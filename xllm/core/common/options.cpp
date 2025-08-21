@@ -30,7 +30,9 @@ std::string Options::to_string() const {
      << ", nnodes: " << nnodes() << ", node_rank: " << node_rank()
      << ", enable_schedule_overlap: " << enable_schedule_overlap()
      << ", enable_disagg_pd: " << enable_disagg_pd()
-     << ", kv_cache_transfer_mode: " << kv_cache_transfer_mode();
+     << ", kv_cache_transfer_mode: " << kv_cache_transfer_mode()
+     << ", enable_continuous_kvcache: " << enable_continuous_kvcache()
+     << ", granularity_size: " << granularity_size();
   ss << "]";
   return ss.str();
 }

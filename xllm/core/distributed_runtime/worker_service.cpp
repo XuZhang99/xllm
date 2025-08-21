@@ -146,6 +146,26 @@ void WorkerService::AllocateKVCache(
   return;
 }
 
+void WorkerService::AllocateContinuousKVCache(
+    ::google::protobuf::RpcController* controller,
+    const proto::XTensorOptions* request,
+    proto::Status* response,
+    ::google::protobuf::Closure* done) {
+  threadpool_.schedule([this, controller, request, response, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    XTensor::Options options;
+    options.num_kv_heads = request->num_kv_heads();
+    options.head_size = request->head_size();
+    options.max_context_len = request->max_context_len();
+    options.max_seqs_per_batch = request->max_seqs_per_batch();
+    options.granularity_size = request->granularity_size();
+    auto future = worker_->allocate_continuous_kv_cache_async(options);
+    bool status = std::move(future).get();
+    response->set_ok(status);
+  });
+  return;
+}
+
 void WorkerService::AllocateKVCacheWithTransfer(
     ::google::protobuf::RpcController* controller,
     const proto::AllocateKVCacheWithTransferRequest* req,

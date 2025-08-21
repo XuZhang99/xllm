@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+option go_package = "jd.com/jd-infer/xllm;xllm";
+package llm.proto;
+option cc_enable_arenas = true;
+option cc_generic_services = true;
+
+import "common.proto";
+
+message Empty {}
+
+message SeqId {
+  int32 seq_id = 1;
+}
+
+message AllocatePagesRequest {
+  int32 seq_id = 1;
+  uint64 num_tokens = 2;
+}
+
+message NumPages {
+  uint64 num_pages = 1;
+}
+
+message KvCacheUtilization {
+  double kv_cache_utilization = 1;
+}
+
+// PageManager receive action from master engine.
+service DistributePageManager{
+  rpc Hello (Status) returns (Status);
+  rpc Allocate (AllocatePagesRequest) returns (Status);
+  rpc Deallocate (SeqId) returns (Empty);
+  rpc Cache (SeqId) returns (Empty);
+  rpc NumFreePagesPerLayer (Empty) returns (NumPages);
+  rpc NumUsedPagesPerLayer (Empty) returns (NumPages);
+  rpc KvCacheUtilization (Empty) returns (KvCacheUtilization);
+}

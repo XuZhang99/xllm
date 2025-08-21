@@ -127,6 +127,9 @@ struct RawForwardInput {
   uint32_t prefill_seq_len;
   // embedding ids of each sequence
   std::vector<int> embedding_ids;
+  // for continuous kvcache
+  std::vector<int64_t> new_cache_slot_offsets;  //[n_tokens]
+  std::vector<int64_t> kv_cache_start_offsets;  //[n_seq]
 };
 
 struct RawSampleOutput {

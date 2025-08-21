@@ -89,6 +89,25 @@ bool RemoteWorker::allocate_kv_cache(
   return true;
 }
 
+bool RemoteWorker::allocate_continuous_kv_cache(
+    const XTensor::Options& options) {
+  proto::XTensorOptions xtensor_options;
+  xtensor_options.set_num_kv_heads(options.num_kv_heads());
+  xtensor_options.set_head_size(options.head_size());
+  xtensor_options.set_max_context_len(options.max_context_len());
+  xtensor_options.set_max_seqs_per_batch(options.max_seqs_per_batch());
+  xtensor_options.set_granularity_size(options.granularity_size());
+
+  proto::Status s;
+  brpc::Controller cntl;
+  stub_->AllocateContinuousKVCache(&cntl, &xtensor_options, &s, nullptr);
+  if (cntl.Failed() || !s.ok()) {
+    LOG(ERROR) << "allocate_continuous_kv_cache failed, " << cntl.ErrorText();
+    return false;
+  }
+  return true;
+}
+
 void RemoteWorker::get_device_info(std::string& device_ip, uint16_t& port) {
   proto::Empty req;
   proto::DeviceInfo resp;
@@ -357,6 +376,31 @@ folly::SemiFuture<bool> RemoteWorker::allocate_kv_cache_async(
           promise.setValue(s.ok());
         }
       });
+  return future;
+}
+
+folly::SemiFuture<bool> RemoteWorker::allocate_continuous_kv_cache_async(
+    const XTensor::Options& options) {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, options, promise = std::move(promise)]() mutable {
+    proto::XTensorOptions xtensor_options;
+    xtensor_options.set_num_kv_heads(options.num_kv_heads());
+    xtensor_options.set_head_size(options.head_size());
+    xtensor_options.set_max_context_len(options.max_context_len());
+    xtensor_options.set_max_seqs_per_batch(options.max_seqs_per_batch());
+    xtensor_options.set_granularity_size(options.granularity_size());
+    proto::Status s;
+    brpc::Controller cntl;
+    stub_->AllocateContinuousKVCache(&cntl, &xtensor_options, &s, nullptr);
+    if (cntl.Failed() || !s.ok()) {
+      LOG(ERROR) << "allocate_continuous_kv_cache_async failed, "
+                 << cntl.ErrorText();
+      promise.setValue(false);
+    } else {
+      promise.setValue(s.ok());
+    }
+  });
   return future;
 }
 

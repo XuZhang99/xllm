@@ -184,3 +184,20 @@ DEFINE_string(etcd_addr, "", "etcd adderss for save instance meta info");
 DEFINE_bool(enable_service_routing, false, "whether to use etcd.");
 
 DEFINE_int32(heart_beat_interval, 3, "heart beat interval");
+
+// --- continuous kvcache config ---
+DEFINE_bool(enable_continuous_kvcache,
+            false,
+            "whether to enable continuous kvcache.");
+
+DEFINE_int64(granularity_size,
+             2 * 1024 * 1024,
+             "granularity size of a physical page");
+
+DEFINE_int64(cache_size_per_token,
+             0,
+             "cache size per token for continuous kvcache.");
+
+DEFINE_int64(buffer_size_per_seq,
+             0,
+             "buffer size per sequence for continuous kvcache.");

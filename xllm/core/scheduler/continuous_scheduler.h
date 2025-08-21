@@ -6,6 +6,8 @@
 #include <limits>
 #include <memory>
 #include <queue>
+#include <utility>
+#include <variant>
 
 #include "async_response_processor.h"
 #include "common/macros.h"
@@ -24,6 +26,16 @@ struct RequestComparator {
   bool operator()(std::shared_ptr<Request> a,
                   std::shared_ptr<Request> b) const {
     return a->created_time() > b->created_time();
+  }
+};
+
+template <class... Ts>
+struct KVCacheManagerHandle : std::variant<Ts*...> {
+  using Base = std::variant<Ts*...>;
+  using Base::Base;
+
+  auto operator->() const {
+    return std::visit([](auto* ptr) { return ptr; }, *this);
   }
 };
 

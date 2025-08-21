@@ -1,6 +1,8 @@
 #pragma once
 #include <optional>
 
+#include "framework/page/multi_layer_xtensor.h"
+
 namespace xllm {
 
 template <typename value_type>
@@ -18,4 +20,6 @@ struct remove_optional<std::optional<value_type>> {
 template <typename value_type>
 using remove_optional_t = typename remove_optional<value_type>::type;
 
+using MultiLayerXTensorPair = std::pair<std::unique_ptr<MultiLayerXTensor>,
+                                        std::unique_ptr<MultiLayerXTensor>>;
 }  // namespace xllm

@@ -27,6 +27,10 @@ class Engine {
     return block_manager_pool_.get();
   }
 
+  virtual PageManagerPool* page_manager_pool() const {
+    return page_manager_pool_.get();
+  }
+
   // return the model args
   virtual const ModelArgs& model_args() const { return args_; }
 
@@ -81,6 +85,7 @@ class Engine {
 
   struct KVCacheCapacity {
     int64_t n_blocks = 0;
+    int64_t n_pages = 0;  // for continuous kvcache
     int64_t cache_size_in_bytes = 0;
     int64_t slot_size = 0;
   };
@@ -94,6 +99,9 @@ class Engine {
 
   // block manager
   std::unique_ptr<BlockManagerPool> block_manager_pool_;
+
+  // page manager
+  std::unique_ptr<PageManagerPool> page_manager_pool_;
 
   // tokenizer
   std::unique_ptr<Tokenizer> tokenizer_;

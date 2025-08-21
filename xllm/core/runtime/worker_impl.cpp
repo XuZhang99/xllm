@@ -94,6 +94,43 @@ bool WorkerImpl::allocate_kv_cache(
   return true;
 }
 
+bool WorkerImpl::allocate_continuous_kv_cache(const XTensor::Options& options) {
+  CHECK(model_ != nullptr) << "Model is not initialized.";
+  CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
+
+  // create a KVCache for each layer
+  const int64_t num_layers = args_.n_layers();
+  kv_caches_.reserve(num_layers);
+
+  std::shared_ptr<XTensor> key_xtensor;
+  std::shared_ptr<XTensor> value_xtensor;
+
+  std::vector<std::shared_ptr<XTensor>> key_xtensors(num_layers);
+  std::vector<std::shared_ptr<XTensor>> value_xtensors(num_layers);
+
+  for (int64_t i = 0; i < num_layers; ++i) {
+    key_xtensor = std::make_shared<XTensor>(options, dtype_);
+    key_xtensors[i] = key_xtensor;
+
+    if (!FLAGS_enable_mla) {
+      value_xtensor = std::make_shared<XTensor>(options, dtype_);
+      value_xtensors[i] = value_xtensor;
+    }
+
+    if (FLAGS_enable_mla) {
+      kv_caches_.emplace_back(key_xtensor, key_xtensor);
+    } else {
+      kv_caches_.emplace_back(key_xtensor, value_xtensor);
+    }
+  }
+
+  MultiLayerXTensorTransfer::get_instance().set_multi_layer_xtensor(
+      key_xtensors, value_xtensors, device_);
+
+  status_ = Status::READY;
+  return true;
+}
+
 bool WorkerImpl::allocate_kv_cache_with_transfer(
     uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
@@ -419,6 +456,17 @@ folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_async(
         const bool success = this->allocate_kv_cache(kv_cache_shape);
         promise.setValue(success);
       });
+  return future;
+}
+
+folly::SemiFuture<bool> WorkerImpl::allocate_continuous_kv_cache_async(
+    const XTensor::Options& options) {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, options, promise = std::move(promise)]() mutable {
+    const bool success = this->allocate_continuous_kv_cache(options);
+    promise.setValue(success);
+  });
   return future;
 }
 

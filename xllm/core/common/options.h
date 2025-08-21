@@ -97,6 +97,10 @@ class Options {
   PROPERTY(bool, enable_service_routing) = false;
 
   PROPERTY(std::optional<std::string>, tool_call_parser);
+
+  PROPERTY(bool, enable_continuous_kvcache) = false;
+
+  PROPERTY(int64_t, granularity_size) = 2 * 1024 * 1024;
 };
 
 }  // namespace xllm

@@ -106,6 +106,12 @@ struct Options {
 
   // enable service routing mode.
   PROPERTY(bool, enable_service_routing) = false;
+
+  // enable continuous kvcache
+  PROPERTY(bool, enable_continuous_kvcache) = false;
+
+  // granularity size for one page in bytes, default 2MB, when enable vattn
+  PROPERTY(int64_t, granularity_size) = 2 * 1024 * 1024;
 };
 
 }  // namespace runtime
