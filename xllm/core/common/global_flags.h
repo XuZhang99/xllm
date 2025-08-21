@@ -126,3 +126,11 @@ DECLARE_int32(heart_beat_interval);
 DECLARE_int32(chunked_match_frequency);
 
 DECLARE_bool(use_zero_evict);
+
+DECLARE_bool(enable_continuous_kvcache);
+
+DECLARE_int64(granularity_size);
+
+DECLARE_int64(cache_size_per_token);
+
+DECLARE_int64(buffer_size_per_seq);

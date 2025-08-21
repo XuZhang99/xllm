@@ -1,5 +1,4 @@
 /* Copyright 2025 The xLLM Authors. All Rights Reserved.
-Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,34 +14,26 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include <optional>
+#include <torch/torch.h>
 
-#if defined(USE_NPU)
-#include "acl/acl.h"
-#endif
+#include "util/type_traits.h"
 
 namespace xllm {
+class PhyPage {
+ public:
+  PhyPage(int64_t granularity_size, torch::Device device);
 
-template <typename value_type>
-struct remove_optional {
-  using type = value_type;
+  ~PhyPage();
+
+  bool is_valid() const { return status_ == VmmSuccess && phy_handle_ != 0; }
+
+  const torch::Device& device() const { return device_; }
+
+  PhyMemHandle get_phy_handle() const { return phy_handle_; }
+
+ private:
+  torch::Device device_;
+  PhyMemHandle phy_handle_;
+  VmmResult status_ = VmmSuccess;
 };
-
-// specialization for optional
-template <typename value_type>
-struct remove_optional<std::optional<value_type>> {
-  using type = value_type;
-};
-
-/// alias template for remove_optional
-template <typename value_type>
-using remove_optional_t = typename remove_optional<value_type>::type;
-
-#if defined(USE_NPU)
-using VirPtr = void*;
-using PhyMemHandle = aclrtDrvMemHandle;
-using VmmResult = aclError;
-#endif
-
-constexpr int VmmSuccess = 0;
 }  // namespace xllm

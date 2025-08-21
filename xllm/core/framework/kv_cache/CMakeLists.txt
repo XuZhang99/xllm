@@ -28,4 +28,5 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:hccl_transfer>
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
+    :page
 )
