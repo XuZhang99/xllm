@@ -55,7 +55,7 @@ class DpEpPadding {
   DpEpPadding(torch::Tensor token_size_per_dp_group,
               int32_t num_experts_per_tok,
               const nlohmann::json& mapping_npu,
-              at::Device device,
+              torch::Device device,
               torch::ScalarType dtype,
               bool is_prefill);
 
@@ -104,7 +104,7 @@ class DpEpPadding {
   torch::Tensor all_gather_padding_;
   torch::Tensor expert_array_;
   std::vector<int64_t> new_dp_size_;
-  at::Device device_;
+  torch::Device device_;
   torch::ScalarType dtype_;
 };
 }  // namespace xllm

@@ -26,22 +26,12 @@ cc_binary(
     glog::glog
     Folly::folly
     nlohmann_json::nlohmann_json
+    $<$<BOOL:${USE_NPU}>:c_sec>
 )
 
-# link brpc
-target_link_libraries(xllm PRIVATE glog::glog brpc leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf ${OpenCV_LIBS})
-add_dependencies(xllm brpc-static)
-
-if(USE_NPU)
-  set(COMMON_LIBS Python::Python ascendcl hccl c_sec nnopbase ms_tools_ext)
-elseif(USE_MLU)
-  set(COMMON_LIBS Python::Python)
-endif()
-
 if(USE_MSPTI)
-  list(APPEND COMMON_LIBS mspti)
+  target_link_libraries(xllm PUBLIC mspti)
 endif()
-target_link_libraries(xllm PUBLIC ${COMMON_LIBS})
 
 # install xllm binary
 install(TARGETS xllm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

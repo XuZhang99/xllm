@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 if(USE_NPU)
   include_directories(
@@ -16,11 +15,8 @@ cc_library(
     rotary_embedding.cpp
   DEPS
     :state_dict
-    :block
     :kv_cache
     :prefix_cache
-    glog::glog
-    gflags::gflags
     torch
 )
 
@@ -35,12 +31,8 @@ cc_library(
     base_layer.cpp
   DEPS
     :state_dict
-    :block
     :kv_cache
     :prefix_cache
-    glog::glog
-    gflags::gflags
-    torch
 )
 
 cc_library(
@@ -70,8 +62,6 @@ cc_library(
     :block
     :base_layer
     :rotary_embedding
-    glog::glog
-    gflags::gflags
     torch
 )
 

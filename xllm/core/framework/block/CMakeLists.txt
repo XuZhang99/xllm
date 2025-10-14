@@ -1,4 +1,3 @@
-include(cc_binary)
 include(cc_library)
 include(cc_test)
 
@@ -17,9 +16,6 @@ cc_library(
     concurrent_block_manager_impl.cpp
     block_manager_impl.cpp
   DEPS
-    $<$<BOOL:${USE_NPU}>:torch_npu>
-    $<$<BOOL:${USE_NPU}>:llm_engine>
-    $<$<BOOL:${USE_NPU}>:graph>
     :request
     :common
     glog::glog
@@ -28,24 +24,13 @@ cc_library(
     torch
 )
 
-set(TEST_SRCS
-  block_manager_test.cpp
-)
-
 cc_test(
   NAME
     block_test
   SRCS
-    ${TEST_SRCS}
+    block_manager_test.cpp
   DEPS
     :block
-    :flags
-    :kv_cache
-    :prefix_cache
-    absl::random_random
-    Boost::serialization
     GTest::gtest_main
 )
 
-target_link_libraries(block_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto ascendcl Folly::folly)
-add_dependencies(block_test brpc-static)

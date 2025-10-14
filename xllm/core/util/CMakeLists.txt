@@ -50,8 +50,7 @@ cc_library(
     ${Python_LIBRARIES}
     :platform
 )
-target_link_libraries(util PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-add_dependencies(util brpc-static)
+
 
 cc_test(
   NAME
@@ -60,16 +59,10 @@ cc_test(
     blocking_counter_test.cpp
     threadpool_test.cpp
   DEPS
-    util
+    :util
     absl::synchronization
     absl::time
     GTest::gtest_main
     gflags::gflags
 )
 target_link_libraries(util_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto)
-add_dependencies(util_test brpc-static)
-
-
-
-
-

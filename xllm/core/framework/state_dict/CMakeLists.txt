@@ -1,7 +1,4 @@
-include(cc_test)
 include(cc_library)
-
-include_directories(..)
 
 add_subdirectory(safetensors)
 
@@ -19,6 +16,6 @@ cc_library(
     torch
     glog::glog
     Folly::folly
-    util
+    :util
 )
 

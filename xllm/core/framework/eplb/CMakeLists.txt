@@ -1,11 +1,5 @@
-include(cc_binary)
 include(cc_library)
 include(cc_test)
-
-include_directories(
-  ${CMAKE_SOURCE_DIR}/xllm/core/kernels/ascend
-  ${CMAKE_SOURCE_DIR}/xllm/core/kernels/ascend/core/include
-)
 
 cc_library(
   NAME 
@@ -25,25 +19,16 @@ cc_library(
     shared_memory_manager.cpp
     expert_buffer_manager.cpp
   DEPS
-    llm_engine
-    :request
     :common
-    glog::glog
-    torch
     :platform
-)
-
-set(TEST_SRCS
-  eplb_policy_test.cpp
 )
 
 cc_test(
   NAME
     eplb_policy_test
   SRCS
-    ${TEST_SRCS}
+    eplb_policy_test.cpp
   DEPS
-    torch
     :eplb
     fmt::fmt
     GTest::gtest_main

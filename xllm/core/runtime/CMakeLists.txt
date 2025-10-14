@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_binary)
 include(cc_test)
 
 cc_library(
@@ -100,7 +99,6 @@ cc_library(
     :models
     $<$<BOOL:${USE_NPU}>:npu_layers>
     :chat_template
-    glog::glog
 )
 
 if(USE_NPU)

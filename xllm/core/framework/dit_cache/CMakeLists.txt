@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 cc_library(
  NAME
@@ -23,5 +22,4 @@ cc_library(
  DEPS
   torch
   glog::glog
-  Folly::folly
 )

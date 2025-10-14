@@ -24,7 +24,7 @@ cc_library(
     rate_limiter.cpp
     device_monitor.cpp
   DEPS
-    util
+    :util
     absl::random_random
     absl::strings
     torch

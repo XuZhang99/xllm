@@ -1,4 +1,3 @@
-include(cc_binary)
 include(cc_library)
 include(cc_test)
 
@@ -34,13 +33,5 @@ cc_test(
     :batch
     absl::time
     GTest::gtest_main
-    $<$<BOOL:${USE_NPU}>:torch_npu>
+    $<$<BOOL:${USE_NPU}>:nnopbase>
 )
-target_link_libraries(batch_test
-                      PUBLIC
-                      Python::Python
-                      $<$<BOOL:${USE_NPU}>:ascendcl>
-                      $<$<BOOL:${USE_NPU}>:hccl>
-                      $<$<BOOL:${USE_NPU}>:c_sec>
-                      $<$<BOOL:${USE_NPU}>:nnopbase>)
-

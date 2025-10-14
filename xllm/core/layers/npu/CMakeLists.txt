@@ -11,7 +11,6 @@ cc_library(
     npu_lm_head_impl.h
     npu_qwen2dot5_vision_encoder_layer_impl.h
     npu_qwen3_moe_decoder_layer_impl.h
-    # atb_parallel_linear.h
     npu_block_copy_impl.h
     buffer/atb_buffer.h
     buffer/atb_workspace.h
@@ -30,7 +29,6 @@ cc_library(
     npu_lm_head_impl.cpp
     npu_qwen2dot5_vision_encoder_layer_impl.cpp
     npu_qwen3_moe_decoder_layer_impl.cpp
-    # atb_parallel_linear.cpp
     npu_block_copy_impl.cpp
     buffer/atb_buffer.cpp
     buffer/atb_workspace.cpp

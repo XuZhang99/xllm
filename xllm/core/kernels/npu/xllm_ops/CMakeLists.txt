@@ -18,4 +18,6 @@ cc_library(
     nlohmann_json::nlohmann_json
     opapi
     spdlog::spdlog
+    ascendcl
+    nnopbase
 )

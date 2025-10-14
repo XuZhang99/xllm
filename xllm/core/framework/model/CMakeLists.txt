@@ -41,18 +41,14 @@ cc_library(
 target_link_libraries(model PRIVATE :kv_cache)
 
 cc_test(
-    NAME 
-      npu_dp_ep_padding_test
-    SRCS
-      npu_dp_ep_padding_test.cpp
-    DEPS
-      :flags
-      :parallel_state
-      torch
-      model
-      absl::synchronization
-      absl::time
-      GTest::gtest_main
+  NAME 
+    npu_dp_ep_padding_test
+  SRCS
+    npu_dp_ep_padding_test.cpp
+  DEPS
+    :parallel_state
+    :model
+    GTest::gtest_main
 )
 
 target_link_libraries(npu_dp_ep_padding_test

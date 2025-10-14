@@ -1,29 +1,7 @@
 include(cc_library)
 include(cc_test)
 
-# Define the base dependencies
-set(BASE_DEPS
-  :common
-  :layers
-  :kv_cache
-  :prefix_cache
-  :block
-  :chat_template
-  glog::glog
-  torch
-)
 
-if(USE_NPU)
-  # Check if NPU is being used
-  include_directories($ENV{XLLM_KERNELS_PATH}/include/xllm_kernels/core/include) 
-  include_directories($ENV{XLLM_KERNELS_PATH}/include/xllm_kernels)
-
-  # Modify dependencies for NPU
-  list(APPEND BASE_DEPS torch_npu)
-  list(APPEND BASE_DEPS :npu_layers)
-endif()
-
-# Define the library
 cc_library(
   NAME 
     processors
@@ -41,5 +19,9 @@ cc_library(
     qwen2_vl_image_processor.cpp
     pywarpper_image_processor.cpp
   DEPS
-    ${BASE_DEPS}
+    :common
+    :layers
+    :chat_template
+    glog::glog
+    torch
 )

@@ -7,27 +7,27 @@ cc_library (
   NAME
     function_call
   HDRS
-        core_types.h
-        base_format_detector.h
-        qwen25_detector.h
-        kimik2_detector.h
-        deepseekv3_detector.h
-        function_call_parser.h
-        function_call.h
-        utils.h
+    core_types.h
+    base_format_detector.h
+    qwen25_detector.h
+    kimik2_detector.h
+    deepseekv3_detector.h
+    function_call_parser.h
+    function_call.h
+    utils.h
   SRCS
-        base_format_detector.cpp
-        qwen25_detector.cpp
-        kimik2_detector.cpp
-        deepseekv3_detector.cpp
-        function_call_parser.cpp
-        utils.cpp
+    base_format_detector.cpp
+    qwen25_detector.cpp
+    kimik2_detector.cpp
+    deepseekv3_detector.cpp
+    function_call_parser.cpp
+    utils.cpp
   DEPS
     nlohmann_json::nlohmann_json
     glog::glog
     proto::xllm_proto
-    partial_json_parser
-    common
+    :partial_json_parser
+    :common
 )
 
 function(add_detector_test TEST_NAME)

@@ -1,6 +1,4 @@
-include(cc_binary)
 include(cc_library)
-include(cc_test)
 
 
 cc_library(
@@ -25,7 +23,6 @@ cc_library(
     kv_cache_store.cpp
   DEPS
     :common
-    $<$<BOOL:${USE_NPU}>:graph>
     glog::glog
     $<$<BOOL:${USE_NPU}>:hccl_transfer>
     torch
@@ -33,4 +30,6 @@ cc_library(
     mooncake_store
     :xtensor
     $<$<BOOL:${USE_NPU}>:platform_npu>
+    $<$<BOOL:${USE_NPU}>:llm_engine>
+    Folly::folly
 )

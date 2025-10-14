@@ -26,7 +26,7 @@ namespace xllm {
 DpEpPadding::DpEpPadding(torch::Tensor token_size_per_dp_group,
                          int32_t num_experts_per_tok,
                          const nlohmann::json& mapping_npu,
-                         at::Device device,
+                         torch::Device device,
                          torch::ScalarType dtype,
                          bool is_prefill)
     : token_size_per_dp_group_(token_size_per_dp_group.contiguous()),

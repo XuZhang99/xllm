@@ -1,12 +1,13 @@
 include(cc_library)
 include(cc_test)
 
-include_directories(.)
 if(USE_NPU)
   include_directories(
     ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
   )
 endif()
+
+include_directories(.)
 add_subdirectory(batch)
 add_subdirectory(block)
 add_subdirectory(chat_template)
@@ -60,19 +61,16 @@ cc_library(
     model_loader
   HDRS
     hf_model_loader.h
-    dit_model_context.h
     dit_model_loader.h
     model_loader.h
   SRCS
     hf_model_loader.cpp
-    dit_model_context.cpp
     dit_model_loader.cpp
     model_loader.cpp
   DEPS
     :common
     :model
     :models
-    $<$<BOOL:${USE_NPU}>:npu_layers>
     :tokenizer
     torch
 )
@@ -82,8 +80,10 @@ cc_library(
     model_context
   HDRS
     model_context.h
+    dit_model_context.h
   SRCS
     model_context.cpp
+    dit_model_context.cpp
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>

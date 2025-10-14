@@ -21,6 +21,3 @@ pybind_extension(
     glog::glog
     Python::Module
 )
-target_link_libraries(common PRIVATE leveldb::leveldb ZLIB::ZLIB OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
-add_dependencies(common brpc-static)
-

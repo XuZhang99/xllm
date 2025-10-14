@@ -16,8 +16,6 @@ limitations under the License.
 
 #include "rejection_sampler.h"
 
-#include <ATen/core/TensorBody.h>
-#include <ATen/ops/stack.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 

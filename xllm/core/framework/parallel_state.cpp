@@ -17,12 +17,10 @@ limitations under the License.
 
 #include <c10/core/Device.h>
 #if defined(USE_NPU)
-#include <hccl/hccl_types.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #include <torch_npu/csrc/core/npu/NPUStream.h>
 
-#include "hccl/hccl.h"
 #include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
 #endif
@@ -50,45 +48,45 @@ namespace {
     }                                                                \
   } while (0)
 #endif
-inline bool is_npu(const at::Tensor& tensor) {
+inline bool is_npu(const torch::Tensor& tensor) {
   if (!tensor.defined()) {
     return false;
   }
   return tensor.device().is_privateuseone();
 }
-inline bool is_npu(const at::TensorOptions& options) {
+inline bool is_npu(const torch::TensorOptions& options) {
   return options.device().is_privateuseone();
 }
-inline bool is_npu(const at::Device& device) {
+inline bool is_npu(const torch::Device& device) {
   return device.is_privateuseone();
 }
-at::Tensor flatten_for_scatter_gather(std::vector<at::Tensor>& tensors) {
+torch::Tensor flatten_for_scatter_gather(std::vector<torch::Tensor>& tensors) {
   auto& t = tensors[0];
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  return at::empty(sizes, t.options());
+  return torch::empty(sizes, t.options());
 }
 #if defined(USE_NPU)
 HcclDataType to_hccl_data_type(const torch::Tensor& input) {
   const auto type = input.scalar_type();
   switch (type) {
-    case at::kFloat:
+    case torch::kFloat:
       return HCCL_DATA_TYPE_FP32;
-    case at::kHalf:
+    case torch::kHalf:
       return HCCL_DATA_TYPE_FP16;
-    case at::kDouble:
+    case torch::kDouble:
       return HCCL_DATA_TYPE_FP64;
-    case at::kLong:
+    case torch::kLong:
       return HCCL_DATA_TYPE_INT64;
-    case at::kInt:
+    case torch::kInt:
       return HCCL_DATA_TYPE_INT32;
-    case at::kChar:
+    case torch::kChar:
       return HCCL_DATA_TYPE_INT8;
-    case at::kByte:
+    case torch::kByte:
       return HCCL_DATA_TYPE_UINT8;
-    case at::kBool:
+    case torch::kBool:
       return HCCL_DATA_TYPE_UINT8;
-    case at::kBFloat16:
+    case torch::kBFloat16:
       return HCCL_DATA_TYPE_BFP16;
     default:
       TORCH_CHECK(false, "Unconvertible HCCL type ", type);
