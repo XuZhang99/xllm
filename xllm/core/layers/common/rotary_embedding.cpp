@@ -16,6 +16,7 @@ limitations under the License.
 #include "rotary_embedding.h"
 
 #include "kernels/ops_api.h"
+#include "platform/device.h"
 
 namespace xllm {
 namespace layer {
@@ -29,8 +30,7 @@ RotaryEmbeddingImpl::RotaryEmbeddingImpl(int rotary_dim,
       max_position_embeddings_(max_position_embeddings),
       rope_theta_(rope_theta),
       interleaved_(interleaved) {
-  auto dev_options =
-      torch::TensorOptions().device(torch::DeviceType::PrivateUse1);
+  auto dev_options = torch::TensorOptions().device(Device::type_torch());
 
   auto inv_freq_t = torch::arange(/*start=*/0,
                                   /*end=*/rotary_dim_,

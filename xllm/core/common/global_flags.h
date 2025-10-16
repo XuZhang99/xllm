@@ -202,3 +202,5 @@ DECLARE_bool(enable_qwen3_reranker);
 DECLARE_string(reasoning_parser);
 
 DECLARE_bool(enable_shm);
+
+DECLARE_int32(workspace_buffer_size);

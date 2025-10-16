@@ -15,6 +15,7 @@ cc_library(
     qwen3_decoder_layer.h
     qwen3_moe_decoder_layer.h
     linear_impl.h
+    linear.h
     word_embedding_impl.h
     layer_utils.h
     indexer.h
@@ -43,6 +44,7 @@ cc_library(
     glog::glog
     gflags::gflags
     torch
+    :platform
 )
 
 # Add test for DenseMLP
