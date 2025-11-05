@@ -43,6 +43,9 @@ const std::unordered_map<torch::ScalarType, std::string_view>
 namespace xllm::kernel::cuda {
 
 ffi::Tensor to_ffi_tensor(const torch::Tensor& torch_tensor) {
+  if (!torch_tensor.defined()) {
+    std::runtime_error("torch_tensor is not defined");
+  }
   auto dlpack = toDLPackImpl<DLManagedTensorVersioned>(torch_tensor);
   return ffi::Tensor::FromDLPackVersioned(dlpack);
 }
