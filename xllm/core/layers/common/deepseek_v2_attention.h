@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "attention.h"
+#include "attention/flash_attention_mla.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
@@ -74,7 +74,7 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   ColumnParallelLinear kv_b_proj_{nullptr};
   RowParallelLinear o_proj_{nullptr};
 
-  Attention attn_{nullptr};
+  AttentionMLA attn_{nullptr};
   DeepseekScalingRotaryEmbedding rotary_emb_{nullptr};
   Indexer indexer_{nullptr};
 };

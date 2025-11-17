@@ -139,14 +139,14 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   }
 
   attn_ = register_module("attn",
-                          Attention(num_local_heads_,
-                                    kv_lora_rank_ + qk_rope_head_dim_,
-                                    /*num_local_heads=*/1,
-                                    kv_lora_rank_,
-                                    args.sliding_window(),
-                                    scaling,
-                                    use_fused_mla_qkv_,
-                                    enable_lighting_indexer_));
+                          AttentionMLA(num_local_heads_,
+                                       kv_lora_rank_ + qk_rope_head_dim_,
+                                       /*num_local_heads=*/1,
+                                       kv_lora_rank_,
+                                       args.sliding_window(),
+                                       scaling,
+                                       use_fused_mla_qkv_,
+                                       enable_lighting_indexer_));
 
   o_proj_ = register_module("o_proj",
                             RowParallelLinear(num_heads * v_head_dim_,

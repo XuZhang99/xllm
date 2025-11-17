@@ -11,6 +11,7 @@ cc_test(
     mla_tests.cpp
     tests_utils.cpp
   DEPS
+    :attention
     :common_layers
     :parallel_state
     :model

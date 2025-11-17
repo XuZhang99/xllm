@@ -1,13 +1,14 @@
 include(cc_library)
 
+add_subdirectory(tests)
+add_subdirectory(attention)
+
 cc_library(
   NAME
     common_layers
   HDRS
-    flashinfer_workspace.h
     deepseek_v2_attention.h
     qwen3_attention.h
-    attention.h
     fuse_norm.h
     rotary_embedding.h
     fused_moe.h
@@ -20,10 +21,8 @@ cc_library(
     layer_utils.h
     indexer.h
   SRCS
-    flashinfer_workspace.cpp
     deepseek_v2_attention.cpp
     qwen3_attention.cpp
-    attention.cpp
     fuse_norm.cpp
     rotary_embedding.cpp
     fused_moe.cpp
@@ -36,17 +35,11 @@ cc_library(
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"
-    :kv_cache
+    :attention
     :prefix_cache
     :block
     :parallel_state
     :state_dict
-    :model
-    :kernels
-    glog::glog
     gflags::gflags
-    torch
     :platform
 )
-
-add_subdirectory(tests)

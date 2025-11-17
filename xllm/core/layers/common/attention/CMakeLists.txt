@@ -1,0 +1,23 @@
+include(cc_library)
+
+cc_library(
+  NAME
+    attention
+  HDRS
+    attention_metadata.h
+    flashinfer_workspace.h
+    flash_attention.h
+    flash_attention_mla.h
+  SRCS
+    attention_metadata.cpp
+    flashinfer_workspace.cpp
+    flash_attention.cpp
+    flash_attention_mla.cpp
+  DEPS
+    torch
+    :common
+    :model
+    :kv_cache
+    :kernels
+    glog::glog
+)

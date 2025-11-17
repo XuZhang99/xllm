@@ -39,7 +39,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #else
-#include "core/layers/common/attention.h"
+#include "core/layers/common/attention/attention_metadata.h"
 #endif
 
 namespace xllm {

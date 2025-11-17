@@ -21,7 +21,7 @@ limitations under the License.
 #include <string>
 #include <tuple>
 
-#include "attention.h"
+#include "attention/attention_metadata.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_args.h"
