@@ -29,8 +29,10 @@ class FusedRMSNormImpl : public torch::nn::Module {
                    double eps,
                    const torch::TensorOptions& options);
 
-  torch::Tensor forward(torch::Tensor& input);
-  torch::Tensor forward_output(torch::Tensor& input, torch::Tensor& output);
+  std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
+      torch::Tensor& input,
+      std::optional<torch::Tensor> residual = std::nullopt);
+
   void set_layernorm_mode();
 
   void load_state_dict(const StateDict& state_dict);

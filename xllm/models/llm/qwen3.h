@@ -92,12 +92,17 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         layer::AttentionMetadata::build(modified_input_params, is_prefill);
 
     torch::Tensor h_ret;
+    std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h_ret = layer(
-          h, positions, attn_metadata, kv_caches[i], modified_input_params);
+      std::tie(h_ret, residual) = layer(h,
+                                        residual,
+                                        positions,
+                                        attn_metadata,
+                                        kv_caches[i],
+                                        modified_input_params);
     }
-    return norm_(h_ret);
+    return std::get<0>(norm_(h_ret, residual));
   }
 
  private:

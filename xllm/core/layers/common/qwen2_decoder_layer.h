@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <functional>
+#include <optional>
 
 #if defined(USE_MLU)
 #include "../mlu/attention.h"
@@ -46,11 +47,13 @@ class Qwen2DecoderImpl : public torch::nn::Module {
 
   void load_state_dict(const StateDict& state_dict);
 
-  torch::Tensor forward(torch::Tensor& x,
-                        torch::Tensor& positions,
-                        const AttentionMetadata& attn_metadata,
-                        KVCache& kv_cache,
-                        const ModelInputParams& input_params);
+  std::tuple<torch::Tensor, torch::Tensor> forward(
+      torch::Tensor& x,
+      std::optional<torch::Tensor>& residual,
+      torch::Tensor& positions,
+      const AttentionMetadata& attn_metadata,
+      KVCache& kv_cache,
+      const ModelInputParams& input_params);
 
  private:
   Qwen2Attention attention_{nullptr};
