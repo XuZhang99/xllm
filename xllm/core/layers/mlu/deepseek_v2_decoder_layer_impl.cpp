@@ -93,15 +93,20 @@ void DeepseekV2DecoderImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-torch::Tensor DeepseekV2DecoderImpl::forward(
+std::tuple<torch::Tensor, torch::Tensor> DeepseekV2DecoderImpl::forward(
     torch::Tensor& x,
+    std::optional<torch::Tensor>& residual,
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
     const ModelInputParams& input_params) {
-  // Input norm
-  torch::Tensor residual = x;
-  x = input_norm_(x);
+  // Pre-attention norm
+  if (!residual.has_value()) {
+    residual = x;
+    x = std::get<0>(input_norm_->forward(x));
+  } else {
+    std::tie(x, residual) = input_norm_->forward(x, residual);
+  }
 
   // Attention
   x = attention_->forward(positions, x, attn_metadata, kv_cache);
@@ -112,12 +117,8 @@ torch::Tensor DeepseekV2DecoderImpl::forward(
     x = xllm::parallel_state::reduce(x, parallel_args_.tp_group_);
   }
 
-  // add up residual before post norm
-  x = x + residual;
-
   // Post-attention norm
-  residual = x;
-  x = post_norm_(x);
+  std::tie(x, residual) = post_norm_->forward(x, residual);
 
   // MLP forward
   if (moe_mlp_) {
@@ -126,10 +127,7 @@ torch::Tensor DeepseekV2DecoderImpl::forward(
     x = mlp_(x);
   }
 
-  // add up residual after mlp/moe
-  x = x + residual;
-
-  return x;
+  return std::make_tuple(x, residual.value());
 }
 
 }  // namespace layer

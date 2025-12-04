@@ -39,12 +39,15 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
                                      layer::DeepseekV2DecoderLayer(context, i));
   }
 
-  torch::Tensor forward(torch::Tensor& x,
-                        torch::Tensor& positions,
-                        const layer::AttentionMetadata& attn_metadata,
-                        KVCache& kv_cache,
-                        const ModelInputParams& input_params) {
-    return decoder_layer_(x, positions, attn_metadata, kv_cache, input_params);
+  std::tuple<torch::Tensor, torch::Tensor> forward(
+      torch::Tensor& x,
+      std::optional<torch::Tensor>& residual,
+      torch::Tensor& positions,
+      const layer::AttentionMetadata& attn_metadata,
+      KVCache& kv_cache,
+      const ModelInputParams& input_params) {
+    return decoder_layer_(
+        x, residual, positions, attn_metadata, kv_cache, input_params);
   }
 
   void load_state_dict(const StateDict& state_dict) {
@@ -116,11 +119,13 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     auto attn_metadata =
         layer::AttentionMetadata::build(input_params, is_prefill);
     torch::Tensor h = embed_tokens_(tokens);
+    std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h = layer(h, positions, attn_metadata, kv_caches[i], input_params);
+      std::tie(h, residual) = layer(
+          h, residual, positions, attn_metadata, kv_caches[i], input_params);
     }
-    return norm_(h);
+    return std::get<0>(norm_(h, residual));
   }
 
   // Provide batched signature to satisfy callers that pass vectors
