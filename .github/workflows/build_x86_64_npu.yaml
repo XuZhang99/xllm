@@ -32,6 +32,8 @@ on:
       - 'cibuild/**.sh'
       - 'setup.py'
       - 'examples/generate.py'
+  issue_comment:
+    types: [created]
 
 env:
   JOBNAME: xllm-x86_64-npu-cibuild-${{ github.run_id }}
@@ -44,6 +46,8 @@ jobs:
   # need to review code first when sensitive files are modified.
   check-sensitive:
     runs-on: [self-hosted]
+    # Skip this job if triggered by issue_comment (slash command)
+    if: github.event_name != 'issue_comment'
     outputs:
       requires_approval: ${{ steps.check_sensitive.outputs.requires_approval }}
       do_build: ${{ steps.decide.outputs.do_build }}
@@ -102,17 +106,67 @@ jobs:
             echo "do_build=false" >> $GITHUB_OUTPUT
           fi
 
+  # Check slash command from issue comments
+  check-slash-command:
+    runs-on: [self-hosted]
+    if: github.event_name == 'issue_comment'
+    outputs:
+      triggered: ${{ steps.check.outputs.triggered }}
+      pr_ref: ${{ steps.check.outputs.pr_ref }}
+    steps:
+      - name: Check for slash command
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = context.payload.comment.body.trim();
+            const validCommands = ['/build', '/test', '/ci'];
+            
+            // Check if comment contains a valid slash command
+            const triggered = validCommands.some(cmd => comment.startsWith(cmd));
+            
+            // Check if this is a PR comment
+            const isPR = !!context.payload.issue.pull_request;
+            
+            if (!isPR) {
+              core.setOutput('triggered', 'false');
+              core.info('Comment is not on a pull request');
+              return;
+            }
+            
+            if (!triggered) {
+              core.setOutput('triggered', 'false');
+              core.info('Comment does not contain a valid slash command');
+              return;
+            }
+            
+            // Get PR details
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.issue.number
+            });
+            
+            core.setOutput('triggered', 'true');
+            core.setOutput('pr_ref', pr.data.head.ref);
+            core.info(`Slash command triggered for PR #${context.payload.issue.number}`);
+
   build:
-    needs: check-sensitive
+    needs: [check-sensitive, check-slash-command]
     if: >
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'push') ||
-      needs.check-sensitive.outputs.do_build == 'true'
+      always() &&
+      (
+        (github.event_name == 'workflow_dispatch' || github.event_name == 'push') ||
+        (github.event_name != 'issue_comment' && needs.check-sensitive.outputs.do_build == 'true') ||
+        (github.event_name == 'issue_comment' && needs.check-slash-command.outputs.triggered == 'true')
+      )
     runs-on: [self-hosted]
     steps:
     - name: Checkout Code
       timeout-minutes: 5
       uses: actions/checkout@v4
       with:
+        ref: ${{ github.event_name == 'issue_comment' && needs.check-slash-command.outputs.pr_ref || github.ref }}
         submodules: true
 
     - name: Build
