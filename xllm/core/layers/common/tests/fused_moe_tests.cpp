@@ -17,6 +17,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -208,25 +210,47 @@ class FusedMoETest : public ::testing::Test {
                             const std::string& hidden_act = "silu",
                             const std::string& scoring_func = "sigmoid",
                             const std::string& topk_method = "noaux_tc") {
-    return FusedMoE(FusedMoEImpl(num_experts,
-                                 top_k,
-                                 num_expert_group,
-                                 topk_group,
-                                 route_scale,
-                                 hidden_size,
-                                 intermediate_size,
-                                 n_shared_experts,
-                                 is_gated,
-                                 has_score_bias,
-                                 has_bias,
-                                 skip_bias_add,
-                                 renormalize,
-                                 hidden_act,
-                                 scoring_func,
-                                 topk_method,
-                                 quant_args_,
-                                 parallel_args_,
-                                 options_));
+    // TODO: add create_fused_moe_shaerd
+    // if (n_shared_experts > 0) {
+    //   return FusedMoEShared(num_experts,
+    //                         top_k,
+    //                         num_expert_group,
+    //                         topk_group,
+    //                         route_scale,
+    //                         hidden_size,
+    //                         intermediate_size,
+    //                         n_shared_experts,
+    //                         is_gated,
+    //                         has_score_bias,
+    //                         has_bias,
+    //                         skip_bias_add,
+    //                         renormalize,
+    //                         hidden_act,
+    //                         scoring_func,
+    //                         topk_method,
+    //                         quant_args_,
+    //                         parallel_args_,
+    //                         options_);
+    // }
+
+    return FusedMoE(num_experts,
+                    top_k,
+                    num_expert_group,
+                    topk_group,
+                    route_scale,
+                    hidden_size,
+                    intermediate_size,
+                    is_gated,
+                    has_score_bias,
+                    has_bias,
+                    skip_bias_add,
+                    renormalize,
+                    hidden_act,
+                    scoring_func,
+                    topk_method,
+                    quant_args_,
+                    parallel_args_,
+                    options_);
   }
 
   // Helper function to create test weights for the FusedMoE (w8a8 smoothquant

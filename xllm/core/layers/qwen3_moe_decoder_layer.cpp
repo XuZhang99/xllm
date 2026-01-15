@@ -60,20 +60,19 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
     moe_mlp_ = register_module("mlp",
                                FusedMoE(model_args.num_experts(),
                                         model_args.num_experts_per_tok(),
-                                        -1,   // num_expert_group
-                                        0,    // topk_group
-                                        1.0,  // route_scale
+                                        /*num_expert_group=*/-1,
+                                        /*topk_group=*/0,
+                                        /*route_scale=*/1.0,
                                         model_args.hidden_size(),
                                         model_args.moe_intermediate_size(),
-                                        0,      // n_shared_experts
-                                        true,   // is_gated
-                                        false,  // has_score_bias
-                                        false,  // has_bias
-                                        false,  // skip_bias_add
+                                        /*is_gated=*/true,
+                                        /*has_score_bias=*/false,
+                                        /*has_bias=*/false,
+                                        /*skip_bias_add=*/false,
                                         model_args.norm_topk_prob(),
                                         model_args.hidden_act(),
-                                        "softmax",
-                                        "",
+                                        /*scoring_func=*/"softmax",
+                                        /*topk_method=*/"",
                                         quant_args,
                                         parallel_args,
                                         options));
@@ -81,8 +80,8 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
     mlp_ = register_module("mlp",
                            DenseMLP(model_args.hidden_size(),
                                     model_args.intermediate_size(),
-                                    true,
-                                    false,
+                                    /*is_gated=*/true,
+                                    /*has_bias=*/false,
                                     model_args.hidden_act(),
                                     /*enable_result_reduction=*/true,
                                     quant_args,

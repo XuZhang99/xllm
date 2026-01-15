@@ -293,6 +293,10 @@ constexpr torch::ScalarType get_scalar_type() {
   }
 }
 
+inline int32_t get_dtype_size(torch::ScalarType dtype) {
+  return static_cast<int32_t>(torch::elementSize(dtype));
+}
+
 inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
                                           const torch::ScalarType dtype,
                                           const void* dev_addr) {

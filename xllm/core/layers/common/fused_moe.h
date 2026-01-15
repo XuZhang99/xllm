@@ -27,7 +27,6 @@ limitations under the License.
 #include "framework/state_dict/utils.h"
 #include "linear.h"
 #include "platform/device.h"
-#include "util/tensor_helper.h"
 
 namespace xllm {
 namespace layer {
@@ -42,7 +41,6 @@ class FusedMoEImpl : public torch::nn::Module {
                double route_scale,
                int64_t hidden_size,
                int64_t intermediate_size,
-               int64_t n_shared_experts,
                bool is_gated,
                bool has_score_bias,
                bool has_bias,
@@ -55,12 +53,18 @@ class FusedMoEImpl : public torch::nn::Module {
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
 
-  torch::Tensor forward_experts(const torch::Tensor& hidden_states,
-                                const torch::Tensor& router_logits,
-                                bool enable_all2all_communication);
+  virtual torch::Tensor forward_experts(const torch::Tensor& hidden_states,
+                                        const torch::Tensor& router_logits,
+                                        bool enable_all2all_communication);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
-  void load_state_dict(const StateDict& state_dict);
+  virtual void load_state_dict(const StateDict& state_dict);
+
+ protected:
+  void init_routed_stream(const torch::Tensor& hidden_states);
+  std::unique_ptr<Stream> routed_stream_;
+  xllm::Device device_;
+  bool routed_stream_initialized_ = false;
 
  private:
   // struct to store the selected expert info
@@ -85,7 +89,6 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t topk_group_;
   double route_scale_;
   int64_t hidden_size_;
-  int64_t n_shared_experts_;
   bool is_gated_;
   bool has_score_bias_;
   bool has_bias_;
@@ -105,14 +108,7 @@ class FusedMoEImpl : public torch::nn::Module {
   torch::Tensor dispatch_recv_token_tensor_head_;
   torch::Tensor dispatch_recv_token_tensor_tail_;
 
-  // steams for parallel shared experts
-  std::unique_ptr<Stream> shared_stream_;
-  std::unique_ptr<Stream> routed_stream_;
-  xllm::Device device_;
-  bool stream_initialized_ = false;
-
   ReplicatedLinear gate_{nullptr};
-  DenseMLP shared_experts_{nullptr};
   DeepEP deep_ep_{nullptr};
 
   QuantArgs quant_args_;
@@ -142,6 +138,43 @@ class FusedMoEImpl : public torch::nn::Module {
                                          torch::Tensor& workspace);
 };
 TORCH_MODULE(FusedMoE);
+
+class FusedMoESharedImpl : public FusedMoEImpl {
+ public:
+  FusedMoESharedImpl() = default;
+  FusedMoESharedImpl(int64_t num_experts,
+                     int64_t top_k,
+                     int64_t num_expert_group,
+                     int64_t topk_group,
+                     double route_scale,
+                     int64_t hidden_size,
+                     int64_t intermediate_size,
+                     int64_t n_shared_experts,
+                     bool is_gated,
+                     bool has_score_bias,
+                     bool has_bias,
+                     bool skip_bias_add,
+                     int64_t renormalize,
+                     const std::string& hidden_act,
+                     const std::string& scoring_func,
+                     const std::string& topk_method,
+                     const QuantArgs& quant_args,
+                     const ParallelArgs& parallel_args,
+                     const torch::TensorOptions& options);
+
+  torch::Tensor forward_experts(const torch::Tensor& hidden_states,
+                                const torch::Tensor& router_logits,
+                                bool enable_all2all_communication) override;
+  void load_state_dict(const StateDict& state_dict) override;
+
+ private:
+  void init_shared_stream(const torch::Tensor& hidden_states);
+  int64_t n_shared_experts_;
+  DenseMLP shared_experts_{nullptr};
+  std::unique_ptr<Stream> shared_stream_;
+  bool shared_stream_initialized_ = false;
+};
+TORCH_MODULE(FusedMoEShared);
 
 }  // namespace layer
 }  // namespace xllm
