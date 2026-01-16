@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "core/platform/device.h"
 #include "core/util/env_var.h"
+#include "dl_convertor.cpp"
 
 namespace {
 const std::unordered_map<torch::ScalarType, std::string_view>
@@ -130,4 +131,34 @@ torch::Tensor get_cache_buffer(const int32_t seq_len,
   return buffer.slice(0, 0, seq_len);
 }
 
+std::tuple<torch::Tensor, double> split_scale_param(
+    const torch::Tensor& scale) {
+  if (!scale.defined()) {
+    return std::make_tuple(torch::Tensor(), 1.0);
+  }
+
+  if (scale.dim() == 0) {
+    return std::make_tuple(torch::Tensor(), scale.item<double>());
+  }
+
+  return std::make_tuple(scale, 1.0);
+}
+
+ffi::Tensor to_ffi_tensor(const torch::Tensor& torch_tensor) {
+  if (!torch_tensor.defined()) {
+    std::runtime_error("torch_tensor is not defined");
+  }
+
+  if (torch_tensor.numel() == 0) {
+    std::runtime_error("torch_tensor is empty");
+  }
+
+  auto dlpack = toDLPackImpl<DLManagedTensorVersioned>(torch_tensor);
+  return ffi::Tensor::FromDLPackVersioned(dlpack);
+}
+
+ffi::Module get_module(const std::string& uri) {
+  std::string uri_path = path_to_uri_so_lib(uri);
+  return ffi::Module::LoadFromFile(uri_path);
+}
 }  // namespace xllm::kernel::cuda
