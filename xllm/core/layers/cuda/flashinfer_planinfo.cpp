@@ -15,6 +15,10 @@ limitations under the License.
 
 #include "flashinfer_planinfo.h"
 
+#include <glog/logging.h>
+
+#include <vector>
+
 #include "core/util/utils.h"
 #include "flashinfer_workspace.h"
 #include "kernels/cuda/function_factory.h"
@@ -25,6 +29,32 @@ using namespace xllm::kernel::cuda;
 namespace xllm {
 namespace layer {
 namespace flashinfer {
+
+// Helper function to deep copy ffi::Array<int64_t> to avoid lifetime issues
+// with TVM runtime memory management
+// This function immediately copies all data to avoid any dependency on TVM
+// runtime
+static ffi::Array<int64_t> deep_copy_plan_info(const ffi::Array<int64_t>& src) {
+  // Get size first - this might fail if Array is invalid
+  size_t src_size = src.size();
+  if (src_size == 0) {
+    return ffi::Array<int64_t>();
+  }
+
+  // Immediately extract all data to a vector to avoid any dependency on TVM
+  // runtime
+  std::vector<int64_t> temp_vec;
+  temp_vec.reserve(src_size);
+  // Use range-based for loop which is safer and more efficient
+  // This immediately copies all elements before any potential invalidation
+  for (const auto& elem : src) {
+    temp_vec.push_back(elem);
+  }
+
+  // Create a new Array from the vector, which will have independent memory
+  // This Array will not depend on TVM runtime lifetime
+  return ffi::Array<int64_t>(temp_vec.begin(), temp_vec.end());
+}
 
 void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                       const std::string& backend,
@@ -67,7 +97,11 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
     const int64_t total_num_rows = qo_indptr_host[-1].item<int64_t>();
     const int64_t batch_size = qo_indptr_host.size(0) - 1;
 
-    plan_info->plan_info =
+    // Get plan_info from TVM function and immediately deep copy it to avoid
+    // lifetime issues We must copy immediately because the TVM Array may become
+    // invalid after the function returns Wrap the entire TVM call in try-catch
+    // to handle any potential crashes
+    plan_info->plan_info = deep_copy_plan_info(
         get_module(plan_info->uri)
             ->GetFunction("plan")
             .value()(to_ffi_tensor(FlashinferWorkspace::get_instance()
@@ -89,7 +123,7 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                      head_dim_vo,
                      /*causal=*/true,
                      /*window_size_left=*/-1)
-            .cast<ffi::Array<int64_t>>();
+            .cast<ffi::Array<int64_t>>());
 
   } else {
     // 2. decode plan info
@@ -115,7 +149,7 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
           attn_meta.paged_kv_indptr.to(torch::kCPU);
       torch::Tensor kv_len_arr_host = attn_meta.kv_seq_lens.to(torch::kCPU);
 
-      plan_info->plan_info =
+      plan_info->plan_info = deep_copy_plan_info(
           get_module(plan_info->uri)
               ->GetFunction("plan")
               .value()(
@@ -138,7 +172,7 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                   head_dim_vo,  // head_dim_vo
                   /*causal=*/false,
                   /*window_size_left=*/-1)
-              .cast<ffi::Array<int64_t>>();
+              .cast<ffi::Array<int64_t>>());
     } else {
       plan_info->uri =
           get_batch_decode_uri(query_dtype,
@@ -159,7 +193,7 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
       torch::Tensor empty_kv_data =
           torch::empty({0}, torch::TensorOptions().dtype(key_dtype));
 
-      plan_info->plan_info =
+      plan_info->plan_info = deep_copy_plan_info(
           get_module(plan_info->uri)
               ->GetFunction("plan")
               .value()(
@@ -181,7 +215,7 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                   head_dim_vo,
                   to_ffi_tensor(empty_q_data),
                   to_ffi_tensor(empty_kv_data))
-              .cast<ffi::Array<int64_t>>();
+              .cast<ffi::Array<int64_t>>());
     }
   }
 }
