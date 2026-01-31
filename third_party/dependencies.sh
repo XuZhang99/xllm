@@ -103,3 +103,40 @@ if [ -f "${CONFIG_FILE}" ]; then
 fi
 
 print_success "yalantinglibs installed successfully to ${INSTALL_PREFIX}"
+
+
+# Install tvm-ffi
+print_section "Installing tvm-ffi"
+
+TVM_FFI_REPO="https://github.com/apache/tvm-ffi.git"
+TVM_FFI_BUILD_TYPE="RelWithDebInfo"
+TVM_FFI_TMP_DIR="$(mktemp -d -t tvm-ffi-XXXXXXXX)"
+TVM_FFI_SRC_DIR="${TVM_FFI_TMP_DIR}/tvm-ffi"
+TVM_FFI_BUILD_DIR="${TVM_FFI_SRC_DIR}/build_cpp"
+
+echo "Cloning tvm-ffi from ${TVM_FFI_REPO}"
+git clone --depth 1 --recurse-submodules "${TVM_FFI_REPO}" "${TVM_FFI_SRC_DIR}"
+check_success "Failed to clone tvm-ffi"
+
+echo "Updating tvm-ffi submodules..."
+git -C "${TVM_FFI_SRC_DIR}" submodule update --init --recursive
+check_success "Failed to update tvm-ffi submodules"
+
+echo "Configuring tvm-ffi..."
+cmake -S "${TVM_FFI_SRC_DIR}" -B "${TVM_FFI_BUILD_DIR}" \
+    -DCMAKE_BUILD_TYPE="${TVM_FFI_BUILD_TYPE}" \
+    -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}"
+check_success "Failed to configure tvm-ffi"
+
+echo "Building tvm-ffi target tvm_ffi_shared..."
+cmake --build "${TVM_FFI_BUILD_DIR}" --parallel --config "${TVM_FFI_BUILD_TYPE}" --target tvm_ffi_shared
+check_success "Failed to build tvm-ffi (tvm_ffi_shared)"
+
+echo "Installing tvm-ffi..."
+cmake --install "${TVM_FFI_BUILD_DIR}" --config "${TVM_FFI_BUILD_TYPE}"
+check_success "Failed to install tvm-ffi"
+
+rm -rf "${TVM_FFI_TMP_DIR}"
+check_success "Failed to cleanup tvm-ffi temporary directory"
+
+print_success "tvm-ffi installed successfully to ${INSTALL_PREFIX}"
