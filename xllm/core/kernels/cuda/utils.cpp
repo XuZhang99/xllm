@@ -349,6 +349,26 @@ std::tuple<torch::Tensor, double> split_scale_param(
   return std::make_tuple(scale, 1.0);
 }
 
+void check_shape_dtype_device(const torch::Tensor& tensor,
+                              const std::vector<size_t>& shape,
+                              const torch::ScalarType& dtype,
+                              const torch::Device& device,
+                              const std::string& name) {
+  if (shape.size() > 0 && tensor.sizes() != shape) {
+    LOG(FATAL) << "Invalid shape of " << name << ": expected " << shape
+               << ", got " << tensor.sizes();
+  }
+  if (tensor.scalar_type() != dtype) {
+    LOG(FATAL) << "Invalid dtype of " << name << ": expected " << dtype
+               << ", got " << tensor.scalar_type();
+  }
+  if (tensor.device() != device) {
+    LOG(FATAL) << "Invalid device of " << name << ": expected " << device
+               << ", got " << tensor.device();
+  }
+}
+
+// below are tvm-ffi related functions
 ffi::Tensor to_ffi_tensor(const torch::Tensor& torch_tensor) {
   if (!torch_tensor.defined()) {
     LOG(FATAL) << "torch_tensor is not defined";
@@ -356,6 +376,33 @@ ffi::Tensor to_ffi_tensor(const torch::Tensor& torch_tensor) {
 
   auto dlpack = to_dlpack_impl<DLManagedTensorVersioned>(torch_tensor);
   return ffi::Tensor::FromDLPackVersioned(dlpack);
+}
+
+ffi::Optional<ffi::Tensor> to_ffi_optional_tensor(
+    const std::optional<torch::Tensor>& optional) {
+  if (!optional.has_value()) {
+    return ffi::Optional<ffi::Tensor>();
+  }
+  return ffi::Optional<ffi::Tensor>(to_ffi_tensor(optional.value()));
+}
+
+ffi::Array<ffi::Tensor> to_ffi_array_tensors(
+    const std::vector<torch::Tensor>& torch_tensors) {
+  std::vector<ffi::Tensor> ffi_tensors;
+  ffi_tensors.reserve(torch_tensors.size());
+  for (const auto& torch_tensor : torch_tensors) {
+    ffi_tensors.push_back(to_ffi_tensor(torch_tensor));
+  }
+  return ffi::Array<ffi::Tensor>(ffi_tensors);
+}
+
+ffi::Optional<ffi::Array<ffi::Tensor>> to_ffi_optional_array_tensors(
+    const std::optional<std::vector<torch::Tensor>>& optional) {
+  if (!optional.has_value()) {
+    return ffi::Optional<ffi::Array<ffi::Tensor>>();
+  }
+  return ffi::Optional<ffi::Array<ffi::Tensor>>(
+      to_ffi_array_tensors(optional.value()));
 }
 
 ffi::Module get_module(const std::string& uri) {
