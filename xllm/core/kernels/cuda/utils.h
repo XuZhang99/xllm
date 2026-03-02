@@ -51,6 +51,18 @@ ceil_div(T a, T b) {
   return (a + b - 1) / b;
 }
 
+enum class ActivationType : int8_t {
+  Gelu = 0,
+  Relu = 1,
+  Silu = 2,
+  Swiglu = 3,
+  Geglu = 4,
+  SwigluBias = 5,
+  Relu2 = 6,
+  Identity = 7,
+  InvalidType = 8
+};
+
 // torch tensor is only on cpu
 torch::Tensor get_cache_buffer(const int32_t seq_len,
                                const torch::Device& device);
@@ -105,7 +117,23 @@ std::string get_batch_decode_uri(torch::ScalarType dtype_q,
 
 std::tuple<torch::Tensor, double> split_scale_param(const torch::Tensor& scale);
 
+void check_shape_dtype_device(const torch::Tensor& tensor,
+                              const std::vector<size_t>& shape,
+                              const torch::ScalarType& dtype,
+                              const torch::Device& device,
+                              const std::string& name);
+
+// below are tvm-ffi related functions
 ffi::Tensor to_ffi_tensor(const torch::Tensor& torch_tensor);
+
+ffi::Optional<ffi::Tensor> to_ffi_optional_tensor(
+    const std::optional<torch::Tensor>& optional);
+
+ffi::Array<ffi::Tensor> to_ffi_array_tensors(
+    const std::vector<torch::Tensor>& torch_tensors);
+
+ffi::Optional<ffi::Array<ffi::Tensor>> to_ffi_optional_array_tensors(
+    const std::optional<std::vector<torch::Tensor>>& optional);
 
 ffi::Module get_module(const std::string& uri);
 
