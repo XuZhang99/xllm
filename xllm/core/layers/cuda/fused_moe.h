@@ -98,30 +98,13 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t num_total_experts_;
   int64_t topk_;
   int64_t hidden_size_;
-  int64_t n_shared_experts_;
   bool is_gated_;
   std::string hidden_act_;
-  bool is_smoothquant_;
 
   int64_t num_experts_per_rank_;
   int64_t start_expert_id_;
 
-  // Deep EP related parameters
-  bool enable_deep_ep_;
-  DeepEPBuffer deep_ep_buffer_;
-  DeepEPParams deep_ep_params_;
-  torch::Tensor dispatch_recv_token_tensor_head_;
-  torch::Tensor dispatch_recv_token_tensor_tail_;
-
-  // streams for parallel shared experts
-  std::unique_ptr<Stream> shared_stream_;
-  std::unique_ptr<Stream> routed_stream_;
-  xllm::Device device_;
-  bool stream_initialized_ = false;
-
   MoEGate gate_{nullptr};
-  DenseMLP shared_experts_{nullptr};
-  DeepEP deep_ep_{nullptr};
 
   QuantArgs quant_args_;
   ParallelArgs parallel_args_;
@@ -132,12 +115,6 @@ class FusedMoEImpl : public torch::nn::Module {
   DEFINE_FUSED_WEIGHT(w1);
   DEFINE_FUSED_WEIGHT(w3);
   DEFINE_FUSED_WEIGHT(w2);
-  DEFINE_WEIGHT(w13_scale);
-  DEFINE_FUSED_WEIGHT(w1_scale);
-  DEFINE_FUSED_WEIGHT(w3_scale);
-  DEFINE_FUSED_WEIGHT(w2_scale);
-  DEFINE_FUSED_WEIGHT(input_smooth);
-  DEFINE_FUSED_WEIGHT(act_smooth);
 
   void load_experts(const StateDict& state_dict);
   // create the group gemm output tensor with the workspace
