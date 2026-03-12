@@ -336,6 +336,7 @@ std::string get_batch_prefill_uri(const std::string& backend,
 
   if (backend == "fa3") oss << "_sm90";
 
+  if (backend == "fa3_superpage") oss << "_sm90_superpage";
   return oss.str();
 }
 

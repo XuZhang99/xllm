@@ -325,4 +325,122 @@ void update_decode_plan_info(std::shared_ptr<PlanInfo> plan_info,
   }
 }
 
+void update_superpage_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
+                                        const AttentionMetadata& attn_meta,
+                                        c10::ScalarType query_dtype,
+                                        c10::ScalarType key_dtype,
+                                        c10::ScalarType output_dtype,
+                                        int32_t head_dim_qk,
+                                        int32_t head_dim_vo,
+                                        int32_t num_qo_heads,
+                                        int32_t num_kv_heads,
+                                        int32_t block_size,
+                                        int32_t window_size_left,
+                                        bool enable_cuda_graph) {
+  CHECK(plan_info->layer_id != -1) << "Need to set layer_id to PlanInfo.";
+  if (plan_info->layer_id != 0) return;
+
+  const auto device =
+      FlashinferWorkspace::get_instance().get_float_workspace_buffer().device();
+  bind_tvmffi_stream_to_current_torch_stream(device);
+
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "update_superpage_prefill_plan_info: layer_id=" << plan_info->layer_id
+      << ", enable_cuda_graph=" << enable_cuda_graph;
+
+  auto float_workspace_buffer = to_ffi_tensor(
+      FlashinferWorkspace::get_instance().get_float_workspace_buffer());
+  auto int_workspace_buffer = to_ffi_tensor(
+      FlashinferWorkspace::get_instance().get_int_workspace_buffer());
+  auto page_locked_int_workspace_buffer =
+      to_ffi_tensor(FlashinferWorkspace::get_instance()
+                        .get_page_locked_int_workspace_buffer());
+
+  plan_info->uri =
+      get_batch_prefill_uri(/*backend=*/"fa3_superpage",
+                            query_dtype,
+                            key_dtype,
+                            output_dtype,
+                            attn_meta.paged_kv_indptr.scalar_type(),
+                            head_dim_qk,
+                            head_dim_vo,
+                            /*pos_encoding_mode=*/0,
+                            /*use_sliding_window=*/false,
+                            /*use_logits_soft_cap=*/false,
+                            /*use_fp16_qk_reduction=*/false);
+  const int64_t batch_size = attn_meta.paged_kv_last_page_len.size(0);
+  torch::Tensor qo_indptr_host;
+  qo_indptr_host = attn_meta.qo_indptr.value().to(torch::kCPU);
+
+  torch::Tensor paged_kv_indptr_host =
+      attn_meta.paged_kv_indptr.to(torch::kCPU);
+  torch::Tensor kv_len_arr_host = attn_meta.kv_seq_lens.to(torch::kCPU);
+
+  const int64_t total_num_rows = qo_indptr_host[-1].item<int64_t>();
+
+  int32_t tile_size = 128;
+  int64_t max_kv_seq_len = kv_len_arr_host.max().item<int64_t>();
+
+  int32_t max_tiles_per_seq = (max_kv_seq_len + tile_size - 1) / tile_size;
+
+  torch::Tensor tile_indptr_host =
+      torch::arange(
+          0,
+          batch_size + 1,
+          torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU)) *
+      max_tiles_per_seq;
+
+  int64_t total_tiles = batch_size * max_tiles_per_seq;
+
+  torch::Tensor kv_tile_indptr_buf =
+      torch::empty({batch_size + 1},
+                   torch::TensorOptions().dtype(torch::kInt32).device(device));
+
+  torch::Tensor kv_tile_contig_flags =
+      torch::empty({total_tiles},
+                   torch::TensorOptions().dtype(torch::kUInt8).device(device));
+
+  kv_tile_indptr_buf._copy(tile_indptr_host, /*no_block=*/true);
+
+  torch::Tensor vector_sparse_indptr_buffer;
+
+  if (block_size != 1) {
+    const int64_t n_seq = kv_len_arr_host.size(0);
+    auto vector_sparse_indptr_host =
+        torch::empty({n_seq + 1}, torch::dtype(torch::kInt32));
+    vector_sparse_indptr_host[0] = 0;
+    torch::cumsum_out(vector_sparse_indptr_host.slice(0, 1, n_seq + 1),
+                      kv_lens_arr_host,
+                      0,
+                      torch::dtype(torch::kInt32));
+
+    vector_sparse_indptr_buffer.slice(0, 0, n_seq + 1)
+        .copy_(vector_sparse_indptr_host, /*non_blocking=*/true);
+
+    paged_kv_indptr_host = vector_sparse_indptr_host;
+  }
+
+  plan_info->plan_info = deep_copy_plan_info(
+      get_function(plan_info->uri, "plan")(float_workspace_buffer,
+                                           int_workspace_buffer,
+                                           page_locked_int_workspace_buffer,
+                                           to_ffi_tensor(qo_indptr_host),
+                                           to_ffi_tensor(paged_kv_indptr_host),
+                                           to_ffi_tensor(kv_len_arr_host),
+                                           total_num_rows,
+                                           batch_size,
+                                           num_qo_heads,  // num_qo_heads
+                                           num_kv_heads,  // num_kv_heads
+                                           block_size,    // block_size
+                                           enable_cuda_graph,
+                                           head_dim_qk,  // head_dim_qk
+                                           head_dim_vo,  // head_dim_vo
+                                           /*causal=*/true,
+                                           window_size_left,
+                                           /*fixed_split_size=*/-1,
+                                           /*disable_split_kv=*/false,
+                                           /*num_colocated_ctas=*/0)
+          .cast<ffi::Array<int64_t>>());
+}
+
 }  // namespace xllm::layer::flashinfer
