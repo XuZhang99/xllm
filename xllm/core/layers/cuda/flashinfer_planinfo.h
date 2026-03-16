@@ -72,6 +72,11 @@ void update_superpage_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
                                         int32_t num_kv_heads,
                                         int32_t block_size,
                                         int32_t window_size_left,
-                                        bool enable_cuda_graph);
+                                        bool enable_cuda_graph,
+                                        int64_t& max_kv_seq_len,
+                                        torch::Tensor vector_sparse_indptr_buf,
+                                        torch::Tensor kv_tile_indptr_buf,
+                                        torch::Tensor kv_tile_contig_flags_buf,
+                                        torch::Tensor kv_lens_buffer);
 
 }  // namespace xllm::layer::flashinfer

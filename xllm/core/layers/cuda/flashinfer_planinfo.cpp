@@ -336,7 +336,12 @@ void update_superpage_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
                                         int32_t num_kv_heads,
                                         int32_t block_size,
                                         int32_t window_size_left,
-                                        bool enable_cuda_graph) {
+                                        bool enable_cuda_graph,
+                                        int64_t& max_kv_seq_len,
+                                        torch::Tensor vector_sparse_indptr_buf,
+                                        torch::Tensor kv_tile_indptr_buf,
+                                        torch::Tensor kv_tile_contig_flags_buf,
+                                        torch::Tensor kv_lens_buffer) {
   CHECK(plan_info->layer_id != -1) << "Need to set layer_id to PlanInfo.";
   if (plan_info->layer_id != 0) return;
 
@@ -379,7 +384,9 @@ void update_superpage_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
   const int64_t total_num_rows = qo_indptr_host[-1].item<int64_t>();
 
   int32_t tile_size = 128;
-  int64_t max_kv_seq_len = kv_len_arr_host.max().item<int64_t>();
+  max_kv_seq_len = kv_len_arr_host.max().item<int64_t>();
+  kv_lens_buffer.slice(0, 0, kv_len_arr_host.size(0))
+      .copy_(kv_len_arr_host, /*non_blocking=*/true);
 
   int32_t max_tiles_per_seq = (max_kv_seq_len + tile_size - 1) / tile_size;
 
@@ -392,29 +399,26 @@ void update_superpage_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
 
   int64_t total_tiles = batch_size * max_tiles_per_seq;
 
-  torch::Tensor kv_tile_indptr_buf =
+  kv_tile_indptr_buf =
       torch::empty({batch_size + 1},
                    torch::TensorOptions().dtype(torch::kInt32).device(device));
 
-  torch::Tensor kv_tile_contig_flags =
+  kv_tile_contig_flags_buf =
       torch::empty({total_tiles},
                    torch::TensorOptions().dtype(torch::kUInt8).device(device));
 
-  kv_tile_indptr_buf._copy(tile_indptr_host, /*no_block=*/true);
-
-  torch::Tensor vector_sparse_indptr_buffer;
+  kv_tile_indptr_buf.copy_(tile_indptr_host, /*no_block=*/true);
 
   if (block_size != 1) {
     const int64_t n_seq = kv_len_arr_host.size(0);
     auto vector_sparse_indptr_host =
         torch::empty({n_seq + 1}, torch::dtype(torch::kInt32));
     vector_sparse_indptr_host[0] = 0;
-    torch::cumsum_out(vector_sparse_indptr_host.slice(0, 1, n_seq + 1),
-                      kv_lens_arr_host,
-                      0,
-                      torch::dtype(torch::kInt32));
+    auto out_slice =
+        vector_sparse_indptr_host.slice(0, 1, n_seq + 1).to(torch::kInt32);
+    torch::cumsum_out(out_slice, kv_lens_buffer, 0);
 
-    vector_sparse_indptr_buffer.slice(0, 0, n_seq + 1)
+    vector_sparse_indptr_buf.slice(0, 0, n_seq + 1)
         .copy_(vector_sparse_indptr_host, /*non_blocking=*/true);
 
     paged_kv_indptr_host = vector_sparse_indptr_host;

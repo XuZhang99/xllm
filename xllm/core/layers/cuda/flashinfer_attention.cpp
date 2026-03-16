@@ -107,6 +107,17 @@ FlashInferAttentionImpl::FlashInferAttentionImpl(int64_t num_heads,
   page_locked_int_workspace_buffer_ =
       flashinfer::FlashinferWorkspace::get_instance()
           .get_page_locked_int_workspace_buffer();
+
+  const auto device = flashinfer::FlashinferWorkspace::get_instance()
+                          .get_float_workspace_buffer()
+                          .device();
+  vector_sparse_indptr_buf_ = torch::empty(
+      {32768}, torch::TensorOptions().dtype(torch::kInt32).device(device));
+  vector_sparse_indices_buf_ =
+      torch::empty({16 * 1024 * 1024},
+                   torch::TensorOptions().dtype(torch::kInt32).device(device));
+  kv_lens_buffer_ = torch::empty(
+      {32768}, torch::TensorOptions().dtype(torch::kInt32).device(device));
 }
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>>
@@ -281,6 +292,80 @@ void FlashInferAttentionImpl::chunked_prefill_forward(
       output,
       output_lse,
       attn_metadata.qo_indptr);
+}
+
+void FlashInferAttentionImpl::superpage_prefill_forward(
+    const AttentionMetadata& attn_metadata,
+    torch::Tensor& query,
+    const torch::Tensor& key,
+    torch::Tensor& output,
+    std::optional<at::Tensor>& output_lse,
+    const torch::Tensor& k_cache,
+    const torch::Tensor& v_cache) {
+  // Get block_size from k_cache if defined and has proper dimensions,
+  // otherwise use a default value (for prefill without KV cache, e.g., LongCat)
+  int64_t block_size = 1;
+  int64_t stride_block = 1;
+  int64_t stride_n = 1;
+  if (k_cache.defined() && k_cache.dim() >= 2) {
+    block_size = k_cache.size(1);
+    stride_block = k_cache.stride(0);
+    stride_n = k_cache.stride(1);
+  }
+  int64_t stride_ratio = stride_block / stride_n;
+
+  if (attn_metadata.enable_cuda_graph) {
+    CHECK(attn_metadata.plan_info->plan_info.defined())
+        << "plan_info plan_info should not be null when enable_cuda_graph is "
+           "true";
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "no need to update plan_info for CUDA graph";
+  } else {
+    flashinfer::update_superpage_prefill_plan_info(
+        attn_metadata.plan_info,
+        attn_metadata,
+        query.scalar_type(),
+        key.scalar_type(),
+        output.scalar_type(),
+        head_size_,
+        head_size_,
+        num_heads_,
+        num_kv_heads_,
+        block_size,
+        sliding_window_,
+        attn_metadata.enable_cuda_graph,
+        max_kv_seq_len_,
+        vector_sparse_indptr_buf_,
+        kv_tile_indptr_buf_,
+        kv_tile_contig_flags_buf_,
+        kv_lens_buffer_);
+  }
+
+  xllm::kernel::cuda::batch_superpage_prefill(
+      attn_metadata.plan_info->uri,
+      attn_metadata.plan_info->plan_info,
+      float_workspace_buffer_,
+      int_workspace_buffer_,
+      page_locked_int_workspace_buffer_,
+      query,
+      k_cache,
+      v_cache,
+      attn_metadata.paged_kv_indptr,
+      attn_metadata.paged_kv_indices,
+      attn_metadata.paged_kv_last_page_len,
+      sliding_window_,
+      scale_,
+      output,
+      stride_ratio,
+      block_size,
+      max_kv_seq_len_,
+      output_lse,
+      attn_metadata.qo_indptr,
+      kv_tile_indptr_buf_,
+      kv_tile_contig_flags_buf_,
+      vector_sparse_indptr_buf_,
+      vector_sparse_indices_buf_,
+      kv_lens_buffer_);
 }
 
 void FlashInferAttentionImpl::decoder_forward(

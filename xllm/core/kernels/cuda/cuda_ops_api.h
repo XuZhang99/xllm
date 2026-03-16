@@ -117,6 +117,32 @@ void batch_chunked_prefill(
     std::optional<torch::Tensor> qo_indptr = std::nullopt,
     bool causal = true);
 
+void batch_superpage_prefill(
+    const std::string& uri,
+    ffi::Array<int64_t> plan_info,
+    torch::Tensor float_workspace_buffer,
+    torch::Tensor int_workspace_buffer,
+    torch::Tensor page_locked_int_workspace_buffer,
+    torch::Tensor query,
+    torch::Tensor k_cache,
+    torch::Tensor v_cache,
+    torch::Tensor paged_kv_indptr,
+    torch::Tensor paged_kv_indices,
+    torch::Tensor paged_kv_last_page_len,
+    int64_t window_left,
+    double sm_scale,
+    torch::Tensor output,
+    int64_t stride_ratio,  // stride_ratio = stride_block / stride_n
+    int64_t block_size,
+    int64_t max_kv_seq_len,
+    std::optional<torch::Tensor>& output_lse,
+    std::optional<torch::Tensor> qo_indptr,
+    torch::Tensor kv_tile_indptr_buf,
+    torch::Tensor kv_tile_contig_flags_buf,
+    torch::Tensor vector_sparse_indptr_buf,
+    torch::Tensor vector_sparse_indices_buf,
+    torch::Tensor kv_lens_buffer);
+
 void batch_decode(const std::string& uri,
                   ffi::Array<int64_t> plan_info,
                   torch::Tensor float_workspace_buffer,
