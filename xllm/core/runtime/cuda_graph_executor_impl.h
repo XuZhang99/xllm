@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
+#include <ATen/cuda/MemPool.h>
 #include <absl/container/flat_hash_map.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
@@ -222,7 +223,7 @@ class CudaGraph {
                std::vector<KVCache>& kv_cache,
                uint32_t bucket_num_tokens,
                const at::cuda::MempoolId_t& pool,
-               c10::cuda::MemPool* pool_ptr = nullptr);
+               at::cuda::MemPool* pool_ptr = nullptr);
 
   // Replay captured graph with new input data
   ModelOutput replay(const torch::Tensor& tokens,
@@ -341,10 +342,10 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   };
 
   VmmPoolState& get_or_create_vmm_pool_state(uint32_t physical_pool_id);
-  c10::cuda::MemPool* get_or_create_vmm_mempool(uint32_t physical_pool_id,
-                                                uint32_t shape_id);
-  c10::cuda::MemPool* get_vmm_mempool(uint32_t physical_pool_id,
-                                      uint32_t shape_id);
+  at::cuda::MemPool* get_or_create_vmm_mempool(uint32_t physical_pool_id,
+                                               uint32_t shape_id);
+  at::cuda::MemPool* get_vmm_mempool(uint32_t physical_pool_id,
+                                     uint32_t shape_id);
   GraphMemoryUsageStats get_graph_memory_usage_stats();
   void log_graph_memory_after_capture();
 

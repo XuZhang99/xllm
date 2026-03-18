@@ -272,7 +272,7 @@ graph LR
 reset_vmm_allocator_offset(device_.index());
 
 // 2. Activate VMM MemPool (CUDA platform uses PyTorch MemPool)
-c10::cuda::MemPoolContext mempool_ctx(get_vmm_mempool_ptr());
+at::cuda::MemPoolContext mempool_ctx(get_vmm_mempool_ptr());
 
 // 3. Execute capture (all allocations will use VMM allocator)
 graph->capture(...);
@@ -354,8 +354,8 @@ vmm::map(vir_ptr, phy_mem_handle, device_id);
 #### 3.6.2 PyTorch Integration (CUDA Platform)
 
 **MemPool Mechanism**:
-- `c10::cuda::MemPool` binds `CUDAAllocator*` at construction
-- `c10::cuda::MemPoolContext` activates MemPool within scope
+- `at::cuda::MemPool` binds `CUDAAllocator*` at construction
+- `at::cuda::MemPoolContext` activates MemPool within scope
 - `beginAllocateToPool()` / `endAllocateToPool()` route allocations to MemPool's allocator
 
 **Key Interface Implementation**:

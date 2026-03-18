@@ -272,7 +272,7 @@ graph LR
 reset_vmm_allocator_offset(device_.index());
 
 // 2. 激活 VMM MemPool（CUDA 平台使用 PyTorch MemPool）
-c10::cuda::MemPoolContext mempool_ctx(get_vmm_mempool_ptr());
+at::cuda::MemPoolContext mempool_ctx(get_vmm_mempool_ptr());
 
 // 3. 执行 capture（此时所有分配会使用 VMM allocator）
 graph->capture(...);
@@ -354,8 +354,8 @@ vmm::map(vir_ptr, phy_mem_handle, device_id);
 #### 3.6.2 PyTorch 集成（CUDA 平台）
 
 **MemPool 机制**：
-- `c10::cuda::MemPool` 在构造时绑定 `CUDAAllocator*`
-- `c10::cuda::MemPoolContext` 在作用域内激活 MemPool
+- `at::cuda::MemPool` 在构造时绑定 `CUDAAllocator*`
+- `at::cuda::MemPoolContext` 在作用域内激活 MemPool
 - `beginAllocateToPool()` / `endAllocateToPool()` 将分配路由到 MemPool 的 allocator
 
 **关键接口实现**：
