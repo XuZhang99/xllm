@@ -25,7 +25,7 @@ namespace xllm {
 
 class Qwen3VLImageProcessor : public Qwen2VLImageProcessor {
  public:
-  explicit Qwen3VLImageProcessor(const ModelArgs& args)
+  explicit Qwen3VLImageProcessor(const std::shared_ptr<ModelArgs>& args)
       : Qwen2VLImageProcessor(args) {}
 
   std::optional<Size> smart_resize_video(int32_t num_frames,

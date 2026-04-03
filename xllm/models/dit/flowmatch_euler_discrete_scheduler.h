@@ -35,19 +35,19 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
  public:
   explicit FlowMatchEulerDiscreteSchedulerImpl(const ModelContext& context)
       : args_(context.get_model_args()) {
-    num_train_timesteps_ = args_.num_train_timesteps();
-    shift_ = args_.shift();
-    use_dynamic_shifting_ = args_.use_dynamic_shifting();
-    base_shift_ = args_.base_shift();
-    max_shift_ = args_.max_shift(),
-    base_image_seq_len_ = args_.base_image_seq_len();
-    max_image_seq_len_ = args_.max_image_seq_len();
-    // shift_terminal_ = static_cast<int64_t>(args_.shift_terminal()) == -1 ?
-    // std::nullopt : args_.shift_terminal();
-    if (static_cast<int64_t>(args_.shift_terminal()) == -1) {
+    num_train_timesteps_ = args_->num_train_timesteps();
+    shift_ = args_->shift();
+    use_dynamic_shifting_ = args_->use_dynamic_shifting();
+    base_shift_ = args_->base_shift();
+    max_shift_ = args_->max_shift(),
+    base_image_seq_len_ = args_->base_image_seq_len();
+    max_image_seq_len_ = args_->max_image_seq_len();
+    // shift_terminal_ = static_cast<int64_t>(args_->shift_terminal()) == -1 ?
+    // std::nullopt : args_->shift_terminal();
+    if (static_cast<int64_t>(args_->shift_terminal()) == -1) {
       shift_terminal_ = std::nullopt;
     } else {
-      shift_terminal_ = args_.shift_terminal();
+      shift_terminal_ = args_->shift_terminal();
     }
     time_shift_type_ = "exponential";
     std::vector<float> timesteps_vec(num_train_timesteps_);
@@ -383,7 +383,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   std::optional<int> begin_index_;
 
   int64_t order_ = 1;  // default value is 1
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> args_;
 };
 
 TORCH_MODULE(FlowMatchEulerDiscreteScheduler);

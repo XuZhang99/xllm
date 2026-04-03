@@ -380,9 +380,8 @@ constexpr int32_t kInMlpGateUpOffsetSharedExpert = static_cast<int32_t>(
     OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_OFFSET_SHARED_EXPERT);
 constexpr int32_t kInMlpGateUpScaleSharedExpert = static_cast<int32_t>(
     OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_SCALE_SHARED_EXPERT);
-constexpr int32_t kInMlpGateUpCompressIdxSharedExpert =
-    static_cast<int32_t>(
-        OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_COMPRESS_IDX_SHARED_EXPERT);
+constexpr int32_t kInMlpGateUpCompressIdxSharedExpert = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_COMPRESS_IDX_SHARED_EXPERT);
 constexpr int32_t kInMlpDownWeightSharedExpert = static_cast<int32_t>(
     OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_WEIGHT_SHARED_EXPERT);
 constexpr int32_t kInMlpDownBiasSharedExpert = static_cast<int32_t>(
@@ -598,8 +597,8 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
   param_from_args(decode_param_, args, parallel_args, /*is_prefill=*/false);
 
   const int32_t weight_count = prefill_param_.use_moe
-                               ? kOneRecMoeWeightCountPerLayer
-                               : kOneRecWeightCountPerLayer;
+                                   ? kOneRecMoeWeightCountPerLayer
+                                   : kOneRecWeightCountPerLayer;
   at_weight_tensors_.resize(weight_count);
   atb_weight_tensors_.resize(weight_count);
 
@@ -609,11 +608,11 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
 
   auto placeholder_tensor = torch::empty({1, 1}, torch::kInt32).to(device_);
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(placeholder_tensor);
-  at_placeholder_ = torch::empty({1, args.hidden_size()}, dtype_).to(device_);
+  at_placeholder_ = torch::empty({1, args->hidden_size()}, dtype_).to(device_);
 
   for (int32_t i = 0; i < weight_count; ++i) {
     at_weight_tensors_[i] =
-        torch::zeros({1, args.hidden_size()}).to(context.get_tensor_options());
+        torch::zeros({1, args->hidden_size()}).to(context.get_tensor_options());
   }
 
   if (prefill_param_.use_moe) {
@@ -626,7 +625,7 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
 
 void NpuOneRecBlockLayerImpl::param_from_args(
     atb_speed::onerec::BlockLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args,
     bool is_prefill,
     const ModelInputParams* input_params) {
@@ -634,7 +633,7 @@ void NpuOneRecBlockLayerImpl::param_from_args(
 
   param.isFA = false;
   param.isPrefill = is_prefill;
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = args->dtype() == "bfloat16";
   param.isPack = true;
   param.supportSwiGLU = true;
   param.supportLcoc = is_prefill;
@@ -656,18 +655,18 @@ void NpuOneRecBlockLayerImpl::param_from_args(
   param.quantGroupSize = 64;
 
   const int64_t args_n_heads =
-      is_decoder_ ? args.decoder_n_heads() : args.n_heads();
+      is_decoder_ ? args->decoder_n_heads() : args->n_heads();
   const int64_t args_head_dim =
-      is_decoder_ ? args.decoder_head_dim() : args.head_dim();
+      is_decoder_ ? args->decoder_head_dim() : args->head_dim();
   param.numAttentionHeadsPerRank = args_n_heads / param.worldSize;
   param.hiddenSizePerAttentionHead = args_head_dim;
 
   std::optional<int64_t> optional_value =
-      is_decoder_ ? args.decoder_n_kv_heads().value_or(args.decoder_n_heads())
-                  : args.n_kv_heads().value_or(args.n_heads());
+      is_decoder_ ? args->decoder_n_kv_heads().value_or(args->decoder_n_heads())
+                  : args->n_kv_heads().value_or(args->n_heads());
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optional_value.value()) / param.worldSize;
-  param.rmsNormEps = args.rms_norm_eps();
+  param.rmsNormEps = args->rms_norm_eps();
 
   param.seqLen = {};
   param.tokenOffset = {};
@@ -690,7 +689,7 @@ void NpuOneRecBlockLayerImpl::param_from_args(
         static_cast<int>(atb_speed::common::LinearDesc::FLOAT16_DESC)};
   }
 
-  param.use_moe = args.use_moe() && is_decoder_;
+  param.use_moe = args->use_moe() && is_decoder_;
   if (param.use_moe) {
     ep_size_ = 1;
     const int32_t ep_rank = 0;
@@ -698,22 +697,22 @@ void NpuOneRecBlockLayerImpl::param_from_args(
     CHECK_EQ(parallel_args.world_size(), ep_size_ * ep_local_tp_size_);
     ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
 
-    num_experts_per_partition_ = args.n_routed_experts() / ep_size_;
+    num_experts_per_partition_ = args->n_routed_experts() / ep_size_;
     start_expert_id_ = ep_rank * num_experts_per_partition_;
     end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
 
     resize_experts_weights(num_experts_per_partition_);
 
     param.moe_config = std::make_unique<atb_speed::onerec::OneRecMoEConfig>();
-    param.moe_config->moe_topk = args.num_experts_per_tok();
-    param.moe_config->moe_num_experts = args.n_routed_experts();
+    param.moe_config->moe_topk = args->num_experts_per_tok();
+    param.moe_config->moe_num_experts = args->n_routed_experts();
     param.moe_config->moe_score_func = "softmax";
-    param.moe_config->moe_route_scale = args.moe_route_scale();
-    param.moe_config->moe_inter_dim = args.moe_intermediate_size();
+    param.moe_config->moe_route_scale = args->moe_route_scale();
+    param.moe_config->moe_inter_dim = args->moe_intermediate_size();
     param.moe_config->use_bf16 = param.isBF16;
     param.moe_config->hasSharedExpertGate = false;
-    param.moe_config->moe_use_shared_experts = args.moe_use_shared_experts();
-    param.moe_config->moe_num_shared_experts = args.n_shared_experts();
+    param.moe_config->moe_use_shared_experts = args->moe_use_shared_experts();
+    param.moe_config->moe_num_shared_experts = args->n_shared_experts();
 
     param.moeLinearQuantType = {atb_speed::common::LinearType::FP,
                                 atb_speed::common::LinearType::FP,
@@ -752,14 +751,14 @@ void NpuOneRecBlockLayerImpl::verify_loaded_weights(
     const bool is_placeholder = (sizes.size() == 2 && sizes[0] == 1);
     const bool expected_placeholder = allowed_placeholders.count(index) > 0;
     const bool is_relative_bias = (index == kInRelativeAttentionBiasWeight);
-    const bool is_shared_optional =
-        prefill_param_.use_moe && !has_shared_experts &&
-        (index == kInMlpGateUpWeightSharedExpert ||
-         index == kInMlpDownWeightSharedExpert ||
-         index == kInSharedExpertGateWeight ||
-         index == kInSharedExpertGateBias ||
-         index == kInSharedExpertGateOffset ||
-         index == kInSharedExpertGateScale);
+    const bool is_shared_optional = prefill_param_.use_moe &&
+                                    !has_shared_experts &&
+                                    (index == kInMlpGateUpWeightSharedExpert ||
+                                     index == kInMlpDownWeightSharedExpert ||
+                                     index == kInSharedExpertGateWeight ||
+                                     index == kInSharedExpertGateBias ||
+                                     index == kInSharedExpertGateOffset ||
+                                     index == kInSharedExpertGateScale);
     if (is_placeholder && !expected_placeholder && !is_relative_bias &&
         !is_shared_optional) {
       CHECK(false) << "weight is not loaded for " << prefix << name;
@@ -855,10 +854,9 @@ void NpuOneRecBlockLayerImpl::merge_loaded_weights() {
     CHECK(wi0_loaded && wi1_loaded)
         << "OneRec FFN gate/up weights are not properly loaded.";
 
-    auto new_gate_up_weight =
-        torch::cat({at_weight_tensors_[kInFfnWi0Weight],
-                    at_weight_tensors_[kInFfnWi1Weight]},
-                   0);
+    auto new_gate_up_weight = torch::cat({at_weight_tensors_[kInFfnWi0Weight],
+                                          at_weight_tensors_[kInFfnWi1Weight]},
+                                         0);
     at_weight_tensors_[kInFfnWi0Weight] = new_gate_up_weight;
     at_weight_tensors_[kInFfnWi1Weight] =
         torch::zeros({1, at_weight_tensors_[kInFfnWi0Weight].size(1)})
@@ -1487,8 +1485,7 @@ void NpuOneRecBlockLayerImpl::process_shared_expert_weights(
   shared_expert_weights_map_[canonical_name] = tmp_tensor;
 }
 
-int32_t NpuOneRecBlockLayerImpl::extract_expert_index(
-    const std::string& name) {
+int32_t NpuOneRecBlockLayerImpl::extract_expert_index(const std::string& name) {
   size_t experts_pos = name.find(".experts.");
   if (experts_pos == std::string::npos) {
     return -1;
