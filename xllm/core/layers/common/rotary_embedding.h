@@ -22,7 +22,7 @@ limitations under the License.
 
 #include "attention_metadata.h"
 #include "core/framework/model_context.h"
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "rotary_embedding_util.h"
 
 namespace xllm {

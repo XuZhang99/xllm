@@ -26,4 +26,5 @@ cc_library(
     fused_moe_all2all.cpp
   DEPS
     :common_layers
+    :model_args
 )

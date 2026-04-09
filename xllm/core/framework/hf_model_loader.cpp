@@ -37,6 +37,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/common/rec_model_utils.h"
 #include "core/common/version_singleton.h"
+#include "core/framework/model_args/model_args_factory.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
 #include "core/framework/state_dict/safetensors/safetensors.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"
@@ -747,6 +748,8 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
                << resolved_model_type;
     return false;
   }
+
+  args_ = create_model_args(resolved_model_type);
   model_args_loader(reader, args_);
 
   return true;

@@ -19,8 +19,8 @@ limitations under the License.
 
 #include <memory>
 
-#include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_args/model_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/qwen2_vision_attention.h"

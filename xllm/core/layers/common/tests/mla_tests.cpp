@@ -19,7 +19,7 @@ limitations under the License.
 
 #include <memory>
 
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/quant_args.h"

@@ -27,7 +27,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "framework/block/block.h"
 #include "framework/block/block_manager_impl.h"
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "framework/request/stopping_checker.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"

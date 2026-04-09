@@ -22,7 +22,6 @@ limitations under the License.
 #include <nlohmann/json.hpp>
 
 #include "base_loader.h"
-#include "framework/model/model_args.h"
 #include "framework/model/npu_dp_ep_padding.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"

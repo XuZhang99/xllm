@@ -29,6 +29,7 @@ cc_library(
     :runtime
     :common
     glog::glog
+    :model_args
 )
 
 cc_test(

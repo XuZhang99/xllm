@@ -24,7 +24,7 @@ limitations under the License.
 #include <memory>
 #include <string>
 
-#include "core/framework/model/model_args.h"
+#include "core/framework/model_args/model_args.h"
 #include "core/framework/parallel_state/parallel_args.h"
 #include "core/framework/quant_args.h"
 #include "framework/parallel_state/parallel_args.h"

@@ -35,7 +35,7 @@ limitations under the License.
 #include "common/types.h"
 #include "core/common/xllm_build_info.h"
 #include "dit_master.h"
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "framework/request/request.h"
 #include "llm_engine.h"
 #include "llm_master.h"

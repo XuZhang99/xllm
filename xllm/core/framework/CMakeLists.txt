@@ -13,6 +13,7 @@ add_subdirectory(block)
 add_subdirectory(chat_template)
 add_subdirectory(kv_cache)
 add_subdirectory(model)
+add_subdirectory(model_args)
 add_subdirectory(parallel_state)
 add_subdirectory(prefix_cache)
 add_subdirectory(request)
@@ -44,6 +45,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:npu_layers>
     :tokenizer
     torch
+    :model_args
 )
 
 cc_library(
@@ -56,6 +58,7 @@ cc_library(
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
+    :model_args
 )
 
 cc_test(

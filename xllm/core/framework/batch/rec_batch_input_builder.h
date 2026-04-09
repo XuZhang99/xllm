@@ -21,7 +21,7 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "framework/request/mm_data.h"
 #include "framework/request/rec_type.h"
 #include "framework/request/sequences_group.h"

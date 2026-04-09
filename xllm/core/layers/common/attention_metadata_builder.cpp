@@ -20,8 +20,8 @@ limitations under the License.
 
 #include "attention_metadata.h"
 #include "core/common/global_flags.h"
-#include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_args/model_args.h"
 
 namespace xllm::layer {
 

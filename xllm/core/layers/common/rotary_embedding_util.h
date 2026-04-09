@@ -24,7 +24,7 @@ limitations under the License.
 #include <tuple>
 #include <unordered_map>
 
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 
 namespace xllm {
 namespace layer {

@@ -20,7 +20,7 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "core/framework/model/model_args.h"
+#include "core/framework/model_args/model_args.h"
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/tokenizer/tokenizer.h"

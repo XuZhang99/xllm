@@ -48,4 +48,5 @@ cc_library(
   DEPS
     ${BASE_DEPS}
     :request
+    :model_args
 )

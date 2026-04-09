@@ -92,6 +92,7 @@ cc_library(
     absl::flat_hash_map
     proto::xllm_proto
     $<$<BOOL:${USE_MLU}>:torch_mlu>
+    :model_args
 )
 
 if(USE_NPU)

@@ -22,8 +22,8 @@ limitations under the License.
 #include <unordered_map>
 #include <utility>
 
-#include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_args/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"

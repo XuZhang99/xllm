@@ -22,7 +22,7 @@ limitations under the License.
 #include <memory>
 
 #include "core/framework/dit_cache/dit_cache_config.h"
-#include "core/framework/model/model_args.h"
+#include "core/framework/model_args/model_args.h"
 #include "core/framework/model_context.h"
 #include "core/framework/quant_args.h"
 #include "framework/parallel_state/parallel_args.h"
@@ -33,12 +33,14 @@ class DiTModelContext {
  public:
   DiTModelContext() : parallel_args_(1, 1, nullptr) {};
 
-  DiTModelContext(const ParallelArgs& input_parallel_args,
-                  const std::unordered_map<std::string, std::shared_ptr<ModelArgs>>& model_args,
-                  const std::unordered_map<std::string, QuantArgs>& quant_args,
-                  const torch::TensorOptions& tensor_options,
-                  const DiTCacheConfig& dit_config,
-                  const std::string& model_type);
+  DiTModelContext(
+      const ParallelArgs& input_parallel_args,
+      const std::unordered_map<std::string, std::shared_ptr<ModelArgs>>&
+          model_args,
+      const std::unordered_map<std::string, QuantArgs>& quant_args,
+      const torch::TensorOptions& tensor_options,
+      const DiTCacheConfig& dit_config,
+      const std::string& model_type);
 
   const std::shared_ptr<ModelArgs>& get_model_args(
       const std::string& component) const;

@@ -19,7 +19,7 @@ limitations under the License.
 #include <string>
 #include <utility>
 
-#include "core/framework/model/model_args.h"
+#include "core/framework/model_args/model_args.h"
 #include "core/framework/request/mm_data.h"
 #include "processors/input_processor.h"
 

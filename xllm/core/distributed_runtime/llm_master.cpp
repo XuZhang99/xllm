@@ -29,7 +29,7 @@ limitations under the License.
 
 #include "api_service/call.h"
 #include "common/metrics.h"
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "framework/request/request.h"
 #include "models/model_registry.h"
 #include "runtime/xservice_client.h"

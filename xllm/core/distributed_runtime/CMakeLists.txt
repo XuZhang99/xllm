@@ -65,6 +65,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:xllm_atb_layers>
     :collective_service
     :xtensor
+    :model_args
 )
 
 cc_library(

@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <absl/strings/match.h>
 
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "framework/request/sequence.h"
 
 namespace xllm {

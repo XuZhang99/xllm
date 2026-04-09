@@ -30,7 +30,12 @@ limitations under the License.
 
 namespace xllm {
 
-struct ModelArgs {
+class ModelArgs {
+ public:
+  // TODO: Add model args for different models
+  ModelArgs() = default;
+  virtual ~ModelArgs() = default;
+
   PROPERTY(std::string, model_type);
 
   PROPERTY(std::string, dtype);

@@ -33,7 +33,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/options.h"
 #include "framework/block/hierarchy_block_manager_pool.h"
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/xtensor/page_allocator.h"
 #include "framework/xtensor/phy_page_pool.h"

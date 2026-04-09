@@ -11,4 +11,5 @@ cc_library(
     fused_moe.cpp
   DEPS
     :common_layers
+    :model_args
 )

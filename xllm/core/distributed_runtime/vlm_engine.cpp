@@ -32,7 +32,7 @@ limitations under the License.
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "core/distributed_runtime/master.h"
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "runtime/llm_worker_impl.h"

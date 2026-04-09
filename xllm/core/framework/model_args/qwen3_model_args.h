@@ -15,36 +15,14 @@ limitations under the License.
 
 #pragma once
 
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <utility>
-
 #include "core/framework/model_args/model_args.h"
-#include "core/framework/request/mm_data.h"
-#include "processors/input_processor.h"
 
 namespace xllm {
 
-class CLIPVLInputProcessor : public InputProcessor {
-  enum class TokenType {
-    INVALID,
-    IMAGE,
-    VIDEO,
-  };
-
+class Qwen3ModelArgs final : public ModelArgs {
  public:
-  explicit CLIPVLInputProcessor(const std::shared_ptr<ModelArgs>& args);
-
-  void process(std::string& prompt, const MMData& mm_data) override;
-
- private:
-  std::pair<TokenType, size_t> find_vision_token(const std::string& prompt,
-                                                 size_t begin);
-
-  const std::string image_token_ = "<|image_pad|>";
-  const std::string video_token_ = "<|video_pad|>";
-  int32_t merge_size_ = 0;
+  Qwen3ModelArgs() = default;
+  ~Qwen3ModelArgs() override = default;
 };
 
 }  // namespace xllm

@@ -25,7 +25,7 @@ limitations under the License.
 #include <tuple>
 #include <unordered_map>
 
-#include "framework/model/model_args.h"
+#include "framework/model_args/model_args.h"
 #include "layers/common/rotary_embedding_util.h"
 
 namespace xllm {

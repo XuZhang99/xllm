@@ -25,8 +25,8 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "distributed_runtime/worker_service.h"
-#include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_args/model_args.h"
 #include "runtime/executor.h"
 #include "runtime/forward_params.h"
 #include "runtime/forward_shared_memory_manager.h"
