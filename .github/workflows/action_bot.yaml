@@ -1,5 +1,5 @@
 # Bot command handler for CI permissions.
-# Authorized users (ci-users team) can comment to control CI:
+# Repository collaborators can comment to control CI:
 #   @xllm-bot run          - Add run-ci label to trigger CI
 #   @xllm-bot rerun        - Cancel and rerun all workflows
 #   @xllm-bot rerun failed - Rerun failed and cancelled jobs
@@ -25,42 +25,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check team membership
+      - name: Check collaborator permission
         id: check-permission
         env:
-          GH_TOKEN: ${{ secrets.XLLM_GITHUB_TOKEN || secrets.XLLM_BOT_TOKEN }}
-          ORG: ${{ github.repository_owner }}
-          TEAM: ci-users
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           ACTOR: ${{ github.event.comment.user.login }}
         run: |
-          echo "Checking if $ACTOR is a member of $ORG/$TEAM..."
+          echo "Checking if $ACTOR is a collaborator on $REPO..."
 
-          # Verify token is set.
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "::error::XLLM_GITHUB_TOKEN or XLLM_BOT_TOKEN secret is not set"
-            echo "authorized=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # List team members and check if commenter is in the list.
-          MEMBERS=$(gh api \
+          PERMISSION=$(gh api \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            --paginate \
-            "/orgs/${ORG}/teams/${TEAM}/members" \
-            --jq '.[].login' 2>&1) || {
-            echo "::error::Failed to get team members: $MEMBERS"
-            echo "authorized=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          }
+            "/repos/${REPO}/collaborators/${ACTOR}/permission" \
+            --jq '.permission' 2>/dev/null || true)
 
-          if echo "$MEMBERS" | grep -qx "$ACTOR"; then
-            echo "$ACTOR is a member of $TEAM"
-            echo "authorized=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "$ACTOR is not a member of $TEAM"
-            echo "authorized=false" >> "$GITHUB_OUTPUT"
-          fi
+          case "$PERMISSION" in
+            admin|maintain|write|triage|read)
+              echo "$ACTOR is authorized with $PERMISSION permission"
+              echo "authorized=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "$ACTOR is not a collaborator. Repository permission: ${PERMISSION:-none}"
+              echo "authorized=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
 
       - name: Parse command
         id: parse
