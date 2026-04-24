@@ -1,0 +1,246 @@
+# Bot command handler for issue and PR maintenance.
+# Authorized repository collaborators can comment:
+#   @xllm-bot help         - Show available commands
+#   @xllm-bot triage       - Add the needs-triage label to an issue or PR
+#   @xllm-bot run          - Refresh the run-ci label to trigger manual PR CI
+#   @xllm-bot rerun        - Cancel and rerun all workflows for a PR
+#   @xllm-bot rerun failed - Rerun failed and cancelled workflows for a PR
+#   @xllm-bot stop         - Cancel in-progress workflows for a PR
+#
+# XLLM_BOT_TOKEN must be a PAT or GitHub App token. Label events created with
+# the default GITHUB_TOKEN do not trigger downstream workflows.
+
+name: Action Bot
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  handle-command:
+    if: |
+      contains(github.event.comment.body, '@xllm-bot') &&
+      github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-latest
+
+    env:
+      BOT_NAME: '@xllm-bot'
+      COMMENT_BODY: ${{ github.event.comment.body }}
+      COMMENT_ID: ${{ github.event.comment.id }}
+      BOT_GH_TOKEN: ${{ secrets.XLLM_BOT_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      IS_PR: ${{ github.event.issue.pull_request && 'true' || 'false' }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      REPO: ${{ github.repository }}
+      RUN_CI_LABEL: run-ci
+      TRIAGE_LABEL: needs-triage
+
+    steps:
+      - name: Handle bot command
+        run: |
+          set -euo pipefail
+
+          react() {
+            gh api \
+              -X POST \
+              "/repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" \
+              -f content="$1" >/dev/null || true
+          }
+
+          ensure_label() {
+            local label="$1"
+            local color="$2"
+            local description="$3"
+
+            if ! gh label list \
+                --repo "$REPO" \
+                --search "$label" \
+                --json name \
+                --jq '.[].name' | grep -Fx "$label" >/dev/null; then
+              gh label create "$label" \
+                --repo "$REPO" \
+                --color "$color" \
+                --description "$description" >/dev/null || true
+            fi
+          }
+
+          get_pr_sha() {
+            gh pr view "$ISSUE_NUMBER" \
+              --repo "$REPO" \
+              --json headRefOid \
+              -q '.headRefOid'
+          }
+
+          bot_pattern=$(printf '%s' "$BOT_NAME" | sed 's/[][\\.^$*+?{}|()]/\\&/g')
+          comment_lc=$(printf '%s' "$COMMENT_BODY" | tr '[:upper:]' '[:lower:]')
+          bot_pattern_lc=$(printf '%s' "$bot_pattern" | tr '[:upper:]' '[:lower:]')
+
+          if printf '%s\n' "$comment_lc" | grep -Eq "${bot_pattern_lc}[[:space:]]+rerun[[:space:]]+failed"; then
+            command="rerun-failed"
+          elif printf '%s\n' "$comment_lc" | grep -Eq "${bot_pattern_lc}[[:space:]]+rerun"; then
+            command="rerun"
+          elif printf '%s\n' "$comment_lc" | grep -Eq "${bot_pattern_lc}[[:space:]]+stop"; then
+            command="stop"
+          elif printf '%s\n' "$comment_lc" | grep -Eq "${bot_pattern_lc}[[:space:]]+run"; then
+            command="run"
+          elif printf '%s\n' "$comment_lc" | grep -Eq "${bot_pattern_lc}[[:space:]]+triage"; then
+            command="triage"
+          elif printf '%s\n' "$comment_lc" | grep -Eq "${bot_pattern_lc}[[:space:]]+help"; then
+            command="help"
+          else
+            echo "Unknown bot command"
+            react "confused"
+            exit 0
+          fi
+
+          actor="${{ github.event.comment.user.login }}"
+          permission=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/repos/${REPO}/collaborators/${actor}/permission" \
+            --jq '.permission' 2>/dev/null || true)
+
+          case "$permission" in
+            admin|maintain|write)
+              echo "$actor is authorized with $permission permission"
+              ;;
+            *)
+              echo "$actor is not authorized. Repository permission: ${permission:-none}"
+              react "confused"
+              exit 0
+              ;;
+          esac
+
+          if [[ -z "${BOT_GH_TOKEN}" ]]; then
+            echo "::error::XLLM_BOT_TOKEN secret is not set"
+            react "confused"
+            exit 1
+          fi
+
+          export GH_TOKEN="$BOT_GH_TOKEN"
+
+          if [[ "$IS_PR" != "true" && "$command" =~ ^(run|rerun|rerun-failed|stop)$ ]]; then
+            echo "Command '$command' only applies to pull requests"
+            react "confused"
+            exit 0
+          fi
+
+          case "$command" in
+            help)
+              gh issue comment "$ISSUE_NUMBER" \
+                --repo "$REPO" \
+                --body "$(cat <<'EOF'
+          Supported commands:
+          - `@xllm-bot triage`: add `needs-triage` to an issue or PR.
+          - `@xllm-bot run`: refresh `run-ci` to trigger manual PR CI.
+          - `@xllm-bot rerun`: cancel queued/in-progress runs and rerun all workflows for a PR.
+          - `@xllm-bot rerun failed`: rerun failed and cancelled workflows for a PR.
+          - `@xllm-bot stop`: cancel queued/in-progress workflows for a PR.
+          EOF
+          )"
+              react "+1"
+              ;;
+
+            triage)
+              ensure_label "$TRIAGE_LABEL" "fbca04" "Needs maintainer triage."
+              gh issue edit "$ISSUE_NUMBER" \
+                --repo "$REPO" \
+                --add-label "$TRIAGE_LABEL"
+              react "+1"
+              ;;
+
+            run)
+              ensure_label "$RUN_CI_LABEL" "0e8a16" "Request CI for a pull request."
+              gh issue edit "$ISSUE_NUMBER" \
+                --repo "$REPO" \
+                --remove-label "$RUN_CI_LABEL" || true
+              gh issue edit "$ISSUE_NUMBER" \
+                --repo "$REPO" \
+                --add-label "$RUN_CI_LABEL"
+              react "+1"
+              ;;
+
+            rerun)
+              pr_sha=$(get_pr_sha)
+              echo "PR HEAD SHA: $pr_sha"
+
+              gh run list \
+                --repo "$REPO" \
+                --commit "$pr_sha" \
+                --limit 100 \
+                --json databaseId,status \
+                -q '.[] | select(.status == "in_progress" or .status == "queued") | .databaseId' | \
+              while read -r run_id; do
+                if [[ -n "$run_id" ]]; then
+                  echo "Cancelling workflow run $run_id"
+                  gh run cancel "$run_id" --repo "$REPO" || true
+                fi
+              done
+
+              sleep 2
+
+              gh run list \
+                --repo "$REPO" \
+                --commit "$pr_sha" \
+                --limit 100 \
+                --json databaseId \
+                -q '.[].databaseId' | \
+              while read -r run_id; do
+                if [[ -n "$run_id" ]]; then
+                  echo "Rerunning workflow run $run_id"
+                  gh run rerun "$run_id" --repo "$REPO" || true
+                fi
+              done
+
+              react "+1"
+              ;;
+
+            rerun-failed)
+              pr_sha=$(get_pr_sha)
+              echo "PR HEAD SHA: $pr_sha"
+
+              for status in failure cancelled; do
+                gh run list \
+                  --repo "$REPO" \
+                  --commit "$pr_sha" \
+                  --status "$status" \
+                  --limit 100 \
+                  --json databaseId \
+                  -q '.[].databaseId' | \
+                while read -r run_id; do
+                  if [[ -n "$run_id" ]]; then
+                    echo "Rerunning $status workflow run $run_id"
+                    gh run rerun "$run_id" --repo "$REPO" --failed || true
+                  fi
+                done
+              done
+
+              react "+1"
+              ;;
+
+            stop)
+              pr_sha=$(get_pr_sha)
+              echo "PR HEAD SHA: $pr_sha"
+
+              gh run list \
+                --repo "$REPO" \
+                --commit "$pr_sha" \
+                --limit 100 \
+                --json databaseId,status \
+                -q '.[] | select(.status == "in_progress" or .status == "queued") | .databaseId' | \
+              while read -r run_id; do
+                if [[ -n "$run_id" ]]; then
+                  echo "Cancelling workflow run $run_id"
+                  gh run cancel "$run_id" --repo "$REPO" || true
+                fi
+              done
+
+              react "+1"
+              ;;
+          esac
