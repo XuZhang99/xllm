@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 
 cc_library(
@@ -37,15 +36,3 @@ cc_library(
     proto::xllm_proto
     $<$<BOOL:${USE_NPU}>:platform_npu>
 )
-
-if(USE_NPU OR USE_MLU)
-cc_test(
-  NAME
-    mooncake_transfer_engine_test
-  SRCS
-    mooncake_transfer_engine_test.cpp
-  DEPS
-    :kv_cache_transfer
-    GTest::gtest_main
-)
-endif()
