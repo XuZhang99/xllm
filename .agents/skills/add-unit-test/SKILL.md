@@ -7,18 +7,18 @@ description: Add or update xLLM unit tests in the repository. Use when Codex nee
 
 ## Workflow
 
-1. Inspect the production code and the nearest existing tests before writing a new test.
+1. Inspect the production code, nearest tests, and nearest test `CMakeLists.txt` before writing a new test.
    - Match the production path under `xllm/` to `tests/` where possible.
    - Prefer extending an existing nearby `*_test.cpp` and `cc_test` target when the behavior belongs to the same domain.
    - Create a new test source only when it improves isolation, keeps platform setup separate, or follows an existing directory pattern.
 
-2. Read the project style guide before editing production files under `xllm/`, and apply the same C++ style discipline to new test code:
+2. Read and apply the project style guide for all new or modified C++/CUDA test source:
    `.agents/skills/code-review/references/custom-code-style.md`.
 
-3. Follow the current test layout and CMake conventions.
-   - Read [xllm-test-patterns.md](references/xllm-test-patterns.md) when adding a new test file, new `cc_test`, platform-specific test, or test directory.
-   - Use `*_test.cpp` for C++ test files and `*_test.cu` for CUDA source tests.
-   - Do not create nested `test/` or `tests/` directories for new unit tests unless the surrounding tree already requires that structure.
+3. Use current test tree conventions from [xllm-test-patterns.md](references/xllm-test-patterns.md) when adding a new test file, new `cc_test`, platform-specific test, or test directory.
+   - Keep unit tests directly in the relevant leaf directory under `tests/`.
+   - Use `*_test.cpp` for C++ tests and `*_test.cu` for CUDA source tests.
+   - Include production headers with direct project paths such as `core/...`, `api_service/...`, or `function_call/...`; include test helpers with `tests/...`.
 
 4. Wire tests through CMake with `include(cc_test)` and `cc_test(...)`.
    - Keep source names relative to the current test directory unless an existing target already uses an absolute source path for a production `.cpp`.
@@ -34,14 +34,14 @@ description: Add or update xLLM unit tests in the repository. Use when Codex nee
 
 6. Validate narrowly before finishing.
    - Always run `git diff --check` for the changed test paths.
-   - Search for stale filenames after moving or renaming tests.
+   - Search for stale filenames, target names, and old short include paths after moving or renaming tests.
    - Run the narrowest build/test command available locally; if not feasible, state the exact reason and what was checked instead.
 
 ## Common Commands
 
 ```bash
 rg --files tests/<area>
-rg "old_test_name|old_file_name" tests xllm CMakeLists.txt
+rg "old_test_name|old_file_name|old_header_name" tests xllm CMakeLists.txt
 git diff --check -- tests/<area>
 ```
 

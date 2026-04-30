@@ -4,12 +4,12 @@ Use this reference when creating or changing unit tests under `tests/`.
 
 ## Layout
 
-- Mirror production structure where practical:
+- Mirror the production structure where practical:
   - `xllm/core/framework/tokenizer` -> `tests/core/framework/tokenizer`
   - `xllm/core/layers/mlu` -> `tests/core/layers/mlu`
   - `xllm/function_call/...` -> `tests/function_call/...`
 - Keep tests directly in the relevant leaf directory.
-- Avoid new nested `test/` or `tests/` directories. Recent cleanup moved those tests into their parent directories.
+- Avoid new nested `test/` or `tests/` directories. Existing unit tests now live directly in their parent test directories.
 - Shared helpers may live beside tests, such as `tests/core/layers/mlu/tests_utils.cpp`.
 
 ## Naming
@@ -23,7 +23,7 @@ Use this reference when creating or changing unit tests under `tests/`.
 
 ## CMake Basics
 
-Use `cc_test` for C++/CUDA unit test binaries:
+Use `cc_test` for C++/CUDA unit test binaries. `tests/CMakeLists.txt` should stay as a simple test-tree entry point; do not add broad include-path shims there to compensate for moved tests.
 
 ```cmake
 include(cc_test)
@@ -47,6 +47,30 @@ Rules:
 - Prefer `GTest::gtest_main`; add `GTest::gtest` only when nearby tests need it or the target explicitly uses it.
 - Add `target_link_libraries(...)` and `add_dependencies(...)` after `cc_test` when needed for `brpc`, `OpenSSL`, `protobuf`, platform runtime libraries, or link-group handling.
 - Use `:target_name` for local production CMake targets where existing tests do so.
+
+## Include Paths
+
+Use direct project paths in test source files instead of relying on extra test-only include directories.
+
+Examples:
+
+```cpp
+#include "core/framework/batch/batch.h"
+#include "core/kernels/cuda/cuda_ops_api.h"
+#include "api_service/sample_service_impl.h"
+#include "function_call/qwen25_detector.h"
+#include "function_call/partial_json_parser/include/partial_json_parser/parser.h"
+#include "tests/core/layers/mlu/tests_utils.h"
+```
+
+Rules:
+
+- Production headers under `xllm/core` should be included as `core/...`.
+- Production headers under `xllm/api_service` should be included as `api_service/...`.
+- Production headers under `xllm/function_call` should be included as `function_call/...`.
+- Test helper headers under `tests` should be included as `tests/...`.
+- Leave external SDK headers and generated headers in their natural form, such as `acl/acl.h` or `anthropic.pb.h`.
+- Do not add include-path logic to `cmake/cc_test.cmake` for test relocation. Keep `cc_test` generic.
 
 ## Platform Gates
 
@@ -89,16 +113,6 @@ target_link_libraries(example_test
                       $<$<BOOL:${USE_NPU}>:c_sec>)
 ```
 
-## Source Style
-
-- Add the xLLM copyright header to new files, using the current year.
-- Include `<gtest/gtest.h>` in every test source.
-- Use project-root-relative includes; avoid `../` includes.
-- Put file-local helpers in an anonymous namespace.
-- Prefer fixed-width integers (`int32_t`, `int64_t`) unless an API requires plain `int`.
-- Use `static_cast`, `nullptr`, braces on all control statements, and concise comments only where they clarify test setup.
-- Keep deterministic random or tensor tests seeded with stable labels or fixed seeds.
-
 ## Test Design
 
 - Test behavior through public or stable internal interfaces used by nearby tests.
@@ -114,6 +128,7 @@ Before finishing:
 ```bash
 rg --files tests/<area>
 rg "old_file_name|old_target_name" tests xllm CMakeLists.txt
+rg '^#include "' tests/<area>
 git diff --check -- tests/<area>
 ```
 
