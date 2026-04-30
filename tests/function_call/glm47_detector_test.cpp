@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "glm47_detector.h"
+#include "function_call/glm47_detector.h"
 
 #include <gtest/gtest.h>
 

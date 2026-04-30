@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "rejection_sampler.h"
+#include "core/framework/sampling/rejection_sampler.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
@@ -23,8 +23,8 @@ limitations under the License.
 
 #include <cstdint>
 
-#include "platform/device.h"
-#include "sampler.h"
+#include "core/platform/device.h"
+#include "core/framework/sampling/sampler.h"
 
 namespace xllm {
 

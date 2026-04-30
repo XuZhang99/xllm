@@ -1,4 +1,4 @@
-#include "prefix_cache.h"
+#include "core/framework/prefix_cache/prefix_cache.h"
 
 #include <absl/random/random.h>
 #include <gtest/gtest.h>
@@ -6,7 +6,7 @@
 
 #include <iostream>
 
-#include "framework/block/block_manager_impl.h"
+#include "core/framework/block/block_manager_impl.h"
 
 namespace xllm {
 

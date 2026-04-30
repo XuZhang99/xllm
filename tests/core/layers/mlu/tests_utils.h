@@ -24,11 +24,11 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
-#include "framework/model/model_args.h"
-#include "framework/parallel_state/parallel_args.h"
-#include "framework/parallel_state/parallel_state.h"
-#include "framework/quant_args.h"
-#include "framework/state_dict/state_dict.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/parallel_state/parallel_args.h"
+#include "core/framework/parallel_state/parallel_state.h"
+#include "core/framework/quant_args.h"
+#include "core/framework/state_dict/state_dict.h"
 
 namespace xllm {
 namespace layer {

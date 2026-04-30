@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "framework/chat_template/deepseek_v32_cpp_template.h"
+#include "core/framework/chat_template/deepseek_v32_cpp_template.h"
 
 #include <gtest/gtest.h>
 

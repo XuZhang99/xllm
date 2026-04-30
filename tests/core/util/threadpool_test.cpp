@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "threadpool.h"
+#include "core/util/threadpool.h"
 
 #include <absl/synchronization/notification.h>
 #include <absl/time/clock.h>

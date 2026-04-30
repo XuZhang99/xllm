@@ -2,8 +2,8 @@
 
 #include <cmath>
 
-#include "partial_json_parser/options.h"
-#include "partial_json_parser/parser.h"
+#include "function_call/partial_json_parser/include/partial_json_parser/options.h"
+#include "function_call/partial_json_parser/include/partial_json_parser/parser.h"
 
 using namespace partial_json_parser;
 

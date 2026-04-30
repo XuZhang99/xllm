@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "sampling_params.h"
+#include "core/framework/sampling/sampling_params.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>

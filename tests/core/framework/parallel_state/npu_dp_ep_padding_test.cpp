@@ -13,13 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "framework/parallel_state/npu_dp_ep_padding.h"
+#include "core/framework/parallel_state/npu_dp_ep_padding.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "common/global_flags.h"
-#include "framework/parallel_state/mapping_npu.h"
+#include "core/common/global_flags.h"
+#include "core/framework/parallel_state/mapping_npu.h"
 
 namespace xllm {
 

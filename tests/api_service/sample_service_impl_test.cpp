@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "sample_service_impl.h"
+#include "api_service/sample_service_impl.h"
 
 #include <gtest/gtest.h>
 

@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "hf_model_loader.h"
+#include "core/framework/hf_model_loader.h"
 
 #include <gtest/gtest.h>
 

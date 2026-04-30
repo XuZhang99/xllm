@@ -22,15 +22,15 @@ limitations under the License.
 #include <unordered_map>
 #include <utility>
 
-#include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
-#include "framework/parallel_state/parallel_args.h"
-#include "framework/quant_args.h"
-#include "framework/state_dict/state_dict.h"
-#include "layers/mlu/tests_utils.h"
-#include "layers/mlu/deepseek_v2_sparse_moe_block.h"
-#include "layers/mlu/fused_moe.h"
-#include "platform/device.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/model/model_input_params.h"
+#include "core/framework/parallel_state/parallel_args.h"
+#include "core/framework/quant_args.h"
+#include "core/framework/state_dict/state_dict.h"
+#include "tests/core/layers/mlu/tests_utils.h"
+#include "core/layers/mlu/deepseek_v2_sparse_moe_block.h"
+#include "core/layers/mlu/fused_moe.h"
+#include "core/platform/device.h"
 
 namespace xllm {
 namespace layer {

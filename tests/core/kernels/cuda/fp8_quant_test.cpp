@@ -17,8 +17,8 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-#include "cuda_ops_api.h"
-#include "cutlass_extensions/common.hpp"
+#include "core/kernels/cuda/cuda_ops_api.h"
+#include "core/kernels/cuda/cutlass_extensions/common.hpp"
 // clang-format on
 class StaticScaledFP8QuantTest : public ::testing::Test {
  protected:

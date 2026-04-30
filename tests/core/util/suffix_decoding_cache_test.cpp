@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "suffix_decoding_cache.h"
+#include "core/util/suffix_decoding_cache.h"
 
 #include <gtest/gtest.h>
 

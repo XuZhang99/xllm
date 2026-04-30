@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "single_block_manager.h"
+#include "core/framework/block/single_block_manager.h"
 
 #include <gtest/gtest.h>
 

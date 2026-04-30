@@ -34,7 +34,7 @@ limitations under the License.
 #include "core/platform/device.h"
 #include "core/runtime/cuda_graph_executor_impl.h"
 #include "core/runtime/options.h"
-#include "layers/common/attention_metadata_builder.h"
+#include "core/layers/common/attention_metadata_builder.h"
 
 namespace xllm {
 namespace {

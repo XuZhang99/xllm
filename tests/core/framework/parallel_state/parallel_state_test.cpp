@@ -23,13 +23,13 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "framework/parallel_state/parallel_state.h"
-#include "platform/device.h"
+#include "core/framework/parallel_state/parallel_state.h"
+#include "core/platform/device.h"
 
 #if defined(USE_MLU)
-#include "framework/parallel_state/mlu_process_group.h"
+#include "core/framework/parallel_state/mlu_process_group.h"
 #elif defined(USE_CUDA)
-#include "framework/parallel_state/cuda_process_group.h"
+#include "core/framework/parallel_state/cuda_process_group.h"
 #endif
 
 namespace xllm {

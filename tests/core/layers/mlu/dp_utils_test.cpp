@@ -18,8 +18,8 @@ limitations under the License.
 
 #include <memory>
 
-#include "layers/common/dp_utils.h"
-#include "layers/mlu/tests_utils.h"
+#include "core/layers/common/dp_utils.h"
+#include "tests/core/layers/mlu/tests_utils.h"
 
 namespace xllm {
 namespace layer {

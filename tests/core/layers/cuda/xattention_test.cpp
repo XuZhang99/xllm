@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "layers/cuda/xattention.h"
+#include "core/layers/cuda/xattention.h"
 
 #include <gtest/gtest.h>
 #include <torch/cuda.h>
@@ -25,9 +25,9 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "framework/kv_cache/kv_cache.h"
-#include "layers/cuda/flashinfer_workspace.h"
-#include "layers/cuda/xattention_workspace.h"
+#include "core/framework/kv_cache/kv_cache.h"
+#include "core/layers/cuda/flashinfer_workspace.h"
+#include "core/layers/cuda/xattention_workspace.h"
 
 namespace xllm::layer::test {
 namespace {

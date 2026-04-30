@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "sample_slot.h"
+#include "core/framework/request/sample_slot.h"
 
 #include <gtest/gtest.h>
 
@@ -24,11 +24,11 @@ limitations under the License.
 #include <string_view>
 #include <vector>
 
-#include "common/global_flags.h"
-#include "framework/block/block_manager_impl.h"
-#include "platform/device.h"
-#include "request.h"
-#include "request_state.h"
+#include "core/common/global_flags.h"
+#include "core/framework/block/block_manager_impl.h"
+#include "core/platform/device.h"
+#include "core/framework/request/request.h"
+#include "core/framework/request/request_state.h"
 
 namespace xllm {
 namespace {

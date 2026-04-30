@@ -13,11 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "embedding_cache.h"
+#include "core/framework/kv_cache/embedding_cache.h"
 
 #include <gtest/gtest.h>
 
-#include "platform/device.h"
+#include "core/platform/device.h"
 
 namespace xllm {
 

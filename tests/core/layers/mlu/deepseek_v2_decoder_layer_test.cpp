@@ -22,23 +22,23 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "common/global_flags.h"
-#include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
-#include "framework/model_context.h"
-#include "framework/parallel_state/parallel_args.h"
-#include "framework/quant_args.h"
-#include "framework/state_dict/state_dict.h"
+#include "core/common/global_flags.h"
+#include "core/framework/kv_cache/kv_cache.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/model/model_input_params.h"
+#include "core/framework/model_context.h"
+#include "core/framework/parallel_state/parallel_args.h"
+#include "core/framework/quant_args.h"
+#include "core/framework/state_dict/state_dict.h"
 #if defined(USE_MLU)
-#include "layers/mlu/attention.h"
-#include "layers/mlu/deepseek_v2_decoder_layer_impl.h"
+#include "core/layers/mlu/attention.h"
+#include "core/layers/mlu/deepseek_v2_decoder_layer_impl.h"
 #elif defined(USE_CUDA)
-#include "layers/cuda/attention.h"
+#include "core/layers/cuda/attention.h"
 #endif
-#include "layers/common/attention_metadata_builder.h"
-#include "layers/mlu/tests_utils.h"
-#include "platform/device.h"
+#include "core/layers/common/attention_metadata_builder.h"
+#include "tests/core/layers/mlu/tests_utils.h"
+#include "core/platform/device.h"
 
 namespace xllm {
 namespace layer {

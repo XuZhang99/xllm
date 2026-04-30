@@ -21,14 +21,14 @@ limitations under the License.
 #include <cstdint>
 #include <vector>
 
-#include "base_executor_impl.h"
+#include "core/runtime/base_executor_impl.h"
 #include "core/framework/batch/batch.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_output.h"
-#include "mlu_graph_executor_impl.h"
-#include "platform/device.h"
-#include "runtime/options.h"
+#include "core/runtime/mlu_graph_executor_impl.h"
+#include "core/platform/device.h"
+#include "core/runtime/options.h"
 
 namespace xllm {
 class MockCausalLM : public CausalLM {

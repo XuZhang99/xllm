@@ -28,10 +28,10 @@ limitations under the License.
 #include <iostream>
 #include <string>
 
-#include "framework/request/sequence.h"
-#include "framework/sampling/sampling_params.h"
-#include "runtime/utils.h"
-#include "distributed_runtime/vlm_master.h"
+#include "core/framework/request/sequence.h"
+#include "core/framework/sampling/sampling_params.h"
+#include "core/util/utils.h"
+#include "core/distributed_runtime/vlm_master.h"
 
 std::vector<char> get_the_bytes(std::string filename) {
   std::ifstream input(filename, std::ios::binary);

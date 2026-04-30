@@ -19,13 +19,13 @@ limitations under the License.
 
 #include <cmath>
 
-#include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_args.h"
-#include "framework/parallel_state/parallel_state.h"
-#include "framework/state_dict/state_dict.h"
-#include "layers/common/qwen2_attention.h"
-#include "platform/device.h"
-#include "layers/mlu/tests_utils.h"
+#include "core/framework/kv_cache/kv_cache.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/parallel_state/parallel_state.h"
+#include "core/framework/state_dict/state_dict.h"
+#include "core/layers/common/qwen2_attention.h"
+#include "core/platform/device.h"
+#include "tests/core/layers/mlu/tests_utils.h"
 
 namespace xllm {
 namespace layer {

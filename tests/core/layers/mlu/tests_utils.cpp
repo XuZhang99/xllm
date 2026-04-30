@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "layers/mlu/tests_utils.h"
+#include "tests/core/layers/mlu/tests_utils.h"
 
 #include <cmath>
 

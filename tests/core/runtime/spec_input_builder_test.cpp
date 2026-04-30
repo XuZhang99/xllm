@@ -13,13 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "runtime/spec_input_builder.h"
+#include "core/runtime/spec_input_builder.h"
 
 #include <gtest/gtest.h>
 
 #include <vector>
 
-#include "framework/model/model_input_params.h"
+#include "core/framework/model/model_input_params.h"
 
 namespace xllm {
 namespace specBuilder {

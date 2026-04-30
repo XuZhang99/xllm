@@ -17,8 +17,8 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-#include "cuda_ops_api.h"
-#include "cutlass_extensions/common.hpp"
+#include "core/kernels/cuda/cuda_ops_api.h"
+#include "core/kernels/cuda/cutlass_extensions/common.hpp"
 
 class CutlassScaledMMTest : public ::testing::Test {
  protected:

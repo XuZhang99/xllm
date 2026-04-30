@@ -1,4 +1,4 @@
-#include "continuous_scheduler.h"
+#include "core/scheduler/continuous_scheduler.h"
 
 #include <absl/time/clock.h>
 #include <gtest/gtest.h>
@@ -7,12 +7,12 @@
 #include <limits>
 #include <optional>
 
-#include "chunked_prefill_scheduler.h"
+#include "core/scheduler/chunked_prefill_scheduler.h"
 #include "core/common/global_flags.h"
-#include "distributed_runtime/engine.h"
-#include "prefill_only_scheduler.h"
-#include "scheduler_factory.h"
-#include "util/utils.h"
+#include "core/distributed_runtime/engine.h"
+#include "core/scheduler/prefill_only_scheduler.h"
+#include "core/scheduler/scheduler_factory.h"
+#include "core/util/utils.h"
 
 namespace xllm {
 

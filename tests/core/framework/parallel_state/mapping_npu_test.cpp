@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mapping_npu.h"
+#include "core/framework/parallel_state/mapping_npu.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>

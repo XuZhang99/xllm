@@ -1,8 +1,8 @@
-#include "rate_limiter.h"
+#include "core/common/rate_limiter.h"
 
 #include <gtest/gtest.h>
 
-#include "global_flags.h"
+#include "core/common/global_flags.h"
 
 namespace xllm {
 

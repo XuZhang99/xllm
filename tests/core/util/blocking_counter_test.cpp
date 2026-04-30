@@ -13,11 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "blocking_counter.h"
+#include "core/util/blocking_counter.h"
 
 #include <gtest/gtest.h>
 
-#include "util/threadpool.h"
+#include "core/util/threadpool.h"
 
 namespace xllm {
 

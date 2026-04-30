@@ -28,20 +28,20 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "common/global_flags.h"
-#include "framework/model/model_args.h"
-#include "framework/parallel_state/parallel_args.h"
-#include "framework/quant_args.h"
-#include "framework/state_dict/state_dict.h"
-#include "layers/mlu/fused_moe.h"
-#include "platform/device.h"
-#include "layers/mlu/tests_utils.h"
-#include "util/tensor_helper.h"
+#include "core/common/global_flags.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/parallel_state/parallel_args.h"
+#include "core/framework/quant_args.h"
+#include "core/framework/state_dict/state_dict.h"
+#include "core/layers/mlu/fused_moe.h"
+#include "core/platform/device.h"
+#include "tests/core/layers/mlu/tests_utils.h"
+#include "core/util/tensor_helper.h"
 
 #if defined(USE_MLU)
-#include "framework/parallel_state/mlu_process_group.h"
+#include "core/framework/parallel_state/mlu_process_group.h"
 #elif defined(USE_CUDA)
-#include "framework/parallel_state/cuda_process_group.h"
+#include "core/framework/parallel_state/cuda_process_group.h"
 #endif
 
 namespace xllm {

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "batch.h"
+#include "core/framework/batch/batch.h"
 
 #include <absl/time/clock.h>
 #include <gtest/gtest.h>
@@ -22,17 +22,17 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 
-#include "batch_input_builder.h"
-#include "common/global_flags.h"
-#include "framework/block/block.h"
-#include "framework/block/block_manager_impl.h"
-#include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_args.h"
-#include "framework/request/stopping_checker.h"
-#include "framework/sampling/sampling_params.h"
-#include "platform/device.h"
-#include "runtime/forward_shared_memory_manager.h"
-#include "runtime/params_utils.h"
+#include "core/framework/batch/batch_input_builder.h"
+#include "core/common/global_flags.h"
+#include "core/framework/block/block.h"
+#include "core/framework/block/block_manager_impl.h"
+#include "core/framework/kv_cache/kv_cache.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/request/stopping_checker.h"
+#include "core/framework/sampling/sampling_params.h"
+#include "core/platform/device.h"
+#include "core/runtime/forward_shared_memory_manager.h"
+#include "core/runtime/params_utils.h"
 
 namespace xllm {
 

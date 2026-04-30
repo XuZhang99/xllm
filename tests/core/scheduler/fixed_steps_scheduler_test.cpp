@@ -13,17 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "fixed_steps_scheduler.h"
+#include "core/scheduler/fixed_steps_scheduler.h"
 
 #include <absl/time/time.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
 
-#include "common/global_flags.h"
-#include "continuous_scheduler.h"
-#include "distributed_runtime/engine.h"
-#include "framework/request/rec_type.h"
+#include "core/common/global_flags.h"
+#include "core/scheduler/continuous_scheduler.h"
+#include "core/distributed_runtime/engine.h"
+#include "core/framework/request/rec_type.h"
 
 namespace xllm {
 

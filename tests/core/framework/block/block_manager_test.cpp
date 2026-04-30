@@ -19,10 +19,10 @@ limitations under the License.
 #include <type_traits>
 #include <utility>
 
-#include "block_manager_impl.h"
-#include "block_manager_pool.h"
-#include "common/global_flags.h"
-#include "framework/request/incremental_decoder.h"
+#include "core/framework/block/block_manager_impl.h"
+#include "core/framework/block/block_manager_pool.h"
+#include "core/common/global_flags.h"
+#include "core/framework/request/incremental_decoder.h"
 
 namespace xllm {
 

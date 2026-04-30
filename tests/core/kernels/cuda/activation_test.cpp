@@ -20,7 +20,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "cuda_ops_api.h"
+#include "core/kernels/cuda/cuda_ops_api.h"
 
 namespace xllm::kernel::cuda {
 namespace test {

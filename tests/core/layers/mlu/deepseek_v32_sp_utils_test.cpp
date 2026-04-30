@@ -22,11 +22,11 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "framework/batch/batch_forward_type.h"
-#include "framework/parallel_state/parallel_state.h"
-#include "layers/common/attention_metadata.h"
-#include "layers/mlu/tests_utils.h"
-#include "layers/mlu/deepseek_v32_sp_context.h"
+#include "core/framework/batch/batch_forward_type.h"
+#include "core/framework/parallel_state/parallel_state.h"
+#include "core/layers/common/attention_metadata.h"
+#include "tests/core/layers/mlu/tests_utils.h"
+#include "core/layers/mlu/deepseek_v32_sp_context.h"
 
 namespace xllm::layer::v32_sp {
 namespace {

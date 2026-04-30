@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "deepseekv3_detector.h"
+#include "function_call/deepseekv3_detector.h"
 
 #include <gtest/gtest.h>
 

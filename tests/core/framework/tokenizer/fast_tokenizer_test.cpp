@@ -21,8 +21,8 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "framework/tokenizer/fast_tokenizer.h"
-#include "framework/tokenizer/tokenizer_args.h"
+#include "core/framework/tokenizer/fast_tokenizer.h"
+#include "core/framework/tokenizer/tokenizer_args.h"
 
 namespace xllm {
 

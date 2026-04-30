@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "chunked_prefill_scheduler.h"
+#include "core/scheduler/chunked_prefill_scheduler.h"
 
 #include <absl/time/clock.h>
 #include <gtest/gtest.h>
@@ -21,8 +21,8 @@ limitations under the License.
 #include <cmath>
 #include <optional>
 
-#include "distributed_runtime/engine.h"
-#include "util/utils.h"
+#include "core/distributed_runtime/engine.h"
+#include "core/util/utils.h"
 
 namespace xllm {
 

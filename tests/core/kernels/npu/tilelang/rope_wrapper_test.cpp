@@ -24,7 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "acl/acl.h"
-#include "tilelang_ops_api.h"
+#include "core/kernels/npu/tilelang/tilelang_ops_api.h"
 
 namespace xllm::kernel::npu::tilelang {
 namespace {

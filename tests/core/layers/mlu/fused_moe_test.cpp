@@ -17,14 +17,14 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-#include "framework/model/model_args.h"
-#include "framework/parallel_state/parallel_args.h"
-#include "framework/parallel_state/parallel_state.h"
-#include "framework/quant_args.h"
-#include "framework/state_dict/state_dict.h"
-#include "layers/mlu/fused_moe.h"
-#include "platform/device.h"
-#include "layers/mlu/tests_utils.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/parallel_state/parallel_args.h"
+#include "core/framework/parallel_state/parallel_state.h"
+#include "core/framework/quant_args.h"
+#include "core/framework/state_dict/state_dict.h"
+#include "core/layers/mlu/fused_moe.h"
+#include "core/platform/device.h"
+#include "tests/core/layers/mlu/tests_utils.h"
 
 namespace xllm {
 namespace layer {

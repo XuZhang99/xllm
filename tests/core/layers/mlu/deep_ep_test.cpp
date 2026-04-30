@@ -24,16 +24,16 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "framework/parallel_state/parallel_args.h"
-#include "layers/common/deep_ep.h"
-#include "platform/device.h"
-#include "layers/mlu/tests_utils.h"
-#include "util/tensor_helper.h"
+#include "core/framework/parallel_state/parallel_args.h"
+#include "core/layers/common/deep_ep.h"
+#include "core/platform/device.h"
+#include "tests/core/layers/mlu/tests_utils.h"
+#include "core/util/tensor_helper.h"
 
 #if defined(USE_MLU)
-#include "framework/parallel_state/mlu_process_group.h"
+#include "core/framework/parallel_state/mlu_process_group.h"
 #elif defined(USE_CUDA)
-#include "framework/parallel_state/cuda_process_group.h"
+#include "core/framework/parallel_state/cuda_process_group.h"
 #endif
 
 namespace xllm {

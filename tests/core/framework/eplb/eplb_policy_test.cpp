@@ -13,13 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "eplb_policy.h"
+#include "core/framework/eplb/eplb_policy.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-#include "platform/device.h"
+#include "core/platform/device.h"
 
 namespace xllm {
 
