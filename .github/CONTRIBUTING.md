@@ -33,7 +33,7 @@ For developers who want to contribute to our code, here is the guidance:
     + A function in plan
 
 ## 2. Install environment for development
-+ We strongly suggest you to read our **[Document](http://xxx/docs/)** before developing
++ We strongly suggest you to read our **[Document](../docs/src/content/docs/en/index.md)** before developing
 + For setting environment, please check our  **[Readme file](/README.md)**
 
 ## 3. Build our project
