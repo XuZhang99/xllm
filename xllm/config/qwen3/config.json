@@ -1,0 +1,8 @@
+{
+    "block_size": 128,
+    "max_memory_utilization": 0.8,
+    "enable_prefix_cache": true,
+    "max_tokens_per_batch": 20480,
+    "max_seqs_per_batch": 256,
+    "max_tokens_per_chunk_for_prefill": 2048
+}
