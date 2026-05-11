@@ -192,8 +192,8 @@ def export_mtp_layer_parameters(input_dir, output_dir, mtp_layer_id, model_type)
                         new_key = key.replace(prefix, "model.layers.0")
                     params[new_key] = f.get_tensor(key)
 
-        except Exception as e:
-            logger.error(f"  Error processing {filename}: {str(e)}")
+        except Exception:
+            logger.exception(f"  Error processing {filename}")
 
     if params:
         new_params = {}

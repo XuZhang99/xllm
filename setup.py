@@ -112,9 +112,8 @@ class ExtBuild(build_ext):
             # build extensions
             for ext in self.extensions:
                 self.build_extension(ext)
-        except Exception as e:
-            logger.error("Build failed.")
-            logger.error(f"Details: {e}")
+        except Exception:
+            logger.exception("Build failed.")
             exit(1)
 
     def build_extension(self, ext: CMakeExtension) -> None:
@@ -316,8 +315,8 @@ class ExtBuildSingleTest(ExtBuild):
                     env=env
                 )
                 logger.info(f"✅ Test {self.test_name} passed!")
-            except subprocess.CalledProcessError as e:
-                logger.error(f"❌ Failed to run test {self.test_name}")
+            except subprocess.CalledProcessError:
+                logger.exception(f"❌ Failed to run test {self.test_name}")
                 raise
         else:
             logger.info(f"🚀 Running test: {test_executable}")
@@ -325,7 +324,7 @@ class ExtBuildSingleTest(ExtBuild):
                 subprocess.check_call([test_executable], cwd=os.path.dirname(test_executable), env=env)
                 logger.info(f"✅ Test {self.test_name} passed!")
             except subprocess.CalledProcessError as e:
-                logger.error(f"❌ Test {self.test_name} failed with exit code {e.returncode}")
+                logger.exception(f"❌ Test {self.test_name} failed with exit code {e.returncode}")
                 raise
 
 class BuildDistWheel(bdist_wheel):
@@ -452,7 +451,7 @@ class TestUT(Command):
             
             if return_code != 0:
                 logger.error(error_message)
-                exit(1)
+                raise subprocess.CalledProcessError(return_code, cmd)
         
         try:
             # Step 1: Run all tests EXCEPT sequential ones in parallel
@@ -492,7 +491,7 @@ class TestUT(Command):
             logger.info("=" * 80)
             return 0
         except subprocess.CalledProcessError as e:
-            logger.error(e.stderr)
+            logger.exception(f"ctest failed: {e.stderr}")
             exit(1)
 
     def run(self) -> None:
