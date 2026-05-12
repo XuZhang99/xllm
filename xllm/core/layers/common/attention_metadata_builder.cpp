@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "attention_metadata.h"
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 
@@ -77,14 +78,14 @@ AttentionMetadata build_attention_metadata(
 
 #if defined(USE_NPU)
   // Determine if we should use ACL graph mode:
-  // - FLAGS_enable_graph must be enabled
+  // - --enable_graph=true
   // - Must be decode phase (not prefill)
   // - tiling_data must be available
   bool is_decode = !params.batch_forward_type.is_prefill() &&
                    !params.batch_forward_type.is_mixed() &&
                    !params.batch_forward_type.is_chunked_prefill();
-  bool use_acl_graph = FLAGS_enable_graph && is_decode &&
-                       params.graph_buffer.tiling_data.defined();
+  bool use_acl_graph = ::xllm::ExecutionConfig::get_instance().enable_graph() &&
+                       is_decode && params.graph_buffer.tiling_data.defined();
   if (use_acl_graph) {
     // ACL graph mode: use CustomPagedAttention with tiling_data on device
     attn_metadata.paged_attention_tiling_data = params.graph_buffer.tiling_data;
@@ -156,7 +157,7 @@ AttentionMetadata build_attention_metadata(
       attn_metadata.step_tensor = llmrec_params.current_round_tensor;
     }
 
-    if (!FLAGS_enable_xattention_one_stage) {
+    if (!::xllm::RecConfig::get_instance().enable_xattention_one_stage()) {
 #if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.xattention_two_stage_decode_cache.emplace(
           XAttentionTwoStageDecodeCache{});

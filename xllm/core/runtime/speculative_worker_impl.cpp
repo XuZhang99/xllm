@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "spec_input_builder.h"
 #include "util/slice.h"
 #include "util/timer.h"
@@ -201,7 +202,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   buf.out_token_ids.reserve(total_num_val_tokens);
   buf.out_positions.reserve(total_num_val_tokens);
   buf.out_new_cache_slots.reserve(total_num_val_tokens);
-  if (!FLAGS_enable_atb_spec_kernel) {
+  if (!::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     buf.out_kv_seq_lens.reserve(total_num_val_tokens);
     buf.out_q_seq_lens.reserve(total_num_val_tokens);
     buf.out_block_tables.reserve(total_num_val_tokens);
@@ -227,13 +228,16 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
         row.token_id = -val_idx;
       }
       row.position_offset = val_idx;
-      row.append_kv_len = !FLAGS_enable_atb_spec_kernel;
-      row.append_q_len_one = !FLAGS_enable_atb_spec_kernel;
-      row.append_block_table = !FLAGS_enable_atb_spec_kernel;
+      row.append_kv_len =
+          !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
+      row.append_q_len_one =
+          !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
+      row.append_block_table =
+          !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
       specBuilder::append_decode_row(view, row, block_size, buf);
     }
 
-    if (FLAGS_enable_atb_spec_kernel) {
+    if (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
       const int32_t kv_len_after_validation = kv_len + num_speculative_tokens;
       specBuilder::update_kv_seq_lens_and_max(
           atb_kv_seq_lens_vec, kv_len_after_validation, atb_kv_max_seq_len);
@@ -249,7 +253,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   validate_input.token_ids = torch::tensor(buf.out_token_ids, int_options);
   validate_input.positions = torch::tensor(buf.out_positions, int_options);
   // update the input_params
-  if (!FLAGS_enable_atb_spec_kernel) {
+  if (!::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     input_params.num_sequences = total_num_val_tokens;
     input_params.q_max_seq_len = 1;
     input_params.batch_forward_type = BatchForwardType::DECODE;
@@ -257,7 +261,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
     input_params.q_max_seq_len = num_val_tokens;
     input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
   }
-  if (FLAGS_enable_atb_spec_kernel) {
+  if (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     input_params.q_seq_lens_vec = std::move(atb_q_seq_lens_vec);
   } else {
     input_params.q_seq_lens_vec = std::move(buf.out_q_seq_lens);
@@ -266,7 +270,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
       torch::tensor(input_params.q_seq_lens_vec, int_options);
   input_params.q_cu_seq_lens =
       specBuilder::build_q_cu_seq_lens_tensor(input_params);
-  if (FLAGS_enable_atb_spec_kernel) {
+  if (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     input_params.kv_max_seq_len = atb_kv_max_seq_len;
     input_params.kv_seq_lens_vec = std::move(atb_kv_seq_lens_vec);
   } else {
@@ -277,7 +281,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
       torch::tensor(input_params.kv_seq_lens_vec, int_options);
   input_params.new_cache_slots =
       torch::tensor(buf.out_new_cache_slots, int_options);
-  if (!FLAGS_enable_atb_spec_kernel) {
+  if (!::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     util::pad_2d_vector(buf.out_block_tables, /*pad_value=*/0);
     input_params.block_tables =
         create_2d_tensor(buf.out_block_tables, torch::kInt).to(device_);

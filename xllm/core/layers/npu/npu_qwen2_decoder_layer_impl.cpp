@@ -22,6 +22,7 @@ limitations under the License.
 #include <map>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 
 // #include "attn_mask.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
@@ -104,7 +105,9 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
   param.supportSwiGLU = true;
   param.supportLcoc = isPrefill;  // isPrefill
   param.supportSpeculate = false;
-  param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
+  param.enableSplitFuse =
+      ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() &&
+      isPrefill;
   param.supportLora = false;
   param.loraEnableGMM = false;
   param.packQuantType = {1, 1};
@@ -159,7 +162,9 @@ NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
   loader_ = std::make_unique<Qwen2DecoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
       context,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
 
   initialize_quantization_parameters();
 }
@@ -321,7 +326,8 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
       atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
-  if (is_prefill && FLAGS_enable_chunked_prefill) {
+  if (is_prefill &&
+      ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =

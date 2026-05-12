@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #pragma once
+
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "pipeline_qwenimage_base.h"
 
@@ -298,7 +300,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
 
     torch::Tensor images;
 
-    if (FLAGS_dit_debug_print) {
+    if (::xllm::DiTConfig::get_instance().dit_debug_print()) {
       input.debug_print();
     }
 
@@ -461,50 +463,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     if (do_true_cfg && negative_prompt_embeds_mask.defined()) {
       negative_txt_seq_lens = negative_prompt_embeds_mask.sum(1);
     }
-    /*
-    if (prompt_embeds.size(1) % FLAGS_sp_size != 0) {
-      int64_t pad_len =
-          FLAGS_sp_size - prompt_embeds.size(1) % FLAGS_sp_size;
-      std::vector<int64_t> pad_with = {
-          0,
-          0,  // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};  // 第1维�~Hbatch�~I�~Mpad
-      std::vector<int64_t> pad_with_mask = {
-          // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};  // 第1维�~Hbatch�~I�~Mpad
-      prompt_embeds = torch::pad(prompt_embeds, pad_with, "constant", 0);
-      prompt_embeds_mask =
-          torch::pad(prompt_embeds_mask, pad_with_mask, "constant", 0);
-    }
 
-    if (negative_prompt_embeds.size(1) % FLAGS_sp_size != 0) {
-      int64_t pad_len = FLAGS_sp_size -
-                        negative_prompt_embeds.size(1) % FLAGS_sp_size;
-      std::vector<int64_t> pad_with = {
-          0,
-          0,  // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};  // 第1维�~Hbatch�~I�~Mpad
-      std::vector<int64_t> pad_with_mask = {
-          // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};
-      negative_prompt_embeds =
-          torch::pad(negative_prompt_embeds, pad_with, "constant", 0);
-      negative_prompt_embeds_mask =
-          torch::pad(negative_prompt_embeds_mask, pad_with_mask, "constant", 0);
-    }
-    */
     scheduler_->set_begin_index(0);
     for (int64_t i = 0; i < timesteps.size(0); ++i) {
       auto t = timesteps[i];
@@ -521,7 +480,8 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       torch::Tensor noise_pred;
       torch::Tensor neg_noise_pred;
       torch::Tensor pos_neg_noise_preds;
-      if (FLAGS_cfg_size == 2 && do_true_cfg) {
+      if (::xllm::ParallelConfig::get_instance().cfg_size() == 2 &&
+          do_true_cfg) {
         auto rank = parallel_args_.dit_cfg_group_->rank();
         if (rank == 0) {
           noise_pred = transformer_->forward(latent_model_input,
