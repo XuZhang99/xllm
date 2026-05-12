@@ -42,6 +42,7 @@ limitations under the License.
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #if defined(USE_NPU)
 #include "platform/npu/device_capture_lock.h"
 #elif defined(USE_CUDA)
@@ -144,15 +145,15 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   sampler_ = std::make_unique<Sampler>();
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
-  if (FLAGS_enable_block_copy_kernel) {
+  if (::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel()) {
     LOG(WARNING) << "enable_block_copy_kernel is only supported on NPU/CUDA; "
                     "forcing enable_block_copy_kernel=false.";
-    FLAGS_enable_block_copy_kernel = false;
+    ::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel(false);
   }
 #endif
 
 #if defined(USE_NPU)
-  if (FLAGS_enable_xtensor) {
+  if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     if (!weight_transfer_) {
       weight_transfer_ = std::make_unique<MooncakeWeightTransfer>(
           options_.transfer_listen_port(), device_.unwrap());
@@ -164,7 +165,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
       LOG(ERROR) << "Failed to register GlobalXTensor";
     }
   }
-  if (FLAGS_enable_rolling_load) {
+  if (::xllm::LoadConfig::get_instance().enable_rolling_load()) {
     load_stream_ = device_.get_stream_from_pool();
   }
   worker_rendezvous_ =
@@ -223,7 +224,7 @@ bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
       .full_attention_interval(args.full_attention_interval())
       .model_id(options_.model_id())
       .model_type(args.model_type())
-      .enable_xtensor(FLAGS_enable_xtensor)
+      .enable_xtensor(::xllm::KVCacheConfig::get_instance().enable_xtensor())
       .enable_linear_attention(enable_linear_attention)
       .enable_lighting_indexer(enable_lighting_indexer)
       .enable_kv_cache_quant(enable_kv_cache_quant);
@@ -250,7 +251,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   const bool enable_lighting_indexer =
       context_.get_model_args().index_n_heads() > 0;
   kv_cache_transfer_ = KVCacheTransferFactory::create(
-      FLAGS_kv_cache_transfer_type,
+      ::xllm::DisaggPDConfig::get_instance().kv_cache_transfer_type(),
       options_.device_ip().value(),
       options_.transfer_listen_port(),
       options_.instance_role(),
@@ -387,7 +388,7 @@ void WorkerImpl::update_last_step_output(
     last_step_output_ = std::move(output.value());
     last_step_output_valid_ = true;
   } else {
-    if (FLAGS_enable_eplb) {
+    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
       last_step_output_ = std::move(output.value());
     }
     last_step_output_valid_ = false;
@@ -429,7 +430,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   // asynchronously scheduled data update streams.
 
   std::optional<std::unique_lock<std::mutex>> lock_guard;
-  if (FLAGS_enable_graph) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     auto& capture_lock =
         ::xllm::npu::DeviceCaptureLock::get_instance().get_lock(
             device_.index());
@@ -490,7 +491,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                 dtype_,
                                 is_prefill);
       processed_input.input_params.dp_ep_padding_data = dp_ep_padding.build();
-      if (FLAGS_enable_eplb) {
+      if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
         // expert_load_data_.fill_(0);
         processed_input.input_params.expert_load_data = expert_load_data_;
       }
@@ -512,7 +513,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 
 void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 #if defined(USE_CUDA)
-  if (FLAGS_enable_block_copy_kernel &&
+  if (::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel() &&
       can_use_cuda_block_copy_kernel(input_params)) {
     execute_cuda_block_copy_kernel(input_params);
     return;
@@ -520,7 +521,8 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 #endif
 
 #if defined(USE_NPU)
-  if (input_params.swap_blocks.size() == 0 || FLAGS_enable_block_copy_kernel) {
+  if (input_params.swap_blocks.size() == 0 ||
+      ::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel()) {
     return;
   }
 #elif defined(USE_CUDA)
@@ -554,7 +556,8 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 #if defined(USE_CUDA)
 void WorkerImpl::refresh_cuda_block_copy_runtime_state() {
   cuda_block_copy_runtime_state_ = {};
-  if (!FLAGS_enable_block_copy_kernel || kv_caches_.empty()) {
+  if (!::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel() ||
+      kv_caches_.empty()) {
     return;
   }
 
@@ -657,7 +660,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
 
       const auto output = this->step(input);
       if (output.has_value()) {
-        if (is_driver() || FLAGS_enable_eplb) {
+        if (is_driver() || ::xllm::EPLBConfig::get_instance().enable_eplb()) {
           std::unique_lock<std::mutex> lock(mtx_);
           cv_.wait(lock, [this] { return !is_recorded_; });
           update_last_step_output(output);
@@ -667,7 +670,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
           update_last_step_output(output);
         }
       } else {
-        if (is_driver() || FLAGS_enable_eplb) {
+        if (is_driver() || ::xllm::EPLBConfig::get_instance().enable_eplb()) {
           std::unique_lock<std::mutex> lock(mtx_);
           cv_.wait(lock, [this] { return !is_recorded_; });
           last_step_output_valid_ = false;
@@ -687,7 +690,8 @@ ForwardOutput WorkerImpl::get_last_step_result() {
   ForwardOutput output;
   std::unique_lock<std::mutex> lock(mtx_);
   cv_.wait(lock, [this] { return is_recorded_; });
-  if (last_step_output_valid_ || FLAGS_enable_eplb) {
+  if (last_step_output_valid_ ||
+      ::xllm::EPLBConfig::get_instance().enable_eplb()) {
     output = last_step_output_;
   }
   is_recorded_ = false;
@@ -753,7 +757,8 @@ bool WorkerImpl::wakeup(const WakeupOptions& options) {
 bool WorkerImpl::wakeup_local(const WakeupOptions& options) {
   if (options.master_status == MasterStatus::LIGHT_SLEEP) {
 #if defined(USE_NPU)
-    if (FLAGS_enable_rolling_load && !is_spec_draft_) {
+    if (::xllm::LoadConfig::get_instance().enable_rolling_load() &&
+        !is_spec_draft_) {
       // Reuse rolling runtime state and refresh rolling initialization on
       // wakeup without re-reading checkpoint in LIGHT_SLEEP.
       if (!init_rolling_runtime_state()) {
@@ -776,9 +781,9 @@ bool WorkerImpl::wakeup_local(const WakeupOptions& options) {
 #if defined(USE_NPU)
 bool WorkerImpl::wakeup_from_remote_weights(const WakeupOptions& options) {
   // Prefer segment-based transfer if available, fallback to legacy offsets.
-  if (FLAGS_enable_rolling_load) {
-    LOG(ERROR)
-        << "Remote weight wakeup does not support FLAGS_enable_rolling_load";
+  if (::xllm::LoadConfig::get_instance().enable_rolling_load()) {
+    LOG(ERROR) << "Remote weight wakeup does not support "
+                  "::xllm::LoadConfig::get_instance().enable_rolling_load()";
     return false;
   }
 
@@ -848,7 +853,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
                             int32_t random_seed,
                             MasterStatus master_status) {
   // set same random seed for all worker
-  FLAGS_random_seed = random_seed;
+  ::xllm::ExecutionConfig::get_instance().random_seed(random_seed);
   device_.set_seed(random_seed);
 
   auto model_loader = ModelLoader::create(model_weights_path);
@@ -873,7 +878,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 
 #if defined(USE_NPU)
-  if (options_.enable_speculative_decode() && FLAGS_enable_atb_spec_kernel) {
+  if (options_.enable_speculative_decode() &&
+      ::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     args.num_speculative_tokens(options_.num_speculative_tokens());
   } else if (options_.enable_speculative_decode() &&
              options_.num_speculative_tokens() == 0 &&
@@ -960,12 +966,12 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 
   status_ = Status::LOADED;
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     // todo: support xtensor
     int32_t num_layers = args.n_layers() - args.first_k_dense_replace();
     int32_t num_device_experts =
         args.n_routed_experts() / context_.get_parallel_args().world_size() +
-        FLAGS_redundant_experts_num;
+        ::xllm::EPLBConfig::get_instance().redundant_experts_num();
     expert_load_data_ = torch::zeros({num_layers, num_device_experts})
                             .to(torch::kInt64)
                             .to(device_)
@@ -979,7 +985,8 @@ void WorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
 #if defined(USE_NPU)
   // Rolling mode uses host-pinned weights as the single source of truth:
   // lazy_load_model -> init_rolling_runtime_state() to finish rolling init.
-  if (FLAGS_enable_rolling_load && !is_spec_draft_) {
+  if (::xllm::LoadConfig::get_instance().enable_rolling_load() &&
+      !is_spec_draft_) {
     model_->lazy_load_model(std::move(loader));
     CHECK(init_rolling_runtime_state())
         << "Failed to initialize rolling runtime state during load_model";
@@ -994,7 +1001,8 @@ void WorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
 bool WorkerImpl::init_rolling_runtime_state() {
   // Draft model (speculative decoding) has only 1 decoder layer, skip rolling
   // load.
-  if (!FLAGS_enable_rolling_load || is_spec_draft_) {
+  if (!::xllm::LoadConfig::get_instance().enable_rolling_load() ||
+      is_spec_draft_) {
     return true;
   }
 
@@ -1004,8 +1012,10 @@ bool WorkerImpl::init_rolling_runtime_state() {
   // Rolling runtime ownership is moved into model.
   // Worker provides runtime dependencies and delegates
   // initialization/refresh.
-  const int32_t n_slots = FLAGS_rolling_load_num_cached_layers;
-  const int32_t n_rolling_slots = FLAGS_rolling_load_num_rolling_slots;
+  const int32_t n_slots =
+      ::xllm::LoadConfig::get_instance().rolling_load_num_cached_layers();
+  const int32_t n_rolling_slots =
+      ::xllm::LoadConfig::get_instance().rolling_load_num_rolling_slots();
   return model_->init_or_refresh_rolling_runtime(load_stream_.get(),
                                                  compute_stream_.get(),
                                                  n_slots,

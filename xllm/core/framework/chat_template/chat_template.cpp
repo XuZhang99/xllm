@@ -18,6 +18,7 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
+#include "core/framework/config/xllm_config.h"
 #include "framework/chat_template/deepseek_v32_cpp_template.h"
 #include "framework/chat_template/jinja_chat_template.h"
 
@@ -28,7 +29,8 @@ namespace xllm {
 std::unique_ptr<ChatTemplate> ChatTemplate::create(
     const TokenizerArgs& tokenizer_args,
     const std::string& model_type) {
-  if (FLAGS_use_cpp_chat_template && model_type == "deepseek_v32") {
+  if (::xllm::ModelConfig::get_instance().use_cpp_chat_template() &&
+      model_type == "deepseek_v32") {
     LOG(INFO) << "Using native C++ chat template for "
               << "model_type: " << model_type;
     return std::make_unique<DeepseekV32CppTemplate>(tokenizer_args);

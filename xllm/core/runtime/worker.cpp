@@ -27,6 +27,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
@@ -48,7 +49,8 @@ Worker::Worker(const ParallelArgs& parallel_args,
                const runtime::Options& options,
                WorkerType worker_type) {
   if (options.enable_speculative_decode()) {
-    auto algo = FLAGS_speculative_algorithm;
+    auto algo =
+        ::xllm::SpeculativeConfig::get_instance().speculative_algorithm();
     LOG(INFO) << "Speculative decode is enabled, algorithm: " << algo;
     if (algo == "Eagle3") {
       impl_ = new Eagle3WorkerImpl(parallel_args, device, options);

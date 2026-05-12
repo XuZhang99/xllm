@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "core/framework/config/xllm_config.h"
 #include "util/net.h"
 
 namespace xllm {
@@ -156,7 +157,8 @@ void LlmDataDistTransfer::allocate_kv_cache(
 
   // convert memory addrs to torch tensors
   aclFormat npu_format_type =
-      model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache
+      model_type_ == "deepseek_v3" &&
+              ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()
           ? ACL_FORMAT_FRACTAL_NZ
           : ACL_FORMAT_ND;
 

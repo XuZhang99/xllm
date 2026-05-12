@@ -20,6 +20,7 @@ limitations under the License.
 #include <c10d/TCPStore.hpp>
 #include <torch_npu/csrc/distributed/ProcessGroupHCCL.hpp>
 
+#include "core/framework/config/xllm_config.h"
 #include "platform/device.h"
 
 namespace {
@@ -124,7 +125,7 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
     hccl_pg_options->global_ranks_in_group = uint32_ranks;
   }
 
-  if (FLAGS_dit_debug_print) {
+  if (::xllm::DiTConfig::get_instance().dit_debug_print()) {
     std::stringstream ranks_ss;
     ranks_ss << "Group : [" << group_ranks[0];
     for (size_t i = 1; i < group_ranks.size(); i++) {

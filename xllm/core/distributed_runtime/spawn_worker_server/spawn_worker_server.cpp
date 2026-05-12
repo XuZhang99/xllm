@@ -22,6 +22,7 @@ limitations under the License.
 #include <unistd.h>
 
 #include "core/distributed_runtime/worker_server.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/platform/device.h"
 #if defined(USE_CUDA) || defined(USE_MLU)
 #include "core/platform/numa_utils.h"
@@ -96,6 +97,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   device.init_device_context();
   FLAGS_enable_atb_comm_multiprocess = true;
 #endif
+  XllmConfig::reload_from_flags();
 
 #if defined(USE_CUDA) || defined(USE_MLU)
   // Bind worker process to the same NUMA node as the device

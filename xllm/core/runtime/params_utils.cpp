@@ -23,6 +23,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/macros.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/mm_batch_data.h"
 #include "runtime/forward_params.h"
@@ -747,7 +748,7 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
     }
   }
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     pb_forward_output->set_prepared_layer_id(prepared_layer_id);
 
     torch::Tensor expert_load_data_flattened =
