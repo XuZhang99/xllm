@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/beam_search_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_bool(enable_beam_search_kernel,
             false,
@@ -45,6 +46,19 @@ BeamSearchConfig BeamSearchConfig::from_flags() {
       .beam_width(FLAGS_beam_width)
       .enable_block_copy_kernel(FLAGS_enable_block_copy_kernel)
       .enable_topk_sorted(FLAGS_enable_topk_sorted);
+  return config;
+}
+
+BeamSearchConfig BeamSearchConfig::from_json(const JsonReader& json) {
+  BeamSearchConfig config = BeamSearchConfig::from_flags();
+  config
+      .enable_beam_search_kernel(json.value_or<bool>(
+          "enable_beam_search_kernel", config.enable_beam_search_kernel()))
+      .beam_width(json.value_or<int32_t>("beam_width", config.beam_width()))
+      .enable_block_copy_kernel(json.value_or<bool>(
+          "enable_block_copy_kernel", config.enable_block_copy_kernel()))
+      .enable_topk_sorted(json.value_or<bool>("enable_topk_sorted",
+                                              config.enable_topk_sorted()));
   return config;
 }
 

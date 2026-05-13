@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/rec_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_bool(
     enable_rec_fast_sampler,
@@ -96,6 +97,39 @@ RecConfig RecConfig::from_flags() {
       .total_conversion_threshold(FLAGS_total_conversion_threshold)
       .request_queue_size(FLAGS_request_queue_size)
       .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
+  return config;
+}
+
+RecConfig RecConfig::from_json(const JsonReader& json) {
+  RecConfig config = RecConfig::from_flags();
+  config
+      .enable_rec_fast_sampler(json.value_or<bool>(
+          "enable_rec_fast_sampler", config.enable_rec_fast_sampler()))
+      .enable_rec_prefill_only(json.value_or<bool>(
+          "enable_rec_prefill_only", config.enable_rec_prefill_only()))
+      .enable_xattention_one_stage(json.value_or<bool>(
+          "enable_xattention_one_stage", config.enable_xattention_one_stage()))
+      .max_decode_rounds(json.value_or<int32_t>("max_decode_rounds",
+                                                config.max_decode_rounds()))
+      .enable_constrained_decoding(json.value_or<bool>(
+          "enable_constrained_decoding", config.enable_constrained_decoding()))
+      .output_rec_logprobs(json.value_or<bool>("output_rec_logprobs",
+                                               config.output_rec_logprobs()))
+      .enable_convert_tokens_to_item(
+          json.value_or<bool>("enable_convert_tokens_to_item",
+                              config.enable_convert_tokens_to_item()))
+      .enable_output_sku_logprobs(json.value_or<bool>(
+          "enable_output_sku_logprobs", config.enable_output_sku_logprobs()))
+      .enable_extended_item_info(json.value_or<bool>(
+          "enable_extended_item_info", config.enable_extended_item_info()))
+      .each_conversion_threshold(json.value_or<int32_t>(
+          "each_conversion_threshold", config.each_conversion_threshold()))
+      .total_conversion_threshold(json.value_or<int32_t>(
+          "total_conversion_threshold", config.total_conversion_threshold()))
+      .request_queue_size(json.value_or<int32_t>("request_queue_size",
+                                                 config.request_queue_size()))
+      .rec_worker_max_concurrency(json.value_or<uint32_t>(
+          "rec_worker_max_concurrency", config.rec_worker_max_concurrency()));
   return config;
 }
 

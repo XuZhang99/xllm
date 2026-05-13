@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class DisaggPDConfig final {
  public:
   DisaggPDConfig() = default;
@@ -30,6 +32,7 @@ class DisaggPDConfig final {
   static DisaggPDConfig& get_instance();
 
   static DisaggPDConfig from_flags();
+  static DisaggPDConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(bool, enable_disagg_pd) = false;

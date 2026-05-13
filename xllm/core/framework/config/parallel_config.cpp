@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
 
@@ -72,6 +73,28 @@ ParallelConfig ParallelConfig::from_flags() {
       .enable_multi_stream_parallel(FLAGS_enable_multi_stream_parallel)
       .micro_batch_num(FLAGS_micro_batch_num)
       .enable_dp_balance(FLAGS_enable_dp_balance);
+  return config;
+}
+
+ParallelConfig ParallelConfig::from_json(const JsonReader& json) {
+  ParallelConfig config = ParallelConfig::from_flags();
+  config.dp_size(json.value_or<int32_t>("dp_size", config.dp_size()))
+      .ep_size(json.value_or<int32_t>("ep_size", config.ep_size()))
+      .cp_size(json.value_or<int32_t>("cp_size", config.cp_size()))
+      .tp_size(json.value_or<int64_t>("tp_size", config.tp_size()))
+      .sp_size(json.value_or<int64_t>("sp_size", config.sp_size()))
+      .cfg_size(json.value_or<int64_t>("cfg_size", config.cfg_size()))
+      .communication_backend(json.value_or<std::string>(
+          "communication_backend", config.communication_backend()))
+      .enable_prefill_sp(
+          json.value_or<bool>("enable_prefill_sp", config.enable_prefill_sp()))
+      .enable_multi_stream_parallel(
+          json.value_or<bool>("enable_multi_stream_parallel",
+                              config.enable_multi_stream_parallel()))
+      .micro_batch_num(
+          json.value_or<int32_t>("micro_batch_num", config.micro_batch_num()))
+      .enable_dp_balance(
+          json.value_or<bool>("enable_dp_balance", config.enable_dp_balance()));
   return config;
 }
 

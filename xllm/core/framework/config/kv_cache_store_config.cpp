@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_store_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_uint32(prefetch_timeout,
               0,
@@ -74,6 +75,35 @@ KVCacheStoreConfig KVCacheStoreConfig::from_flags() {
       .store_metadata_server(FLAGS_store_metadata_server)
       .store_local_hostname(FLAGS_store_local_hostname)
       .enable_control_h2d_block_num(FLAGS_enable_control_h2d_block_num);
+  return config;
+}
+
+KVCacheStoreConfig KVCacheStoreConfig::from_json(const JsonReader& json) {
+  KVCacheStoreConfig config = KVCacheStoreConfig::from_flags();
+  config
+      .prefetch_timeout(json.value_or<uint32_t>("prefetch_timeout",
+                                                config.prefetch_timeout()))
+      .prefetch_bacth_size(json.value_or<uint32_t>(
+          "prefetch_bacth_size", config.prefetch_bacth_size()))
+      .layers_wise_copy_batchs(json.value_or<uint32_t>(
+          "layers_wise_copy_batchs", config.layers_wise_copy_batchs()))
+      .host_blocks_factor(json.value_or<double>("host_blocks_factor",
+                                                config.host_blocks_factor()))
+      .enable_kvcache_store(json.value_or<bool>("enable_kvcache_store",
+                                                config.enable_kvcache_store()))
+      .enable_cache_upload(json.value_or<bool>("enable_cache_upload",
+                                               config.enable_cache_upload()))
+      .store_protocol(
+          json.value_or<std::string>("store_protocol", config.store_protocol()))
+      .store_master_server_address(json.value_or<std::string>(
+          "store_master_server_address", config.store_master_server_address()))
+      .store_metadata_server(json.value_or<std::string>(
+          "store_metadata_server", config.store_metadata_server()))
+      .store_local_hostname(json.value_or<std::string>(
+          "store_local_hostname", config.store_local_hostname()))
+      .enable_control_h2d_block_num(
+          json.value_or<bool>("enable_control_h2d_block_num",
+                              config.enable_control_h2d_block_num()));
   return config;
 }
 

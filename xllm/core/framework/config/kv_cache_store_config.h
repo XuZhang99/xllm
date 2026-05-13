@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class KVCacheStoreConfig final {
  public:
   KVCacheStoreConfig() = default;
@@ -30,6 +32,7 @@ class KVCacheStoreConfig final {
   static KVCacheStoreConfig& get_instance();
 
   static KVCacheStoreConfig from_flags();
+  static KVCacheStoreConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(uint32_t, prefetch_timeout) = 0;

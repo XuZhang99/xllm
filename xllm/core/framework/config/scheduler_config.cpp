@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
 
@@ -92,6 +93,46 @@ SchedulerConfig SchedulerConfig::from_flags() {
       .aggressive_coeff(FLAGS_aggressive_coeff)
       .starve_threshold(FLAGS_starve_threshold)
       .enable_starve_prevent(FLAGS_enable_starve_prevent);
+  return config;
+}
+
+SchedulerConfig SchedulerConfig::from_json(const JsonReader& json) {
+  SchedulerConfig config = SchedulerConfig::from_flags();
+  config
+      .max_tokens_per_batch(json.value_or<int32_t>(
+          "max_tokens_per_batch", config.max_tokens_per_batch()))
+      .max_seqs_per_batch(json.value_or<int32_t>("max_seqs_per_batch",
+                                                 config.max_seqs_per_batch()))
+      .enable_schedule_overlap(json.value_or<bool>(
+          "enable_schedule_overlap", config.enable_schedule_overlap()))
+      .prefill_scheduling_memory_usage_threshold(json.value_or<double>(
+          "prefill_scheduling_memory_usage_threshold",
+          config.prefill_scheduling_memory_usage_threshold()))
+      .enable_chunked_prefill(json.value_or<bool>(
+          "enable_chunked_prefill", config.enable_chunked_prefill()))
+      .max_tokens_per_chunk_for_prefill(
+          json.value_or<int32_t>("max_tokens_per_chunk_for_prefill",
+                                 config.max_tokens_per_chunk_for_prefill()))
+      .chunked_match_frequency(json.value_or<int32_t>(
+          "chunked_match_frequency", config.chunked_match_frequency()))
+      .use_zero_evict(
+          json.value_or<bool>("use_zero_evict", config.use_zero_evict()))
+      .max_decode_token_per_sequence(
+          json.value_or<int32_t>("max_decode_token_per_sequence",
+                                 config.max_decode_token_per_sequence()))
+      .priority_strategy(json.value_or<std::string>("priority_strategy",
+                                                    config.priority_strategy()))
+      .use_mix_scheduler(
+          json.value_or<bool>("use_mix_scheduler", config.use_mix_scheduler()))
+      .enable_online_preempt_offline(
+          json.value_or<bool>("enable_online_preempt_offline",
+                              config.enable_online_preempt_offline()))
+      .aggressive_coeff(
+          json.value_or<double>("aggressive_coeff", config.aggressive_coeff()))
+      .starve_threshold(
+          json.value_or<double>("starve_threshold", config.starve_threshold()))
+      .enable_starve_prevent(json.value_or<bool>(
+          "enable_starve_prevent", config.enable_starve_prevent()));
   return config;
 }
 

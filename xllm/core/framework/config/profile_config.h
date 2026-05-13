@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class ProfileConfig final {
  public:
   ProfileConfig() = default;
@@ -30,6 +32,7 @@ class ProfileConfig final {
   static ProfileConfig& get_instance();
 
   static ProfileConfig from_flags();
+  static ProfileConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(bool, enable_profile_step_time) = false;

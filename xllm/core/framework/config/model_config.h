@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class ModelConfig final {
  public:
   ModelConfig() = default;
@@ -30,6 +32,7 @@ class ModelConfig final {
   static ModelConfig& get_instance();
 
   static ModelConfig from_flags();
+  static ModelConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(std::string, model_id);

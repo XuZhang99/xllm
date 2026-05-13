@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/dit_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
@@ -77,6 +78,39 @@ DiTConfig DiTConfig::from_flags() {
       .dit_cache_end_blocks(FLAGS_dit_cache_end_blocks)
       .dit_sp_communication_overlap(FLAGS_dit_sp_communication_overlap)
       .dit_debug_print(FLAGS_dit_debug_print);
+  return config;
+}
+
+DiTConfig DiTConfig::from_json(const JsonReader& json) {
+  DiTConfig config = DiTConfig::from_flags();
+  config
+      .max_requests_per_batch(json.value_or<int32_t>(
+          "max_requests_per_batch", config.max_requests_per_batch()))
+      .dit_cache_policy(json.value_or<std::string>("dit_cache_policy",
+                                                   config.dit_cache_policy()))
+      .dit_cache_warmup_steps(json.value_or<int64_t>(
+          "dit_cache_warmup_steps", config.dit_cache_warmup_steps()))
+      .dit_cache_n_derivatives(json.value_or<int64_t>(
+          "dit_cache_n_derivatives", config.dit_cache_n_derivatives()))
+      .dit_cache_skip_interval_steps(
+          json.value_or<int64_t>("dit_cache_skip_interval_steps",
+                                 config.dit_cache_skip_interval_steps()))
+      .dit_cache_residual_diff_threshold(
+          json.value_or<double>("dit_cache_residual_diff_threshold",
+                                config.dit_cache_residual_diff_threshold()))
+      .dit_cache_start_steps(json.value_or<int64_t>(
+          "dit_cache_start_steps", config.dit_cache_start_steps()))
+      .dit_cache_end_steps(json.value_or<int64_t>("dit_cache_end_steps",
+                                                  config.dit_cache_end_steps()))
+      .dit_cache_start_blocks(json.value_or<int64_t>(
+          "dit_cache_start_blocks", config.dit_cache_start_blocks()))
+      .dit_cache_end_blocks(json.value_or<int64_t>(
+          "dit_cache_end_blocks", config.dit_cache_end_blocks()))
+      .dit_sp_communication_overlap(
+          json.value_or<int64_t>("dit_sp_communication_overlap",
+                                 config.dit_sp_communication_overlap()))
+      .dit_debug_print(
+          json.value_or<bool>("dit_debug_print", config.dit_debug_print()));
   return config;
 }
 

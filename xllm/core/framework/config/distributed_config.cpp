@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/distributed_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_string(master_node_addr,
               "127.0.0.1:19888",
@@ -61,6 +62,27 @@ DistributedConfig DistributedConfig::from_flags() {
       .enable_service_routing(FLAGS_enable_service_routing)
       .heart_beat_interval(FLAGS_heart_beat_interval)
       .etcd_ttl(FLAGS_etcd_ttl);
+  return config;
+}
+
+DistributedConfig DistributedConfig::from_json(const JsonReader& json) {
+  DistributedConfig config = DistributedConfig::from_flags();
+  config
+      .master_node_addr(json.value_or<std::string>("master_node_addr",
+                                                   config.master_node_addr()))
+      .xtensor_master_node_addr(json.value_or<std::string>(
+          "xtensor_master_node_addr", config.xtensor_master_node_addr()))
+      .nnodes(json.value_or<int32_t>("nnodes", config.nnodes()))
+      .node_rank(json.value_or<int32_t>("node_rank", config.node_rank()))
+      .device_ip(json.value_or<std::string>("device_ip", config.device_ip()))
+      .etcd_addr(json.value_or<std::string>("etcd_addr", config.etcd_addr()))
+      .etcd_namespace(
+          json.value_or<std::string>("etcd_namespace", config.etcd_namespace()))
+      .enable_service_routing(json.value_or<bool>(
+          "enable_service_routing", config.enable_service_routing()))
+      .heart_beat_interval(json.value_or<double>("heart_beat_interval",
+                                                 config.heart_beat_interval()))
+      .etcd_ttl(json.value_or<int32_t>("etcd_ttl", config.etcd_ttl()));
   return config;
 }
 

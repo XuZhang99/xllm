@@ -5,6 +5,7 @@ cc_library(
     framework_config
   HDRS
     beam_search_config.h
+    config_json_utils.h
     kv_cache_config.h
     disagg_pd_config.h
     distributed_config.h
@@ -23,6 +24,7 @@ cc_library(
     xllm_config.h
   SRCS
     beam_search_config.cpp
+    config_json_utils.cpp
     kv_cache_config.cpp
     disagg_pd_config.cpp
     distributed_config.cpp
@@ -41,6 +43,7 @@ cc_library(
     xllm_config.cpp
   DEPS
     gflags::gflags
+    util
 )
 
 cc_library(

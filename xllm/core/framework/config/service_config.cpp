@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/service_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_string(host, "", "Host name for brpc server.");
 
@@ -68,6 +69,30 @@ ServiceConfig ServiceConfig::from_flags() {
       .num_request_handling_threads(FLAGS_num_request_handling_threads)
       .num_response_handling_threads(FLAGS_num_response_handling_threads)
       .health_check_interval_ms(FLAGS_health_check_interval_ms);
+  return config;
+}
+
+ServiceConfig ServiceConfig::from_json(const JsonReader& json) {
+  ServiceConfig config = ServiceConfig::from_flags();
+  config.host(json.value_or<std::string>("host", config.host()))
+      .port(json.value_or<int32_t>("port", config.port()))
+      .rpc_idle_timeout_s(json.value_or<int32_t>("rpc_idle_timeout_s",
+                                                 config.rpc_idle_timeout_s()))
+      .rpc_channel_timeout_ms(json.value_or<int32_t>(
+          "rpc_channel_timeout_ms", config.rpc_channel_timeout_ms()))
+      .max_reconnect_count(json.value_or<int32_t>("max_reconnect_count",
+                                                  config.max_reconnect_count()))
+      .num_threads(json.value_or<int32_t>("num_threads", config.num_threads()))
+      .max_concurrent_requests(json.value_or<int32_t>(
+          "max_concurrent_requests", config.max_concurrent_requests()))
+      .num_request_handling_threads(
+          json.value_or<int32_t>("num_request_handling_threads",
+                                 config.num_request_handling_threads()))
+      .num_response_handling_threads(
+          json.value_or<int32_t>("num_response_handling_threads",
+                                 config.num_response_handling_threads()))
+      .health_check_interval_ms(json.value_or<int32_t>(
+          "health_check_interval_ms", config.health_check_interval_ms()));
   return config;
 }
 

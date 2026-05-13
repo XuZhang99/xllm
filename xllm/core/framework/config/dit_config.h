@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class DiTConfig final {
  public:
   DiTConfig() = default;
@@ -30,6 +32,7 @@ class DiTConfig final {
   static DiTConfig& get_instance();
 
   static DiTConfig from_flags();
+  static DiTConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(int32_t, max_requests_per_batch) = 1;

@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_int32(block_size,
              128,
@@ -67,6 +68,26 @@ KVCacheConfig KVCacheConfig::from_flags() {
       .xxh3_128bits_seed(FLAGS_xxh3_128bits_seed)
       .enable_xtensor(FLAGS_enable_xtensor)
       .phy_page_granularity_size(FLAGS_phy_page_granularity_size);
+  return config;
+}
+
+KVCacheConfig KVCacheConfig::from_json(const JsonReader& json) {
+  KVCacheConfig config = KVCacheConfig::from_flags();
+  config.block_size(json.value_or<int32_t>("block_size", config.block_size()))
+      .max_cache_size(
+          json.value_or<int64_t>("max_cache_size", config.max_cache_size()))
+      .max_memory_utilization(json.value_or<double>(
+          "max_memory_utilization", config.max_memory_utilization()))
+      .kv_cache_dtype(
+          json.value_or<std::string>("kv_cache_dtype", config.kv_cache_dtype()))
+      .enable_prefix_cache(json.value_or<bool>("enable_prefix_cache",
+                                               config.enable_prefix_cache()))
+      .xxh3_128bits_seed(json.value_or<uint32_t>("xxh3_128bits_seed",
+                                                 config.xxh3_128bits_seed()))
+      .enable_xtensor(
+          json.value_or<bool>("enable_xtensor", config.enable_xtensor()))
+      .phy_page_granularity_size(json.value_or<int64_t>(
+          "phy_page_granularity_size", config.phy_page_granularity_size()));
   return config;
 }
 

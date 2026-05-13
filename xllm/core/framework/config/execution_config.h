@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class ExecutionConfig final {
  public:
   ExecutionConfig() = default;
@@ -30,6 +32,7 @@ class ExecutionConfig final {
   static ExecutionConfig& get_instance();
 
   static ExecutionConfig from_flags();
+  static ExecutionConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(bool, enable_graph) = false;

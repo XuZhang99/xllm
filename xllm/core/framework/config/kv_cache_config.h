@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class KVCacheConfig final {
  public:
   KVCacheConfig() = default;
@@ -30,6 +32,7 @@ class KVCacheConfig final {
   static KVCacheConfig& get_instance();
 
   static KVCacheConfig from_flags();
+  static KVCacheConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(int32_t, block_size) = 128;

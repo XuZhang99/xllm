@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class ParallelConfig final {
  public:
   ParallelConfig() = default;
@@ -30,6 +32,7 @@ class ParallelConfig final {
   static ParallelConfig& get_instance();
 
   static ParallelConfig from_flags();
+  static ParallelConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(int32_t, dp_size) = 1;

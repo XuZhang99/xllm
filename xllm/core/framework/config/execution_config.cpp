@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/execution_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_bool(
     enable_graph,
@@ -94,6 +95,38 @@ ExecutionConfig ExecutionConfig::from_flags() {
 #if defined(USE_NPU)
   config.npu_kernel_backend(FLAGS_npu_kernel_backend)
       .enable_intralayer_addnorm(FLAGS_enable_intralayer_addnorm);
+#endif
+  return config;
+}
+
+ExecutionConfig ExecutionConfig::from_json(const JsonReader& json) {
+  ExecutionConfig config = ExecutionConfig::from_flags();
+  config
+      .enable_graph(json.value_or<bool>("enable_graph", config.enable_graph()))
+      .enable_graph_mode_decode_no_padding(
+          json.value_or<bool>("enable_graph_mode_decode_no_padding",
+                              config.enable_graph_mode_decode_no_padding()))
+      .enable_prefill_piecewise_graph(
+          json.value_or<bool>("enable_prefill_piecewise_graph",
+                              config.enable_prefill_piecewise_graph()))
+      .enable_graph_vmm_pool(json.value_or<bool>(
+          "enable_graph_vmm_pool", config.enable_graph_vmm_pool()))
+      .max_tokens_for_graph_mode(json.value_or<int32_t>(
+          "max_tokens_for_graph_mode", config.max_tokens_for_graph_mode()))
+      .enable_shm(json.value_or<bool>("enable_shm", config.enable_shm()))
+      .use_contiguous_input_buffer(json.value_or<bool>(
+          "use_contiguous_input_buffer", config.use_contiguous_input_buffer()))
+      .input_shm_size(
+          json.value_or<uint64_t>("input_shm_size", config.input_shm_size()))
+      .output_shm_size(
+          json.value_or<uint64_t>("output_shm_size", config.output_shm_size()))
+      .random_seed(json.value_or<int32_t>("random_seed", config.random_seed()));
+#if defined(USE_NPU)
+  config
+      .npu_kernel_backend(json.value_or<std::string>(
+          "npu_kernel_backend", config.npu_kernel_backend()))
+      .enable_intralayer_addnorm(json.value_or<bool>(
+          "enable_intralayer_addnorm", config.enable_intralayer_addnorm()));
 #endif
   return config;
 }

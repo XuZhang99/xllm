@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/disagg_pd_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_bool(enable_disagg_pd,
             false,
@@ -54,6 +55,26 @@ DisaggPDConfig DisaggPDConfig::from_flags() {
       .kv_cache_transfer_type(FLAGS_kv_cache_transfer_type)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .transfer_listen_port(FLAGS_transfer_listen_port);
+  return config;
+}
+
+DisaggPDConfig DisaggPDConfig::from_json(const JsonReader& json) {
+  DisaggPDConfig config = DisaggPDConfig::from_flags();
+  config
+      .enable_disagg_pd(
+          json.value_or<bool>("enable_disagg_pd", config.enable_disagg_pd()))
+      .enable_pd_ooc(
+          json.value_or<bool>("enable_pd_ooc", config.enable_pd_ooc()))
+      .disagg_pd_port(
+          json.value_or<int32_t>("disagg_pd_port", config.disagg_pd_port()))
+      .instance_role(
+          json.value_or<std::string>("instance_role", config.instance_role()))
+      .kv_cache_transfer_type(json.value_or<std::string>(
+          "kv_cache_transfer_type", config.kv_cache_transfer_type()))
+      .kv_cache_transfer_mode(json.value_or<std::string>(
+          "kv_cache_transfer_mode", config.kv_cache_transfer_mode()))
+      .transfer_listen_port(json.value_or<int32_t>(
+          "transfer_listen_port", config.transfer_listen_port()));
   return config;
 }
 

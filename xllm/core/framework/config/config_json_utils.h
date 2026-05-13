@@ -15,34 +15,15 @@ limitations under the License.
 
 #pragma once
 
-#include <cstdint>
+#include <string>
+#include <string_view>
 
-#include "core/common/macros.h"
+#include "core/util/json_reader.h"
 
-namespace xllm {
+namespace xllm::config {
 
-class JsonReader;
+JsonReader load_json_file(const std::string& config_path);
 
-class LoadConfig final {
- public:
-  LoadConfig() = default;
-  ~LoadConfig() = default;
+JsonReader parse_json_string(std::string_view config_json);
 
-  static LoadConfig& get_instance();
-
-  static LoadConfig from_flags();
-  static LoadConfig from_json(const JsonReader& json);
-  static void reload_from_flags();
-
-  PROPERTY(bool, enable_manual_loader) = false;
-
-  PROPERTY(bool, enable_rolling_load) = false;
-
-  PROPERTY(int32_t, rolling_load_num_cached_layers) = 2;
-
-  PROPERTY(int32_t, rolling_load_num_rolling_slots) = -1;
-
-  PROPERTY(bool, enable_prefetch_weight) = false;
-};
-
-}  // namespace xllm
+}  // namespace xllm::config

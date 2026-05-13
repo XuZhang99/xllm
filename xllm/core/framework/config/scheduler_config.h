@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class SchedulerConfig final {
  public:
   SchedulerConfig() = default;
@@ -30,6 +32,7 @@ class SchedulerConfig final {
   static SchedulerConfig& get_instance();
 
   static SchedulerConfig from_flags();
+  static SchedulerConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(int32_t, max_tokens_per_batch) = 10240;

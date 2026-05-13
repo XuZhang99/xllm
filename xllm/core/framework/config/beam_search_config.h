@@ -21,6 +21,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class BeamSearchConfig final {
  public:
   BeamSearchConfig() = default;
@@ -29,6 +31,7 @@ class BeamSearchConfig final {
   static BeamSearchConfig& get_instance();
 
   static BeamSearchConfig from_flags();
+  static BeamSearchConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(bool, enable_beam_search_kernel) = false;

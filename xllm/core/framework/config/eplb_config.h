@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class EPLBConfig final {
  public:
   EPLBConfig() = default;
@@ -30,6 +32,7 @@ class EPLBConfig final {
   static EPLBConfig& get_instance();
 
   static EPLBConfig from_flags();
+  static EPLBConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(bool, enable_eplb) = false;

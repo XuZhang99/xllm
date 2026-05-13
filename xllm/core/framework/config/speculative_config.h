@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class SpeculativeConfig final {
  public:
   SpeculativeConfig() = default;
@@ -30,6 +32,7 @@ class SpeculativeConfig final {
   static SpeculativeConfig& get_instance();
 
   static SpeculativeConfig from_flags();
+  static SpeculativeConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(std::string, draft_model);

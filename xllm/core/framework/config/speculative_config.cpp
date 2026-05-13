@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/speculative_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_string(draft_model, "", "draft hf model path to the model file.");
 
@@ -87,6 +88,42 @@ SpeculativeConfig SpeculativeConfig::from_flags() {
       .speculative_suffix_use_tree_spec(FLAGS_speculative_suffix_use_tree_spec)
       .enable_opt_validate_probs(FLAGS_enable_opt_validate_probs)
       .enable_atb_spec_kernel(FLAGS_enable_atb_spec_kernel);
+  return config;
+}
+
+SpeculativeConfig SpeculativeConfig::from_json(const JsonReader& json) {
+  SpeculativeConfig config = SpeculativeConfig::from_flags();
+  config
+      .draft_model(
+          json.value_or<std::string>("draft_model", config.draft_model()))
+      .draft_devices(
+          json.value_or<std::string>("draft_devices", config.draft_devices()))
+      .num_speculative_tokens(json.value_or<int32_t>(
+          "num_speculative_tokens", config.num_speculative_tokens()))
+      .speculative_algorithm(json.value_or<std::string>(
+          "speculative_algorithm", config.speculative_algorithm()))
+      .speculative_suffix_cache_max_depth(
+          json.value_or<int32_t>("speculative_suffix_cache_max_depth",
+                                 config.speculative_suffix_cache_max_depth()))
+      .speculative_suffix_max_spec_factor(
+          json.value_or<double>("speculative_suffix_max_spec_factor",
+                                config.speculative_suffix_max_spec_factor()))
+      .speculative_suffix_max_spec_offset(
+          json.value_or<double>("speculative_suffix_max_spec_offset",
+                                config.speculative_suffix_max_spec_offset()))
+      .speculative_suffix_min_token_prob(
+          json.value_or<double>("speculative_suffix_min_token_prob",
+                                config.speculative_suffix_min_token_prob()))
+      .speculative_suffix_max_cached_requests(json.value_or<int32_t>(
+          "speculative_suffix_max_cached_requests",
+          config.speculative_suffix_max_cached_requests()))
+      .speculative_suffix_use_tree_spec(
+          json.value_or<bool>("speculative_suffix_use_tree_spec",
+                              config.speculative_suffix_use_tree_spec()))
+      .enable_opt_validate_probs(json.value_or<bool>(
+          "enable_opt_validate_probs", config.enable_opt_validate_probs()))
+      .enable_atb_spec_kernel(json.value_or<bool>(
+          "enable_atb_spec_kernel", config.enable_atb_spec_kernel()));
   return config;
 }
 

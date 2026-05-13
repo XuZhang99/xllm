@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <string>
+#include <string_view>
 
 #include "core/common/macros.h"
 #include "core/framework/config/beam_search_config.h"
@@ -37,6 +38,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class XllmConfig final {
  public:
   XllmConfig() = default;
@@ -45,6 +48,9 @@ class XllmConfig final {
   static XllmConfig& get_instance();
 
   static XllmConfig from_flags();
+  static XllmConfig from_json(const JsonReader& json);
+  static XllmConfig from_json_file(const std::string& config_path);
+  static XllmConfig from_json_string(std::string_view config_json);
   static void reload_from_flags();
 
   PROPERTY(ServiceConfig, service_config);

@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class DistributedConfig final {
  public:
   DistributedConfig() = default;
@@ -30,6 +32,7 @@ class DistributedConfig final {
   static DistributedConfig& get_instance();
 
   static DistributedConfig from_flags();
+  static DistributedConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(std::string, master_node_addr) = "127.0.0.1:19888";

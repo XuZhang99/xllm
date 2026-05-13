@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "core/framework/config/xllm_config.h"
 
+#include "core/framework/config/config_json_utils.h"
+#include "core/util/json_reader.h"
+
 namespace xllm {
 
 XllmConfig XllmConfig::from_flags() {
@@ -36,6 +39,35 @@ XllmConfig XllmConfig::from_flags() {
       .dit_config(DiTConfig::from_flags())
       .rec_config(RecConfig::from_flags());
   return config;
+}
+
+XllmConfig XllmConfig::from_json(const JsonReader& json) {
+  XllmConfig config;
+  config.service_config(ServiceConfig::from_json(json))
+      .model_config(ModelConfig::from_json(json))
+      .load_config(LoadConfig::from_json(json))
+      .kv_cache_config(KVCacheConfig::from_json(json))
+      .kv_cache_store_config(KVCacheStoreConfig::from_json(json))
+      .beam_search_config(BeamSearchConfig::from_json(json))
+      .scheduler_config(SchedulerConfig::from_json(json))
+      .parallel_config(ParallelConfig::from_json(json))
+      .eplb_config(EPLBConfig::from_json(json))
+      .distributed_config(DistributedConfig::from_json(json))
+      .disagg_pd_config(DisaggPDConfig::from_json(json))
+      .speculative_config(SpeculativeConfig::from_json(json))
+      .profile_config(ProfileConfig::from_json(json))
+      .execution_config(ExecutionConfig::from_json(json))
+      .dit_config(DiTConfig::from_json(json))
+      .rec_config(RecConfig::from_json(json));
+  return config;
+}
+
+XllmConfig XllmConfig::from_json_file(const std::string& config_path) {
+  return XllmConfig::from_json(config::load_json_file(config_path));
+}
+
+XllmConfig XllmConfig::from_json_string(std::string_view config_json) {
+  return XllmConfig::from_json(config::parse_json_string(config_json));
 }
 
 XllmConfig& XllmConfig::get_instance() {

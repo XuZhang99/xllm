@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/model_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_string(model_id, "", "hf model name.");
 
@@ -96,6 +97,36 @@ ModelConfig ModelConfig::from_flags() {
       .flashinfer_workspace_buffer_size(FLAGS_flashinfer_workspace_buffer_size)
       .use_audio_in_video(FLAGS_use_audio_in_video)
       .use_cpp_chat_template(FLAGS_use_cpp_chat_template);
+  return config;
+}
+
+ModelConfig ModelConfig::from_json(const JsonReader& json) {
+  ModelConfig config = ModelConfig::from_flags();
+  config.model_id(json.value_or<std::string>("model_id", config.model_id()))
+      .model(json.value_or<std::string>("model", config.model()))
+      .backend(json.value_or<std::string>("backend", config.backend()))
+      .task(json.value_or<std::string>("task", config.task()))
+      .devices(json.value_or<std::string>("devices", config.devices()))
+      .limit_image_per_prompt(json.value_or<int32_t>(
+          "limit_image_per_prompt", config.limit_image_per_prompt()))
+      .enable_customize_mla_kernel(json.value_or<bool>(
+          "enable_customize_mla_kernel", config.enable_customize_mla_kernel()))
+      .reasoning_parser(json.value_or<std::string>("reasoning_parser",
+                                                   config.reasoning_parser()))
+      .tool_call_parser(json.value_or<std::string>("tool_call_parser",
+                                                   config.tool_call_parser()))
+      .enable_qwen3_reranker(json.value_or<bool>(
+          "enable_qwen3_reranker", config.enable_qwen3_reranker()))
+      .enable_return_mm_full_embeddings(
+          json.value_or<bool>("enable_return_mm_full_embeddings",
+                              config.enable_return_mm_full_embeddings()))
+      .flashinfer_workspace_buffer_size(
+          json.value_or<int32_t>("flashinfer_workspace_buffer_size",
+                                 config.flashinfer_workspace_buffer_size()))
+      .use_audio_in_video(json.value_or<bool>("use_audio_in_video",
+                                              config.use_audio_in_video()))
+      .use_cpp_chat_template(json.value_or<bool>(
+          "use_cpp_chat_template", config.use_cpp_chat_template()));
   return config;
 }
 

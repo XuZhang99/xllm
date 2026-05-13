@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/load_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/util/json_reader.h"
 
 DEFINE_bool(enable_manual_loader,
             false,
@@ -58,6 +59,24 @@ LoadConfig LoadConfig::from_flags() {
       .rolling_load_num_cached_layers(FLAGS_rolling_load_num_cached_layers)
       .rolling_load_num_rolling_slots(FLAGS_rolling_load_num_rolling_slots)
       .enable_prefetch_weight(FLAGS_enable_prefetch_weight);
+  return config;
+}
+
+LoadConfig LoadConfig::from_json(const JsonReader& json) {
+  LoadConfig config = LoadConfig::from_flags();
+  config
+      .enable_manual_loader(json.value_or<bool>("enable_manual_loader",
+                                                config.enable_manual_loader()))
+      .enable_rolling_load(json.value_or<bool>("enable_rolling_load",
+                                               config.enable_rolling_load()))
+      .rolling_load_num_cached_layers(
+          json.value_or<int32_t>("rolling_load_num_cached_layers",
+                                 config.rolling_load_num_cached_layers()))
+      .rolling_load_num_rolling_slots(
+          json.value_or<int32_t>("rolling_load_num_rolling_slots",
+                                 config.rolling_load_num_rolling_slots()))
+      .enable_prefetch_weight(json.value_or<bool>(
+          "enable_prefetch_weight", config.enable_prefetch_weight()));
   return config;
 }
 

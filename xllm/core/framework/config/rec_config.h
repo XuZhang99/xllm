@@ -21,6 +21,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class RecConfig final {
  public:
   RecConfig() = default;
@@ -29,6 +31,7 @@ class RecConfig final {
   static RecConfig& get_instance();
 
   static RecConfig from_flags();
+  static RecConfig from_json(const JsonReader& json);
   static void reload_from_flags();
 
   PROPERTY(bool, enable_rec_fast_sampler) = true;
