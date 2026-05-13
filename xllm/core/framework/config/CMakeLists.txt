@@ -11,9 +11,11 @@ cc_library(
     dit_config.h
     eplb_config.h
     execution_config.h
+    help_formatter.h
     kv_cache_store_config.h
     load_config.h
     model_config.h
+    option_category.h
     parallel_config.h
     profile_config.h
     rec_config.h

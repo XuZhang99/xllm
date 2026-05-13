@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,19 @@ class DisaggPDConfig final {
 
   static DisaggPDConfig from_flags();
   static void reload_from_flags();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "DISAGGREGATED PREFILL-DECODE OPTIONS",
+        {"enable_disagg_pd",
+         "enable_pd_ooc",
+         "disagg_pd_port",
+         "instance_role",
+         "kv_cache_transfer_type",
+         "kv_cache_transfer_mode",
+         "transfer_listen_port"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(bool, enable_disagg_pd) = false;
 

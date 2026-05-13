@@ -1,7 +1,7 @@
 include(cc_library)
 
 cc_library(
-  NAME 
+  NAME
     common
   HDRS
     constants.h

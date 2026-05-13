@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,24 @@ class ExecutionConfig final {
 
   static ExecutionConfig from_flags();
   static void reload_from_flags();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "EXECUTION OPTIONS",
+        {"enable_graph",
+         "enable_graph_mode_decode_no_padding",
+         "enable_prefill_piecewise_graph",
+         "enable_graph_vmm_pool",
+         "max_tokens_for_graph_mode",
+         "enable_shm",
+         "use_contiguous_input_buffer",
+         "input_shm_size",
+         "output_shm_size",
+         "random_seed",
+         "npu_kernel_backend",
+         "enable_intralayer_addnorm"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(bool, enable_graph) = false;
 

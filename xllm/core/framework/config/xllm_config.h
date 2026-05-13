@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <string>
+#include <vector>
 
 #include "core/common/macros.h"
 #include "core/framework/config/beam_search_config.h"
@@ -28,6 +28,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_store_config.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/model_config.h"
+#include "core/framework/config/option_category.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/profile_config.h"
 #include "core/framework/config/rec_config.h"
@@ -46,6 +47,27 @@ class XllmConfig final {
 
   static XllmConfig from_flags();
   static void reload_from_flags();
+
+  [[nodiscard]] static const std::vector<OptionCategory>& option_categories() {
+    static const std::vector<OptionCategory> kOptionCategories = {
+        ServiceConfig::option_category(),
+        ModelConfig::option_category(),
+        LoadConfig::option_category(),
+        KVCacheConfig::option_category(),
+        KVCacheStoreConfig::option_category(),
+        BeamSearchConfig::option_category(),
+        SchedulerConfig::option_category(),
+        ParallelConfig::option_category(),
+        EPLBConfig::option_category(),
+        DistributedConfig::option_category(),
+        DisaggPDConfig::option_category(),
+        SpeculativeConfig::option_category(),
+        ProfileConfig::option_category(),
+        ExecutionConfig::option_category(),
+        DiTConfig::option_category(),
+        RecConfig::option_category()};
+    return kOptionCategories;
+  }
 
   PROPERTY(ServiceConfig, service_config);
 
