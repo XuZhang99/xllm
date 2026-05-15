@@ -23,7 +23,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/macros.h"
 #include "common/metrics.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/mm_batch_data.h"
 #include "runtime/forward_params.h"
