@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <thread>
@@ -31,7 +32,7 @@ namespace xllm {
 
 class XTensorDistServer {
  public:
-  XTensorDistServer(int local_rank,
+  XTensorDistServer(int32_t local_rank,
                     const std::string& master_node_addr,
                     std::atomic<bool>& done,
                     const torch::Device& device,
@@ -45,9 +46,9 @@ class XTensorDistServer {
                      std::atomic<bool>& done,
                      const std::string& master_node_addr,
                      const torch::Device& device,
-                     int world_size,
-                     int global_rank,
-                     int local_rank);
+                     int32_t world_size,
+                     int32_t global_rank,
+                     int32_t local_rank);
 
   bool sync_master_node(const std::string& master_node_addr,
                         proto::AddressInfo& addr_info,

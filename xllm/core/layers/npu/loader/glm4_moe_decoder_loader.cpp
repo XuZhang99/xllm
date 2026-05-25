@@ -81,26 +81,27 @@ Glm4MoeDecoderLoader::Glm4MoeDecoderLoader(
   n_kv_heads_ = static_cast<int32_t>(model_args.n_kv_heads().value());
 }
 
-void Glm4MoeDecoderLoader::resize_experts_weights(int num_of_device_experts) {
+void Glm4MoeDecoderLoader::resize_experts_weights(
+    int32_t num_of_device_experts) {
+  const size_t num_experts = static_cast<size_t>(num_of_device_experts);
   experts_weights_["gate_proj.weight"] =
-      std::vector<torch::Tensor>(num_of_device_experts);
-  experts_weights_["up_proj.weight"] =
-      std::vector<torch::Tensor>(num_of_device_experts);
+      std::vector<torch::Tensor>(num_experts);
+  experts_weights_["up_proj.weight"] = std::vector<torch::Tensor>(num_experts);
   experts_weights_["down_proj.weight"] =
-      std::vector<torch::Tensor>(num_of_device_experts);
+      std::vector<torch::Tensor>(num_experts);
   if (quantize_type_.compare("w8a8_dynamic") == 0) {
     experts_weights_["gate_proj.weight_offset"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["up_proj.weight_offset"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["down_proj.weight_offset"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["gate_proj.weight_scale"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["up_proj.weight_scale"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["down_proj.weight_scale"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
   }
 }
 
@@ -194,7 +195,7 @@ void Glm4MoeDecoderLoader::merge_host_at_weights() {
 void Glm4MoeDecoderLoader::process_expert_weights(const StateDict& state_dict,
                                                   const std::string& name,
                                                   const torch::Tensor& tensor) {
-  int expert_index = extract_expert_index(name);
+  int32_t expert_index = extract_expert_index(name);
   if (expert_index < start_expert_id_ || expert_index > end_expert_id_) {
     return;
   }
@@ -206,11 +207,11 @@ void Glm4MoeDecoderLoader::process_expert_weights(const StateDict& state_dict,
   const auto& shard_map = (quantize_type_.compare("w8a8_dynamic") == 0)
                               ? WEIGHT_SHARD_W8A8
                               : WEIGHT_SHARD;
-  const int index = get_mapped_index(suffix, weight_mapping);
+  const int32_t index = get_mapped_index(suffix, weight_mapping);
   if (index == -1) {
     return;
   }
-  const int local_index = expert_index % num_experts_per_partition_;
+  const int32_t local_index = expert_index % num_experts_per_partition_;
   const bool is_sharded = shard_map.count(index);
 
   std::lock_guard<std::mutex> lock(experts_mutex_);
@@ -237,7 +238,7 @@ void Glm4MoeDecoderLoader::process_shared_expert_weights(
                               ? WEIGHT_SHARD_W8A8
                               : WEIGHT_SHARD;
   std::lock_guard<std::mutex> lock(shared_experts_mutex_);
-  const int index = get_mapped_index(name, weight_mapping);
+  const int32_t index = get_mapped_index(name, weight_mapping);
   if (index == -1) {
     return;
   }
@@ -264,7 +265,7 @@ void Glm4MoeDecoderLoader::process_mlp_common_weights(
   const auto& shard_map = (quantize_type_.compare("w8a8_dynamic") == 0)
                               ? WEIGHT_SHARD_W8A8
                               : WEIGHT_SHARD;
-  const int index = get_mapped_index(name, weight_mapping);
+  const int32_t index = get_mapped_index(name, weight_mapping);
   if (index == -1) {
     return;
   }
@@ -301,7 +302,7 @@ void Glm4MoeDecoderLoader::process_general_weights(
     return;
   }
 
-  const int index = get_mapped_index(name, weight_mapping);
+  const int32_t index = get_mapped_index(name, weight_mapping);
   if (index == -1) {
     return;
   }
@@ -333,7 +334,7 @@ void Glm4MoeDecoderLoader::process_general_weights(
   if (quantize_type_.compare("w8a8_dynamic") == 0) {
     auto it = SPECIAL_MULTI_ASSIGN_W8A8.find(name);
     if (it != SPECIAL_MULTI_ASSIGN_W8A8.end()) {
-      for (int idx : it->second) {
+      for (int32_t idx : it->second) {
         t[idx] = tmp_tensor;
       }
       return;
@@ -345,7 +346,7 @@ void Glm4MoeDecoderLoader::process_general_weights(
 torch::Tensor Glm4MoeDecoderLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
-    int dim) {
+    int32_t dim) {
   if (parallel_args_.world_size() > 1) {
     return state_dict
         .get_sharded_tensor(
@@ -359,9 +360,9 @@ torch::Tensor Glm4MoeDecoderLoader::get_sharded_tensor(
 torch::Tensor Glm4MoeDecoderLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
-    int dim,
-    int local_tp_rank,
-    int local_tp_size) {
+    int32_t dim,
+    int32_t local_tp_rank,
+    int32_t local_tp_size) {
   if (local_tp_size > 1) {
     return state_dict
         .get_sharded_tensor(name, dim, local_tp_rank, local_tp_size)
@@ -386,17 +387,18 @@ std::string Glm4MoeDecoderLoader::extract_endswith(const std::string& input) {
   return result;
 }
 
-int Glm4MoeDecoderLoader::extract_expert_index(const std::string& name) {
+int32_t Glm4MoeDecoderLoader::extract_expert_index(const std::string& name) {
   std::string prefix = "experts.";
   size_t pos = name.find(prefix);
   if (pos != std::string::npos) {
     pos += prefix.length();
     size_t end_pos = pos;
-    while (end_pos < name.length() && std::isdigit(name[end_pos])) {
+    while (end_pos < name.length() &&
+           std::isdigit(static_cast<unsigned char>(name[end_pos]))) {
       ++end_pos;
     }
     if (end_pos > pos) {
-      return std::stoi(name.substr(pos, end_pos - pos));
+      return static_cast<int32_t>(std::stoll(name.substr(pos, end_pos - pos)));
     }
   }
 
@@ -405,7 +407,7 @@ int Glm4MoeDecoderLoader::extract_expert_index(const std::string& name) {
 
 void Glm4MoeDecoderLoader::merge_shared_experts_weights() {
   auto& t = working_tensors();
-  auto merge_and_clear = [this, &t](int index,
+  auto merge_and_clear = [this, &t](int32_t index,
                                     torch::Tensor& shared_experts_gate,
                                     torch::Tensor& shared_experts_up) {
     t[index] = torch::cat({shared_experts_gate, shared_experts_up}, 0)
@@ -558,9 +560,9 @@ torch::Tensor Glm4MoeDecoderLoader::merge_experts_weights(
   return merged_tensor;
 }
 
-int Glm4MoeDecoderLoader::get_mapped_index(
+int32_t Glm4MoeDecoderLoader::get_mapped_index(
     const std::string& name,
-    const std::unordered_map<std::string, int>& mapping) {
+    const std::unordered_map<std::string, int32_t>& mapping) {
   const auto it = mapping.find(name);
   if (it == mapping.end()) {
     LOG(ERROR) << "Missing mapping for: " << name;

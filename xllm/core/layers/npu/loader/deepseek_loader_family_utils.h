@@ -21,6 +21,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -41,7 +42,7 @@ template <typename StateDictLike,
           typename ProcessGeneralWeightsFn>
 inline void load_state_dict_common(
     const StateDictLike& state_dict,
-    const std::unordered_map<std::string, int>& weight_mapping_w8a8,
+    const std::unordered_map<std::string, int32_t>& weight_mapping_w8a8,
     const WeightShardMap& weight_shard_w8a8,
     SetKvWeightFn set_kv_weight,
     ProcessExpertWeightsFn process_expert_weights,
@@ -50,7 +51,7 @@ inline void load_state_dict_common(
     ProcessGeneralWeightsFn process_general_weights) {
   for (const auto& [name, tensor] : state_dict) {
     if (absl::EndsWith(name, "self_attn.kv_b_proj.weight")) {
-      const int index = weight_mapping_w8a8.at(name);
+      const int32_t index = weight_mapping_w8a8.at(name);
       set_kv_weight(state_dict, name, index, weight_shard_w8a8.at(index));
       continue;
     }
@@ -74,7 +75,7 @@ inline void load_state_dict_common(
   }
 }
 
-inline int extract_expert_index(const std::string& name) {
+inline int32_t extract_expert_index(const std::string& name) {
   static const std::string prefix = "experts.";
   size_t pos = name.find(prefix);
   if (pos != std::string::npos) {
@@ -85,7 +86,7 @@ inline int extract_expert_index(const std::string& name) {
       ++end_pos;
     }
     if (end_pos > pos) {
-      return std::stoi(name.substr(pos, end_pos - pos));
+      return static_cast<int32_t>(std::stoll(name.substr(pos, end_pos - pos)));
     }
   }
   return -1;
@@ -105,7 +106,8 @@ inline std::string extract_endswith(const std::string& input) {
 }
 
 template <typename Mapping>
-inline int get_mapped_index(const std::string& name, const Mapping& mapping) {
+inline int32_t get_mapped_index(const std::string& name,
+                                const Mapping& mapping) {
   const auto it = mapping.find(name);
   if (it == mapping.end()) {
     LOG(WARNING) << "Parameter '" << name
@@ -118,9 +120,9 @@ inline int get_mapped_index(const std::string& name, const Mapping& mapping) {
 template <typename StateDictLike>
 inline torch::Tensor get_sharded_tensor(const StateDictLike& state_dict,
                                         const std::string& name,
-                                        int dim,
-                                        int rank,
-                                        int world_size) {
+                                        int32_t dim,
+                                        int32_t rank,
+                                        int32_t world_size) {
   if (world_size > 1) {
     return state_dict.get_sharded_tensor(name, dim, rank, world_size);
   }
@@ -129,9 +131,9 @@ inline torch::Tensor get_sharded_tensor(const StateDictLike& state_dict,
 
 template <typename WeightTensors, typename MakeTensorFn>
 inline void initialize_weight_tensors(WeightTensors& weight_tensors,
-                                      int weight_count,
+                                      int32_t weight_count,
                                       MakeTensorFn make_tensor) {
-  for (int i = 0; i < weight_count; ++i) {
+  for (int32_t i = 0; i < weight_count; ++i) {
     weight_tensors[i] = make_tensor();
   }
 }
@@ -139,9 +141,9 @@ inline void initialize_weight_tensors(WeightTensors& weight_tensors,
 template <typename WeightTensors>
 inline void convert_offsets_to_int8(
     WeightTensors& weight_tensors,
-    std::initializer_list<int> indices,
+    std::initializer_list<int32_t> indices,
     c10::optional<at::Device> device = c10::nullopt) {
-  for (int index : indices) {
+  for (int32_t index : indices) {
     auto converted = weight_tensors[index].to(torch::kInt8);
     if (device.has_value()) {
       converted = converted.to(*device);
@@ -152,8 +154,8 @@ inline void convert_offsets_to_int8(
 
 template <typename WeightTensors>
 inline void handle_device_specific_bias(WeightTensors& weight_tensors,
-                                        int dp_local_tp_rank,
-                                        int bias_index) {
+                                        int32_t dp_local_tp_rank,
+                                        int32_t bias_index) {
   if (dp_local_tp_rank == 0) {
     return;
   }
@@ -172,24 +174,24 @@ inline void process_expert_weights_common(
     const StateDictLike& state_dict,
     const std::string& name,
     const torch::Tensor& tensor,
-    const std::unordered_map<std::string, int>& weight_mapping_w8a8,
+    const std::unordered_map<std::string, int32_t>& weight_mapping_w8a8,
     const WeightShardMap& weight_shard_w8a8,
     const DeviceExpertList& device_expert_list,
     ExpertsWeightsMap& experts_weights,
     std::mutex& experts_mutex,
-    int rank,
-    int local_world_size,
-    int ep_rank,
-    int num_experts_per_partition,
-    int ep_local_tp_rank,
-    int ep_local_tp_size,
+    int32_t rank,
+    int32_t local_world_size,
+    int32_t ep_rank,
+    int32_t num_experts_per_partition,
+    int32_t ep_local_tp_rank,
+    int32_t ep_local_tp_size,
     bool enable_eplb,
     bool decode_is_bf16,
     GetShardedTensorFn get_sharded_tensor_fn,
     CacheEplbTensorFn cache_eplb_tensor_fn) {
-  const int expert_index = extract_expert_index(name);
+  const int32_t expert_index = extract_expert_index(name);
   const std::string suffix = extract_endswith(name);
-  const int index = get_mapped_index(suffix, weight_mapping_w8a8);
+  const int32_t index = get_mapped_index(suffix, weight_mapping_w8a8);
   if (index == -1) {
     return;
   }
@@ -198,10 +200,10 @@ inline void process_expert_weights_common(
   const bool needs_eplb = enable_eplb && (rank % local_world_size ==
                                           expert_index % local_world_size);
 
-  const int start_idx = ep_rank * num_experts_per_partition;
-  const int end_idx = (ep_rank + 1) * num_experts_per_partition;
-  const int safe_end =
-      std::min(end_idx, static_cast<int>(device_expert_list.size()));
+  const int32_t start_idx = ep_rank * num_experts_per_partition;
+  const int32_t end_idx = (ep_rank + 1) * num_experts_per_partition;
+  const int32_t safe_end =
+      std::min(end_idx, static_cast<int32_t>(device_expert_list.size()));
 
   auto begin_it = device_expert_list.cbegin() + start_idx;
   auto end_it = device_expert_list.cbegin() + safe_end;
@@ -243,8 +245,10 @@ inline void process_expert_weights_common(
   std::vector<size_t> matches_pos;
   for (auto iter = expert_it; iter != end_it; ++iter) {
     if (*iter == expert_index) {
-      matches_pos.emplace_back(
-          std::distance(device_expert_list.cbegin(), iter) - start_idx);
+      const int32_t expert_pos = static_cast<int32_t>(std::distance(
+                                     device_expert_list.cbegin(), iter)) -
+                                 start_idx;
+      matches_pos.emplace_back(static_cast<size_t>(expert_pos));
     }
   }
 
@@ -267,15 +271,15 @@ inline void process_general_weights_common(
     const StateDictLike& state_dict,
     const std::string& name,
     const torch::Tensor& tensor,
-    const std::unordered_map<std::string, int>& weight_mapping_w8a8,
+    const std::unordered_map<std::string, int32_t>& weight_mapping_w8a8,
     const WeightShardMap& weight_shard_w8a8,
     WeightTensors& weight_tensors,
     const at::Device& target_device,
-    int dp_local_tp_rank,
-    int dp_local_tp_size,
+    int32_t dp_local_tp_rank,
+    int32_t dp_local_tp_size,
     CorrectTensorDtypeFn correct_tensor_dtype_fn,
     PostAssignFn post_assign_fn) {
-  const int index = get_mapped_index(name, weight_mapping_w8a8);
+  const int32_t index = get_mapped_index(name, weight_mapping_w8a8);
   if (index == -1) {
     return;
   }
@@ -304,13 +308,13 @@ inline void process_mlp_common_weights_common(
     const StateDictLike& state_dict,
     const std::string& name,
     const torch::Tensor& tensor,
-    const std::unordered_map<std::string, int>& weight_mapping_w8a8,
+    const std::unordered_map<std::string, int32_t>& weight_mapping_w8a8,
     const WeightShardMap& weight_shard_w8a8,
     WeightTensors& weight_tensors,
     SharedExpertsWeightsMap& shared_experts_weights,
     std::mutex& shared_experts_mutex,
     GetTensorFn get_tensor_fn) {
-  const int index = get_mapped_index(name, weight_mapping_w8a8);
+  const int32_t index = get_mapped_index(name, weight_mapping_w8a8);
   if (index == -1) {
     return;
   }
@@ -329,11 +333,11 @@ inline void process_mlp_common_weights_common(
 template <typename WeightTensors, typename SharedExpertsWeightsMap>
 inline void process_shared_expert_weights_common(
     const std::string& name,
-    const std::unordered_map<std::string, int>& weight_mapping_w8a8,
+    const std::unordered_map<std::string, int32_t>& weight_mapping_w8a8,
     WeightTensors& weight_tensors,
     SharedExpertsWeightsMap& shared_experts_weights,
     const torch::Tensor& tmp_tensor) {
-  const int index = get_mapped_index(name, weight_mapping_w8a8);
+  const int32_t index = get_mapped_index(name, weight_mapping_w8a8);
   if (index == -1) {
     return;
   }
@@ -396,13 +400,13 @@ inline void merge_shared_experts_weights_common(
     const torch::Tensor& tensor_placeholder,
     bool use_shared_experts_prefix,
     const std::string& quantize_type,
-    int gateup_weight_idx,
-    int gateup_offset_idx,
-    int gateup_scale_idx,
+    int32_t gateup_weight_idx,
+    int32_t gateup_offset_idx,
+    int32_t gateup_scale_idx,
     MakeTensorFn make_tensor_fn) {
   const std::string prefix =
       use_shared_experts_prefix ? "mlp.shared_experts." : "mlp.";
-  auto merge_and_clear = [&](int index,
+  auto merge_and_clear = [&](int32_t index,
                              const std::string& gate_suffix,
                              const std::string& up_suffix) {
     const std::string gate_name = prefix + gate_suffix;
@@ -424,9 +428,10 @@ inline void merge_shared_experts_weights_common(
 }
 
 template <typename WeightTensors>
-inline void squeeze_weight_tensors(WeightTensors& weight_tensors,
-                                   const std::vector<int>& squeeze_indices) {
-  for (int index : squeeze_indices) {
+inline void squeeze_weight_tensors(
+    WeightTensors& weight_tensors,
+    const std::vector<int32_t>& squeeze_indices) {
+  for (int32_t index : squeeze_indices) {
     if (weight_tensors[index].dim() > 1) {
       weight_tensors[index] = weight_tensors[index].squeeze();
     }
@@ -436,17 +441,17 @@ inline void squeeze_weight_tensors(WeightTensors& weight_tensors,
 template <typename StateDictLike, typename CorrectTensorDtypeFn>
 inline void set_kv_weight_common(const StateDictLike& state_dict,
                                  const std::string& tensor_name,
-                                 int weight_position,
-                                 int dim,
+                                 int32_t weight_position,
+                                 int32_t dim,
                                  std::vector<torch::Tensor>& weight_tensors,
                                  const at::Device& target_device,
-                                 int parallel_world_size,
-                                 int dp_local_tp_rank,
-                                 int dp_local_tp_size,
-                                 int num_key_value_heads,
-                                 int qk_nope_head_dim,
-                                 int v_head_dim,
-                                 int kv_lora_rank,
+                                 int32_t parallel_world_size,
+                                 int32_t dp_local_tp_rank,
+                                 int32_t dp_local_tp_size,
+                                 int32_t num_key_value_heads,
+                                 int32_t qk_nope_head_dim,
+                                 int32_t v_head_dim,
+                                 int32_t kv_lora_rank,
                                  CorrectTensorDtypeFn correct_tensor_dtype_fn) {
   torch::Tensor mutable_tensor;
   if (parallel_world_size <= 1) {
@@ -478,7 +483,7 @@ template <typename WeightTensors, typename ViewTensorFn, typename TransRopeFn>
 inline void preprocess_linear_for_rope_common(
     WeightTensors& weight_tensors,
     const std::vector<std::string>& linear_for_rope,
-    const std::unordered_map<std::string, int>& weight_mapping_w8a8,
+    const std::unordered_map<std::string, int32_t>& weight_mapping_w8a8,
     const std::string& quantize_type,
     ViewTensorFn view_tensor_fn,
     TransRopeFn trans_rope_weight_fn) {
@@ -486,7 +491,7 @@ inline void preprocess_linear_for_rope_common(
     if (quantize_type.empty() && !absl::EndsWith(name, "weight")) {
       continue;
     }
-    const int index = weight_mapping_w8a8.at(name);
+    const int32_t index = weight_mapping_w8a8.at(name);
     weight_tensors[index] = view_tensor_fn(weight_tensors[index], name, true);
     weight_tensors[index] = trans_rope_weight_fn(weight_tensors[index]);
     weight_tensors[index] =
@@ -498,18 +503,19 @@ inline void preprocess_linear_for_rope_common(
 
 inline void initialize_device_expert_list(
     std::vector<int32_t>& device_expert_list,
-    int num_device,
-    int num_device_expert,
+    int32_t num_device,
+    int32_t num_device_expert,
     bool enable_eplb,
-    int redundant_experts_num) {
+    int32_t redundant_experts_num) {
   int32_t num_device_route_expert = num_device_expert;
   if (enable_eplb) {
     num_device_route_expert = num_device_expert - redundant_experts_num;
   }
-  for (int i = 0; i < num_device * num_device_route_expert; ++i) {
+  for (int32_t i = 0; i < num_device * num_device_route_expert; ++i) {
     device_expert_list.emplace_back(i);
     if (enable_eplb && (i + 1) % num_device_route_expert == 0) {
-      for (int redundant_expert = 0; redundant_expert < redundant_experts_num;
+      for (int32_t redundant_expert = 0;
+           redundant_expert < redundant_experts_num;
            ++redundant_expert) {
         device_expert_list.emplace_back(i);
       }
@@ -520,7 +526,7 @@ inline void initialize_device_expert_list(
 template <typename ExpertsWeightsMap>
 inline void reserve_experts_weights(ExpertsWeightsMap& experts_weights,
                                     std::mutex& experts_mutex,
-                                    int num_of_device_experts,
+                                    int32_t num_of_device_experts,
                                     const std::string& quantize_type) {
   experts_weights.clear();
   std::vector<std::string> weight_names = {
@@ -551,8 +557,8 @@ inline std::string get_expert_shm_key(int32_t layer_id,
 template <typename WeightTensors>
 inline void convert_descaled_weights_to_float(
     WeightTensors& weight_tensors,
-    std::initializer_list<int> indices) {
-  for (int index : indices) {
+    std::initializer_list<int32_t> indices) {
+  for (int32_t index : indices) {
     weight_tensors[index] = weight_tensors[index].to(torch::kFloat32);
   }
 }
@@ -566,10 +572,10 @@ inline torch::Tensor convert_fp16_to_int64(const torch::Tensor& fp16_tensor) {
 inline torch::Tensor view_tensor(torch::Tensor weight,
                                  const std::string& name,
                                  bool pre_view,
-                                 int prefill_num_attention_heads_per_rank,
-                                 int qk_nope_head_dim,
-                                 int prefill_qk_rope_head_dim,
-                                 int kv_lora_rank) {
+                                 int32_t prefill_num_attention_heads_per_rank,
+                                 int32_t qk_nope_head_dim,
+                                 int32_t prefill_qk_rope_head_dim,
+                                 int32_t kv_lora_rank) {
   if (absl::StrContains(name, "q_b_proj")) {
     if (pre_view) {
       return weight
@@ -592,7 +598,7 @@ inline torch::Tensor view_tensor(torch::Tensor weight,
 }
 
 inline torch::Tensor trans_rope_weight(torch::Tensor weight,
-                                       int prefill_qk_rope_head_dim,
+                                       int32_t prefill_qk_rope_head_dim,
                                        bool clone_first) {
   torch::Tensor output = clone_first ? weight.clone() : weight;
   const int64_t d = weight.size(-2);

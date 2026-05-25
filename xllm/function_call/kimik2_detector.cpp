@@ -210,11 +210,12 @@ StreamingParseResult KimiK2Detector::parse_streaming_increment(
         streamed_args_for_tool_.push_back("");
       }
 
-      while (static_cast<int>(prev_tool_call_arr_.size()) <= current_tool_id_) {
+      while (static_cast<int32_t>(prev_tool_call_arr_.size()) <=
+             current_tool_id_) {
         prev_tool_call_arr_.push_back(
             std::unordered_map<std::string, std::string>());
       }
-      while (static_cast<int>(streamed_args_for_tool_.size()) <=
+      while (static_cast<int32_t>(streamed_args_for_tool_.size()) <=
              current_tool_id_) {
         streamed_args_for_tool_.push_back("");
       }

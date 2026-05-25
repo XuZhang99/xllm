@@ -56,7 +56,7 @@ class NpuBlockCopyImpl : public BaseLayer {
                         const torch::Tensor& src_block_ids,
                         const torch::Tensor& dst_block_ids,
                         const torch::Tensor& cum_sum,
-                        int nodeId = 0);
+                        int32_t nodeId = 0);
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                const torch::Tensor& key_cache,

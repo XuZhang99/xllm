@@ -27,19 +27,19 @@ torch::Tensor generate_cp_load_balance_idx(const torch::Tensor& input_lengths) {
               "input_lengths must be int32 tensor");
   TORCH_CHECK(input_lengths.dim() == 1, "input_lengths must be 1D tensor");
 
-  std::vector<int> lengths_vec;
-  int* lengths_ptr = input_lengths.data_ptr<int>();
+  std::vector<int32_t> lengths_vec;
+  int32_t* lengths_ptr = input_lengths.data_ptr<int32_t>();
   int64_t n = input_lengths.numel();
   for (int64_t i = 0; i < n; ++i) {
     lengths_vec.push_back(lengths_ptr[i]);
   }
 
-  std::vector<int> cp_load_balance_idx_first, cp_load_balance_idx_last;
-  int base = 0;
-  for (int length : lengths_vec) {
-    std::vector<int> length_range(length);
+  std::vector<int32_t> cp_load_balance_idx_first, cp_load_balance_idx_last;
+  int32_t base = 0;
+  for (int32_t length : lengths_vec) {
+    std::vector<int32_t> length_range(length);
     std::iota(length_range.begin(), length_range.end(), base);
-    int divider = length / 2;
+    int32_t divider = length / 2;
     cp_load_balance_idx_first.insert(cp_load_balance_idx_first.end(),
                                      length_range.begin(),
                                      length_range.begin() + divider);
@@ -58,23 +58,24 @@ torch::Tensor generate_cp_load_balance_idx(const torch::Tensor& input_lengths) {
   return tensor;
 }
 
-torch::Tensor generate_cp_o_recover_idx(const std::vector<int>& chunk_lengths) {
-  std::vector<int> cp_o_recover_idx;
-  int base = 0;
-  int chunk_lengths_sum =
-      std::accumulate(chunk_lengths.begin(), chunk_lengths.end(), 0);
+torch::Tensor generate_cp_o_recover_idx(
+    const std::vector<int32_t>& chunk_lengths) {
+  std::vector<int32_t> cp_o_recover_idx;
+  int32_t base = 0;
+  int32_t chunk_lengths_sum =
+      std::accumulate(chunk_lengths.begin(), chunk_lengths.end(), int32_t{0});
 
-  for (int chunk_len : chunk_lengths) {
-    std::vector<int> length_range(chunk_len);
+  for (int32_t chunk_len : chunk_lengths) {
+    std::vector<int32_t> length_range(chunk_len);
     std::iota(length_range.begin(), length_range.end(), base);
     cp_o_recover_idx.insert(
         cp_o_recover_idx.end(), length_range.begin(), length_range.end());
-    std::vector<int> last_part(length_range.size());
+    std::vector<int32_t> last_part(length_range.size());
     std::transform(
         length_range.begin(),
         length_range.end(),
         last_part.begin(),
-        [chunk_lengths_sum](int x) { return x + chunk_lengths_sum; });
+        [chunk_lengths_sum](int32_t x) { return x + chunk_lengths_sum; });
     cp_o_recover_idx.insert(
         cp_o_recover_idx.end(), last_part.begin(), last_part.end());
     base += chunk_len;
@@ -85,21 +86,21 @@ torch::Tensor generate_cp_o_recover_idx(const std::vector<int>& chunk_lengths) {
 }
 
 torch::Tensor generate_cp_kv_recover_idx(
-    int cp_size,
-    int input_ids_size,
-    const std::vector<int>& chunk_lengths) {
-  std::vector<int> cp_kv_recover_idx;
-  int req_offset = 0;
+    int32_t cp_size,
+    int32_t input_ids_size,
+    const std::vector<int32_t>& chunk_lengths) {
+  std::vector<int32_t> cp_kv_recover_idx;
+  int32_t req_offset = 0;
 
-  for (int req_chunk_len : chunk_lengths) {
-    std::vector<std::vector<int>> gather_idx_per_chunk(cp_size * 2);
-    for (int cp_rank_id = 0; cp_rank_id < cp_size; ++cp_rank_id) {
-      int rank_offset = cp_rank_id * input_ids_size;
-      std::vector<int> first_part(req_chunk_len);
+  for (int32_t req_chunk_len : chunk_lengths) {
+    std::vector<std::vector<int32_t>> gather_idx_per_chunk(cp_size * 2);
+    for (int32_t cp_rank_id = 0; cp_rank_id < cp_size; ++cp_rank_id) {
+      int32_t rank_offset = cp_rank_id * input_ids_size;
+      std::vector<int32_t> first_part(req_chunk_len);
       std::iota(first_part.begin(), first_part.end(), rank_offset + req_offset);
       gather_idx_per_chunk[cp_rank_id] = first_part;
 
-      std::vector<int> last_part(req_chunk_len);
+      std::vector<int32_t> last_part(req_chunk_len);
       std::iota(last_part.begin(),
                 last_part.end(),
                 rank_offset + req_offset + req_chunk_len);
@@ -129,10 +130,10 @@ std::pair<torch::Tensor, torch::Tensor> compute_input_lengths_cumsum_cp(
   auto input_lengths_cumsum_cp_next =
       torch::zeros({n}, torch::dtype(torch::kInt32).device(torch::kCPU));
 
-  int offset = 0;
-  auto cumsum_data = input_lengths_cumsum.data_ptr<int>();
-  auto prev_data = input_lengths_cumsum_cp_prev.data_ptr<int>();
-  auto next_data = input_lengths_cumsum_cp_next.data_ptr<int>();
+  int32_t offset = 0;
+  auto cumsum_data = input_lengths_cumsum.data_ptr<int32_t>();
+  auto prev_data = input_lengths_cumsum_cp_prev.data_ptr<int32_t>();
+  auto next_data = input_lengths_cumsum_cp_next.data_ptr<int32_t>();
 
   for (int64_t i = 0; i < n; ++i) {
     prev_data[i] = offset + (cumsum_data[i] - offset) / 2;
@@ -147,28 +148,28 @@ std::pair<torch::Tensor, torch::Tensor> generate_k_gather_index(
     const torch::Tensor& actual_seq_lengths_kv_cp_prev,
     const torch::Tensor& actual_seq_lengths_kv_cp_next,
     const torch::Tensor& input_lengths,
-    int cp_size) {
+    int32_t cp_size) {
   TORCH_CHECK(actual_seq_lengths_kv_cp_prev.dim() == 1,
               "actual_seq_lengths_kv_cp_prev must be 1D");
   TORCH_CHECK(actual_seq_lengths_kv_cp_next.dim() == 1,
               "actual_seq_lengths_kv_cp_next must be 1D");
   TORCH_CHECK(input_lengths.dim() == 1, "input_lengths must be 1D");
 
-  std::vector<int> k_gather_index_prev, k_gather_index_next;
-  int k_offset = 0;
+  std::vector<int32_t> k_gather_index_prev, k_gather_index_next;
+  int32_t k_offset = 0;
   int64_t n = input_lengths.numel();
 
-  auto prev_len_data = actual_seq_lengths_kv_cp_prev.data_ptr<int>();
-  auto next_len_data = actual_seq_lengths_kv_cp_next.data_ptr<int>();
-  auto input_len_data = input_lengths.data_ptr<int>();
+  auto prev_len_data = actual_seq_lengths_kv_cp_prev.data_ptr<int32_t>();
+  auto next_len_data = actual_seq_lengths_kv_cp_next.data_ptr<int32_t>();
+  auto input_len_data = input_lengths.data_ptr<int32_t>();
 
   for (int64_t i = 0; i < n; ++i) {
-    std::vector<int> prev_range(prev_len_data[i]);
+    std::vector<int32_t> prev_range(prev_len_data[i]);
     std::iota(prev_range.begin(), prev_range.end(), k_offset);
     k_gather_index_prev.insert(
         k_gather_index_prev.end(), prev_range.begin(), prev_range.end());
 
-    std::vector<int> next_range(next_len_data[i]);
+    std::vector<int32_t> next_range(next_len_data[i]);
     std::iota(next_range.begin(), next_range.end(), k_offset);
     k_gather_index_next.insert(
         k_gather_index_next.end(), next_range.begin(), next_range.end());
@@ -204,8 +205,8 @@ struct PrefixRankGeometry {
 
 PrefixRankGeometry compute_prefix_rank_geometry(
     const std::vector<int32_t>& kv_cache_tokens_per_seq,
-    int cp_size,
-    int block_size) {
+    int32_t cp_size,
+    int32_t block_size) {
   TORCH_CHECK(cp_size > 0, "cp_size must be positive");
   TORCH_CHECK(block_size > 0, "block_size must be positive");
 
@@ -244,7 +245,7 @@ std::pair<torch::Tensor, torch::Tensor> generate_current_k_gather_index(
     const torch::Tensor& current_lengths_kv_cp_prev,
     const torch::Tensor& current_lengths_kv_cp_next,
     const torch::Tensor& input_lengths,
-    int cp_size) {
+    int32_t cp_size) {
   TORCH_CHECK(current_lengths_kv_cp_prev.dim() == 1,
               "current_lengths_kv_cp_prev must be 1D");
   TORCH_CHECK(current_lengths_kv_cp_next.dim() == 1,
@@ -257,18 +258,18 @@ std::pair<torch::Tensor, torch::Tensor> generate_current_k_gather_index(
   TORCH_CHECK(cp_size > 0, "cp_size must be positive");
 
   const int64_t n = input_lengths.numel();
-  auto prev_len_data = current_lengths_kv_cp_prev.data_ptr<int>();
-  auto next_len_data = current_lengths_kv_cp_next.data_ptr<int>();
-  auto input_len_data = input_lengths.data_ptr<int>();
+  auto prev_len_data = current_lengths_kv_cp_prev.data_ptr<int32_t>();
+  auto next_len_data = current_lengths_kv_cp_next.data_ptr<int32_t>();
+  auto input_len_data = input_lengths.data_ptr<int32_t>();
 
-  std::vector<int> prev_idx, next_idx;
-  int k_offset = 0;
+  std::vector<int32_t> prev_idx, next_idx;
+  int32_t k_offset = 0;
   for (int64_t i = 0; i < n; ++i) {
-    std::vector<int> prev_range(prev_len_data[i]);
+    std::vector<int32_t> prev_range(prev_len_data[i]);
     std::iota(prev_range.begin(), prev_range.end(), k_offset);
     prev_idx.insert(prev_idx.end(), prev_range.begin(), prev_range.end());
 
-    std::vector<int> next_range(next_len_data[i]);
+    std::vector<int32_t> next_range(next_len_data[i]);
     std::iota(next_range.begin(), next_range.end(), k_offset);
     next_idx.insert(next_idx.end(), next_range.begin(), next_range.end());
 
@@ -299,24 +300,25 @@ std::pair<torch::Tensor, torch::Tensor> generate_current_k_gather_index(
 // happen to be equal (the legacy default) behavior is unchanged.
 std::pair<torch::Tensor, torch::Tensor> generate_context_k_gather_index(
     const std::vector<int32_t>& kv_cache_tokens_per_seq,
-    int kv_split_size,
-    int block_size) {
+    int32_t kv_split_size,
+    int32_t block_size) {
   const auto geom = compute_prefix_rank_geometry(
       kv_cache_tokens_per_seq, kv_split_size, block_size);
   const int64_t n = static_cast<int64_t>(kv_cache_tokens_per_seq.size());
 
-  std::vector<int> ctx_idx;
+  std::vector<int32_t> ctx_idx;
   for (int64_t i = 0; i < n; ++i) {
     if (geom.real_len_in_rank[i] == 0) {
       // Prefix-less seq: only the padding slot lives in merged_kv's prefix
       // segment and it must not be gathered.
       continue;
     }
-    for (int64_t j = 0; j < kv_split_size; ++j) {
-      std::vector<int> prefix_range(geom.cache_len_in_rank[i]);
+    for (int32_t j = 0; j < kv_split_size; ++j) {
+      std::vector<int32_t> prefix_range(geom.cache_len_in_rank[i]);
       std::iota(prefix_range.begin(),
                 prefix_range.end(),
-                geom.offset_in_rank[i] + geom.rank_block_size * j);
+                static_cast<int32_t>(geom.offset_in_rank[i] +
+                                     geom.rank_block_size * j));
       ctx_idx.insert(ctx_idx.end(), prefix_range.begin(), prefix_range.end());
     }
   }
@@ -346,8 +348,8 @@ merge_context_and_current_k_gather_index(
     const torch::Tensor& current_lengths_kv_cp_next,
     const torch::Tensor& input_lengths,
     const std::vector<int32_t>& kv_cache_tokens_per_seq,
-    int kv_split_size,
-    int block_size) {
+    int32_t kv_split_size,
+    int32_t block_size) {
   // NOTE: `kv_split_size` (was `cp_size`) only governs the PREFIX-segment
   // geometry: rank stride for AllGather slices and `prefix_total_len`. The
   // CURRENT-segment indices passed in via current_k_gather_index_* are
@@ -367,14 +369,14 @@ merge_context_and_current_k_gather_index(
       static_cast<int32_t>(geom.rank_block_size * kv_split_size);
   const int64_t n = input_lengths.numel();
 
-  auto current_prev_len_data = current_lengths_kv_cp_prev.data_ptr<int>();
-  auto current_next_len_data = current_lengths_kv_cp_next.data_ptr<int>();
-  auto current_prev_data = current_k_gather_index_prev.data_ptr<int>();
-  auto current_next_data = current_k_gather_index_next.data_ptr<int>();
-  auto history_prev_data = history_k_gather_index_prev.data_ptr<int>();
-  auto history_next_data = history_k_gather_index_next.data_ptr<int>();
+  auto current_prev_len_data = current_lengths_kv_cp_prev.data_ptr<int32_t>();
+  auto current_next_len_data = current_lengths_kv_cp_next.data_ptr<int32_t>();
+  auto current_prev_data = current_k_gather_index_prev.data_ptr<int32_t>();
+  auto current_next_data = current_k_gather_index_next.data_ptr<int32_t>();
+  auto history_prev_data = history_k_gather_index_prev.data_ptr<int32_t>();
+  auto history_next_data = history_k_gather_index_next.data_ptr<int32_t>();
 
-  std::vector<int> merged_prev, merged_next;
+  std::vector<int32_t> merged_prev, merged_next;
   int64_t history_off = 0;
   int64_t current_off_prev = 0;
   int64_t current_off_next = 0;
@@ -411,14 +413,14 @@ merge_context_and_current_k_gather_index(
 }
 
 CpPrefillInputs prepare_cp_prefill_inputs(
-    int cp_size,
+    int32_t cp_size,
     const torch::Tensor& input_ids,
     const torch::Tensor& position_ids,
     const torch::Tensor& input_lengths,
     bool enable_kvcache_split,
     const std::vector<int32_t>& kv_cache_tokens_per_seq,
-    int block_size,
-    int kv_split_size) {
+    int32_t block_size,
+    int32_t kv_split_size) {
   TORCH_CHECK(cp_size > 0, "cp_size must be positive");
   // Default kv_split_size to cp_size to preserve legacy behavior (prefix
   // geometry was implicitly bound to cp_size before the KV-split / CP
@@ -435,8 +437,8 @@ CpPrefillInputs prepare_cp_prefill_inputs(
               ").");
   CpPrefillInputs inputs;
 
-  std::vector<int> chunk_lengths;
-  auto input_len_data = input_lengths.data_ptr<int>();
+  std::vector<int32_t> chunk_lengths;
+  auto input_len_data = input_lengths.data_ptr<int32_t>();
   for (int64_t i = 0; i < input_lengths.numel(); ++i) {
     chunk_lengths.push_back(input_len_data[i] / 2);
   }
@@ -445,8 +447,8 @@ CpPrefillInputs prepare_cp_prefill_inputs(
 
   inputs.cp_o_recover_idx = generate_cp_o_recover_idx(chunk_lengths);
 
-  inputs.cp_kv_recover_idx =
-      generate_cp_kv_recover_idx(cp_size, input_ids.numel(), chunk_lengths);
+  inputs.cp_kv_recover_idx = generate_cp_kv_recover_idx(
+      cp_size, static_cast<int32_t>(input_ids.numel()), chunk_lengths);
 
   auto input_lengths_cumsum = torch::cumsum(input_lengths, 0, torch::kInt32);
   auto [input_lengths_cumsum_cp_prev, input_lengths_cumsum_cp_next] =
@@ -476,10 +478,10 @@ CpPrefillInputs prepare_cp_prefill_inputs(
     // previous implementation.
     const auto geom = compute_prefix_rank_geometry(
         kv_cache_tokens_per_seq, kv_split_size, block_size);
-    auto prev_total_data = actual_seq_lengths_kv_cp_prev.data_ptr<int>();
-    auto next_total_data = actual_seq_lengths_kv_cp_next.data_ptr<int>();
-    std::vector<int32_t> current_prev_vec(n);
-    std::vector<int32_t> current_next_vec(n);
+    auto prev_total_data = actual_seq_lengths_kv_cp_prev.data_ptr<int32_t>();
+    auto next_total_data = actual_seq_lengths_kv_cp_next.data_ptr<int32_t>();
+    std::vector<int32_t> current_prev_vec(static_cast<size_t>(n));
+    std::vector<int32_t> current_next_vec(static_cast<size_t>(n));
     for (int64_t i = 0; i < n; ++i) {
       const int32_t prefix_kv_len_total =
           geom.real_len_in_rank[i] * kv_split_size;

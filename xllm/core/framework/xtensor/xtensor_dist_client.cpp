@@ -47,15 +47,15 @@ bool XTensorDistClient::wait_for_server_ready(
   proto::Status req;
   proto::Status resp;
 
-  int try_count = 0;
+  int32_t try_count = 0;
   brpc::Controller cntl;
-  const int sleep_time_second = 3;
+  constexpr int32_t kSleepTimeSecond = 3;
   while (try_count <
          ::xllm::ServiceConfig::get_instance().max_reconnect_count()) {
     cntl.Reset();
     stub_->Hello(&cntl, &req, &resp, nullptr);
     if (cntl.Failed() || !resp.ok()) {
-      std::this_thread::sleep_for(std::chrono::seconds(sleep_time_second));
+      std::this_thread::sleep_for(std::chrono::seconds(kSleepTimeSecond));
     } else {
       LOG(INFO) << "XTensorDistClient connected to server: " << server_address
                 << ", global_rank: " << global_rank_;
@@ -247,7 +247,7 @@ XTensorDistClient::get_xtensor_offsets_async(
     ResultType layer_offsets;
     layer_offsets.reserve(resp.layer_offsets_size());
 
-    for (int i = 0; i < resp.layer_offsets_size(); ++i) {
+    for (int32_t i = 0; i < resp.layer_offsets_size(); ++i) {
       const auto& layer_proto = resp.layer_offsets(i);
       std::vector<uint64_t> k_offsets(layer_proto.k_offsets().begin(),
                                       layer_proto.k_offsets().end());

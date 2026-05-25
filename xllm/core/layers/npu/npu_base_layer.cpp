@@ -59,7 +59,7 @@ BaseLayer::BaseLayer(const ModelContext& context)
 }
 
 atb::Status BaseLayer::execute_node(atb_speed::Model::Node& node,
-                                    int node_id,
+                                    int32_t node_id,
                                     aclrtEvent* event,
                                     std::atomic<bool>* event_flag) {
   // TODO: Stream management needs to be refactored

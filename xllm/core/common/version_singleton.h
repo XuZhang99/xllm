@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstddef>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -32,7 +33,7 @@ class VersionSingleton {
   template <typename... Args>
   static T* GetInstance(const std::string& version,
                         bool delete_old_versions = true,
-                        int reserved_version_size =
+                        size_t reserved_version_size =
                             2,  // default retention of the last two versions
                         Args&&... args) {
     T* instance = nullptr;

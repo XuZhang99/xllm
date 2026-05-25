@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <folly/Function.h>
 
+#include <cstdint>
 #include <functional>
 #include <future>
 #include <memory>
@@ -45,14 +46,14 @@ class LLMMaster : public Master {
   // handle a request, the engine will execute the request asynchronously
   // completion/encode
   void handle_request(std::string prompt,
-                      std::optional<std::vector<int>> prompt_tokens,
+                      std::optional<std::vector<int32_t>> prompt_tokens,
                       RequestParams sp,
                       std::optional<Call*> call,
                       OutputCallback callback);
 
   // chat
   void handle_request(std::vector<Message> messages,
-                      std::optional<std::vector<int>> prompt_tokens,
+                      std::optional<std::vector<int32_t>> prompt_tokens,
                       RequestParams sp,
                       std::optional<Call*> call,
                       OutputCallback callback);
@@ -95,14 +96,14 @@ class LLMMaster : public Master {
  private:
   std::shared_ptr<Request> generate_request(
       std::string prompt,
-      std::optional<std::vector<int>> prompt_tokens,
+      std::optional<std::vector<int32_t>> prompt_tokens,
       const RequestParams& sp,
       std::optional<Call*> call,
       OutputCallback callback);
 
   std::shared_ptr<Request> generate_request(
       const std::vector<Message>& messages,
-      std::optional<std::vector<int>> prompt_tokens,
+      std::optional<std::vector<int32_t>> prompt_tokens,
       const RequestParams& sp,
       std::optional<Call*> call,
       OutputCallback callback);

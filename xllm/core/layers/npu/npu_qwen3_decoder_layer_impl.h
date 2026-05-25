@@ -59,7 +59,7 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
                         ModelInputParams& input_params,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
-                        int node_id = 0);
+                        int32_t node_id = 0);
 
  private:
   void param_from_args(atb_speed::qwen::QwenLayerParam& param,
@@ -75,7 +75,7 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
                                KVCache& kv_cache,
                                ModelInputParams& input_params,
                                bool is_prefill,
-                               int node_id);
+                               int32_t node_id);
 
   void initialize_parallel_parameters(atb_speed::qwen::QwenLayerParam& param,
                                       const ParallelArgs& parallel_args);
@@ -100,13 +100,13 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
 
   at::Tensor at_placeholder_;
 
-  int device_id_;
+  int32_t device_id_;
   int32_t layer_id_;
-  int rank_id_;
+  int32_t rank_id_;
   std::vector<std::shared_ptr<at::Tensor>> prefill_tensor_storage_;
   std::vector<std::shared_ptr<at::Tensor>> decode_tensor_storage_;
-  std::vector<std::shared_ptr<std::vector<int>>> prefill_vector_storage_;
-  std::vector<std::shared_ptr<std::vector<int>>> decode_vector_storage_;
+  std::vector<std::shared_ptr<std::vector<int32_t>>> prefill_vector_storage_;
+  std::vector<std::shared_ptr<std::vector<int32_t>>> decode_vector_storage_;
 };
 TORCH_MODULE(NpuQwen3DecoderLayer);
 

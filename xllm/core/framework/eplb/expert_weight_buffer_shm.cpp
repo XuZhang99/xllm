@@ -87,7 +87,7 @@ void ExpertBufferShm::initialize_as_creator() {
 }
 
 void ExpertBufferShm::verify_and_recover() {
-  int rc = pthread_mutex_lock(&header_->allocation_mutex);
+  int32_t rc = pthread_mutex_lock(&header_->allocation_mutex);
   if (rc == EOWNERDEAD) {
     pthread_mutex_consistent(&header_->allocation_mutex);
     LOG(WARNING) << "Recovered from orphaned mutex for expert " << expert_id_;
@@ -128,8 +128,8 @@ void ExpertBufferShm::add_tensor(int32_t layer_id,
   TensorMeta* layer_metas = &tensor_metas_[layer_id * MAX_TENSORS_PER_LAYER];
 
   // Find available slot and check for duplicates
-  int available_slot = -1;
-  for (int i = 0; i < MAX_TENSORS_PER_LAYER; ++i) {
+  int32_t available_slot = -1;
+  for (int32_t i = 0; i < MAX_TENSORS_PER_LAYER; ++i) {
     TensorMeta& meta = layer_metas[i];
     if (meta.tensor_name[0] == '\0') {
       if (available_slot == -1) available_slot = i;
@@ -150,8 +150,8 @@ void ExpertBufferShm::add_tensor(int32_t layer_id,
   strncpy(meta.tensor_name, tensor_name.c_str(), sizeof(meta.tensor_name) - 1);
   meta.tensor_name[sizeof(meta.tensor_name) - 1] = '\0';
 
-  meta.rank = tensor.dim();
-  for (int i = 0; i < meta.rank; ++i) {
+  meta.rank = static_cast<int32_t>(tensor.dim());
+  for (int32_t i = 0; i < meta.rank; ++i) {
     meta.shape[i] = tensor.size(i);
   }
   meta.dtype = static_cast<int32_t>(tensor.scalar_type());
@@ -162,7 +162,7 @@ void ExpertBufferShm::add_tensor(int32_t layer_id,
 
   // Calculate offset by summing sizes of previous tensors in this expert
   size_t layer_data_offset = 0;
-  for (int i = 0; i < MAX_TENSORS_PER_LAYER; ++i) {
+  for (int32_t i = 0; i < MAX_TENSORS_PER_LAYER; ++i) {
     if (&layer_metas[i] == &meta) break;
     layer_data_offset += layer_metas[i].actual_size;
   }
@@ -203,7 +203,7 @@ torch::Tensor ExpertBufferShm::get_tensor(int32_t layer_id,
   TensorMeta* layer_metas = &tensor_metas_[layer_id * MAX_TENSORS_PER_LAYER];
 
   // Search for the requested tensor
-  for (int i = 0; i < MAX_TENSORS_PER_LAYER; ++i) {
+  for (int32_t i = 0; i < MAX_TENSORS_PER_LAYER; ++i) {
     TensorMeta& meta = layer_metas[i];
 
     // Skip empty slots

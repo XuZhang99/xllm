@@ -116,7 +116,7 @@ class XllmRecCapiServiceImpl : public c_api_test::XllmRecCapiService {
       std::vector<XLLM_ChatMessage> cms;
       std::vector<std::unique_ptr<char[]>> contents;
       cms.reserve(request->messages_size());
-      for (int i = 0; i < request->messages_size(); ++i) {
+      for (int32_t i = 0; i < request->messages_size(); ++i) {
         const auto& m = request->messages(i);
         XLLM_ChatMessage cm{};
         std::memset(cm.role, 0, sizeof(cm.role));
@@ -142,7 +142,7 @@ class XllmRecCapiServiceImpl : public c_api_test::XllmRecCapiService {
     } else if (fn == "xllm_rec_token_completions") {
       std::vector<int32_t> token_ids;
       token_ids.reserve(request->token_ids_size());
-      for (int i = 0; i < request->token_ids_size(); ++i) {
+      for (int32_t i = 0; i < request->token_ids_size(); ++i) {
         token_ids.push_back(request->token_ids(i));
       }
       raw = xllm_rec_token_completions(
@@ -155,7 +155,7 @@ class XllmRecCapiServiceImpl : public c_api_test::XllmRecCapiService {
     } else if (fn == "xllm_rec_multimodal_completions") {
       std::vector<int32_t> token_ids;
       token_ids.reserve(request->token_ids_size());
-      for (int i = 0; i < request->token_ids_size(); ++i) {
+      for (int32_t i = 0; i < request->token_ids_size(); ++i) {
         token_ids.push_back(request->token_ids(i));
       }
       XLLM_MM_Data mm{};
@@ -178,7 +178,7 @@ class XllmRecCapiServiceImpl : public c_api_test::XllmRecCapiService {
       std::vector<XLLM_ChatMessage> cms;
       std::vector<std::unique_ptr<char[]>> contents;
       cms.reserve(request->messages_size());
-      for (int i = 0; i < request->messages_size(); ++i) {
+      for (int32_t i = 0; i < request->messages_size(); ++i) {
         const auto& m = request->messages(i);
         XLLM_ChatMessage cm{};
         std::memset(cm.role, 0, sizeof(cm.role));

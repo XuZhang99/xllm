@@ -30,7 +30,7 @@ std::optional<std::string> MMType::to_string() {
     case Value::EMBEDDING:
       return "embedding";
     default:
-      LOG(WARNING) << "Unknown mm type: " << static_cast<int>(value_);
+      LOG(WARNING) << "Unknown mm type: " << static_cast<int32_t>(value_);
   }
   return std::nullopt;
 }

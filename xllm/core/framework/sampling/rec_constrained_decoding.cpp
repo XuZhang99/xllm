@@ -106,7 +106,7 @@ torch::Tensor RecConstrainedDecoding::generate_decode_mask(
   std::vector<int64_t> global_batch_token_indices;
   std::vector<int64_t> global_batch_vocab_indices;
 
-  int max_index_num_per_token = 8192;
+  int32_t max_index_num_per_token = 8192;
   global_batch_token_indices.reserve(max_index_num_per_token * sequence_num);
   global_batch_vocab_indices.reserve(max_index_num_per_token * sequence_num);
 

@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "core/framework/model/model_args.h"
@@ -32,10 +34,10 @@ class ImageProcessor {
   virtual bool process(const MMInput& mm_inputs, MMData& mm_datas) = 0;
   virtual torch::Tensor resize(const torch::Tensor& image,
                                const std::vector<int64_t>& size,
-                               int resample,
+                               int32_t resample,
                                bool antialias = true);
   virtual torch::Tensor centerCrop(const torch::Tensor& image,
-                                   const std::pair<int, int>& cropSize);
+                                   const std::pair<int64_t, int64_t>& cropSize);
   virtual torch::Tensor rescale(const torch::Tensor& image, double scale);
   virtual torch::Tensor normalize(const torch::Tensor& image,
                                   const std::vector<double>& mean,

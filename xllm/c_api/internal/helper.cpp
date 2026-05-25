@@ -155,7 +155,8 @@ XLLM_Response* build_error_response(const std::string& request_id,
   XLLM_SET_META_STRING_FIELD(response->id, request_id);
 
   LOG(ERROR) << "Request [" << request_id << "] error: " << error_info
-             << " (code: " << static_cast<int>(response->status_code) << ")";
+             << " (code: " << static_cast<int32_t>(response->status_code)
+             << ")";
 
   return response;
 }
@@ -201,7 +202,7 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
   const int32_t total_threshold =
       ::xllm::RecConfig::get_instance().total_conversion_threshold();
 
-  for (int i = 0; i < output.outputs.size(); i++) {
+  for (size_t i = 0; i < output.outputs.size(); i++) {
     const auto& seq_output = output.outputs[i];
     XLLM_Choice& choice = response->choices.entries[i];
     choice.index = seq_output.index;
@@ -240,7 +241,7 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
       choice.token_size = seq_output.token_ids.size();
       choice.token_ids = new int32_t[choice.token_size];
       CHECK(nullptr != choice.token_ids);
-      for (int j = 0; j < choice.token_size; j++) {
+      for (size_t j = 0; j < choice.token_size; j++) {
         choice.token_ids[j] = seq_output.token_ids[j];
       }
     }
@@ -250,7 +251,7 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
       choice.logprobs.entries =
           new XLLM_LogProb[choice.logprobs.entries_size]();
       CHECK(nullptr != choice.logprobs.entries);
-      for (int j = 0; j < seq_output.logprobs.value().size(); j++) {
+      for (size_t j = 0; j < seq_output.logprobs.value().size(); j++) {
         const auto& logprob = seq_output.logprobs.value()[j];
         XLLM_LogProb& xllm_logprob = choice.logprobs.entries[j];
 
@@ -414,7 +415,7 @@ XLLM_Response* handle_inference_request(
                                       std::nullopt,
                                       on_request_complete);
     } else if constexpr (std::is_same_v<HandlerType, XLLM_REC_Handler>) {
-      if constexpr (std::is_same_v<InputType, std::vector<int>>) {
+      if constexpr (std::is_same_v<InputType, std::vector<int32_t>>) {
         if (nullptr != extra) {
           xllm::MMData* mm_data =
               dynamic_cast<xllm::MMData*>(static_cast<xllm::MMData*>(extra));
@@ -478,7 +479,7 @@ void xllm_free_response(XLLM_Response* resp) {
   }
 
   if (nullptr != resp->choices.entries) {
-    for (int i = 0; i < resp->choices.entries_size; ++i) {
+    for (size_t i = 0; i < resp->choices.entries_size; ++i) {
       XLLM_Choice& choice = resp->choices.entries[i];
 
       if (nullptr != choice.text) {
@@ -577,8 +578,8 @@ torch::Tensor convert_xllm_tensor_to_torch(const XLLM_Tensor& xllm_tensor) {
       xllm_dtype_to_torch_scalar_type(xllm_tensor.dtype);
 
   std::vector<int64_t> shape;
-  for (int i = 0; i < xllm_tensor.dims.rank; ++i) {
-    int dim = xllm_tensor.dims.dim[i];
+  for (int32_t i = 0; i < xllm_tensor.dims.rank; ++i) {
+    int32_t dim = xllm_tensor.dims.dim[i];
     if (dim > 0) {
       shape.push_back(dim);
     }
@@ -741,13 +742,13 @@ handle_inference_request<XLLM_REC_Handler, std::vector<xllm::Message>>(
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
-// 5. REC Handler + std::vector<int> (chat completions)
+// 5. REC Handler + std::vector<int32_t> (chat completions)
 template XLLM_Response*
-handle_inference_request<XLLM_REC_Handler, std::vector<int>>(
+handle_inference_request<XLLM_REC_Handler, std::vector<int32_t>>(
     XLLM_REC_Handler* handler,
     InferenceType inference_type,
     const std::string& model_id,
-    const std::vector<int>& input,
+    const std::vector<int32_t>& input,
     void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);

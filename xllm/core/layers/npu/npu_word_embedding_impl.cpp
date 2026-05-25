@@ -110,7 +110,7 @@ int64_t NpuWordEmbeddingImpl::init_node(
 }
 
 torch::Tensor NpuWordEmbeddingImpl::forward(const torch::Tensor& x,
-                                            int nodeId) {
+                                            int32_t nodeId) {
   atb::Status st;
   // std::cout<<"x:"<<x<<std::endl;
   build_node_variant_pack(embedding_node_, x);

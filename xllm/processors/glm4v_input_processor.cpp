@@ -125,7 +125,7 @@ void GLM4VInputProcessor::process(std::string& prompt, const MMData& mm_data) {
   prompt = std::move(data);
 }
 
-void GLM4VInputProcessor::find_mm_spans(const std::vector<int>& prompt,
+void GLM4VInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
                                         MMData& mm_data) {
   size_t tokens_num = prompt.size();
   uint32_t global_mm_index = 0;

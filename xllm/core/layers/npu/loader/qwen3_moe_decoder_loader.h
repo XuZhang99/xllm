@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -33,26 +34,27 @@ class Qwen3MoeDecoderLoader : public BaseLoader {
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
   void verify_loaded_weights(const std::string& prefix) const override;
-  void resize_experts_weights(int num_of_device_experts) override;
+  void resize_experts_weights(int32_t num_of_device_experts) override;
 
  protected:
   void merge_host_at_weights() override;
 
   std::string extract_endswith(const std::string& input);
 
-  int extract_expert_index(const std::string& name);
+  int32_t extract_expert_index(const std::string& name);
 
-  int get_mapped_index(const std::string& name,
-                       const std::unordered_map<std::string, int>& mapping);
+  int32_t get_mapped_index(
+      const std::string& name,
+      const std::unordered_map<std::string, int32_t>& mapping);
 
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,
-                                   int dim);
+                                   int32_t dim);
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,
-                                   int dim,
-                                   int local_tp_rank,
-                                   int local_tp_size);
+                                   int32_t dim,
+                                   int32_t local_tp_rank,
+                                   int32_t local_tp_size);
 
   void process_mlp_common_weights(const StateDict& state_dict,
                                   const std::string& name,

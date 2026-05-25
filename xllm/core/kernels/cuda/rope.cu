@@ -16,6 +16,8 @@ limitations under the License.
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/all.h>
 
+#include <cstdint>
+
 #include "cuda_ops_api.h"
 
 // ref to:
@@ -28,9 +30,9 @@ inline __device__ void apply_token_rotary_embedding(
     scalar_t* __restrict__ arr,
     const scalar_t* __restrict__ cos_ptr,
     const scalar_t* __restrict__ sin_ptr,
-    int rot_offset,
-    int embed_dim) {
-  int x_index, y_index;
+    int64_t rot_offset,
+    int64_t embed_dim) {
+  int64_t x_index, y_index;
   scalar_t cos, sin;
   if (IS_NEOX) {
     // GPT-NeoX style rotary embedding.
@@ -62,35 +64,35 @@ inline __device__ void apply_rotary_embedding(
                                    // head_size] or [num_tokens, num_kv_heads,
                                    // head_size]
     const scalar_t* cache_ptr,
-    const int head_size,
-    const int num_heads,
-    const int num_kv_heads,
-    const int rot_dim,
-    const int token_idx,
+    const int64_t head_size,
+    const int64_t num_heads,
+    const int64_t num_kv_heads,
+    const int64_t rot_dim,
+    const int64_t token_idx,
     const int64_t query_stride,
     const int64_t key_stride,
     const int64_t head_stride) {
-  const int embed_dim = rot_dim / 2;
+  const int64_t embed_dim = rot_dim / 2;
   const scalar_t* cos_ptr = cache_ptr;
   const scalar_t* sin_ptr = cache_ptr + embed_dim;
 
-  const int nq = num_heads * embed_dim;
-  for (int i = threadIdx.x; i < nq; i += blockDim.x) {
-    const int head_idx = i / embed_dim;
+  const int64_t nq = num_heads * embed_dim;
+  for (int64_t i = threadIdx.x; i < nq; i += blockDim.x) {
+    const int64_t head_idx = i / embed_dim;
     const int64_t token_head =
         token_idx * query_stride + head_idx * head_stride;
-    const int rot_offset = i % embed_dim;
+    const int64_t rot_offset = i % embed_dim;
     apply_token_rotary_embedding<scalar_t, IS_NEOX>(
         query + token_head, cos_ptr, sin_ptr, rot_offset, embed_dim);
   }
 
   if (key != nullptr) {
-    const int nk = num_kv_heads * embed_dim;
-    for (int i = threadIdx.x; i < nk; i += blockDim.x) {
-      const int head_idx = i / embed_dim;
+    const int64_t nk = num_kv_heads * embed_dim;
+    for (int64_t i = threadIdx.x; i < nk; i += blockDim.x) {
+      const int64_t head_idx = i / embed_dim;
       const int64_t token_head =
           token_idx * key_stride + head_idx * head_stride;
-      const int rot_offset = i % embed_dim;
+      const int64_t rot_offset = i % embed_dim;
       apply_token_rotary_embedding<scalar_t, IS_NEOX>(
           key + token_head, cos_ptr, sin_ptr, rot_offset, embed_dim);
     }
@@ -110,15 +112,15 @@ __global__ void rotary_embedding_kernel(
                                  // head_size]
     const scalar_t* __restrict__ cos_sin_cache,  // [max_position, 2, rot_dim //
                                                  // 2]
-    const int rot_dim,
+    const int64_t rot_dim,
     const int64_t query_stride,
     const int64_t key_stride,
     const int64_t head_stride,
-    const int num_heads,
-    const int num_kv_heads,
-    const int head_size) {
+    const int64_t num_heads,
+    const int64_t num_kv_heads,
+    const int64_t head_size) {
   // Each thread block is responsible for one token.
-  const int token_idx = blockIdx.x;
+  const int64_t token_idx = blockIdx.x;
   int64_t pos = positions[token_idx];
   const scalar_t* cache_ptr = cos_sin_cache + pos * rot_dim;
 
@@ -170,7 +172,7 @@ void rotary_embedding(
   // num_tokens = batch_size * seq_len
   int64_t head_size = cos_sin_cache.size(-1);
   int64_t num_tokens = positions.numel();
-  int positions_ndim = positions.dim();
+  int64_t positions_ndim = positions.dim();
 
   // Make sure num_tokens dim is consistent across positions, query, and key
   CHECK(positions_ndim == 1 || positions_ndim == 2)
@@ -191,24 +193,25 @@ void rotary_embedding(
 
   // Make sure head_size is valid for query and key
   // hidden_size = num_heads * head_size
-  int query_hidden_size = query.numel() / num_tokens;
-  int key_hidden_size = key.has_value() ? key->numel() / num_tokens : 0;
+  int64_t query_hidden_size = query.numel() / num_tokens;
+  int64_t key_hidden_size = key.has_value() ? key->numel() / num_tokens : 0;
   CHECK(query_hidden_size % head_size == 0);
   CHECK(key_hidden_size % head_size == 0);
 
   // Make sure query and key have consistent number of heads
-  int num_heads = query_hidden_size / head_size;
-  int num_kv_heads = key.has_value() ? key_hidden_size / head_size : num_heads;
+  int64_t num_heads = query_hidden_size / head_size;
+  int64_t num_kv_heads =
+      key.has_value() ? key_hidden_size / head_size : num_heads;
   CHECK(num_heads % num_kv_heads == 0);
 
-  int rot_dim = cos_sin_cache.size(1);
-  int seq_dim_idx = positions_ndim - 1;
+  int64_t rot_dim = cos_sin_cache.size(1);
+  int64_t seq_dim_idx = positions_ndim - 1;
   int64_t query_stride = query.stride(seq_dim_idx);
   int64_t key_stride = key.has_value() ? key->stride(seq_dim_idx) : 0;
   // Determine head stride: for [*, heads, head_size] use stride of last dim;
   // for flat [*, heads*head_size], heads blocks are contiguous of size
   // head_size
-  int query_ndim = query.dim();
+  int64_t query_ndim = query.dim();
   int64_t head_stride =
       (query_ndim == positions_ndim + 2) ? query.stride(-2) : head_size;
 

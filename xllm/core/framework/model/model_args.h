@@ -307,11 +307,11 @@ struct ModelArgs {
   // Vision model's mm_vocab_size
   PROPERTY(int64_t, mm_vocab_size) = 0;
 
-  PROPERTY(int, mm_window_size) = 0;
-  PROPERTY(std::vector<int64_t>, mm_fullatt_block_indexes);
-  PROPERTY(std::vector<int64_t>, mm_deepstack_visual_indexes);
-  PROPERTY(int, mm_tokens_per_second) = 0;
-  PROPERTY(int, mm_temporal_patch_size) = 0;
+  PROPERTY(int32_t, mm_window_size) = 0;
+  PROPERTY(std::vector<int32_t>, mm_fullatt_block_indexes);
+  PROPERTY(std::vector<int32_t>, mm_deepstack_visual_indexes);
+  PROPERTY(int32_t, mm_tokens_per_second) = 0;
+  PROPERTY(int32_t, mm_temporal_patch_size) = 0;
 
   // VLM model projector's mm_projector_type
   PROPERTY(std::string, mm_projector_type);
@@ -333,14 +333,14 @@ struct ModelArgs {
   // mm image begin
   // VLM image preprocessor centor crop
   PROPERTY(bool, mm_image_do_center_crop) = false;
-  PROPERTY(int, mm_image_crop_height_size) = 336;
-  PROPERTY(int, mm_image_crop_width_size) = 336;
+  PROPERTY(int32_t, mm_image_crop_height_size) = 336;
+  PROPERTY(int32_t, mm_image_crop_width_size) = 336;
 
   // VLM image preprocessor resize
   PROPERTY(bool, mm_image_do_resize) = false;
-  PROPERTY(int, mm_image_resize_shortest_edge) = 336;
+  PROPERTY(int32_t, mm_image_resize_shortest_edge) = 336;
 
-  PROPERTY(int, mm_image_resample) = 0;
+  PROPERTY(int32_t, mm_image_resample) = 0;
 
   // VLM image preprocessor resize
   PROPERTY(bool, mm_image_do_rescale) = false;
@@ -356,8 +356,8 @@ struct ModelArgs {
   PROPERTY(std::vector<double>, mm_video_normalize_mean) = {};
   PROPERTY(std::vector<double>, mm_video_normalize_std) = {};
 
-  PROPERTY(int, mm_image_min_pixels) = 0;
-  PROPERTY(int, mm_image_max_pixels) = 0;
+  PROPERTY(int32_t, mm_image_min_pixels) = 0;
+  PROPERTY(int32_t, mm_image_max_pixels) = 0;
 
   PROPERTY(int64_t, mm_image_shortest_edge) = 0;
   PROPERTY(int64_t, mm_image_longest_edge) = 0;
@@ -366,17 +366,17 @@ struct ModelArgs {
   PROPERTY(int64_t, mm_video_shortest_edge) = 0;
   PROPERTY(int64_t, mm_video_longest_edge) = 0;
 
-  PROPERTY(int, mm_image_patch_size) = 0;
-  PROPERTY(int, mm_image_temporal_patch_size) = 0;
-  PROPERTY(int, mm_image_merge_size) = 0;
+  PROPERTY(int32_t, mm_image_patch_size) = 0;
+  PROPERTY(int32_t, mm_image_temporal_patch_size) = 0;
+  PROPERTY(int32_t, mm_image_merge_size) = 0;
 
   // GLM
-  PROPERTY(int, mm_video_patch_size) = 0;
-  PROPERTY(int, mm_video_temporal_patch_size) = 0;
-  PROPERTY(int, mm_video_merge_size) = 0;
+  PROPERTY(int32_t, mm_video_patch_size) = 0;
+  PROPERTY(int32_t, mm_video_temporal_patch_size) = 0;
+  PROPERTY(int32_t, mm_video_merge_size) = 0;
 
-  PROPERTY(int, mm_image_feature_size) = 0;
-  PROPERTY(int, mm_scale_resolution) = 0;
+  PROPERTY(int32_t, mm_image_feature_size) = 0;
+  PROPERTY(int32_t, mm_scale_resolution) = 0;
   PROPERTY(bool, mm_slice_mode) = false;
   PROPERTY(bool, mm_use_image_id) = false;
 

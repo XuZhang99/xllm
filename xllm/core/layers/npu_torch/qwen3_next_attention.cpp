@@ -85,8 +85,8 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
       "k_norm", Qwen3NextRMSNorm(head_dim_, args.rms_norm_eps(), options));
 
   // 5. Rotary embedding
-  const int rotary_dim =
-      static_cast<int>(head_dim_ * args.partial_rotary_factor());
+  const int64_t rotary_dim =
+      static_cast<int64_t>(head_dim_ * args.partial_rotary_factor());
   rotary_emb_ =
       register_module("rotary_emb",
                       PartialRotaryEmbedding(rotary_dim,

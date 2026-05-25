@@ -178,43 +178,45 @@ std::string Qwen3MoeDecoderLoader::extract_endswith(const std::string& input) {
   return result;
 }
 
-int Qwen3MoeDecoderLoader::extract_expert_index(const std::string& name) {
+int32_t Qwen3MoeDecoderLoader::extract_expert_index(const std::string& name) {
   std::string prefix = "experts.";
   size_t pos = name.find(prefix);
   if (pos != std::string::npos) {
     pos += prefix.length();
     size_t end_pos = pos;
-    while (end_pos < name.length() && std::isdigit(name[end_pos])) {
+    while (end_pos < name.length() &&
+           std::isdigit(static_cast<unsigned char>(name[end_pos]))) {
       ++end_pos;
     }
     if (end_pos > pos) {
-      return std::stoi(name.substr(pos, end_pos - pos));
+      return static_cast<int32_t>(std::stoll(name.substr(pos, end_pos - pos)));
     }
   }
 
   return -1;
 }
 
-void Qwen3MoeDecoderLoader::resize_experts_weights(int num_of_device_experts) {
+void Qwen3MoeDecoderLoader::resize_experts_weights(
+    int32_t num_of_device_experts) {
+  const size_t num_experts = static_cast<size_t>(num_of_device_experts);
   experts_weights_["gate_proj.weight"] =
-      std::vector<torch::Tensor>(num_of_device_experts);
-  experts_weights_["up_proj.weight"] =
-      std::vector<torch::Tensor>(num_of_device_experts);
+      std::vector<torch::Tensor>(num_experts);
+  experts_weights_["up_proj.weight"] = std::vector<torch::Tensor>(num_experts);
   experts_weights_["down_proj.weight"] =
-      std::vector<torch::Tensor>(num_of_device_experts);
+      std::vector<torch::Tensor>(num_experts);
   if (quantize_type_.compare("w8a8_dynamic") == 0) {
     experts_weights_["gate_proj.weight_offset"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["up_proj.weight_offset"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["down_proj.weight_offset"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["gate_proj.weight_scale"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["up_proj.weight_scale"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
     experts_weights_["down_proj.weight_scale"] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(num_experts);
   }
 }
 
@@ -222,7 +224,7 @@ void Qwen3MoeDecoderLoader::process_expert_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
-  int expert_index = extract_expert_index(name);
+  int32_t expert_index = extract_expert_index(name);
   if (expert_index < start_expert_id_ || expert_index > end_expert_id_) {
     return;
   }
@@ -234,8 +236,8 @@ void Qwen3MoeDecoderLoader::process_expert_weights(
   const auto& shard_map = (quantize_type_.compare("w8a8_dynamic") == 0)
                               ? WEIGHT_SHARD_W8A8
                               : WEIGHT_SHARD;
-  const int index = get_mapped_index(suffix, weight_mapping);
-  const int local_index = expert_index % num_experts_per_partition_;
+  const int32_t index = get_mapped_index(suffix, weight_mapping);
+  const int32_t local_index = expert_index % num_experts_per_partition_;
   const bool is_sharded = shard_map.count(index);
 
   torch::Tensor tmp_tensor = is_sharded
@@ -249,9 +251,9 @@ void Qwen3MoeDecoderLoader::process_expert_weights(
   experts_weights_[suffix][local_index] = tmp_tensor.clone();
 }
 
-int Qwen3MoeDecoderLoader::get_mapped_index(
+int32_t Qwen3MoeDecoderLoader::get_mapped_index(
     const std::string& name,
-    const std::unordered_map<std::string, int>& mapping) {
+    const std::unordered_map<std::string, int32_t>& mapping) {
   const auto it = mapping.find(name);
   if (it == mapping.end()) {
     LOG(ERROR) << "Missing mapping for: " << name;
@@ -271,7 +273,7 @@ void Qwen3MoeDecoderLoader::process_mlp_common_weights(
   const auto& shard_map = (quantize_type_.compare("w8a8_dynamic") == 0)
                               ? WEIGHT_SHARD_W8A8
                               : WEIGHT_SHARD;
-  const int index = get_mapped_index(name, weight_mapping);
+  const int32_t index = get_mapped_index(name, weight_mapping);
   const bool is_sharded = shard_map.count(index);
 
   torch::Tensor tmp_tensor = is_sharded
@@ -304,22 +306,23 @@ void Qwen3MoeDecoderLoader::process_general_weights(
     return;
   }
 
-  const int index = get_mapped_index(name, weight_mapping);
+  const int32_t index = get_mapped_index(name, weight_mapping);
   const bool is_sharded = shard_map.count(index);
   torch::Tensor tmp_tensor;
   int32_t tp_rank = dp_local_tp_rank_;
   int32_t tp_size = dp_local_tp_size_;
 
-  static const std::unordered_set<int> qkv_tensor_indices = {IN_QKV_WEIGHT_1,
-                                                             IN_QKV_WEIGHT_2,
-                                                             IN_QKV_BIAS_1,
-                                                             IN_QKV_BIAS_2,
-                                                             IN_QKV_DESCALE_1,
-                                                             IN_QKV_DESCALE_2,
-                                                             IN_QKV_OFFSET_1,
-                                                             IN_QKV_OFFSET_2,
-                                                             IN_QKV_SCALE_1,
-                                                             IN_QKV_SCALE_2};
+  static const std::unordered_set<int32_t> qkv_tensor_indices = {
+      IN_QKV_WEIGHT_1,
+      IN_QKV_WEIGHT_2,
+      IN_QKV_BIAS_1,
+      IN_QKV_BIAS_2,
+      IN_QKV_DESCALE_1,
+      IN_QKV_DESCALE_2,
+      IN_QKV_OFFSET_1,
+      IN_QKV_OFFSET_2,
+      IN_QKV_SCALE_1,
+      IN_QKV_SCALE_2};
 
   if (qkv_tensor_indices.count(index) > 0) {
     if (n_kv_heads_ < dp_local_tp_size_) {
@@ -342,7 +345,7 @@ void Qwen3MoeDecoderLoader::process_general_weights(
   if (quantize_type_.compare("w8a8_dynamic") == 0) {
     auto it = SPECIAL_MULTI_ASSIGN_W8A8.find(name);
     if (it != SPECIAL_MULTI_ASSIGN_W8A8.end()) {
-      for (int idx : it->second) {
+      for (int32_t idx : it->second) {
         t[idx] = tmp_tensor;
       }
       return;
@@ -354,7 +357,7 @@ void Qwen3MoeDecoderLoader::process_general_weights(
 torch::Tensor Qwen3MoeDecoderLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
-    int dim) {
+    int32_t dim) {
   if (parallel_args_.world_size() > 1) {
     return state_dict.get_sharded_tensor(
         name, dim, parallel_args_.rank(), parallel_args_.world_size());
@@ -366,9 +369,9 @@ torch::Tensor Qwen3MoeDecoderLoader::get_sharded_tensor(
 torch::Tensor Qwen3MoeDecoderLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
-    int dim,
-    int local_tp_rank,
-    int local_tp_size) {
+    int32_t dim,
+    int32_t local_tp_rank,
+    int32_t local_tp_size) {
   if (local_tp_size > 1) {
     return state_dict.get_sharded_tensor(
         name, dim, local_tp_rank, local_tp_size);

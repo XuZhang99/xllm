@@ -124,9 +124,9 @@ class Glm4_VisionBlockImpl : public torch::nn::Module {
                         torch::Tensor& m_cos_pos,
                         torch::Tensor& m_sin_pos,
                         torch::Tensor& cu_seq_len,
-                        std::vector<int>& cu_seq_len_vec,
+                        std::vector<int32_t>& cu_seq_len_vec,
                         ModelInputParams& input_params,
-                        int node_id) {
+                        int32_t node_id) {
     return encoder_layer_(x,
                           m_cos_pos,
                           m_sin_pos,
@@ -182,13 +182,13 @@ class Glm4VisionRotaryEmbeddingImpl : public torch::nn::Module {
     freqs_cached_ = torch::outer(seq, inv_freq_);
   }
 
-  torch::Tensor forward(int seqlen) {
+  torch::Tensor forward(int64_t seqlen) {
     update_freqs_cache(seqlen);
     return freqs_cached_.slice(0, 0, seqlen);
   }
 
  private:
-  int dim_ = 0;
+  int64_t dim_ = 0;
   double theta_ = 0.0;
 
   int64_t seq_len_cached_ = 0;
@@ -213,7 +213,7 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
         position_embedding_->weight.to(options));
   }
   torch::Tensor forward(torch::Tensor x,
-                        std::vector<int> lengths,
+                        std::vector<int32_t> lengths,
                         torch::Tensor image_shapes,
                         torch::Tensor h_coords,
                         torch::Tensor w_coords) {
@@ -468,13 +468,13 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
   }
   std::tuple<torch::Tensor, torch::Tensor> rot_pos_emb(torch::Tensor grid_thw) {
     std::vector<torch::Tensor> pos_ids_vec;
-    auto count = grid_thw.sizes()[0];
+    int64_t count = grid_thw.sizes()[0];
     pos_ids_vec.reserve(count);
     auto options =
         torch::TensorOptions().dtype(torch::kLong).device(grid_thw.device());
 
     auto grid_thw_cpu = grid_thw.cpu();
-    for (int idx = 0; idx < count; ++idx) {
+    for (int64_t idx = 0; idx < count; ++idx) {
       auto t = grid_thw_cpu[idx][0].item<int64_t>();
       auto h = grid_thw_cpu[idx][1].item<int64_t>();
       auto w = grid_thw_cpu[idx][2].item<int64_t>();
@@ -544,9 +544,9 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
     cu_seqlens = F::pad(
         cu_seqlens, F::PadFuncOptions({1, 0}).mode(torch::kConstant).value(0));
     cu_seqlens = torch::diff(cu_seqlens).cpu().to(torch::kInt);
-    std::vector<int> seqlens;
-    seqlens.assign(cu_seqlens.data_ptr<int>(),
-                   cu_seqlens.data_ptr<int>() + cu_seqlens.numel());
+    std::vector<int32_t> seqlens;
+    seqlens.assign(cu_seqlens.data_ptr<int32_t>(),
+                   cu_seqlens.data_ptr<int32_t>() + cu_seqlens.numel());
 
     hidden_states = embeddings_(hidden_states,
                                 seqlens,
@@ -556,18 +556,18 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
-    std::vector<int> cu_seqlens_vec(
-        cu_seqlens_cpu.data_ptr<int>(),
-        cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
+    std::vector<int32_t> cu_seqlens_vec(
+        cu_seqlens_cpu.data_ptr<int32_t>(),
+        cu_seqlens_cpu.data_ptr<int32_t>() + cu_seqlens_cpu.numel());
     cu_seqlens = cu_seqlens.to(hidden_states.device());
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    for (size_t idx = 0; idx < blocks_->size(); ++idx) {
       hidden_states = layers_[idx](hidden_states,
                                    m_cos,
                                    m_sin,
                                    cu_seqlens,
                                    cu_seqlens_vec,
                                    input_params_new,
-                                   idx);
+                                   static_cast<int32_t>(idx));
     }
     hidden_states = post_layernorm_(hidden_states);
     hidden_states = hidden_states.view(
@@ -592,7 +592,7 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
       post_conv_layernorm_->weight.data().copy_(norm_weight);
       is_post_conv_layernorm_weight_loaded = true;
     }
-    for (int idx = 0; idx < layers_.size(); ++idx) {
+    for (size_t idx = 0; idx < layers_.size(); ++idx) {
       layers_[idx]->load_state_dict(state_dict.get_dict_with_prefix(
           "blocks." + std::to_string(idx) + "."));
     }
@@ -625,7 +625,7 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
     embeddings_->verify_loaded_weights(prefix + "embeddings.");
     CHECK(is_post_conv_layernorm_weight_loaded)
         << "weight is not loaded for " << prefix + "post_conv_layernorm.weight";
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    for (size_t idx = 0; idx < blocks_->size(); ++idx) {
       layers_[idx]->verify_loaded_weights(prefix + "blocks." +
                                           std::to_string(idx) + ".");
     }
@@ -640,15 +640,15 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
   }
 
   void merge_loaded_weights() {
-    for (int idx = 0; idx < layers_.size(); ++idx) {
+    for (size_t idx = 0; idx < layers_.size(); ++idx) {
       layers_[idx]->merge_loaded_weights();
     }
   }
 
  private:
-  int hidden_size_ = 0;
-  int out_hidden_size_ = 0;
-  int spatial_merge_size_ = 0;
+  int64_t hidden_size_ = 0;
+  int64_t out_hidden_size_ = 0;
+  int64_t spatial_merge_size_ = 0;
 
   Glm4VisionPatchEmbed patch_embed_{nullptr};
   Glm4VisionRotaryEmbedding rotary_pos_emb_{nullptr};
@@ -743,10 +743,10 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
     }
     if (video_input) {
       std::vector<torch::Tensor> temp_frames_hw;
-      for (int i = 0; i < video_input->video_grid_thw.size(0); ++i) {
-        auto t = video_input->video_grid_thw[i][0].item<int32_t>();
-        auto h = video_input->video_grid_thw[i][1].item<int32_t>();
-        auto w = video_input->video_grid_thw[i][2].item<int32_t>();
+      for (int64_t i = 0; i < video_input->video_grid_thw.size(0); ++i) {
+        auto t = video_input->video_grid_thw[i][0].item<int64_t>();
+        auto h = video_input->video_grid_thw[i][1].item<int64_t>();
+        auto w = video_input->video_grid_thw[i][2].item<int64_t>();
         auto repeated_row =
             torch::tensor({1, h, w}).unsqueeze(0).repeat({t, 1});
         temp_frames_hw.push_back(repeated_row);
@@ -869,8 +869,9 @@ REGISTER_MODEL_ARGS(glm4v, [&] {
   // text config
   LOAD_ARG_OR(vocab_size, "text_config.vocab_size", 151552);
   // LOAD_ARG_OR(pad_token_id, "text_config.pad_token_id", 151329);
-  LOAD_ARG_OR(
-      eos_token_id_vec, "text_config.eos_token_id", std::vector<int>{151329});
+  LOAD_ARG_OR(eos_token_id_vec,
+              "text_config.eos_token_id",
+              std::vector<int32_t>{151329});
   LOAD_ARG_OR(attention_bias, "text_config.attention_bias", true);
   LOAD_ARG_OR(attention_dropout, "text_config.attention_dropout", 0.0f);
   LOAD_ARG_OR(first_k_dense_replace, "text_config.first_k_dense_replace", 1);

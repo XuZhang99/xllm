@@ -36,7 +36,7 @@ int32_t get_sm_version_num() {
   return version_num;
 }
 
-int32_t get_device_sm_count(int device) {
+int32_t get_device_sm_count(int32_t device) {
   return xllm::cuda::get_device_sm_count(device);
 }
 

@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -88,7 +89,7 @@ class Qwen2VLImageProcessor : public ImageProcessor {
   int32_t resample_ = 3;
   double rescale_factor_ = 0.00392156862745098;
 
-  std::unordered_map<std::string, int> size_;
+  std::unordered_map<std::string, int32_t> size_;
   int32_t temporal_patch_size_ = 2;
 
   bool do_sample_frame_ = true;

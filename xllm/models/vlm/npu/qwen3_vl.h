@@ -99,9 +99,9 @@ class Qwen3_VisionBlockImpl : public torch::nn::Module {
                         torch::Tensor& m_cos_pos,
                         torch::Tensor& m_sin_pos,
                         torch::Tensor& cu_seq_len,
-                        std::vector<int>& cu_seq_len_vec,
+                        std::vector<int32_t>& cu_seq_len_vec,
                         ModelInputParams& input_params,
-                        int node_id) {
+                        int32_t node_id) {
     return encoder_layer_(x,
                           m_cos_pos,
                           m_sin_pos,
@@ -157,13 +157,13 @@ class Qwen3_VisionRotaryEmbeddingImpl : public torch::nn::Module {
     freqs_cached_ = torch::outer(seq, inv_freq_);
   }
 
-  torch::Tensor forward(int seqlen) {
+  torch::Tensor forward(int64_t seqlen) {
     update_freqs_cache(seqlen);
     return freqs_cached_.slice(0, 0, seqlen);
   }
 
  private:
-  int dim_ = 0;
+  int64_t dim_ = 0;
   double theta_ = 0.0;
 
   int64_t seq_len_cached_ = 0;
@@ -181,10 +181,9 @@ class Qwen3_VisionPatchMergerImpl : public torch::nn::Module {
     auto quant_args = context.get_quant_args();
     auto parallel_args = context.get_parallel_args();
     int64_t d_model = model_args.mm_projection_dim();
-    int context_dim = model_args.mm_hidden_size();
-    int spatial_merge_size = model_args.mm_spatial_merge_size();
-    hidden_size_ =
-        context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
+    int64_t context_dim = model_args.mm_hidden_size();
+    int64_t spatial_merge_size = model_args.mm_spatial_merge_size();
+    hidden_size_ = context_dim * spatial_merge_size * spatial_merge_size;
     use_postshuffle_norm_ = use_postshuffle_norm;
     if (use_postshuffle_norm)
       norm_ = register_module(
@@ -289,7 +288,7 @@ class Qwen3_VisionPatchMergerImpl : public torch::nn::Module {
   }
 
  private:
-  int hidden_size_;
+  int64_t hidden_size_;
   bool use_postshuffle_norm_;
   torch::nn::LayerNorm norm_{nullptr};
   torch::nn::Sequential mlp_{nullptr};
@@ -321,9 +320,9 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
                                      visual_indexes.begin(),
                                      visual_indexes.end());
     num_position_embeddings_ = model_args.mm_num_position_embeddings();
-    spatial_merge_unit_ =
-        static_cast<int>(spatial_merge_size_ * spatial_merge_size_);
-    num_grid_per_side_ = static_cast<int>(std::sqrt(num_position_embeddings_));
+    spatial_merge_unit_ = spatial_merge_size_ * spatial_merge_size_;
+    num_grid_per_side_ =
+        static_cast<int64_t>(std::sqrt(num_position_embeddings_));
 
     patch_embed_ =
         register_module("patch_embed", Qwen3_VisionPatchEmbed(context));
@@ -346,7 +345,7 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
       blocks_->push_back(block);
       layers_.push_back(block);
     }
-    for (int32_t idx = 0; idx < deepstack_visual_indexes_.size(); idx++) {
+    for (size_t idx = 0; idx < deepstack_visual_indexes_.size(); ++idx) {
       auto merger = Qwen3_VisionPatchMerger(context, true);
       deepstack_mergers_->push_back(merger);
       deepstack_merger_layers_.push_back(merger);
@@ -355,14 +354,14 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
 
   torch::Tensor rot_pos_emb(torch::Tensor grid_thw) {
     std::vector<torch::Tensor> pos_ids_vec;
-    auto count = grid_thw.sizes()[0];
+    int64_t count = grid_thw.sizes()[0];
     pos_ids_vec.reserve(count);
 
     auto grid_thw_cpu = grid_thw.cpu();
     auto options =
         torch::TensorOptions().dtype(torch::kLong).device(grid_thw.device());
 
-    for (int idx = 0; idx < count; ++idx) {
+    for (int64_t idx = 0; idx < count; ++idx) {
       auto t = grid_thw_cpu[idx][0].item<int64_t>();
       auto h = grid_thw_cpu[idx][1].item<int64_t>();
       auto w = grid_thw_cpu[idx][2].item<int64_t>();
@@ -511,25 +510,26 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
-    std::vector<int> cu_seqlens_vec(
-        cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec
-        cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
+    std::vector<int32_t> cu_seqlens_vec(
+        cu_seqlens_cpu.data_ptr<int32_t>(),  // full seqlen vec
+        cu_seqlens_cpu.data_ptr<int32_t>() + cu_seqlens_cpu.numel());
     std::vector<torch::Tensor> deepstack_feature_lists;
     deepstack_feature_lists.reserve(deepstack_visual_indexes_.size());
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    for (size_t idx = 0; idx < blocks_->size(); ++idx) {
       hidden_states = layers_[idx](hidden_states,
                                    m_cos,
                                    m_sin,
                                    cu_seqlens,
                                    cu_seqlens_vec,
                                    input_params_new,
-                                   idx);
+                                   static_cast<int32_t>(idx));
       auto it = std::find(deepstack_visual_indexes_.begin(),
                           deepstack_visual_indexes_.end(),
                           idx);
 
       if (it != deepstack_visual_indexes_.end()) {
-        int index = std::distance(deepstack_visual_indexes_.begin(), it);
+        size_t index = static_cast<size_t>(
+            std::distance(deepstack_visual_indexes_.begin(), it));
         deepstack_feature_lists.push_back(
             deepstack_merger_layers_[index](hidden_states));
       }
@@ -542,14 +542,14 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict) {
     patch_embed_->load_state_dict(
         state_dict.get_dict_with_prefix("patch_embed."));
-    for (int idx = 0; idx < layers_.size(); ++idx) {
+    for (size_t idx = 0; idx < layers_.size(); ++idx) {
       layers_[idx]->load_state_dict(state_dict.get_dict_with_prefix(
           "blocks." + std::to_string(idx) + "."));
     }
 
     merger_->load_state_dict(state_dict.get_dict_with_prefix("merger."));
 
-    for (int idx = 0; idx < deepstack_merger_layers_.size(); ++idx) {
+    for (size_t idx = 0; idx < deepstack_merger_layers_.size(); ++idx) {
       deepstack_merger_layers_[idx]->load_state_dict(
           state_dict.get_dict_with_prefix("deepstack_merger_list." +
                                           std::to_string(idx) + "."));
@@ -567,13 +567,13 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
 
   void verify_loaded_weights(const std::string& prefix) const {
     patch_embed_->verify_loaded_weights(prefix + "patch_embed.");
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    for (size_t idx = 0; idx < blocks_->size(); ++idx) {
       layers_[idx]->verify_loaded_weights(prefix + "blocks." +
                                           std::to_string(idx) + ".");
     }
     merger_->verify_loaded_weights(prefix + "merger.");
 
-    for (int idx = 0; idx < deepstack_merger_layers_.size(); ++idx) {
+    for (size_t idx = 0; idx < deepstack_merger_layers_.size(); ++idx) {
       deepstack_merger_layers_[idx]->verify_loaded_weights(
           "deepstack_merger_list." + std::to_string(idx) + ".");
     }
@@ -582,21 +582,21 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
   }
 
   void merge_loaded_weights() {
-    for (int idx = 0; idx < layers_.size(); ++idx) {
+    for (size_t idx = 0; idx < layers_.size(); ++idx) {
       layers_[idx]->merge_loaded_weights();
     }
   }
 
  private:
-  int hidden_size_ = 0;
-  int num_heads_ = 0;
-  int window_size_ = 0;
-  int patch_size_ = 0;
-  int spatial_merge_size_ = 0;
-  std::vector<int64_t> deepstack_visual_indexes_;
-  int spatial_merge_unit_ = 0;
+  int64_t hidden_size_ = 0;
+  int64_t num_heads_ = 0;
+  int64_t window_size_ = 0;
+  int64_t patch_size_ = 0;
+  int64_t spatial_merge_size_ = 0;
+  std::vector<int32_t> deepstack_visual_indexes_;
+  int64_t spatial_merge_unit_ = 0;
   int64_t num_position_embeddings_ = 0;
-  int num_grid_per_side_ = 0;
+  int64_t num_grid_per_side_ = 0;
 
   Qwen3_VisionPatchEmbed patch_embed_{nullptr};
   Qwen3_VisionRotaryEmbedding rotary_pos_emb_{nullptr};
@@ -611,7 +611,7 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
 
   torch::Tensor m_cos;
   torch::Tensor m_sin;
-  int device_id = 0;
+  int32_t device_id = 0;
   bool is_emb_weight_loaded = false;
   torch::TensorOptions options_;
 };

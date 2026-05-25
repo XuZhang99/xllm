@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <google/protobuf/util/json_util.h>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -35,7 +36,7 @@ namespace api_service {
 
 // Check for unstreamed tool arguments and send them using the provided sender
 // This is shared between Chat API and Anthropic API implementations
-using SendFunc = std::function<bool(const std::string&, int)>;
+using SendFunc = std::function<bool(const std::string&, int32_t)>;
 inline bool check_for_unstreamed_tool_args(
     std::shared_ptr<StreamOutputParser> stream_parser,
     size_t index,
@@ -66,7 +67,7 @@ inline bool check_for_unstreamed_tool_args(
               expected_call.substr(actual_args.length());
 
           if (!remaining_call.empty()) {
-            return send_func(remaining_call, static_cast<int>(tool_index));
+            return send_func(remaining_call, static_cast<int32_t>(tool_index));
           }
         }
       }

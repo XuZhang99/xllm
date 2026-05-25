@@ -32,7 +32,7 @@ MMErrCode MMInputTransfer::trans(const std::vector<Message>& messages,
   inputs.clear();
   std::vector<MMInputItem> ins;
 
-  for (int idx = 0; idx < messages.size(); ++idx) {
+  for (size_t idx = 0; idx < messages.size(); ++idx) {
     const auto& message = messages[idx];
     const auto& mmc = std::get<MMContentVec>(message.content);
 
@@ -50,7 +50,7 @@ MMErrCode MMInputTransfer::trans(const MMContentVec& mmc,
                                  std::vector<MMInputItem>& inputs,
                                  MMPayload& payload) {
   inputs.clear();
-  for (int idx = 0; idx < mmc.size(); ++idx) {
+  for (size_t idx = 0; idx < mmc.size(); ++idx) {
     const auto& item = mmc[idx];
     const auto& type = item.type;
 

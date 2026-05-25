@@ -53,7 +53,7 @@ class NpuWordEmbeddingImpl : public BaseLayer {
 
   int64_t init_layer();
 
-  torch::Tensor forward(const torch::Tensor& x, int nodeId);
+  torch::Tensor forward(const torch::Tensor& x, int32_t nodeId);
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                const torch::Tensor& x);

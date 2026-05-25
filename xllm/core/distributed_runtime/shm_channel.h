@@ -14,6 +14,8 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+#include <cstdint>
+
 #include "comm_channel.h"
 #include "runtime/forward_shared_memory_manager.h"
 #include "runtime/options.h"
@@ -22,8 +24,8 @@ namespace xllm {
 
 class ShmChannel : public CommChannel {
  public:
-  explicit ShmChannel(int dp_group,
-                      int rank,
+  explicit ShmChannel(int32_t dp_group,
+                      int32_t rank,
                       bool is_driver,
                       const runtime::Options& options);
   ~ShmChannel() = default;

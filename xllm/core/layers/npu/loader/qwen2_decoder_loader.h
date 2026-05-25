@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -35,7 +36,7 @@ class Qwen2DecoderLoader : public BaseLoader {
  protected:
   void merge_host_at_weights() override;
 
-  int device_id_ = 0;
+  int32_t device_id_ = 0;
 };
 
 }  // namespace layer

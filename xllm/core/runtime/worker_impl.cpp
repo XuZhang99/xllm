@@ -1383,7 +1383,7 @@ void WorkerImpl::init_hierarchy_kv_cache_transfer() {
 void WorkerImpl::prepare_mla_prefixcache_inputs(
     ModelInputParams& input_params) {
   int32_t sum_prefix =
-      input_params.attention.device.kv_cache_tokens_nums.sum().item<int>();
+      input_params.attention.device.kv_cache_tokens_nums.sum().item<int32_t>();
   input_params.attention.device.history_compressed_kv =
       torch::empty({sum_prefix, context_.get_model_args().kv_lora_rank()},
                    torch::TensorOptions().dtype(dtype_).pinned_memory(true))
@@ -1410,12 +1410,13 @@ void WorkerImpl::prepare_mla_prefixcache_inputs(
       input_params.attention.device.ring_cur_seqlen.cpu().contiguous();
   torch::Tensor ring_cache_seqlen_host =
       input_params.attention.device.ring_cache_seqlen.cpu().contiguous();
-  input_params.attention.host.ring_cur_seqlen = std::vector<int>(
-      ring_cur_seqlen_host.data_ptr<int>(),
-      ring_cur_seqlen_host.data_ptr<int>() + ring_cur_seqlen_host.numel());
-  input_params.attention.host.ring_cache_seqlen = std::vector<int>(
-      ring_cache_seqlen_host.data_ptr<int>(),
-      ring_cache_seqlen_host.data_ptr<int>() + ring_cache_seqlen_host.numel());
+  input_params.attention.host.ring_cur_seqlen = std::vector<int32_t>(
+      ring_cur_seqlen_host.data_ptr<int32_t>(),
+      ring_cur_seqlen_host.data_ptr<int32_t>() + ring_cur_seqlen_host.numel());
+  input_params.attention.host.ring_cache_seqlen =
+      std::vector<int32_t>(ring_cache_seqlen_host.data_ptr<int32_t>(),
+                           ring_cache_seqlen_host.data_ptr<int32_t>() +
+                               ring_cache_seqlen_host.numel());
 }
 
 int64_t WorkerImpl::get_num_layers() const {

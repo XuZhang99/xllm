@@ -154,7 +154,7 @@ class Batch {
 
   void append_token_for_sequence(Sequence* seq,
                                  const Token& token,
-                                 int token_idx,
+                                 size_t token_idx,
                                  bool replace_fake_token);
 
   void process_beam_search(bool force_requested_result_size = false);

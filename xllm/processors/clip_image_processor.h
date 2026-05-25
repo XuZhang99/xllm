@@ -34,17 +34,17 @@ class CLIPImageProcessor : public ImageProcessor {
 
  private:
   std::vector<int64_t> get_resize_output_image_size(const torch::Tensor& image,
-                                                    int shortest_edge);
+                                                    int32_t shortest_edge);
 
  private:
   bool do_resize_;
   bool do_center_crop_;
   bool do_rescale_;
   bool do_normalize_;
-  int shortest_edge_;
-  int resample_;
+  int32_t shortest_edge_;
+  int32_t resample_;
   double rescale_factor_;
-  std::pair<int, int> crop_size_;
+  std::pair<int64_t, int64_t> crop_size_;
   std::vector<double> image_mean_;
   std::vector<double> image_std_;
 };

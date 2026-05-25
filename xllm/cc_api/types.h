@@ -69,44 +69,44 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
   bool is_local = true;
 
   // The KVCacheTranfer listen port
-  int transfer_listen_port = 26000;
+  int32_t transfer_listen_port = 26000;
 
   // The number of multi-nodes
-  int nnodes = 1;
+  int32_t nnodes = 1;
 
   // The node rank
-  int node_rank = 0;
+  int32_t node_rank = 0;
 
   // Data parallel size for MLA attention
-  int dp_size = 1;
+  int32_t dp_size = 1;
 
   // Expert parallel size for MoE model
-  int ep_size = 1;
+  int32_t ep_size = 1;
 
   // Number of slots per kv cache block. Default is 128
-  int block_size = 128;
+  int32_t block_size = 128;
 
   // Max gpu memory size for kv cache. Default is 0, which means cache size is
   // caculated by available memory
-  int max_cache_size = 0;
+  int32_t max_cache_size = 0;
 
   // Max number of tokens per batch
-  int max_tokens_per_batch = 20480;
+  int32_t max_tokens_per_batch = 20480;
 
   // Max number of sequences per batch
-  int max_seqs_per_batch = 256;
+  int32_t max_seqs_per_batch = 256;
 
   // Max number of token per chunk in prefill stage
-  int max_tokens_per_chunk_for_prefill = -1;
+  int32_t max_tokens_per_chunk_for_prefill = -1;
 
   // Number of speculative tokens
-  int num_speculative_tokens = 0;
+  int32_t num_speculative_tokens = 0;
 
   // Number of threads for handling input requests
-  int num_request_handling_threads = 4;
+  int32_t num_request_handling_threads = 4;
 
   // Expert parallel degree
-  int expert_parallel_degree = 0;
+  int32_t expert_parallel_degree = 0;
 
   // The fraction of GPU memory to be used for model inference, including model
   // weights and kv cache

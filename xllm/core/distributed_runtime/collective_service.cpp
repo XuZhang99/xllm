@@ -22,9 +22,9 @@ limitations under the License.
 
 namespace xllm {
 
-CollectiveService::CollectiveService(int dp_group_num,
-                                     int total_num,
-                                     int device_idx)
+CollectiveService::CollectiveService(int32_t dp_group_num,
+                                     int32_t total_num,
+                                     int32_t device_idx)
     : total_num_(total_num) {
 #if defined(USE_NPU)
   root_infos_.reserve(dp_group_num + 1);
@@ -58,7 +58,7 @@ void CollectiveService::Sync(::google::protobuf::RpcController* controller,
 }
 
 std::unordered_map<int32_t, std::string> CollectiveService::wait() {
-  int connected = 0;
+  int32_t connected = 0;
   while (connected < total_num_) {
     absl::SleepFor(absl::Milliseconds(1000));
     {

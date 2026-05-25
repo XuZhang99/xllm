@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <utility>
@@ -23,7 +24,7 @@ namespace xllm {
 namespace layer {
 
 namespace eagle3_decoder_constants {
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_NORM_WEIGHT = 0,      // weight
   IN_NORM_BIAS = 1,        // bias
   IN_NORM_NEW_WEIGHT = 2,  // new weight
@@ -86,7 +87,7 @@ enum DecoderLayerTensorId : int {
   IN_HIDDEN_NORM_WEIGHT = 50,  // weight
   IN_HIDDEN_NORM_BIAS = 51,    // bias
 };
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {
     {IN_NORM_WEIGHT, "input_layernorm.weight"},
     {IN_HIDDEN_NORM_WEIGHT, "hidden_norm.weight"},
     {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
@@ -98,7 +99,7 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_MLP_W1_WEIGHT, "mlp.up_proj.weight"},
     {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"}};
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING_W8A8 = {
     {IN_NORM_WEIGHT, "input_layernorm.weight"},
     {IN_HIDDEN_NORM_WEIGHT, "hidden_norm.weight"},
     {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
@@ -134,31 +135,32 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
     {IN_MLP_W1_SCALE, "mlp.up_proj.input_scale"},
     {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"}};
 
-static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
-                                          {IN_K_WEIGHT, 0},
-                                          {IN_V_WEIGHT, 0},
-                                          {IN_ATTENTION_OUT_WEIGHT, 1},
-                                          {IN_MLP_W2_WEIGHT, 0},
-                                          {IN_MLP_W1_WEIGHT, 0},
-                                          {IN_MLP_CPROJ_WEIGHT, 1}};
+static std::map<int32_t, int32_t> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
+                                                  {IN_K_WEIGHT, 0},
+                                                  {IN_V_WEIGHT, 0},
+                                                  {IN_ATTENTION_OUT_WEIGHT, 1},
+                                                  {IN_MLP_W2_WEIGHT, 0},
+                                                  {IN_MLP_W1_WEIGHT, 0},
+                                                  {IN_MLP_CPROJ_WEIGHT, 1}};
 
-static std::map<int, int> WEIGHT_SHARD_W8A8 = {{IN_Q_WEIGHT, 0},
-                                               {IN_Q_BIAS, 0},
-                                               {IN_Q_DEQSCALE, 0},
-                                               {IN_K_WEIGHT, 0},
-                                               {IN_K_BIAS, 0},
-                                               {IN_K_DEQSCALE, 0},
-                                               {IN_V_WEIGHT, 0},
-                                               {IN_V_BIAS, 0},
-                                               {IN_V_DEQSCALE, 0},
-                                               {IN_ATTENTION_OUT_WEIGHT, 1},
-                                               {IN_MLP_W2_WEIGHT, 0},
-                                               {IN_MLP_W2_BIAS, 0},
-                                               {IN_MLP_W2_DEQSCALE, 0},
-                                               {IN_MLP_W1_WEIGHT, 0},
-                                               {IN_MLP_W1_BIAS, 0},
-                                               {IN_MLP_W1_DEQSCALE, 0},
-                                               {IN_MLP_CPROJ_WEIGHT, 1}};
+static std::map<int32_t, int32_t> WEIGHT_SHARD_W8A8 = {
+    {IN_Q_WEIGHT, 0},
+    {IN_Q_BIAS, 0},
+    {IN_Q_DEQSCALE, 0},
+    {IN_K_WEIGHT, 0},
+    {IN_K_BIAS, 0},
+    {IN_K_DEQSCALE, 0},
+    {IN_V_WEIGHT, 0},
+    {IN_V_BIAS, 0},
+    {IN_V_DEQSCALE, 0},
+    {IN_ATTENTION_OUT_WEIGHT, 1},
+    {IN_MLP_W2_WEIGHT, 0},
+    {IN_MLP_W2_BIAS, 0},
+    {IN_MLP_W2_DEQSCALE, 0},
+    {IN_MLP_W1_WEIGHT, 0},
+    {IN_MLP_W1_BIAS, 0},
+    {IN_MLP_W1_DEQSCALE, 0},
+    {IN_MLP_CPROJ_WEIGHT, 1}};
 
 }  // namespace eagle3_decoder_constants
 

@@ -555,7 +555,7 @@ struct MoeExpandInputParams {
   // Dtype: int32.
   torch::Tensor combine_idx;
   // topk for moe
-  int topk;
+  int32_t topk;
 };
 
 struct MoeCombineResultParams {
@@ -1303,15 +1303,15 @@ struct MoeInitRoutingV2Params {
   torch::Tensor expert_idx;
   std::optional<torch::Tensor> scale;
   std::optional<torch::Tensor> offset;
-  int active_num;
-  int expert_capacity;
-  int expert_num;
-  int drop_pad_mode;
-  int expert_tokens_num_type;
+  int32_t active_num;
+  int32_t expert_capacity;
+  int32_t expert_num;
+  int32_t drop_pad_mode;
+  int32_t expert_tokens_num_type;
   bool expert_tokens_num_flag;
-  int quant_mode;
+  int32_t quant_mode;
   torch::IntArrayRef active_expert_range;
-  int row_idx_type;
+  int32_t row_idx_type;
 };
 
 // FP8 scaled quantize parameters

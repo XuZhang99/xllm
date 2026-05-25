@@ -28,16 +28,18 @@ limitations under the License.
 #endif
 
 namespace {
-std::pair<int, std::vector<uint64_t>> get_trans_group_rank(int world_size,
-                                                           int global_rank,
-                                                           int split_size) {
-  int trans_group_count = split_size;
-  int trans_group_size = world_size / split_size;
-  int trans_group_index = global_rank % trans_group_size;
-  int trans_index = global_rank / trans_group_size;
+std::pair<int32_t, std::vector<uint64_t>> get_trans_group_rank(
+    int32_t world_size,
+    int32_t global_rank,
+    int32_t split_size) {
+  int32_t trans_group_count = split_size;
+  int32_t trans_group_size = world_size / split_size;
+  int32_t trans_group_index = global_rank % trans_group_size;
+  int32_t trans_index = global_rank / trans_group_size;
   std::vector<uint64_t> trans_group_ranks;
-  for (int i = 0; i < trans_group_count; i++) {
-    uint64_t rank = i * trans_group_size + trans_group_index;
+  for (int32_t i = 0; i < trans_group_count; i++) {
+    uint64_t rank =
+        static_cast<uint64_t>(i * trans_group_size + trans_group_index);
     trans_group_ranks.push_back(rank);
   }
 
@@ -58,27 +60,27 @@ std::vector<int64_t> get_gather_shape(int32_t world_size,
 
 namespace xllm {
 
-std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,
-                                                     int global_rank,
-                                                     int split_size,
-                                                     bool trans) {
+std::pair<int32_t, std::vector<uint64_t>> get_group_rank(int32_t world_size,
+                                                         int32_t global_rank,
+                                                         int32_t split_size,
+                                                         bool trans) {
   if (trans) {
     return get_trans_group_rank(world_size, global_rank, split_size);
   }
-  int target_group_index = global_rank / split_size;
-  uint64_t start_rank = target_group_index * split_size;
-  uint64_t end_rank = start_rank + split_size;
+  int32_t target_group_index = global_rank / split_size;
+  int32_t start_rank = target_group_index * split_size;
+  int32_t end_rank = start_rank + split_size;
   std::vector<uint64_t> group_rank;
-  int index = global_rank - start_rank;
-  for (uint64_t rank = start_rank; rank < end_rank; rank++) {
-    group_rank.push_back(rank);
+  int32_t index = global_rank - start_rank;
+  for (int32_t rank = start_rank; rank < end_rank; rank++) {
+    group_rank.push_back(static_cast<uint64_t>(rank));
   }
   return {index, group_rank};
 }
 
 c10::intrusive_ptr<c10d::Store> create_tcp_store(const std::string& host,
-                                                 int port,
-                                                 int rank) {
+                                                 int32_t port,
+                                                 int32_t rank) {
   c10d::TCPStoreOptions tcp_options;
   tcp_options.isServer = (rank == 0);
   tcp_options.port = port;

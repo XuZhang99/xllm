@@ -37,7 +37,8 @@ class GLM4VInputProcessor : public InputProcessor {
   explicit GLM4VInputProcessor(const ModelArgs& args);
 
   void process(std::string& prompt, const MMData& mm_data) override;
-  void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) override;
+  void find_mm_spans(const std::vector<int32_t>& prompt,
+                     MMData& mm_data) override;
 
  private:
   std::pair<TokenType, size_t> find_vision_token(const std::string& prompt,

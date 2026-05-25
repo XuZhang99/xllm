@@ -156,7 +156,7 @@ class DisaggPDScheduler : public ChunkedPrefillScheduler {
   std::vector<std::string> decode_inst_names_;
   // TODO later
   // std::vector<std::string> updated_decode_inst_names;
-  int current_decode_idx_ = 0;
+  size_t current_decode_idx_ = 0;
 
   // for decode
   // request_id -> Request object

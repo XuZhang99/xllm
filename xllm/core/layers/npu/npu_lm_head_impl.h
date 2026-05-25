@@ -50,12 +50,12 @@ class NpuLmHeadImpl : public BaseLayer {
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& seleted_idxes,
-                        int nodeId);
+                        int32_t nodeId);
 
   torch::Tensor forward_with_hidden(const torch::Tensor& hidden_states,
                                     const torch::Tensor& seleted_idxes,
                                     torch::Tensor& out_hidden,
-                                    int nodeId);
+                                    int32_t nodeId);
 
  private:
   void param_from_args(atb_speed::common::LmHeadParam& param,

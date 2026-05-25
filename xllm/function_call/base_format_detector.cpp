@@ -270,11 +270,11 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
         nlohmann::json cur_arguments = current_tool_call["arguments"];
 
         // Calculate how much of the arguments we've already streamed
-        int sent = streamed_args_for_tool_[current_tool_id_].length();
+        size_t sent = streamed_args_for_tool_[current_tool_id_].length();
         std::string cur_args_json = cur_arguments.dump();
 
         std::string argument_diff;
-        int completing_tool_id = current_tool_id_;
+        int32_t completing_tool_id = current_tool_id_;
 
         // If the current tool's JSON is complete, send all remaining arguments
         if (is_current_complete) {
@@ -283,7 +283,8 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
           // Only remove the processed portion, keep unprocessed content
           buffer_ = current_text.substr(start_idx + end_idx);
 
-          if (current_tool_id_ < static_cast<int>(prev_tool_call_arr_.size())) {
+          if (current_tool_id_ <
+              static_cast<int32_t>(prev_tool_call_arr_.size())) {
             prev_tool_call_arr_[current_tool_id_].clear();
           }
           current_tool_name_sent_ = false;
@@ -292,7 +293,7 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
         }
         // If the tool is still being parsed, send incremental changes
         else if (current_tool_id_ <
-                 static_cast<int>(prev_tool_call_arr_.size())) {
+                 static_cast<int32_t>(prev_tool_call_arr_.size())) {
           auto prev_args_it =
               prev_tool_call_arr_[current_tool_id_].find("arguments");
           if (prev_args_it != prev_tool_call_arr_[current_tool_id_].end()) {
@@ -306,7 +307,7 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
         }
 
         if (!argument_diff.empty()) {
-          int tool_index_to_use =
+          int32_t tool_index_to_use =
               is_current_complete ? completing_tool_id : current_tool_id_;
           res = StreamingParseResult(
               "",
@@ -324,7 +325,8 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
     }
 
     if (current_tool_id_ >= 0) {
-      while (static_cast<int>(prev_tool_call_arr_.size()) <= current_tool_id_) {
+      while (static_cast<int32_t>(prev_tool_call_arr_.size()) <=
+             current_tool_id_) {
         prev_tool_call_arr_.push_back({});
       }
 

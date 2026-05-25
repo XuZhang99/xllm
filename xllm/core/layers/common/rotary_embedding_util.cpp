@@ -87,27 +87,28 @@ using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
 
 // Inverse dim formula to find dim based on number of rotations
-inline double yarn_find_correction_dim(int num_rotations,
-                                       int dim,
+inline double yarn_find_correction_dim(int64_t num_rotations,
+                                       int64_t dim,
                                        float theta,
-                                       int max_position_embeddings) {
+                                       int64_t max_position_embeddings) {
   return (dim *
           std::log(max_position_embeddings / (num_rotations * 2 * M_PI))) /
          (2 * std::log(theta));
 }
 
 // Find dim range bounds based on rotations
-inline std::tuple<int, int> yarn_find_correction_range(
-    int low_rot,
-    int high_rot,
-    int dim,
+inline std::tuple<int64_t, int64_t> yarn_find_correction_range(
+    int64_t low_rot,
+    int64_t high_rot,
+    int64_t dim,
     float theta,
-    int max_position_embeddings) {
-  int low = std::floor(
-      yarn_find_correction_dim(low_rot, dim, theta, max_position_embeddings));
-  int high = std::ceil(
-      yarn_find_correction_dim(high_rot, dim, theta, max_position_embeddings));
-  return std::make_tuple(std::max(low, 0), std::min(high, dim - 1));
+    int64_t max_position_embeddings) {
+  int64_t low = static_cast<int64_t>(std::floor(
+      yarn_find_correction_dim(low_rot, dim, theta, max_position_embeddings)));
+  int64_t high = static_cast<int64_t>(std::ceil(
+      yarn_find_correction_dim(high_rot, dim, theta, max_position_embeddings)));
+  return std::make_tuple(std::max<int64_t>(low, 0),
+                         std::min<int64_t>(high, dim - 1));
 }
 
 // Create cos_sin tensor for rotary embedding cache
@@ -288,7 +289,8 @@ torch::Tensor apply_deepseek_yarn_rope_scaling(float factor,
   torch::Tensor pos_freqs = torch::pow(theta, slice / rotary_dim);
   torch::Tensor inv_freq_extrapolation = 1.0 / pos_freqs;
   torch::Tensor inv_freq_interpolation = 1.0 / (factor * pos_freqs);
-  int low, high;
+  int64_t low = 0;
+  int64_t high = 0;
   std::tie(low, high) = yarn_find_correction_range(
       beta_fast, beta_slow, rotary_dim, theta, old_context_len);
   // Get n-d rotational scaling corrected for extrapolation

@@ -814,7 +814,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
       params.meta.q_max_seq_len = actual_seq_len;
       params.meta.kv_max_seq_len = actual_seq_len;
       auto cu_seqlens =
-          torch::tensor({0, static_cast<int>(actual_seq_len)}, torch::kInt)
+          torch::tensor({0, static_cast<int32_t>(actual_seq_len)}, torch::kInt)
               .to(tokens.device());
       params.attention.device.q_seq_lens = cu_seqlens;
       params.attention.device.kv_seq_lens = cu_seqlens;

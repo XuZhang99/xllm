@@ -27,7 +27,7 @@ namespace xllm {
 
 class CollectiveCommunicatorBase {
  public:
-  CollectiveCommunicatorBase(int global_rank, int world_size)
+  CollectiveCommunicatorBase(int32_t global_rank, int32_t world_size)
       : global_rank_(global_rank), world_size_(world_size) {}
 
   virtual ~CollectiveCommunicatorBase() = default;
@@ -37,12 +37,12 @@ class CollectiveCommunicatorBase {
 
   virtual const ParallelArgs* parallel_args() = 0;
 
-  int get_global_rank() const { return global_rank_; }
-  int get_world_size() const { return world_size_; }
+  int32_t get_global_rank() const { return global_rank_; }
+  int32_t get_world_size() const { return world_size_; }
 
  protected:
-  int global_rank_;
-  int world_size_;
+  int32_t global_rank_;
+  int32_t world_size_;
 };
 
 }  // namespace xllm

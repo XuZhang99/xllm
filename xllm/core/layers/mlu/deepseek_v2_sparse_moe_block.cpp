@@ -170,7 +170,7 @@ DeepseekV2SparseMoEBlockImpl::shard_attn_out(
 
   CHECK(attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kReplicated)
       << "unexpected post-attention layout for sparse MoE shard path: "
-      << static_cast<int>(attn_layout);
+      << static_cast<int32_t>(attn_layout);
   x = x + residual;
   auto pad = pad_tokens(x, target_tokens);
   return {slice_tp_tokens(pad.first), pad.second};

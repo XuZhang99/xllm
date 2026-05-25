@@ -29,13 +29,13 @@ namespace xllm {
 namespace net {
 
 static std::mutex g_port_mutex;
-static std::unordered_set<int> g_allocated_port_map;
+static std::unordered_set<int32_t> g_allocated_port_map;
 
 // TODO: return private ip
 std::string get_local_ip_addr() {
   char ip[INET_ADDRSTRLEN]{'\0'};
   char hostname[256];
-  int ret = gethostname(hostname, sizeof(hostname));
+  int32_t ret = gethostname(hostname, sizeof(hostname));
   if (ret != 0) {
     LOG(ERROR) << "gethostname failed";
     return "";
@@ -58,9 +58,9 @@ std::string get_local_ip_addr() {
   return std::string(ip);
 }
 
-int get_local_free_port() {
+int32_t get_local_free_port() {
   std::lock_guard<std::mutex> lock(g_port_mutex);
-  int port;
+  int32_t port;
   do {
     port = 0;
     struct sockaddr_in addr;
@@ -138,14 +138,14 @@ std::string extract_port(const std::string& input) {
 
 void parse_host_port_from_addr(const std::string& addr,
                                std::string& host,
-                               int& port) {
+                               int32_t& port) {
   CHECK(!addr.empty()) << "Address is empty";
 
   auto colon_pos = addr.find(':');
   CHECK_NE(colon_pos, std::string::npos) << "Invalid address format: " << addr;
 
   host = addr.substr(0, colon_pos);
-  port = std::stoi(addr.substr(colon_pos + 1));
+  port = static_cast<int32_t>(std::stoi(addr.substr(colon_pos + 1)));
 }
 
 }  // namespace net

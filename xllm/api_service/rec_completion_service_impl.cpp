@@ -293,11 +293,11 @@ void RecCompletionServiceImpl::process_async_impl(
     include_usage = rpc_request.stream_options().include_usage();
   }
 
-  std::optional<std::vector<int>> prompt_tokens = std::nullopt;
+  std::optional<std::vector<int32_t>> prompt_tokens = std::nullopt;
   if (rpc_request.has_routing()) {
-    prompt_tokens = std::vector<int>{};
+    prompt_tokens = std::vector<int32_t>{};
     prompt_tokens->reserve(rpc_request.token_ids_size());
-    for (int i = 0; i < rpc_request.token_ids_size(); i++) {
+    for (int32_t i = 0; i < rpc_request.token_ids_size(); ++i) {
       prompt_tokens->emplace_back(rpc_request.token_ids(i));
     }
 
@@ -310,7 +310,7 @@ void RecCompletionServiceImpl::process_async_impl(
   if (rpc_request_ref.input_tensors_size()) {
     std::vector<proto::InferInputTensor> tensors;
     tensors.reserve(rpc_request_ref.input_tensors_size());
-    for (int i = 0; i < rpc_request_ref.input_tensors_size(); ++i) {
+    for (int32_t i = 0; i < rpc_request_ref.input_tensors_size(); ++i) {
       tensors.push_back(rpc_request_ref.input_tensors(i));
     }
     input_tensors = std::move(tensors);

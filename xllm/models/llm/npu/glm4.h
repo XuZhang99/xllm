@@ -122,13 +122,13 @@ class Glm4ModelImpl
     sin_pos = sin_pos.reshape({-1, sin_pos.sizes().back() / 2, 2});
     torch::Tensor attn_mask;
     if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      int max_kv_seq = input_params.meta.kv_max_seq_len;
-      int num_sequences = input_params.meta.num_sequences;
+      int32_t max_kv_seq = input_params.meta.kv_max_seq_len;
+      int32_t num_sequences = input_params.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(num_sequences);
+        req_mask_vec.reserve(static_cast<size_t>(num_sequences));
 
-        for (int j = 0; j < num_sequences; j++) {
+        for (int32_t j = 0; j < num_sequences; j++) {
           auto mask = attn_mask_.gen_append_mask(
               input_params.attention.host.q_seq_lens[j],
               input_params.attention.host.kv_seq_lens[j],
@@ -194,7 +194,7 @@ REGISTER_MODEL_ARGS(glm4, [&] {
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(attention_bias, "attention_bias", true);
   LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0f);
-  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int>{151329});
+  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int32_t>{151329});
   LOAD_ARG_OR(head_dim, "head_dim", 128);
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(hidden_size, "hidden_size", 4096);

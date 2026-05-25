@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
     std::cout << "LLM completions successfully" << std::endl;
 
     if (nullptr != resp->choices.entries) {
-      for (int i = 0; i < resp->choices.entries_size; ++i) {
+      for (size_t i = 0; i < resp->choices.entries_size; ++i) {
         XLLM_Choice& choice = resp->choices.entries[i];
         std::cout << "xllm answer[" << choice.index << "]:" << choice.text
                   << std::endl;

@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <variant>
@@ -82,7 +83,7 @@ struct Message {
   Message(const std::string& role, const MMContentVec& content)
       : role(role), content(std::move(content)) {}
 
-  int calc_count(const std::string& type) {
+  int32_t calc_count(const std::string& type) {
     if (std::holds_alternative<std::string>(content)) {
       if (type == "text") {
         return 1;
@@ -92,7 +93,7 @@ struct Message {
     }
 
     const auto& mmc = std::get<MMContentVec>(content);
-    int count = 0;
+    int32_t count = 0;
     for (const auto& item : mmc) {
       if (item.type == type) {
         ++count;

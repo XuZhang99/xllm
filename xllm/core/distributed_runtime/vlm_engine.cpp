@@ -98,7 +98,8 @@ void VLMEngine::process_group_test() {
     // seconds). This is particularly important in multi-node multi-device
     // communication scenarios where network latency may require a longer
     // timeout period.
-    const int timeout_seconds = util::get_process_group_test_timeout_seconds();
+    const int32_t timeout_seconds =
+        util::get_process_group_test_timeout_seconds();
     folly::collectAll(futures)
         .within(std::chrono::seconds(timeout_seconds))
         .get();
@@ -135,8 +136,9 @@ bool VLMEngine::init_model() {
   tokenizer_args_ = model_loader->tokenizer_args();
 
   // compute the number of local kv heads and head dim
-  const int world_size = dp_size_ > 1 ? (dp_local_tp_size_)
-                                      : static_cast<int>(worker_clients_num_);
+  const int64_t world_size = dp_size_ > 1
+                                 ? dp_local_tp_size_
+                                 : static_cast<int64_t>(worker_clients_num_);
   const int64_t n_heads = args_.n_heads();
   const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
 
@@ -389,7 +391,7 @@ void VLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
   // cause the output on other workers is the same as that on driver.
   // Under data parallelism (DP), we need to get dp_size outputs.
   // The `stride` means the workers num we can skip.
-  int stride = dp_local_tp_size_;
+  uint32_t stride = dp_local_tp_size_;
 
   for (auto worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += stride) {

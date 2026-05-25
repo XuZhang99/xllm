@@ -71,7 +71,7 @@ class Qwen2_5_VLForMMEmbeddingImpl : public torch::nn::Module {
 
     std::vector<torch::Tensor> mm_embeddings;
 
-    std::vector<int> image_sizes = get_images_size(image_grid_thw);
+    std::vector<int32_t> image_sizes = get_images_size(image_grid_thw);
     mm_embeddings.reserve(image_sizes.size());
 
     int32_t token_start_idx = 0;

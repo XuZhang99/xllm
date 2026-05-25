@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch_npu/torch_npu.h>
 
+#include <cstdint>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -45,7 +46,7 @@ class Glm4MoeDecoderLoader : public BaseLoader {
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
 
-  void resize_experts_weights(int num_of_device_experts) override;
+  void resize_experts_weights(int32_t num_of_device_experts) override;
 
   int32_t layer_id_;
   int32_t prefill_param_firstKDenseReplace_;
@@ -69,8 +70,8 @@ class Glm4MoeDecoderLoader : public BaseLoader {
 
   std::unordered_map<std::string, torch::Tensor> shared_experts_weights_;
   std::unordered_map<std::string, std::vector<torch::Tensor>> experts_weights_;
-  std::unordered_map<std::string, int> weight_mapping_;
-  std::unordered_map<std::string, int> weight_mapping_w8a8_;
+  std::unordered_map<std::string, int32_t> weight_mapping_;
+  std::unordered_map<std::string, int32_t> weight_mapping_w8a8_;
 
   std::mutex shared_experts_mutex_;
   std::mutex experts_mutex_;
@@ -96,16 +97,16 @@ class Glm4MoeDecoderLoader : public BaseLoader {
 
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,
-                                   int dim);
+                                   int32_t dim);
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,
-                                   int dim,
-                                   int local_tp_rank,
-                                   int local_tp_size);
+                                   int32_t dim,
+                                   int32_t local_tp_rank,
+                                   int32_t local_tp_size);
 
   std::string extract_endswith(const std::string& input);
 
-  int extract_expert_index(const std::string& name);
+  int32_t extract_expert_index(const std::string& name);
 
   void merge_shared_experts_weights();
 
@@ -118,8 +119,9 @@ class Glm4MoeDecoderLoader : public BaseLoader {
                                       std::vector<torch::Tensor>& experts_gate,
                                       bool transpose = false);
 
-  int get_mapped_index(const std::string& name,
-                       const std::unordered_map<std::string, int>& mapping);
+  int32_t get_mapped_index(
+      const std::string& name,
+      const std::unordered_map<std::string, int32_t>& mapping);
 };
 
 }  // namespace layer

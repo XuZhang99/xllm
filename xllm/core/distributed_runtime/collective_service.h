@@ -20,6 +20,7 @@ limitations under the License.
 #include <hccl/hccl.h>
 #endif
 
+#include <cstdint>
 #include <unordered_map>
 
 #include "common/macros.h"
@@ -29,7 +30,9 @@ namespace xllm {
 
 class CollectiveService : public proto::Collective {
  public:
-  CollectiveService(int dp_group_num, int total_num, int device_idx);
+  CollectiveService(int32_t dp_group_num,
+                    int32_t total_num,
+                    int32_t device_idx);
   virtual ~CollectiveService() = default;
 
   void Sync(::google::protobuf::RpcController* controller,
@@ -51,7 +54,7 @@ class CollectiveService : public proto::Collective {
 #endif
 
  private:
-  int total_num_ = 0;
+  int32_t total_num_ = 0;
 #if defined(USE_NPU)
   std::vector<HcclRootInfo> root_infos_;
 #endif

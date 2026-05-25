@@ -67,7 +67,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
       torch::Tensor expert_gate_up = fused_gate_up;
       torch::Tensor expert_down = fused_down;
 
-      const int num_experts = expert_gate_up.size(0);
+      const int64_t num_experts = expert_gate_up.size(0);
 
       auto chunks = expert_gate_up.chunk(2, /*dim=*/-1);
       auto expert_gate = chunks[0].contiguous();
@@ -82,7 +82,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
         }
       }
 
-      for (int i = 0; i < num_experts; ++i) {
+      for (int64_t i = 0; i < num_experts; ++i) {
         auto gate_i = expert_gate[i].transpose(0, 1);
         auto up_i = expert_up[i].transpose(0, 1);
         auto down_i = expert_down[i].transpose(0, 1);
@@ -165,7 +165,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
     rank_ = parallel_args.rank();
     num_experts_per_tok_ = model_args.num_experts_per_tok();
-    for (int i = 0; i < parallel_args.world_size(); i += dp_local_tp_size_) {
+    for (int32_t i = 0; i < parallel_args.world_size();
+         i += dp_local_tp_size_) {
       indices.push_back(i);
     }
 
@@ -252,9 +253,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         // mrop_length == freqs_length == head_dim / 2
         int64_t mrop_length = freqs_t.size(-1) / 2;
 
-        for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
+        for (int64_t dim_idx = 1; dim_idx <= 2; ++dim_idx) {
           int64_t offset = dim_idx;  // H -> offset=1, W -> offset=2
-          int64_t section_len = mrope_section_[dim_idx];
+          int64_t section_len = mrope_section_[static_cast<size_t>(dim_idx)];
           int64_t length = section_len * 3;
 
           // Since the last dim of freqs is repeated to 2*mrop_length
@@ -290,15 +291,16 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         attn_mask = attn_mask_.get_attn_mask(
             max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
-        int batch_size = input_params.attention.host.q_seq_lens.size();
+        int32_t batch_size =
+            static_cast<int32_t>(input_params.attention.host.q_seq_lens.size());
         if (batch_size > 0) {
           std::vector<torch::Tensor> req_mask_vec;
-          req_mask_vec.reserve(batch_size);
+          req_mask_vec.reserve(static_cast<size_t>(batch_size));
 
-          for (int j = 0; j < batch_size; j++) {
-            int start = input_params.attention.host.kv_seq_lens[j] -
-                        input_params.attention.host.q_seq_lens[j];
-            int end = input_params.attention.host.kv_seq_lens[j];
+          for (int32_t j = 0; j < batch_size; j++) {
+            int64_t start = input_params.attention.host.kv_seq_lens[j] -
+                            input_params.attention.host.q_seq_lens[j];
+            int64_t end = input_params.attention.host.kv_seq_lens[j];
 
             auto req_mask_slice = attn_mask.slice(0, start, end);
             req_mask_vec.emplace_back(req_mask_slice);
@@ -310,7 +312,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
     }
     auto deep_stacks = input_params.multimodal.deep_stacks;
-    int deep_stack_size = deep_stacks.size();
+    size_t deep_stack_size = deep_stacks.size();
 
     int64_t input_length = h.size(0);
     torch::Tensor expert_array = torch::arange(
@@ -358,7 +360,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
       rolling_guard.before_layer(layer_index);
       layer(h,
             residual,
@@ -393,7 +395,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     npu_embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
     // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
@@ -402,7 +404,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
   void verify_loaded_weights(const std::string& prefix) const {
     npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
@@ -411,7 +413,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
   void merge_loaded_weights() {
     npu_embed_tokens_->merge_loaded_weights();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
@@ -554,7 +556,7 @@ REGISTER_MODEL_ARGS_WITH_VARNAME(qwen3_moe_atb, qwen3_moe_atb, [&] {
   LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
   LOAD_ARG_OR(vocab_size, "vocab_size", 151936);
-  LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int>());
+  LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int32_t>());
 
   // Eagle3: layer ids (0-based) to capture from config, e.g.
   // "layers_to_capture": [2, 14, 25]; defaults to empty if missing

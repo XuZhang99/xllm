@@ -161,7 +161,7 @@ int64_t NpuLmHeadImpl::init_node(atb_speed::Model::Node& node,
 
 torch::Tensor NpuLmHeadImpl::forward(const torch::Tensor& hidden_states,
                                      const torch::Tensor& seleted_idxes,
-                                     int nodeId) {
+                                     int32_t nodeId) {
   torch::Tensor out_hidden;
   return forward_with_hidden(hidden_states, seleted_idxes, out_hidden, nodeId);
 }
@@ -170,7 +170,7 @@ torch::Tensor NpuLmHeadImpl::forward_with_hidden(
     const torch::Tensor& hidden_states,
     const torch::Tensor& seleted_idxes,
     torch::Tensor& out_hidden,
-    int nodeId) {
+    int32_t nodeId) {
   atb::Status st;
   build_node_variant_pack(lm_head_node_prefill_, hidden_states, seleted_idxes);
   st = execute_node(lm_head_node_prefill_, nodeId);

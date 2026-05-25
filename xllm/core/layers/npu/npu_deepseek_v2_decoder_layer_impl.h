@@ -127,12 +127,12 @@ class NpuDeepseekV2DecoderLayerImpl : public BaseLayer {
                         const ModelInputParams& input_params,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
-                        int node_id = 0);
+                        int32_t node_id = 0);
 
  private:
   struct ShardingConfig {
     bool is_sharded;
-    int index;
+    int32_t index;
     bool use_dp_sharding = false;
   };
 
@@ -148,9 +148,9 @@ class NpuDeepseekV2DecoderLayerImpl : public BaseLayer {
                        bool is_prefill,
                        bool is_prefixcache);
 
-  void reserve_experts_weights(int num_of_device_experts);
+  void reserve_experts_weights(int32_t num_of_device_experts);
 
-  void initialize_device_expert_list(int numdevice, int num_layers);
+  void initialize_device_expert_list(int32_t numdevice, int32_t num_layers);
 
   void initialize_basic_parameters(
       atb_speed::deepseekV2::DecoderLayerParam& param,

@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -34,7 +35,7 @@ class RMSNormLoader : public BaseLoader {
   void verify_loaded_weights(const std::string& weight_str) const override;
 
  protected:
-  int rank_id_;
+  int32_t rank_id_;
 };
 
 }  // namespace layer

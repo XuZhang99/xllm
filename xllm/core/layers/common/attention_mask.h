@@ -16,6 +16,8 @@ limitations under the License.
 #pragma once
 #include <torch/torch.h>
 
+#include <cstdint>
+
 namespace xllm {
 namespace layer {
 
@@ -51,7 +53,7 @@ class AttentionMask : public torch::nn::Module {
                          torch::Device device,
                          int64_t seqlen);
 
-  int seq_len_cached_;
+  int64_t seq_len_cached_;
   float mask_value_;
   at::Tensor atten_mask_cache_;
 };

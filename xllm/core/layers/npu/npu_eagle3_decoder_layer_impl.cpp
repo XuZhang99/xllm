@@ -56,13 +56,13 @@ void NpuEagle3DecoderLayerImpl::param_from_args(
 
   param.packQuantType = {1, 1};
   param.linearQuantType = {0, -1, -1, 0, 0, -1, 0};
-  param.linearTransposeType = {static_cast<int>(TransposeType::TRANSPOSE),
-                               static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::TRANSPOSE),
-                               static_cast<int>(TransposeType::TRANSPOSE),
-                               static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::TRANSPOSE)};
+  param.linearTransposeType = {static_cast<int32_t>(TransposeType::TRANSPOSE),
+                               static_cast<int32_t>(TransposeType::INVALID),
+                               static_cast<int32_t>(TransposeType::INVALID),
+                               static_cast<int32_t>(TransposeType::TRANSPOSE),
+                               static_cast<int32_t>(TransposeType::TRANSPOSE),
+                               static_cast<int32_t>(TransposeType::INVALID),
+                               static_cast<int32_t>(TransposeType::TRANSPOSE)};
   param.kvQuant = false;
   param.quantGroupSize = 0;
   param.rmsNormEps = args.rms_norm_eps();
@@ -73,11 +73,12 @@ void NpuEagle3DecoderLayerImpl::param_from_args(
   param.enableIntraLayerAddNorm = false;
   param.enableInterLayerAddNorm = false;
   // param.numKeyValueHeadsPerRank = args.n_kv_heads();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  std::optional<int64_t> optional_value = args.n_kv_heads();
   param.numKeyValueHeadsPerRank =
-      static_cast<int>(optionalValue.value()) / param.worldSize;
+      static_cast<int32_t>(optional_value.value()) / param.worldSize;
   ;
-  // param.numKeyValueHeadsPerRank = static_cast<int>(args.n_kv_heads());
+  // param.numKeyValueHeadsPerRank =
+  //     static_cast<int32_t>(args.n_kv_heads());
 
   param.rank = parallel_args.rank();
   param.backend = "lccl";
@@ -120,7 +121,7 @@ void NpuEagle3DecoderLayerImpl::initialize_linear_transpose_type() {
           : loader_->get_at_weight_tensors();
   TransposeType transpose_type =
       check_transpose(at_host_weight_tensors[IN_MLP_W2_WEIGHT]);
-  int transpose_value = static_cast<int>(transpose_type);
+  int32_t transpose_value = static_cast<int32_t>(transpose_type);
   prefill_param_.linearTransposeType[4] = transpose_value;
   decode_param_.linearTransposeType[4] = transpose_value;
 }
@@ -130,7 +131,7 @@ void NpuEagle3DecoderLayerImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   Device::empty_cache(device_.index());
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
+  for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
   }
@@ -140,24 +141,24 @@ void NpuEagle3DecoderLayerImpl::merge_loaded_weights() {
 
 void NpuEagle3DecoderLayerImpl::initialize_quantization_parameters() {
   if (quantize_type_ == "w8a8") {
-    prefill_param_.packQuantType = {static_cast<int>(PackType::ALL_W8A8),
-                                    static_cast<int>(PackType::ALL_W8A8)};
-    decode_param_.packQuantType = {static_cast<int>(PackType::ALL_W8A8),
-                                   static_cast<int>(PackType::ALL_W8A8)};
-    prefill_param_.linearQuantType = {static_cast<int>(LinearType::INT),
-                                      static_cast<int>(LinearType::INVALID),
-                                      static_cast<int>(LinearType::INVALID),
-                                      static_cast<int>(LinearType::INT),
-                                      static_cast<int>(LinearType::INT),
-                                      static_cast<int>(LinearType::INVALID),
-                                      static_cast<int>(LinearType::FP)};
-    decode_param_.linearQuantType = {static_cast<int>(LinearType::INT),
-                                     static_cast<int>(LinearType::INVALID),
-                                     static_cast<int>(LinearType::INVALID),
-                                     static_cast<int>(LinearType::INT),
-                                     static_cast<int>(LinearType::INT),
-                                     static_cast<int>(LinearType::INVALID),
-                                     static_cast<int>(LinearType::FP)};
+    prefill_param_.packQuantType = {static_cast<int32_t>(PackType::ALL_W8A8),
+                                    static_cast<int32_t>(PackType::ALL_W8A8)};
+    decode_param_.packQuantType = {static_cast<int32_t>(PackType::ALL_W8A8),
+                                   static_cast<int32_t>(PackType::ALL_W8A8)};
+    prefill_param_.linearQuantType = {static_cast<int32_t>(LinearType::INT),
+                                      static_cast<int32_t>(LinearType::INVALID),
+                                      static_cast<int32_t>(LinearType::INVALID),
+                                      static_cast<int32_t>(LinearType::INT),
+                                      static_cast<int32_t>(LinearType::INT),
+                                      static_cast<int32_t>(LinearType::INVALID),
+                                      static_cast<int32_t>(LinearType::FP)};
+    decode_param_.linearQuantType = {static_cast<int32_t>(LinearType::INT),
+                                     static_cast<int32_t>(LinearType::INVALID),
+                                     static_cast<int32_t>(LinearType::INVALID),
+                                     static_cast<int32_t>(LinearType::INT),
+                                     static_cast<int32_t>(LinearType::INT),
+                                     static_cast<int32_t>(LinearType::INVALID),
+                                     static_cast<int32_t>(LinearType::FP)};
   }
 }
 
@@ -231,7 +232,7 @@ torch::Tensor NpuEagle3DecoderLayerImpl::forward(
     ModelInputParams& input_params,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
-    int node_id) {
+    int32_t node_id) {
   atb::Status st;
   if (!input_params.meta.batch_forward_type.is_decode()) {
     // mstxRangeId id = mstxRangeStartA("prefill build variant", nullptr);

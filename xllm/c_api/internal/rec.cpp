@@ -367,8 +367,9 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_token_completions(
         "", XLLM_StatusCode::kInvalidRequest, "Invalid input parameters");
   }
 
-  std::vector<int> token_ids_vec;
-  for (int i = 0; i < token_size; i++) {
+  std::vector<int32_t> token_ids_vec;
+  token_ids_vec.reserve(token_size);
+  for (size_t i = 0; i < token_size; i++) {
     token_ids_vec.push_back(token_ids[i]);
   }
 
@@ -416,8 +417,9 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_multimodal_completions(
         "Critical error in mm_data conversion: " + std::string(e.what()));
   }
 
-  std::vector<int> token_ids_vec;
-  for (int i = 0; i < token_size; i++) {
+  std::vector<int32_t> token_ids_vec;
+  token_ids_vec.reserve(token_size);
+  for (size_t i = 0; i < token_size; i++) {
     token_ids_vec.push_back(token_ids[i]);
   }
 
@@ -446,7 +448,7 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_chat_completions(
 
   std::vector<xllm::Message> xllm_messages;
   xllm_messages.reserve(messages_count);
-  for (int i = 0; i < messages_count; i++) {
+  for (size_t i = 0; i < messages_count; i++) {
     xllm_messages.emplace_back(messages[i].role, messages[i].content);
   }
 

@@ -131,7 +131,7 @@ void Device::init_device_context() const {
 #endif
 }
 
-int Device::device_count() {
+int32_t Device::device_count() {
 #if defined(USE_NPU)
   return c10_npu::device_count();
 #elif defined(USE_MLU)
@@ -216,7 +216,7 @@ void Device::empty_cache(int32_t device_index) {
 
 int64_t Device::free_memory() { return get_device_mem().free_memory; }
 
-int Device::synchronize_default_stream() {
+int32_t Device::synchronize_default_stream() {
 #if defined(USE_NPU)
   return aclrtSynchronizeStream(c10_npu::getCurrentNPUStream(index()).stream());
 #elif defined(USE_MLU)

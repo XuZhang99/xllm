@@ -103,7 +103,7 @@ size_t TensorNumElements(const XLLM_Dims& d) {
     return 0;
   }
   size_t n = 1;
-  for (int i = 0; i < d.rank && i < 8; ++i) {
+  for (int32_t i = 0; i < d.rank && i < 8; ++i) {
     if (d.dim[i] <= 0) {
       return 0;
     }
@@ -201,8 +201,8 @@ void ApplyGflagsToXllmInitOptions(XLLM_InitOptions* o) {
 void PbToXllmDims(const c_api_test::XLLM_Dims& pb, XLLM_Dims* out) {
   std::memset(out->dim, 0, sizeof(out->dim));
   out->rank = pb.rank();
-  const int n = std::min(8, pb.dim_size());
-  for (int i = 0; i < n; ++i) {
+  const int32_t n = std::min(8, pb.dim_size());
+  for (int32_t i = 0; i < n; ++i) {
     out->dim[i] = pb.dim(i);
   }
 }
@@ -210,8 +210,8 @@ void PbToXllmDims(const c_api_test::XLLM_Dims& pb, XLLM_Dims* out) {
 void XllmDimsToPb(const XLLM_Dims& in, c_api_test::XLLM_Dims* pb) {
   pb->set_rank(in.rank);
   pb->clear_dim();
-  const int n = std::min(8, in.rank);
-  for (int i = 0; i < n; ++i) {
+  const int32_t n = std::min(8, in.rank);
+  for (int32_t i = 0; i < n; ++i) {
     pb->add_dim(in.dim[i]);
   }
 }
@@ -244,7 +244,7 @@ void PbToXllmTensors(const c_api_test::XLLM_Tensors& pb,
   owned->tensor_lists.emplace_back();
   std::vector<XLLM_Tensor>& row = owned->tensor_lists.back();
   row.reserve(static_cast<size_t>(pb.entries_size()));
-  for (int i = 0; i < pb.entries_size(); ++i) {
+  for (int32_t i = 0; i < pb.entries_size(); ++i) {
     XLLM_Tensor t{};
     PbToXllmTensor(pb.entries(i), &t, owned);
     row.push_back(t);
@@ -293,7 +293,7 @@ void PbToXllmMmDict(const c_api_test::XLLM_MM_Dict& pb,
                     MmDataOwned* owned) {
   owned->mm_dict_entries.clear();
   owned->mm_dict_entries.reserve(static_cast<size_t>(pb.entries_size()));
-  for (int i = 0; i < pb.entries_size(); ++i) {
+  for (int32_t i = 0; i < pb.entries_size(); ++i) {
     owned->mm_dict_entries.emplace_back();
     XLLM_MM_DictEntry& e = owned->mm_dict_entries.back();
     std::memset(e.key, 0, sizeof(e.key));
@@ -319,7 +319,7 @@ void PbToXllmMmItems(const c_api_test::XLLM_MM_Items& pb,
                      MmDataOwned* owned) {
   owned->mm_items.clear();
   owned->mm_items.reserve(static_cast<size_t>(pb.entries_size()));
-  for (int i = 0; i < pb.entries_size(); ++i) {
+  for (int32_t i = 0; i < pb.entries_size(); ++i) {
     owned->mm_items.emplace_back();
     PbToXllmMmItem(pb.entries(i), &owned->mm_items.back(), owned);
   }
@@ -488,7 +488,7 @@ void PbToXllmLogProbs(const c_api_test::XLLM_LogProbs& pb,
                       std::vector<XLLM_LogProb>* storage) {
   storage->clear();
   storage->reserve(static_cast<size_t>(pb.entries_size()));
-  for (int i = 0; i < pb.entries_size(); ++i) {
+  for (int32_t i = 0; i < pb.entries_size(); ++i) {
     XLLM_LogProb e{};
     e.token_id = pb.entries(i).token_id();
     e.logprob = pb.entries(i).logprob();
@@ -538,7 +538,7 @@ void PbToXllmChoice(const c_api_test::XLLM_Choice& pb,
   }
   ro->token_ids_vecs.emplace_back();
   ro->token_ids_vecs.back().reserve(static_cast<size_t>(pb.token_ids_size()));
-  for (int i = 0; i < pb.token_ids_size(); ++i) {
+  for (int32_t i = 0; i < pb.token_ids_size(); ++i) {
     ro->token_ids_vecs.back().push_back(pb.token_ids(i));
   }
   out->token_ids = ro->token_ids_vecs.back().data();
@@ -547,7 +547,7 @@ void PbToXllmChoice(const c_api_test::XLLM_Choice& pb,
   ro->logprob_vecs.emplace_back();
   std::vector<XLLM_LogProb>& le = ro->logprob_vecs.back();
   le.reserve(static_cast<size_t>(pb.logprobs().entries_size()));
-  for (int i = 0; i < pb.logprobs().entries_size(); ++i) {
+  for (int32_t i = 0; i < pb.logprobs().entries_size(); ++i) {
     XLLM_LogProb e{};
     e.token_id = pb.logprobs().entries(i).token_id();
     e.logprob = pb.logprobs().entries(i).logprob();
@@ -589,7 +589,7 @@ void PbToXllmChoices(const c_api_test::XLLM_Choices& pb,
                      ResponseOwned* ro) {
   ro->choices.clear();
   ro->choices.reserve(static_cast<size_t>(pb.entries_size()));
-  for (int i = 0; i < pb.entries_size(); ++i) {
+  for (int32_t i = 0; i < pb.entries_size(); ++i) {
     ro->choices.emplace_back();
     PbToXllmChoice(pb.entries(i), &ro->choices.back(), ro);
   }

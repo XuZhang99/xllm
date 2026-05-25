@@ -256,7 +256,9 @@ class LongCatAudioDiTPipelineImpl final : public torch::nn::Module {
       // Matches official Python utils.approx_duration_from_text.
       auto approx_dur = [&](const std::string& text,
                             float max_dur_sec) -> float {
-        int nzh = 0, nen = 0, nother = 0;
+        int32_t nzh = 0;
+        int32_t nen = 0;
+        int32_t nother = 0;
         for (size_t ci = 0; ci < text.size();) {
           unsigned char c = static_cast<unsigned char>(text[ci]);
           if (c >= 0xE0 && ci + 2 < text.size()) {

@@ -150,7 +150,8 @@ bool EtcdClient::get_all_xservices(const std::string& key_prefix,
 
   values->clear();
   values->reserve(response.keys().size());
-  for (int i = 0; i < response.keys().size(); ++i) {
+  const int32_t num_keys = static_cast<int32_t>(response.keys().size());
+  for (int32_t i = 0; i < num_keys; ++i) {
     values->emplace_back(response.value(i).as_string());
   }
 
@@ -159,7 +160,7 @@ bool EtcdClient::get_all_xservices(const std::string& key_prefix,
 
 bool EtcdClient::register_instance(const std::string& key,
                                    const std::string& value,
-                                   const int ttl) {
+                                   int32_t ttl) {
   auto keep_alive = std::make_shared<etcd::KeepAlive>(&client_, ttl);
   auto response = client_.put(namespaced_key(key), value, keep_alive->Lease());
   if (!response.is_ok()) {

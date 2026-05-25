@@ -247,7 +247,7 @@ torch::Tensor reduce_scatter(const torch::Tensor& input,
 
 torch::Tensor scatter(torch::Tensor input,
                       ProcessGroup* process_group,
-                      int dim) {
+                      int64_t dim) {
   if (!process_group) {
     return input;
   }
@@ -257,7 +257,7 @@ torch::Tensor scatter(torch::Tensor input,
   }
 
   // get the size for last dimension
-  const int32_t dim_size = input.size(dim);
+  const int64_t dim_size = input.size(dim);
   CHECK(dim_size % world_size == 0)
       << "dim_size " << dim_size << " cannot be divided by world_size "
       << world_size;
@@ -423,7 +423,7 @@ std::vector<std::unique_ptr<ProcessGroup>> create_npu_process_groups(
 #if defined(USE_NPU)
   CHECK(!devices.empty()) << "devices should not be empty";
 
-  std::vector<int> device_idxs;
+  std::vector<int32_t> device_idxs;
   device_idxs.reserve(devices.size());
   for (const auto& device : devices) {
     device_idxs.push_back(device.index());
@@ -465,7 +465,7 @@ std::vector<std::unique_ptr<ProcessGroup>> create_local_process_groups(
   // For GPU: use create_process_group with localhost
   // Parse port from options.master_node_addr() to support multiple instances
   std::string host;
-  int port;
+  int32_t port;
 
   // Parse port from options.master_node_addr()
   // Note: master_node_addr always has a default value (127.0.0.1:19888)

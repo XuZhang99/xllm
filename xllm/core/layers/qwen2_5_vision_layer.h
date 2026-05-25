@@ -45,7 +45,7 @@ class Qwen2_5_VisionLayerImpl : public torch::nn::Module {
                         torch::Tensor& cu_seq_len,
                         std::vector<int32_t>& cu_seq_len_vec,
                         ModelInputParams& input_params,
-                        int node_id);
+                        int32_t node_id);
 
  protected:
   Qwen2VisionAttention attention_{nullptr};

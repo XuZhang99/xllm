@@ -62,7 +62,7 @@ class NpuQwen2DecoderLayerImpl : public BaseLayer {
                         ModelInputParams& input_params,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
-                        int node_id = 0);
+                        int32_t node_id = 0);
 
  private:
   void initialize_quantization_parameters();
@@ -98,13 +98,13 @@ class NpuQwen2DecoderLayerImpl : public BaseLayer {
 
   at::Tensor at_placeholder_;
 
-  int device_id_;
+  int32_t device_id_;
   int32_t layer_id_;
 
   std::vector<std::shared_ptr<at::Tensor>> prefill_tensor_storage_;
   std::vector<std::shared_ptr<at::Tensor>> decode_tensor_storage_;
-  std::vector<std::shared_ptr<std::vector<int>>> prefill_vector_storage_;
-  std::vector<std::shared_ptr<std::vector<int>>> decode_vector_storage_;
+  std::vector<std::shared_ptr<std::vector<int32_t>>> prefill_vector_storage_;
+  std::vector<std::shared_ptr<std::vector<int32_t>>> decode_vector_storage_;
 };
 TORCH_MODULE(NpuQwen2DecoderLayer);
 

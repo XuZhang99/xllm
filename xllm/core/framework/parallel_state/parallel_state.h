@@ -70,7 +70,7 @@ torch::Tensor reduce_scatter(const torch::Tensor& input,
 
 torch::Tensor scatter(torch::Tensor input,
                       ProcessGroup* process_group,
-                      int dim = -1);
+                      int64_t dim = -1);
 
 std::function<torch::Tensor()> all_to_all_4D(const torch::Tensor& input_,
                                              int32_t scatter_idx,

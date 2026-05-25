@@ -835,25 +835,25 @@ void ProfileManager::generate_random_decode_batch(
   CHECK(total_length <= batch_size * max_context_len);
 
   token_length_vec.resize(batch_size, min_context_len);
-  int remain = total_length - batch_size * min_context_len;
+  int32_t remain = total_length - batch_size * min_context_len;
 
   std::random_device rd;
   std::mt19937_64 gen(rd());
 
-  for (int i = 0; i < batch_size; ++i) {
+  for (int32_t i = 0; i < batch_size; ++i) {
     if (remain == 0) break;
 
-    int max = remain > (max_context_len - min_context_len)
-                  ? (max_context_len - min_context_len)
-                  : remain;
+    int32_t max = remain > (max_context_len - min_context_len)
+                      ? (max_context_len - min_context_len)
+                      : remain;
 
-    std::uniform_int_distribution<int> dis(0, max);
-    int add = dis(gen);
+    std::uniform_int_distribution<int32_t> dis(0, max);
+    int32_t add = dis(gen);
     token_length_vec[i] += add;
     remain -= add;
   }
 
-  int idx = 0;
+  int32_t idx = 0;
   while (remain > 0) {
     if (token_length_vec[idx % batch_size] < max_context_len) {
       token_length_vec[idx % batch_size] += 1;

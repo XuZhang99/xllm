@@ -172,8 +172,8 @@ ProcessGroupImpl::~ProcessGroupImpl() {
   Device::empty_cache(device().index());
 }
 
-ProcessGroupImpl::ProcessGroupImpl(int rank,
-                                   int world_size,
+ProcessGroupImpl::ProcessGroupImpl(int32_t rank,
+                                   int32_t world_size,
                                    const torch::Device& device,
                                    HcclComm comm)
     : ProcessGroup(rank, world_size, device),

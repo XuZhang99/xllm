@@ -15,6 +15,8 @@ limitations under the License.
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/cuda.h>
 
+#include <cstdint>
+
 #include "cuda_ops_api.h"
 
 // ref to:
@@ -46,8 +48,8 @@ template <typename scalar_t,
 __global__ void act_and_mul_kernel(
     scalar_t* __restrict__ out,          // [..., d]
     const scalar_t* __restrict__ input,  // [..., 2, d]
-    const int d) {
-  constexpr int VEC_SIZE = 16 / sizeof(scalar_t);
+    const int64_t d) {
+  constexpr int32_t VEC_SIZE = 16 / sizeof(scalar_t);
   const int64_t token_idx = blockIdx.x;
   const scalar_t* x_ptr = input + token_idx * 2 * d;
   const scalar_t* y_ptr = x_ptr + d;
@@ -63,22 +65,22 @@ __global__ void act_and_mul_kernel(
     const int4* x_vec = reinterpret_cast<const int4*>(x_ptr);
     const int4* y_vec = reinterpret_cast<const int4*>(y_ptr);
     int4* out_vec = reinterpret_cast<int4*>(out_ptr);
-    const int num_vecs = d / VEC_SIZE;
-    const int vec_end = num_vecs * VEC_SIZE;
+    const int64_t num_vecs = d / VEC_SIZE;
+    const int64_t vec_end = num_vecs * VEC_SIZE;
 
-    for (int i = threadIdx.x; i < num_vecs; i += blockDim.x) {
+    for (int64_t i = threadIdx.x; i < num_vecs; i += blockDim.x) {
       int4 x = XLLM_LDG(&x_vec[i]), y = XLLM_LDG(&y_vec[i]), r;
       auto* xp = reinterpret_cast<scalar_t*>(&x);
       auto* yp = reinterpret_cast<scalar_t*>(&y);
       auto* rp = reinterpret_cast<scalar_t*>(&r);
 #pragma unroll
-      for (int j = 0; j < VEC_SIZE; j++) {
+      for (int32_t j = 0; j < VEC_SIZE; j++) {
         rp[j] = compute<scalar_t, ACT_FN, act_first>(xp[j], yp[j]);
       }
       out_vec[i] = r;
     }
     // Scalar cleanup for remaining elements
-    for (int i = vec_end + threadIdx.x; i < d; i += blockDim.x) {
+    for (int64_t i = vec_end + threadIdx.x; i < d; i += blockDim.x) {
       out_ptr[i] = compute<scalar_t, ACT_FN, act_first>(XLLM_LDG(&x_ptr[i]),
                                                         XLLM_LDG(&y_ptr[i]));
     }
@@ -122,10 +124,10 @@ __device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
 }
 
 #define LAUNCH_ACTIVATION_GATE_KERNEL(KERNEL, ACT_FIRST)                   \
-  int d = input.size(-1) / 2;                                              \
-  int64_t num_tokens = input.numel() / input.size(-1);                     \
+  const int64_t d = input.size(-1) / 2;                                    \
+  const int64_t num_tokens = input.numel() / input.size(-1);               \
   dim3 grid(num_tokens);                                                   \
-  dim3 block(std::min(d, 1024));                                           \
+  dim3 block(static_cast<uint32_t>(std::min<int64_t>(d, 1024)));           \
   if (num_tokens == 0) {                                                   \
     return;                                                                \
   }                                                                        \

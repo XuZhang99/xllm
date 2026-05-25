@@ -18,7 +18,9 @@ limitations under the License.
 namespace xllm {
 
 namespace {
-double factorial(int k) { return std::tgamma(static_cast<double>(k) + 1.0); }
+double factorial(int32_t k) {
+  return std::tgamma(static_cast<double>(k) + 1.0);
+}
 }  // namespace
 
 void TaylorSeer::init(const DiTCacheConfig& cfg) {
@@ -54,11 +56,11 @@ TaylorSeer::approximate_derivative(const torch::Tensor& Y) {
   dY[0] = Y;
   valid[0] = true;
 
-  int elapsed_steps = current_step_ - last_non_approximated_step_;
+  int64_t elapsed_steps = current_step_ - last_non_approximated_step_;
   if (elapsed_steps <= 0) return {dY, valid};
 
-  for (int i = 0; i < n_derivatives_; ++i) {
-    if (i >= static_cast<int>(valid_prev_.size()) || !valid_prev_[i] ||
+  for (int32_t i = 0; i < n_derivatives_; ++i) {
+    if (i >= static_cast<int32_t>(valid_prev_.size()) || !valid_prev_[i] ||
         !dY_prev_[i].defined()) {
       break;
     }
@@ -72,11 +74,11 @@ TaylorSeer::approximate_derivative(const torch::Tensor& Y) {
 torch::Tensor TaylorSeer::approximate_value() {
   if (!dY_current_[0].defined()) return torch::Tensor();
 
-  int elapsed_steps = current_step_ - last_non_approximated_step_;
+  int64_t elapsed_steps = current_step_ - last_non_approximated_step_;
   if (elapsed_steps < 0) return torch::Tensor();
 
   torch::Tensor output = torch::zeros_like(dY_current_[0]);
-  for (int i = 0; i < order_; ++i) {
+  for (int32_t i = 0; i < order_; ++i) {
     if (!valid_current_[i]) break;
     double coef =
         std::pow(static_cast<double>(elapsed_steps), i) / factorial(i);
@@ -90,7 +92,7 @@ void TaylorSeer::update(const torch::Tensor& Y) {
   valid_prev_ = valid_current_;
 
   if (!dY_current_[0].defined()) {
-    for (int i = 0; i < order_; ++i) {
+    for (int32_t i = 0; i < order_; ++i) {
       dY_current_[i] = (i == 0) ? Y : torch::zeros_like(Y);
       valid_current_[i] = (i == 0);
     }

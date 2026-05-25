@@ -76,7 +76,7 @@ bool send_tool_call_chunk(std::shared_ptr<ChatCall> call,
                           const std::string& tool_call_id,
                           const std::string& function_name,
                           const std::string& arguments,
-                          int tool_index,
+                          int32_t tool_index,
                           const std::string& request_id,
                           int64_t created_time,
                           const std::string& model) {
@@ -326,7 +326,7 @@ bool send_delta_to_client_brpc(
     if (seq_output.finish_reason.has_value()) {
       // Check for unstreamed tool args before sending finish reason
       if (stream_parser && stream_parser->get_has_tool_call(index)) {
-        auto send_func = [&](const std::string& arguments, int tool_index) {
+        auto send_func = [&](const std::string& arguments, int32_t tool_index) {
           return send_tool_call_chunk(call,
                                       index,
                                       "",
@@ -567,11 +567,11 @@ void ChatServiceImpl::process_rec_chat_request(std::shared_ptr<ChatCall> call) {
   }
 
   // Parse prompt tokens from routing (inline code, not extracted to helper)
-  std::optional<std::vector<int>> prompt_tokens = std::nullopt;
+  std::optional<std::vector<int32_t>> prompt_tokens = std::nullopt;
   if (rpc_request.has_routing()) {
-    prompt_tokens = std::vector<int>{};
+    prompt_tokens = std::vector<int32_t>{};
     prompt_tokens->reserve(rpc_request.token_ids_size());
-    for (int i = 0; i < rpc_request.token_ids_size(); i++) {
+    for (int32_t i = 0; i < rpc_request.token_ids_size(); ++i) {
       prompt_tokens->emplace_back(rpc_request.token_ids(i));
     }
     request_params.decode_address = rpc_request.routing().decode_name();
@@ -699,11 +699,11 @@ void ChatServiceImpl::process_async_rpc_impl(
     }
   }
 
-  std::optional<std::vector<int>> prompt_tokens = std::nullopt;
+  std::optional<std::vector<int32_t>> prompt_tokens = std::nullopt;
   if (rpc_request.has_routing()) {
-    prompt_tokens = std::vector<int>{};
+    prompt_tokens = std::vector<int32_t>{};
     prompt_tokens->reserve(rpc_request.token_ids_size());
-    for (int i = 0; i < rpc_request.token_ids_size(); i++) {
+    for (int32_t i = 0; i < rpc_request.token_ids_size(); ++i) {
       prompt_tokens->emplace_back(rpc_request.token_ids(i));
     }
 
@@ -793,11 +793,11 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   if (rpc_request.has_stream_options()) {
     include_usage = rpc_request.stream_options().include_usage();
   }
-  std::optional<std::vector<int>> prompt_tokens = std::nullopt;
+  std::optional<std::vector<int32_t>> prompt_tokens = std::nullopt;
   if (rpc_request.has_routing()) {
-    prompt_tokens = std::vector<int>{};
+    prompt_tokens = std::vector<int32_t>{};
     prompt_tokens->reserve(rpc_request.token_ids_size());
-    for (int i = 0; i < rpc_request.token_ids_size(); i++) {
+    for (int32_t i = 0; i < rpc_request.token_ids_size(); ++i) {
       prompt_tokens->emplace_back(rpc_request.token_ids(i));
     }
 

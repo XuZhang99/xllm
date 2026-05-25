@@ -91,9 +91,9 @@ void NpuLlamaDecoderLayerImpl::param_from_args(
   param.worldSize = parallel_args.world_size();
   param.numAttentionHeadsPerRank = args.n_heads() / param.worldSize;
   param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  std::optional<int64_t> optional_value = args.n_kv_heads();
   param.numKeyValueHeadsPerRank =
-      static_cast<int>(optionalValue.value()) / param.worldSize;
+      static_cast<int32_t>(optional_value.value()) / param.worldSize;
   param.rank = parallel_args.rank();
   param.backend = "lccl";
   param.tensorParallelInfo = {
@@ -106,7 +106,7 @@ void NpuLlamaDecoderLayerImpl::merge_loaded_weights() {
 
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   Device::empty_cache(device_.index());
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
+  for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
   }
@@ -170,7 +170,7 @@ torch::Tensor NpuLlamaDecoderLayerImpl::forward(torch::Tensor& x,
                                                 torch::Tensor& attn_mask,
                                                 KVCache& kv_cache,
                                                 ModelInputParams& input_params,
-                                                int node_id) {
+                                                int32_t node_id) {
   atb::Status st;
 
   if (!input_params.meta.batch_forward_type.is_decode()) {

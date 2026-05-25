@@ -28,6 +28,7 @@ limitations under the License.
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <optional>
@@ -224,7 +225,7 @@ bool try_parse_layer_id_with_prefix(const std::string& tensor_name,
   size_t end = begin;
   while (end < tensor_name.size() &&
          std::isdigit(static_cast<unsigned char>(tensor_name[end]))) {
-    const int digit = tensor_name[end] - '0';
+    const int64_t digit = static_cast<int64_t>(tensor_name[end] - '0');
     if (value > (std::numeric_limits<int64_t>::max() - digit) / 10) {
       return false;
     }
@@ -323,11 +324,11 @@ bool log_safetensors_error(::Status status,
   }
   if (tensor_name == nullptr) {
     LOG(ERROR) << op << " failed for " << weights_file
-               << ", status=" << static_cast<int>(status);
+               << ", status=" << static_cast<int32_t>(status);
   } else {
     LOG(ERROR) << op << " failed for " << weights_file
                << ", tensor_name=" << tensor_name
-               << ", status=" << static_cast<int>(status);
+               << ", status=" << static_cast<int32_t>(status);
   }
   return false;
 }
@@ -339,12 +340,12 @@ void check_safetensors_cleanup(::Status status,
   if (tensor_name == nullptr) {
     CHECK(status == ::Status::Ok)
         << op << " cleanup failed for " << weights_file
-        << ", status=" << static_cast<int>(status);
+        << ", status=" << static_cast<int32_t>(status);
   } else {
     CHECK(status == ::Status::Ok)
         << op << " cleanup failed for " << weights_file
         << ", tensor_name=" << tensor_name
-        << ", status=" << static_cast<int>(status);
+        << ", status=" << static_cast<int32_t>(status);
   }
 }
 
@@ -446,10 +447,10 @@ std::vector<std::unique_ptr<StateDict>>& HFModelLoader::get_state_dicts() {
   if (state_dicts_.empty()) {
     // load state dict
     state_dicts_.reserve(model_weights_files_.size());
-    auto file_cnt = model_weights_files_.size();
+    const int32_t file_cnt = static_cast<int32_t>(model_weights_files_.size());
     BlockingCounter counter(file_cnt);
     state_dicts_.resize(model_weights_files_.size());
-    for (int file_id = 0; file_id < file_cnt; file_id++) {
+    for (int32_t file_id = 0; file_id < file_cnt; ++file_id) {
       threadpool_->schedule([this, file_id, &counter]() mutable {
         LOG(INFO) << "Loading model weights from "
                   << model_weights_files_[file_id];
@@ -1062,16 +1063,16 @@ bool HFModelLoader::load_image_preprocessor_args(
     args_.mm_image_do_center_crop() =
         image_preprocess_reader.value_or<bool>("do_center_crop", false);
     args_.mm_image_crop_height_size() =
-        image_preprocess_reader.value_or<int>("crop_size.height", 335);
+        image_preprocess_reader.value_or<int32_t>("crop_size.height", 335);
     args_.mm_image_crop_width_size() =
-        image_preprocess_reader.value_or<int>("crop_size.width", 335);
+        image_preprocess_reader.value_or<int32_t>("crop_size.width", 335);
 
     args_.mm_image_do_resize() =
         image_preprocess_reader.value_or<bool>("do_resize", false);
     args_.mm_image_resize_shortest_edge() =
-        image_preprocess_reader.value_or<int>("size.shortest_edge", 335);
+        image_preprocess_reader.value_or<int32_t>("size.shortest_edge", 335);
     args_.mm_image_resample() =
-        image_preprocess_reader.value_or<int>("resample", 335);
+        image_preprocess_reader.value_or<int32_t>("resample", 335);
 
     args_.mm_image_do_rescale() =
         image_preprocess_reader.value_or<bool>("do_rescale", false);
@@ -1103,31 +1104,31 @@ bool HFModelLoader::load_image_preprocessor_args(
     }
 
     args_.mm_image_shortest_edge() =
-        image_preprocess_reader.value_or<int>("size.shortest_edge", 0);
+        image_preprocess_reader.value_or<int64_t>("size.shortest_edge", 0);
 
     args_.mm_image_longest_edge() =
-        image_preprocess_reader.value_or<int>("size.longest_edge", 0);
+        image_preprocess_reader.value_or<int64_t>("size.longest_edge", 0);
 
     args_.mm_image_min_pixels() =
-        image_preprocess_reader.value_or<int>("min_pixels", 0);
+        image_preprocess_reader.value_or<int32_t>("min_pixels", 0);
 
     args_.mm_image_max_pixels() =
-        image_preprocess_reader.value_or<int>("max_pixels", 0);
+        image_preprocess_reader.value_or<int32_t>("max_pixels", 0);
 
     args_.mm_image_patch_size() =
-        image_preprocess_reader.value_or<int>("patch_size", 0);
+        image_preprocess_reader.value_or<int32_t>("patch_size", 0);
 
     args_.mm_image_temporal_patch_size() =
-        image_preprocess_reader.value_or<int>("temporal_patch_size", 0);
+        image_preprocess_reader.value_or<int32_t>("temporal_patch_size", 0);
 
     args_.mm_image_merge_size() =
-        image_preprocess_reader.value_or<int>("merge_size", 0);
+        image_preprocess_reader.value_or<int32_t>("merge_size", 0);
 
     args_.mm_image_feature_size() =
-        image_preprocess_reader.value_or<int>("image_feature_size", 0);
+        image_preprocess_reader.value_or<int32_t>("image_feature_size", 0);
 
     args_.mm_scale_resolution() =
-        image_preprocess_reader.value_or<int>("scale_resolution", 0);
+        image_preprocess_reader.value_or<int32_t>("scale_resolution", 0);
 
     args_.mm_slice_mode() =
         image_preprocess_reader.value_or<bool>("slice_mode", false);
@@ -1150,10 +1151,10 @@ bool HFModelLoader::load_video_preprocessor_args(
               << video_preprocess_file_path;
 
     args_.mm_video_shortest_edge() =
-        video_preprocess_reader.value_or<int>("size.shortest_edge", 0);
+        video_preprocess_reader.value_or<int64_t>("size.shortest_edge", 0);
 
     args_.mm_video_longest_edge() =
-        video_preprocess_reader.value_or<int>("size.longest_edge", 0);
+        video_preprocess_reader.value_or<int64_t>("size.longest_edge", 0);
 
     const auto& video_prerocess_data = video_preprocess_reader.data();
     if (video_preprocess_reader.contains("image_mean")) {
@@ -1166,13 +1167,13 @@ bool HFModelLoader::load_video_preprocessor_args(
           video_prerocess_data["image_std"].get<std::vector<double>>();
     }
     args_.mm_video_patch_size() =
-        video_preprocess_reader.value_or<int>("patch_size", 0);
+        video_preprocess_reader.value_or<int32_t>("patch_size", 0);
 
     args_.mm_video_temporal_patch_size() =
-        video_preprocess_reader.value_or<int>("temporal_patch_size", 0);
+        video_preprocess_reader.value_or<int32_t>("temporal_patch_size", 0);
 
     args_.mm_video_merge_size() =
-        video_preprocess_reader.value_or<int>("merge_size", 0);
+        video_preprocess_reader.value_or<int32_t>("merge_size", 0);
 
     args_.mm_video_do_rescale() =
         video_preprocess_reader.value_or<bool>("do_rescale", false);

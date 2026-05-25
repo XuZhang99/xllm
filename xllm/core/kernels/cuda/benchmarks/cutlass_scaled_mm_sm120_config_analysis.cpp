@@ -30,6 +30,7 @@
 #include <torch/torch.h>
 
 #include <chrono>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -44,8 +45,8 @@
 namespace {
 
 // Benchmark configuration
-constexpr int kWarmupIters = 10;
-constexpr int kBenchIters = 100;
+constexpr int32_t kWarmupIters = 10;
+constexpr int32_t kBenchIters = 100;
 
 // Result structure
 struct ConfigResult {
@@ -103,7 +104,7 @@ ConfigResult BenchmarkWithDispatch(int64_t m,
   auto [a, b, a_scales, b_scales, c] = CreateTestTensors(m, n, k, device);
 
   // Warmup
-  for (int i = 0; i < kWarmupIters; ++i) {
+  for (int32_t i = 0; i < kWarmupIters; ++i) {
     xllm::kernel::cuda::cutlass_scaled_mm(
         c, a, b, a_scales, b_scales, std::nullopt);
   }
@@ -111,7 +112,7 @@ ConfigResult BenchmarkWithDispatch(int64_t m,
 
   // Benchmark
   auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < kBenchIters; ++i) {
+  for (int32_t i = 0; i < kBenchIters; ++i) {
     xllm::kernel::cuda::cutlass_scaled_mm(
         c, a, b, a_scales, b_scales, std::nullopt);
   }
@@ -205,7 +206,7 @@ class CutlassScaledMMSM120ConfigTest : public ::testing::Test {
     device_ = torch::Device(torch::kCUDA, current_device);
 
     // Check compute capability, SM120 test only runs on SM120 architecture
-    int compute_capability = xllm::kernel::cuda::get_sm_version_num();
+    int32_t compute_capability = xllm::kernel::cuda::get_sm_version_num();
     if (compute_capability < 120) {
       GTEST_SKIP() << "SM120 test requires compute capability >= 12.0 "
                       "(Blackwell), current: "
@@ -238,7 +239,7 @@ class CutlassScaledMMSM120ConfigTest : public ::testing::Test {
   }
 
   torch::Device device_ = torch::kCPU;
-  int compute_capability_ = 0;
+  int32_t compute_capability_ = 0;
 };
 
 // ============================================================================

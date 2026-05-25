@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <unordered_map>
@@ -23,7 +24,7 @@ namespace xllm {
 namespace layer {
 
 namespace llama_decoder_constants {
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
 
   IN_NORM_WEIGHT = 0,  // weight
   IN_NORM_BIAS,        // bias
@@ -85,7 +86,7 @@ enum DecoderLayerTensorId : int {
   IN_MLP_CPROJ_COMPRESS_IDX,
 };
 
-static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
+static const std::unordered_map<std::string, int32_t> WEIGHT_MAPPING = {
     {"input_layernorm.weight", IN_NORM_WEIGHT},
     {"self_attn.q_proj.weight", IN_Q_WEIGHT},
     {"self_attn.k_proj.weight", IN_K_WEIGHT},
@@ -97,13 +98,13 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
     {"mlp.down_proj.weight", IN_MLP_CPROJ_WEIGHT},
 };
 
-static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
-                                          {IN_K_WEIGHT, 0},
-                                          {IN_V_WEIGHT, 0},
-                                          {IN_ATTENTION_OUT_WEIGHT, 1},
-                                          {IN_MLP_W2_WEIGHT, 0},
-                                          {IN_MLP_W1_WEIGHT, 0},
-                                          {IN_MLP_CPROJ_WEIGHT, 1}};
+static std::map<int32_t, int32_t> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
+                                                  {IN_K_WEIGHT, 0},
+                                                  {IN_V_WEIGHT, 0},
+                                                  {IN_ATTENTION_OUT_WEIGHT, 1},
+                                                  {IN_MLP_W2_WEIGHT, 0},
+                                                  {IN_MLP_W1_WEIGHT, 0},
+                                                  {IN_MLP_CPROJ_WEIGHT, 1}};
 
 }  // namespace llama_decoder_constants
 

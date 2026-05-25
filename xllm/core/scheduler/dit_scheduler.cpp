@@ -100,7 +100,7 @@ void DiTDynamicBatchScheduler::generate() {}
 std::vector<DiTBatch> DiTDynamicBatchScheduler::prepare_batch() {
   Timer timer;
 
-  int count = 0;
+  int32_t count = 0;
   std::shared_ptr<DiTRequest> request;
   while (request_queue_.read(request)) {
     running_requests_.emplace_back(request);

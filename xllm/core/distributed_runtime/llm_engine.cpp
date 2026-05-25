@@ -119,7 +119,8 @@ void LLMEngine::process_group_test() {
     // XLLM_PROCESS_GROUP_ASYNC_TIMEOUT_SECONDS environment variable (default: 4
     // seconds). This is particularly important in multi-node multi-device
     // scenarios where network latency may require a longer timeout period.
-    const int timeout_seconds = util::get_process_group_test_timeout_seconds();
+    const int32_t timeout_seconds =
+        util::get_process_group_test_timeout_seconds();
     folly::collectAll(futures)
         .within(std::chrono::seconds(timeout_seconds))
         .get();
@@ -1003,7 +1004,7 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
   // cause the output on other workers is the same as that on driver.
   // Under data parallelism (DP), we need to get dp_size outputs.
   // The `stride` means the workers num we can skip.
-  int stride = dp_local_tp_size_;
+  uint32_t stride = dp_local_tp_size_;
   // If EPLB is enabled, we need to get results from all workers,
   // because the experts on each worker are different,
   // and the tokens load of all experts needs to be returned to engine.

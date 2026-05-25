@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <initializer_list>
 #include <vector>
 
@@ -26,24 +27,24 @@ namespace qwen_loader_family_utils {
 
 template <typename ZeroLikeFn>
 inline void reset_indices(std::vector<at::Tensor>& tensors,
-                          std::initializer_list<int> indices,
+                          std::initializer_list<int32_t> indices,
                           ZeroLikeFn zero_like) {
-  for (int idx : indices) {
+  for (int32_t idx : indices) {
     tensors[idx] = zero_like(tensors[idx]);
   }
 }
 
 template <typename ZeroLikeFn>
 inline void merge_packed_qkv_for_tp(std::vector<at::Tensor>& tensors,
-                                    int qkv_weight_idx,
-                                    int qkv_bias_idx,
-                                    int q_weight_idx,
-                                    int k_weight_idx,
-                                    int v_weight_idx,
-                                    int q_bias_idx,
-                                    int k_bias_idx,
-                                    int v_bias_idx,
-                                    int world_size,
+                                    int32_t qkv_weight_idx,
+                                    int32_t qkv_bias_idx,
+                                    int32_t q_weight_idx,
+                                    int32_t k_weight_idx,
+                                    int32_t v_weight_idx,
+                                    int32_t q_bias_idx,
+                                    int32_t k_bias_idx,
+                                    int32_t v_bias_idx,
+                                    int32_t world_size,
                                     ZeroLikeFn zero_like) {
   if (world_size <= 1) {
     return;
@@ -60,10 +61,10 @@ inline void merge_packed_qkv_for_tp(std::vector<at::Tensor>& tensors,
 
 template <typename ZeroLikeFn>
 inline void merge_gate_up(std::vector<at::Tensor>& tensors,
-                          int gate_weight_idx,
-                          int up_weight_idx,
-                          int gate_bias_idx,
-                          int up_bias_idx,
+                          int32_t gate_weight_idx,
+                          int32_t up_weight_idx,
+                          int32_t gate_bias_idx,
+                          int32_t up_bias_idx,
                           ZeroLikeFn zero_like) {
   tensors[gate_weight_idx] =
       torch::cat({tensors[gate_weight_idx], tensors[up_weight_idx]}, 0);
@@ -75,9 +76,9 @@ inline void merge_gate_up(std::vector<at::Tensor>& tensors,
 template <typename ZeroLikeFn>
 inline void merge_qkv_bias(
     std::vector<at::Tensor>& tensors,
-    int q_bias_idx,
-    int k_bias_idx,
-    int v_bias_idx,
+    int32_t q_bias_idx,
+    int32_t k_bias_idx,
+    int32_t v_bias_idx,
     ZeroLikeFn zero_like,
     c10::optional<torch::ScalarType> dtype = c10::nullopt) {
   auto merged = torch::cat(
@@ -88,9 +89,9 @@ inline void merge_qkv_bias(
 
 template <typename ZeroLikeFn>
 inline void merge_qkv_weight_transposed(std::vector<at::Tensor>& tensors,
-                                        int q_weight_idx,
-                                        int k_weight_idx,
-                                        int v_weight_idx,
+                                        int32_t q_weight_idx,
+                                        int32_t k_weight_idx,
+                                        int32_t v_weight_idx,
                                         ZeroLikeFn zero_like) {
   tensors[q_weight_idx] =
       torch::cat(
@@ -103,8 +104,8 @@ inline void merge_qkv_weight_transposed(std::vector<at::Tensor>& tensors,
 
 template <typename ZeroLikeFn>
 inline void merge_mlp_weight_transposed(std::vector<at::Tensor>& tensors,
-                                        int gate_weight_idx,
-                                        int up_weight_idx,
+                                        int32_t gate_weight_idx,
+                                        int32_t up_weight_idx,
                                         ZeroLikeFn zero_like) {
   tensors[gate_weight_idx] =
       torch::cat({tensors[gate_weight_idx], tensors[up_weight_idx]}, 0)
@@ -115,17 +116,17 @@ inline void merge_mlp_weight_transposed(std::vector<at::Tensor>& tensors,
 
 template <typename ZeroLikeFn>
 inline void convert_qwen_decoder_w8a8_shared(std::vector<at::Tensor>& tensors,
-                                             int attn_out_deqscale_idx,
-                                             int q_deqscale_idx,
-                                             int k_deqscale_idx,
-                                             int v_deqscale_idx,
-                                             int mlp_gate_bias_idx,
-                                             int mlp_up_bias_idx,
-                                             int mlp_gate_deqscale_idx,
-                                             int mlp_up_deqscale_idx,
-                                             int q_offset_idx,
-                                             int attn_out_offset_idx,
-                                             int mlp_gate_offset_idx,
+                                             int32_t attn_out_deqscale_idx,
+                                             int32_t q_deqscale_idx,
+                                             int32_t k_deqscale_idx,
+                                             int32_t v_deqscale_idx,
+                                             int32_t mlp_gate_bias_idx,
+                                             int32_t mlp_up_bias_idx,
+                                             int32_t mlp_gate_deqscale_idx,
+                                             int32_t mlp_up_deqscale_idx,
+                                             int32_t q_offset_idx,
+                                             int32_t attn_out_offset_idx,
+                                             int32_t mlp_gate_offset_idx,
                                              ZeroLikeFn zero_like) {
   tensors[attn_out_deqscale_idx] =
       tensors[attn_out_deqscale_idx].to(torch::kFloat32);

@@ -18,7 +18,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-enum Glm4VisionEncoderLayerTensorId : int {
+enum Glm4VisionEncoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_POST_NORM_WEIGHT,
   IN_QKV_WEIGHT,
@@ -29,7 +29,7 @@ enum Glm4VisionEncoderLayerTensorId : int {
   IN_LINEAR_GATE_WEIGHT
 };
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {
     {IN_INPUT_NORM_WEIGHT, "norm1.weight"},
     {IN_POST_NORM_WEIGHT, "norm2.weight"},
     {IN_QKV_WEIGHT, "attn.qkv.weight"},
@@ -39,10 +39,10 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_LINEAR_DOWN_WEIGHT, "mlp.down_proj.weight"}};
 
 // IN_QKV_WEIGHT is sharded explicitly in merge_host_at_weights.
-static std::map<int, int> WEIGHT_SHARD = {{IN_ATTN_PROJ_WEIGHT, 1},
-                                          {IN_LINEAR_UP_WEIGHT, 0},
-                                          {IN_LINEAR_GATE_WEIGHT, 0},
-                                          {IN_LINEAR_DOWN_WEIGHT, 1}};
+static std::map<int32_t, int32_t> WEIGHT_SHARD = {{IN_ATTN_PROJ_WEIGHT, 1},
+                                                  {IN_LINEAR_UP_WEIGHT, 0},
+                                                  {IN_LINEAR_GATE_WEIGHT, 0},
+                                                  {IN_LINEAR_DOWN_WEIGHT, 1}};
 
 Glm4VisionEncoderLoader::Glm4VisionEncoderLoader(uint64_t weight_count,
                                                  const ModelContext& context,
@@ -56,11 +56,11 @@ Glm4VisionEncoderLoader::Glm4VisionEncoderLoader(uint64_t weight_count,
   if (load_to_host()) {
     auto host_options =
         torch::TensorOptions().dtype(options.dtype()).device(torch::kCPU);
-    for (int i = 0; i < weight_count; ++i) {
+    for (int32_t i = 0; i < weight_count; ++i) {
       working_tensors()[i] = torch::zeros({1}, host_options);
     }
   } else {
-    for (int i = 0; i < weight_count; ++i) {
+    for (int32_t i = 0; i < weight_count; ++i) {
       working_tensors()[i] = torch::zeros({1}).to(options);
     }
   }

@@ -95,7 +95,7 @@ REGISTER_MODEL_ARGS(qwen3_next, [&] {
   LOAD_ARG_OR(sliding_window, "sliding_window", 4096);
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
   LOAD_ARG_OR(vocab_size, "vocab_size", 151936);
-  LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int>());
+  LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int32_t>());
 
   // Additional parameters for Qwen3-Next architecture
   LOAD_ARG_OR(attn_output_gate, "attn_output_gate", true);

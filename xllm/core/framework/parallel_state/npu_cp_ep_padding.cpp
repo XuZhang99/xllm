@@ -148,32 +148,31 @@ void CpEpPadding::handle_expert_parallel() {
   }
 
   const int64_t base_length = dynamic_ep_idx_padding.size(0);
-  const float buffer_factor =
-      get_all2all_buffer_factor(static_cast<int>(base_length));
-  int ep_input_length = static_cast<int>(base_length * buffer_factor);
+  const float buffer_factor = get_all2all_buffer_factor(base_length);
+  int64_t ep_input_length = static_cast<int64_t>(base_length * buffer_factor);
 
-  int64_t group_size = mapping_npu_["moeEpSize"].get<int64_t>();
-  const int all2all_padding = ep_input_length % group_size;
-  const int padding =
+  const int64_t group_size = mapping_npu_["moeEpSize"].get<int64_t>();
+  const int64_t all2all_padding = ep_input_length % group_size;
+  const int64_t padding =
       (all2all_padding != 0) ? (group_size - all2all_padding) : 0;
 
-  int ep_input_length_padding = ep_input_length + padding;
+  int64_t ep_input_length_padding = ep_input_length + padding;
   std::vector<int32_t> moe_idx_data;
-  moe_idx_data.reserve(ep_input_length_padding);
-  for (int i = 1; i <= ep_input_length_padding; ++i) {
-    moe_idx_data.push_back(i);
+  moe_idx_data.reserve(static_cast<size_t>(ep_input_length_padding));
+  for (int64_t i = 1; i <= ep_input_length_padding; ++i) {
+    moe_idx_data.push_back(static_cast<int32_t>(i));
   }
   moe_idx_ = torch::tensor(moe_idx_data, torch::dtype(torch::kInt32));
   expert_array_ = safe_to(
       torch::ones({moe_idx_.sizes()[0]}, dtype_).view({-1, 1}), device_, true);
 }
 
-float CpEpPadding::get_all2all_buffer_factor(int length) const {
+float CpEpPadding::get_all2all_buffer_factor(int64_t length) const {
   float all2all_buffer_factor =
       static_cast<float>(mapping_npu_["moeEpSize"].get<int64_t>());
-  length *= mapping_npu_["attnCpSize"].get<int>();
+  length *= mapping_npu_["attnCpSize"].get<int64_t>();
 
-  const std::vector<std::pair<int, float>> length_thresholds = {
+  const std::vector<std::pair<int64_t, float>> length_thresholds = {
       {1048576, 1.32f},
       {524288, 1.4f},
       {262144, 1.53f},

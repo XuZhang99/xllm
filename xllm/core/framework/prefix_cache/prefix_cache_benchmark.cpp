@@ -109,7 +109,7 @@ static void BM_MurmurHash3_x64_128(benchmark::State& state) {
 
   for (auto _ : state) {
     MurmurHash3_x64_128(
-        data.data(), static_cast<int>(data_len), kMurmurSeed, out);
+        data.data(), static_cast<int32_t>(data_len), kMurmurSeed, out);
     benchmark::DoNotOptimize(out);
   }
 
@@ -158,7 +158,8 @@ static void BM_MurmurHash3_Chain(benchmark::State& state) {
     std::memset(hash_buf, 0, sizeof(hash_buf));
     for (int64_t b = 0; b < num_blocks; ++b) {
       const int32_t* block_data = tokens.data() + b * block_size;
-      const int data_bytes = static_cast<int>(block_size * sizeof(int32_t));
+      const int32_t data_bytes =
+          static_cast<int32_t>(block_size * sizeof(int32_t));
       if (b == 0) {
         MurmurHash3_x64_128(block_data, data_bytes, kMurmurSeed, hash_buf);
       } else {

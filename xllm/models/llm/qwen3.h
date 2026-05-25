@@ -84,7 +84,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
       // mrop_length == freqs_length == head_dim / 2
       int64_t mrop_length = static_cast<int64_t>(freqs_t.size(-1) / 2);
 
-      for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
+      for (int64_t dim_idx = 1; dim_idx <= 2; ++dim_idx) {
         int64_t offset = dim_idx;
         int64_t section_len = mrope_section_[dim_idx];
         int64_t length = section_len * 3;

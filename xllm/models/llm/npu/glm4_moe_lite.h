@@ -150,7 +150,8 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
     rank_ = parallel_args.rank();
     mapping_data_ = parallel_args.mapping_data();
     num_experts_per_tok_ = model_args.num_experts_per_tok();
-    for (int i = 0; i < parallel_args.world_size(); i += dp_local_tp_size_) {
+    for (int32_t i = 0; i < parallel_args.world_size();
+         i += dp_local_tp_size_) {
       indices.push_back(i);
     }
   }
@@ -222,7 +223,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
       rolling_guard.before_layer(layer_index);
       layer(h,
             cos_pos,
@@ -242,7 +243,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
     npu_embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
     // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
@@ -251,7 +252,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
 
   void verify_loaded_weights(const std::string& prefix) const {
     npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
@@ -260,7 +261,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
 
   void merge_loaded_weights() {
     npu_embed_tokens_->merge_loaded_weights();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
@@ -268,7 +269,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
 
   void merge_and_move_pinned_host() {
     npu_embed_tokens_->merge_and_move_pinned_host();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_and_move_pinned_host();
     }
     norm_->merge_and_move_pinned_host();
@@ -276,7 +277,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
 
   void free_weights() {
     npu_embed_tokens_->free_weights();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->free_weights();
     }
     norm_->free_weights();
@@ -284,7 +285,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
 
   void reload_weights() {
     npu_embed_tokens_->reload_weights();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->reload_weights();
     }
     norm_->reload_weights();
@@ -297,7 +298,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
 
   void reload_weights_from_device() {
     npu_embed_tokens_->reload_weights_from_device();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->reload_weights_from_device();
     }
     norm_->reload_weights_from_device();
@@ -372,7 +373,7 @@ REGISTER_MODEL_ARGS(glm4_moe_lite, [&] {
   LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0f);
   LOAD_ARG_OR(decoder_sparse_step, "decoder_sparse_step", 1);
   // LOAD_ARG_OR(eos_token_id, "eos_token_id", 154820);
-  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int>{154820});
+  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int32_t>{154820});
   LOAD_ARG_OR(n_group, "n_group", 8);
   LOAD_ARG_OR(topk_group, "topk_group", 4);
   LOAD_ARG_OR(qk_nope_head_dim, "qk_nope_head_dim", 192);

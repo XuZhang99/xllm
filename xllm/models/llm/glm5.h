@@ -59,7 +59,7 @@ REGISTER_MODEL_ARGS(
       LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 202752);
       LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-5);
       LOAD_ARG_OR_FUNC(eos_token_id_vec, "eos_token_id", [&] {
-        return std::vector<int>{154820, 154827, 154829};
+        return std::vector<int32_t>{154820, 154827, 154829};
       });
       LOAD_ARG_OR(bos_token_id, "bos_token_id", 0);
       LOAD_ARG_OR(rope_theta, "rope_parameters.rope_theta", 1000000.0f);

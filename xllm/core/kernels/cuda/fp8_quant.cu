@@ -18,6 +18,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
 #include <torch/extension.h>
+#include <cstdint>
 // clang-format on
 
 namespace xllm {
@@ -80,11 +81,11 @@ __global__ void scaled_fp8_quant_kernel_strided(
     fp8_type* __restrict__ out,
     const scalar_t* __restrict__ input,
     const float* __restrict__ scale,
-    int hidden_size,
+    int32_t hidden_size,
     int64_t in_row_stride,
     int64_t out_row_stride) {
   const int64_t token_idx = blockIdx.x;  // one token per block
-  const int tid = threadIdx.x;
+  const int32_t tid = threadIdx.x;
 
   const scalar_t* token_in = input + token_idx * in_row_stride;
   fp8_type* token_out = out + token_idx * out_row_stride;
@@ -121,11 +122,11 @@ void static_scaled_fp8_quant(torch::Tensor& out,          // [..., d]
   TORCH_CHECK(out.stride(-1) == 1,
               "last dimension of output must be contiguous");
 
-  const int hidden_size = input.size(-1);
-  const int num_tokens = input.numel() / hidden_size;
-  const int block_size = 256;
-  dim3 grid(num_tokens);
-  dim3 block(block_size);
+  const int32_t hidden_size = static_cast<int32_t>(input.size(-1));
+  const int32_t num_tokens = static_cast<int32_t>(input.numel() / hidden_size);
+  const int32_t block_size = 256;
+  dim3 grid(static_cast<uint32_t>(num_tokens));
+  dim3 block(static_cast<uint32_t>(block_size));
 
   const int64_t in_row_stride = input.stride(-2);
   const int64_t out_row_stride = out.stride(-2);

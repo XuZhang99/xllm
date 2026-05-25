@@ -51,12 +51,12 @@ class NpuGlm4MoeDecoderImpl : public BaseLayer {
                         const ModelInputParams& input_params,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
-                        int node_id = 0);
+                        int32_t node_id = 0);
 
  private:
   struct ShardingConfig {
     bool is_sharded;
-    int index;
+    int32_t index;
     bool use_dp_sharding = false;
   };
 

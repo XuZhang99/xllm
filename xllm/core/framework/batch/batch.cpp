@@ -610,17 +610,17 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
     group_flat2d.clear();
     last_logprobs.clear();
 
-    for (int b = 0; b < result_width; ++b) {
+    for (int32_t b = 0; b < result_width; ++b) {
       std::vector<int32_t> row_tokens;
       row_tokens.reserve(static_cast<size_t>(total_rounds));
-      for (int c = 0; c < total_rounds; ++c) {
+      for (int32_t c = 0; c < total_rounds; ++c) {
         // Access [g][b][c]
         row_tokens.push_back(seq_group_accessor[g][b][c]);
       }
       group_flat2d.emplace_back(std::move(row_tokens));
       if (has_logprobs) {
         // logprobs is flattened [batch * beam_width]
-        int logprob_idx = static_cast<int>(g) * beam_width + b;
+        int64_t logprob_idx = static_cast<int64_t>(g) * beam_width + b;
         last_logprobs.push_back(
             output.beam_search_output.out_logprobs[logprob_idx].item<float>());
       }
@@ -718,7 +718,7 @@ bool Batch::update_sequence_state(Sequence* seq, bool replace_fake_token) {
 
 void Batch::append_token_for_sequence(Sequence* seq,
                                       const Token& token,
-                                      int token_idx,
+                                      size_t token_idx,
                                       bool replace_fake_token) {
   // always append a token, maybe true or fake token
   if (!replace_fake_token) {

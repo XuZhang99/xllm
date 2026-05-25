@@ -60,20 +60,21 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   param.loraEnableGMM = false;
   param.enableXattention = is_rec_multi_round_mode();
 
-  param.linearTransposeType = {static_cast<int>(TransposeType::NOT_TRANSPOSE),
-                               static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
-                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
-                               static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::NOT_TRANSPOSE)};
+  param.linearTransposeType = {
+      static_cast<int32_t>(TransposeType::NOT_TRANSPOSE),
+      static_cast<int32_t>(TransposeType::INVALID),
+      static_cast<int32_t>(TransposeType::INVALID),
+      static_cast<int32_t>(TransposeType::NOT_TRANSPOSE),
+      static_cast<int32_t>(TransposeType::NOT_TRANSPOSE),
+      static_cast<int32_t>(TransposeType::INVALID),
+      static_cast<int32_t>(TransposeType::NOT_TRANSPOSE)};
   param.quantGroupSize = 0;
   param.normEps = args.rms_norm_eps();
   param.numAttentionHeadsPerRank = args.n_heads() / parallel_args.world_size();
   param.hiddenSizePerAttentionHead = args.head_dim();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  std::optional<int64_t> optional_value = args.n_kv_heads();
   param.numKeyValueHeadsPerRank =
-      static_cast<int>(optionalValue.value()) / parallel_args.world_size();
+      static_cast<int32_t>(optional_value.value()) / parallel_args.world_size();
   param.backend =
       ::xllm::ParallelConfig::get_instance().communication_backend();
   param.enableLogN = false;
@@ -129,39 +130,40 @@ void NpuQwen3DecoderLayerImpl::initialize_parallel_parameters(
 void NpuQwen3DecoderLayerImpl::initialize_quantization_parameters(
     atb_speed::qwen::QwenLayerParam& param) {
   if (quantize_type_.empty()) {
-    param.linearDescs = {static_cast<int>(LinearTypeV2::BFLOAT16),
-                         static_cast<int>(LinearTypeV2::INVALID),
-                         static_cast<int>(LinearTypeV2::INVALID),
-                         static_cast<int>(LinearTypeV2::BFLOAT16),
-                         static_cast<int>(LinearTypeV2::BFLOAT16),
-                         static_cast<int>(LinearTypeV2::INVALID),
-                         static_cast<int>(LinearTypeV2::BFLOAT16)};
-    param.packQuantType = {static_cast<int>(PackType::PACK_QUANT_UNDEFINED),
-                           static_cast<int>(PackType::PACK_QUANT_UNDEFINED)};
-    param.linearQuantType = {static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID)};
+    param.linearDescs = {static_cast<int32_t>(LinearTypeV2::BFLOAT16),
+                         static_cast<int32_t>(LinearTypeV2::INVALID),
+                         static_cast<int32_t>(LinearTypeV2::INVALID),
+                         static_cast<int32_t>(LinearTypeV2::BFLOAT16),
+                         static_cast<int32_t>(LinearTypeV2::BFLOAT16),
+                         static_cast<int32_t>(LinearTypeV2::INVALID),
+                         static_cast<int32_t>(LinearTypeV2::BFLOAT16)};
+    param.packQuantType = {
+        static_cast<int32_t>(PackType::PACK_QUANT_UNDEFINED),
+        static_cast<int32_t>(PackType::PACK_QUANT_UNDEFINED)};
+    param.linearQuantType = {static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID)};
   } else {
-    param.linearDescs = {static_cast<int>(LinearTypeV2::W8A8),
-                         static_cast<int>(LinearTypeV2::INVALID),
-                         static_cast<int>(LinearTypeV2::INVALID),
-                         static_cast<int>(LinearTypeV2::W8A8),
-                         static_cast<int>(LinearTypeV2::W8A8),
-                         static_cast<int>(LinearTypeV2::INVALID),
-                         static_cast<int>(LinearTypeV2::BFLOAT16)};
-    param.packQuantType = {static_cast<int>(PackType::ALL_W8A8),
-                           static_cast<int>(PackType::ALL_W8A8)};
-    param.linearQuantType = {static_cast<int>(LinearType::INT),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INT),
-                             static_cast<int>(LinearType::INT),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::FP)};
+    param.linearDescs = {static_cast<int32_t>(LinearTypeV2::W8A8),
+                         static_cast<int32_t>(LinearTypeV2::INVALID),
+                         static_cast<int32_t>(LinearTypeV2::INVALID),
+                         static_cast<int32_t>(LinearTypeV2::W8A8),
+                         static_cast<int32_t>(LinearTypeV2::W8A8),
+                         static_cast<int32_t>(LinearTypeV2::INVALID),
+                         static_cast<int32_t>(LinearTypeV2::BFLOAT16)};
+    param.packQuantType = {static_cast<int32_t>(PackType::ALL_W8A8),
+                           static_cast<int32_t>(PackType::ALL_W8A8)};
+    param.linearQuantType = {static_cast<int32_t>(LinearType::INT),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INT),
+                             static_cast<int32_t>(LinearType::INT),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::FP)};
   }
 }
 
@@ -245,7 +247,7 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
                                                 ModelInputParams& input_params,
                                                 aclrtEvent* event,
                                                 std::atomic<bool>* event_flag,
-                                                int node_id) {
+                                                int32_t node_id) {
   atb::Status st;
   if (!input_params.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
@@ -288,7 +290,7 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
     KVCache& kv_cache,
     ModelInputParams& input_params,
     bool is_prefill,
-    int node_id) {
+    int32_t node_id) {
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
@@ -310,7 +312,7 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(
           input_params.attention.device.block_tables);
 
-  int input_idx = WEIGHT_COUNT_PER_LAYER + 11;
+  size_t input_idx = WEIGHT_COUNT_PER_LAYER + 11;
   if (is_rec_multi_round_mode()) {
     const auto* llmrec = input_params.llmrec_params();
 

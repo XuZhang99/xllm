@@ -17,6 +17,7 @@ limitations under the License.
 #include <torch/cuda.h>
 
 #include <cmath>
+#include <cstdint>
 
 #include "kernels/cuda/utils.h"
 #include "xattention_ops_api.h"
@@ -139,9 +140,9 @@ void lse_combine(torch::Tensor output,
 
   // Launch kernel: one block per (batch, head) pair, threads along D.
   const int64_t total_elements = B * H;
-  const int threads_per_block = 128;
+  const uint32_t threads_per_block = 128;
   dim3 block_dim(threads_per_block, 1, 1);
-  dim3 grid_dim(1, static_cast<unsigned int>(total_elements), 1);
+  dim3 grid_dim(1, static_cast<uint32_t>(total_elements), 1);
 
   DISPATCH_FLOATING_TYPES(
       shared_o.scalar_type(), "lse_combine_kernel_input", [&] {

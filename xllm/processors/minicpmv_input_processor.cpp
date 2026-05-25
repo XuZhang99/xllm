@@ -82,7 +82,7 @@ void MiniCPMInputProcessor::process(std::string& prompt,
   prompt = new_prompt;
 }
 
-void MiniCPMInputProcessor::find_mm_spans(const std::vector<int>& prompt,
+void MiniCPMInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
                                           MMData& mm_data) {
   uint32_t global_mm_index = 0;
   uint32_t offset = 0;
@@ -154,7 +154,7 @@ std::string MiniCPMInputProcessor::get_slice_image_placeholder(
 
   std::string image_placeholder = im_start_token_;
 
-  for (int i = 0; i < image_feature_size_; ++i) {
+  for (int32_t i = 0; i < image_feature_size_; ++i) {
     image_placeholder += unk_token_;
   }
 

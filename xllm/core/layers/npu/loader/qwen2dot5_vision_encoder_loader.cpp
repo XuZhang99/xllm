@@ -49,11 +49,11 @@ Qwen2dot5VisionEncoderLoader::Qwen2dot5VisionEncoderLoader(
   if (load_to_host()) {
     auto host_options =
         torch::TensorOptions().dtype(options.dtype()).device(torch::kCPU);
-    for (int i = 0; i < weight_count; ++i) {
+    for (int32_t i = 0; i < weight_count; ++i) {
       working_tensors()[i] = torch::zeros({1}, host_options);
     }
   } else {
-    for (int i = 0; i < weight_count; ++i) {
+    for (int32_t i = 0; i < weight_count; ++i) {
       working_tensors()[i] = torch::zeros({1}).to(options);
     }
   }
@@ -128,8 +128,8 @@ void Qwen2dot5VisionEncoderLoader::pad_qkv_weights() {
   auto& w = working_tensors();
   auto qkv_proj_weight = w[IN_QKV_WEIGHT];
   auto qkv_proj_bias = w[IN_QKV_BIAS];
-  int num_heads_per_rank = encode_param_num_attention_heads_per_rank_;
-  int hidden_size = num_heads_per_rank * 80 * encode_param_world_size_;
+  int32_t num_heads_per_rank = encode_param_num_attention_heads_per_rank_;
+  int32_t hidden_size = num_heads_per_rank * 80 * encode_param_world_size_;
 
   auto qkv_proj_weight_reshaped =
       qkv_proj_weight.reshape({num_heads_per_rank, 3, 80, hidden_size});

@@ -103,7 +103,7 @@ void Qwen2_5_VLInputProcessor::process(std::string& prompt,
   prompt = std::move(data);
 }
 
-void Qwen2_5_VLInputProcessor::find_mm_spans(const std::vector<int>& prompt,
+void Qwen2_5_VLInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
                                              MMData& mm_data) {
   auto start = prompt.begin();
   uint32_t global_mm_index = 0;

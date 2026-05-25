@@ -161,7 +161,7 @@ XLLM_Response build_error_response(const std::string& request_id,
   response.id = request_id.empty() ? "unknown_request" : request_id;
 
   LOG(ERROR) << "Request [" << response.id << "] error: " << error_info
-             << " (code: " << static_cast<int>(response.status_code) << ")";
+             << " (code: " << static_cast<int32_t>(response.status_code) << ")";
 
   return response;
 }

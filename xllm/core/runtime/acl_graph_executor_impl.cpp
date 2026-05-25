@@ -354,16 +354,18 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     params_for_capture->attention.host.kv_seq_lens.resize(padded_num_tokens);
     params_for_capture->attention.host.q_seq_lens.resize(padded_num_tokens);
     // Copy actual values from original params
-    for (int i = 0; i < actual_batch_size; i++) {
-      params_for_capture->attention.host.kv_seq_lens[i] =
-          params.attention.host.kv_seq_lens[i];
-      params_for_capture->attention.host.q_seq_lens[i] =
-          params.attention.host.q_seq_lens[i];
+    for (int64_t i = 0; i < actual_batch_size; i++) {
+      const size_t idx = static_cast<size_t>(i);
+      params_for_capture->attention.host.kv_seq_lens[idx] =
+          params.attention.host.kv_seq_lens[idx];
+      params_for_capture->attention.host.q_seq_lens[idx] =
+          params.attention.host.q_seq_lens[idx];
     }
     // Fill padded positions with default values
-    for (int i = actual_batch_size; i < padded_num_tokens; i++) {
-      params_for_capture->attention.host.kv_seq_lens[i] = kPaddingSeqLen;
-      params_for_capture->attention.host.q_seq_lens[i] = kPaddingSeqLen;
+    for (int64_t i = actual_batch_size; i < padded_num_tokens; i++) {
+      const size_t idx = static_cast<size_t>(i);
+      params_for_capture->attention.host.kv_seq_lens[idx] = kPaddingSeqLen;
+      params_for_capture->attention.host.q_seq_lens[idx] = kPaddingSeqLen;
     }
     params_for_capture->meta.num_sequences = padded_num_tokens;
     params_for_capture->meta.batch_forward_type = BatchForwardType::DECODE;
@@ -427,7 +429,7 @@ void GraphPersistentParam::initialize_paged_attention_plan_context(
       << "Failed to set launch mode to GRAPH_LAUNCH_MODE";
 
   // Create custom paged attention operation
-  const int dp_local_tp_size = options_.world_size() / options_.dp_size();
+  const int32_t dp_local_tp_size = options_.world_size() / options_.dp_size();
 
   // Cache headNum and head_dim as member variables
   num_head_ = static_cast<int32_t>(args_.n_heads() / dp_local_tp_size);
@@ -441,7 +443,7 @@ void GraphPersistentParam::initialize_paged_attention_plan_context(
   }
   paOpParam.headNum = num_head_;
 
-  std::optional<long int> optionalValue = args_.n_kv_heads();
+  std::optional<int64_t> optionalValue = args_.n_kv_heads();
   paOpParam.kvHeadNum =
       std::max(1,
                static_cast<int32_t>(optionalValue.value_or(args_.n_heads())) /
@@ -822,7 +824,7 @@ void GraphPersistentParam::update_attention_mask(
 
       // Generate mask for this sequence: [q_len, kv_len]
       // Use tril to generate lower triangular mask
-      int diagonal = kv_len - q_len;
+      int64_t diagonal = kv_len - q_len;
       auto options = torch::TensorOptions().dtype(torch::kBool).device(device_);
       auto bias = torch::tril(torch::ones({q_len, kv_len}, options), diagonal);
       bias = ~bias;  // Invert: True positions need to be masked

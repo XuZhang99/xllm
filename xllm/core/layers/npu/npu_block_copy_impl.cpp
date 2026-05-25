@@ -68,7 +68,7 @@ torch::Tensor NpuBlockCopyImpl::forward(const torch::Tensor& key_cache,
                                         const torch::Tensor& src_block_ids,
                                         const torch::Tensor& dst_block_ids,
                                         const torch::Tensor& cum_sum,
-                                        int nodeId) {
+                                        int32_t nodeId) {
   atb::Status st;
   build_node_variant_pack(
       node_, key_cache, value_cache, src_block_ids, dst_block_ids, cum_sum);

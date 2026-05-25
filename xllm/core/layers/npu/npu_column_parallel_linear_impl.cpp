@@ -134,7 +134,7 @@ int64_t NpuColumnParallelLinearImpl::init_node(
 }
 
 torch::Tensor NpuColumnParallelLinearImpl::forward(const torch::Tensor& input,
-                                                   int nodeId) {
+                                                   int32_t nodeId) {
   atb::Status st;
   build_node_variant_pack(linear_node_, input);
   st = execute_node(linear_node_, nodeId);
@@ -163,7 +163,7 @@ void NpuColumnParallelLinearImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(1) = *node.inTensors.at(1);
   inTensorDescs.at(1) = node.inTensors.at(1)->desc;
 
-  for (int i = 2; i < 7; i++) {
+  for (int32_t i = 2; i < 7; ++i) {
     node.variantPack.inTensors.at(i) = placeholder_;
     inTensorDescs.at(i) = placeholder_.desc;
   }

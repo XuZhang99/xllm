@@ -331,7 +331,7 @@ class OneRecStackImpl : public torch::nn::Module {
           kv_cache_ref,
           input_params_local,
           npu_encoder_output.defined() ? &npu_encoder_output : nullptr,
-          static_cast<int>(i),
+          static_cast<int32_t>(i),
           event,
           event_flag,
           expert_array);
@@ -365,7 +365,7 @@ class OneRecStackImpl : public torch::nn::Module {
       }
     }
 
-    for (int i = 0; i < static_cast<int>(layers_.size()); ++i) {
+    for (size_t i = 0; i < layers_.size(); ++i) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("block." + std::to_string(i) + "."));
     }
@@ -375,14 +375,14 @@ class OneRecStackImpl : public torch::nn::Module {
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    for (int i = 0; i < static_cast<int>(layers_.size()); ++i) {
+    for (size_t i = 0; i < layers_.size(); ++i) {
       layers_[i]->verify_loaded_weights(prefix + "block." + std::to_string(i) +
                                         ".");
     }
   }
 
   void merge_loaded_weights() {
-    for (int i = 0; i < static_cast<int>(layers_.size()); ++i) {
+    for (size_t i = 0; i < layers_.size(); ++i) {
       layers_[i]->merge_loaded_weights();
     }
   }

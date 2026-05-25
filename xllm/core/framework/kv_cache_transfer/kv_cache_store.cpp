@@ -119,7 +119,7 @@ uint32_t KVCacheStore::batch_put(
   uint64_t success_cnt = block_transfer_info.size() - str_keys.size();
   auto results = client_ptr_->BatchPut(str_keys, slices, rep_config_);
 
-  for (int i = 0; i < str_keys.size(); i++) {
+  for (size_t i = 0; i < str_keys.size(); i++) {
     if (!results[i].has_value()) {
       break;
     }
@@ -158,7 +158,7 @@ uint32_t KVCacheStore::batch_get(
 
   uint64_t success_cnt = 0;
   auto results = client_ptr_->BatchGet(str_keys, slices);
-  for (int i = 0; i < str_keys.size(); i++) {
+  for (size_t i = 0; i < str_keys.size(); i++) {
     if (!results[i].has_value()) {
       break;
     }

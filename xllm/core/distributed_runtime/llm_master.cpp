@@ -171,11 +171,12 @@ void LLMMaster::handle_batch_request(
   }
 }
 
-void LLMMaster::handle_request(std::string prompt,
-                               std::optional<std::vector<int>> prompt_tokens,
-                               RequestParams sp,
-                               std::optional<Call*> call,
-                               OutputCallback callback) {
+void LLMMaster::handle_request(
+    std::string prompt,
+    std::optional<std::vector<int32_t>> prompt_tokens,
+    RequestParams sp,
+    std::optional<Call*> call,
+    OutputCallback callback) {
   scheduler_->incr_pending_requests(1);
   // add into the queue
   threadpool_->schedule([this,
@@ -210,11 +211,12 @@ void LLMMaster::handle_request(std::string prompt,
   });
 }
 
-void LLMMaster::handle_request(std::vector<Message> messages,
-                               std::optional<std::vector<int>> prompt_tokens,
-                               RequestParams sp,
-                               std::optional<Call*> call,
-                               OutputCallback callback) {
+void LLMMaster::handle_request(
+    std::vector<Message> messages,
+    std::optional<std::vector<int32_t>> prompt_tokens,
+    RequestParams sp,
+    std::optional<Call*> call,
+    OutputCallback callback) {
   scheduler_->incr_pending_requests(1);
   // add into the queue
   threadpool_->schedule([this,
@@ -281,7 +283,7 @@ void LLMMaster::generate() {
 
 std::shared_ptr<Request> LLMMaster::generate_request(
     std::string prompt,
-    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<int32_t>> prompt_tokens,
     const RequestParams& sp,
     std::optional<Call*> call,
     OutputCallback callback) {
@@ -295,7 +297,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
 
   // encode the prompt
   Timer timer;
-  std::vector<int> local_prompt_tokens;
+  std::vector<int32_t> local_prompt_tokens;
 
   if (prompt_tokens.has_value()) {
     local_prompt_tokens = std::move(prompt_tokens.value());
@@ -399,7 +401,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   std::vector<std::vector<int32_t>> stop_sequences;
   if (sp.stop.has_value()) {
     for (const auto& s : sp.stop.value()) {
-      std::vector<int> tmp_tokens;
+      std::vector<int32_t> tmp_tokens;
       if (!tokenizer_->encode(s, &tmp_tokens)) {
         CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                             "Failed to encode stop sequence",
@@ -495,7 +497,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
 
 std::shared_ptr<Request> LLMMaster::generate_request(
     const std::vector<Message>& messages,
-    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<int32_t>> prompt_tokens,
     const RequestParams& sp,
     std::optional<Call*> call,
     OutputCallback callback) {

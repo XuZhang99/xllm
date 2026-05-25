@@ -773,7 +773,7 @@ void NpuOneRecBlockLayerImpl::param_from_args(
       is_decoder_ ? decoder_kv_heads.value_or(args.decoder_n_heads())
                   : general_kv_heads.value_or(args.n_heads());
   param.numKeyValueHeadsPerRank =
-      static_cast<int>(args_kv_heads / param.worldSize);
+      static_cast<int32_t>(args_kv_heads / param.worldSize);
   param.rmsNormEps = args.rms_norm_eps();
 
   param.seqLen = {};
@@ -785,16 +785,16 @@ void NpuOneRecBlockLayerImpl::param_from_args(
 
   if (param.isBF16) {
     param.linearDescs = {
-        static_cast<int>(atb_speed::common::LinearDesc::BFLOAT16_DESC),
-        static_cast<int>(atb_speed::common::LinearDesc::BFLOAT16_DESC),
-        static_cast<int>(atb_speed::common::LinearDesc::BFLOAT16_DESC),
-        static_cast<int>(atb_speed::common::LinearDesc::BFLOAT16_DESC)};
+        static_cast<int32_t>(atb_speed::common::LinearDesc::BFLOAT16_DESC),
+        static_cast<int32_t>(atb_speed::common::LinearDesc::BFLOAT16_DESC),
+        static_cast<int32_t>(atb_speed::common::LinearDesc::BFLOAT16_DESC),
+        static_cast<int32_t>(atb_speed::common::LinearDesc::BFLOAT16_DESC)};
   } else {
     param.linearDescs = {
-        static_cast<int>(atb_speed::common::LinearDesc::FLOAT16_DESC),
-        static_cast<int>(atb_speed::common::LinearDesc::FLOAT16_DESC),
-        static_cast<int>(atb_speed::common::LinearDesc::FLOAT16_DESC),
-        static_cast<int>(atb_speed::common::LinearDesc::FLOAT16_DESC)};
+        static_cast<int32_t>(atb_speed::common::LinearDesc::FLOAT16_DESC),
+        static_cast<int32_t>(atb_speed::common::LinearDesc::FLOAT16_DESC),
+        static_cast<int32_t>(atb_speed::common::LinearDesc::FLOAT16_DESC),
+        static_cast<int32_t>(atb_speed::common::LinearDesc::FLOAT16_DESC)};
   }
 
   param.use_moe = args.use_moe() && is_decoder_;

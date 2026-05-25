@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <unordered_map>
@@ -24,7 +25,7 @@ namespace xllm {
 namespace layer {
 
 namespace qwen2_decoder_constants {
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_NORM_WEIGHT = 0,      // weight
   IN_NORM_BIAS = 1,        // bias
   IN_NORM_NEW_WEIGHT = 2,  // new weight
@@ -85,7 +86,7 @@ enum DecoderLayerTensorId : int {
   IN_MLP_CPROJ_COMPRESS_IDX = 49,
 };
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {
     {IN_NORM_WEIGHT, "input_layernorm.weight"},
     {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
     {IN_Q_BIAS, "self_attn.q_proj.bias"},
@@ -99,7 +100,7 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_MLP_W1_WEIGHT, "mlp.up_proj.weight"},
     {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"}};
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING_W8A8 = {
     {IN_NORM_WEIGHT, "input_layernorm.weight"},
     {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
     {IN_Q_BIAS, "self_attn.q_proj.quant_bias"},
@@ -134,39 +135,40 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
     {IN_MLP_W1_SCALE, "mlp.up_proj.input_scale"},
     {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"}};
 
-static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
-                                          {IN_Q_BIAS, 0},
-                                          {IN_K_WEIGHT, 0},
-                                          {IN_K_BIAS, 0},
-                                          {IN_V_WEIGHT, 0},
-                                          {IN_V_BIAS, 0},
-                                          {IN_ATTENTION_OUT_WEIGHT, 1},
-                                          {IN_MLP_W2_WEIGHT, 0},
-                                          {IN_MLP_W1_WEIGHT, 0},
-                                          {IN_MLP_CPROJ_WEIGHT, 1}};
+static std::map<int32_t, int32_t> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
+                                                  {IN_Q_BIAS, 0},
+                                                  {IN_K_WEIGHT, 0},
+                                                  {IN_K_BIAS, 0},
+                                                  {IN_V_WEIGHT, 0},
+                                                  {IN_V_BIAS, 0},
+                                                  {IN_ATTENTION_OUT_WEIGHT, 1},
+                                                  {IN_MLP_W2_WEIGHT, 0},
+                                                  {IN_MLP_W1_WEIGHT, 0},
+                                                  {IN_MLP_CPROJ_WEIGHT, 1}};
 
-static std::map<int, int> WEIGHT_SHARD_W8A8 = {{IN_Q_WEIGHT, 0},
-                                               {IN_Q_BIAS, 0},
-                                               {IN_Q_DEQSCALE, 0},
-                                               {IN_K_WEIGHT, 0},
-                                               {IN_K_BIAS, 0},
-                                               {IN_K_DEQSCALE, 0},
-                                               {IN_V_WEIGHT, 0},
-                                               {IN_V_BIAS, 0},
-                                               {IN_V_DEQSCALE, 0},
-                                               {IN_ATTENTION_OUT_WEIGHT, 1},
-                                               {IN_MLP_W2_WEIGHT, 0},
-                                               {IN_MLP_W2_BIAS, 0},
-                                               {IN_MLP_W2_DEQSCALE, 0},
-                                               {IN_MLP_W1_WEIGHT, 0},
-                                               {IN_MLP_W1_BIAS, 0},
-                                               {IN_MLP_W1_DEQSCALE, 0},
-                                               {IN_MLP_CPROJ_WEIGHT, 1}};
+static std::map<int32_t, int32_t> WEIGHT_SHARD_W8A8 = {
+    {IN_Q_WEIGHT, 0},
+    {IN_Q_BIAS, 0},
+    {IN_Q_DEQSCALE, 0},
+    {IN_K_WEIGHT, 0},
+    {IN_K_BIAS, 0},
+    {IN_K_DEQSCALE, 0},
+    {IN_V_WEIGHT, 0},
+    {IN_V_BIAS, 0},
+    {IN_V_DEQSCALE, 0},
+    {IN_ATTENTION_OUT_WEIGHT, 1},
+    {IN_MLP_W2_WEIGHT, 0},
+    {IN_MLP_W2_BIAS, 0},
+    {IN_MLP_W2_DEQSCALE, 0},
+    {IN_MLP_W1_WEIGHT, 0},
+    {IN_MLP_W1_BIAS, 0},
+    {IN_MLP_W1_DEQSCALE, 0},
+    {IN_MLP_CPROJ_WEIGHT, 1}};
 
 }  // namespace qwen2_decoder_constants
 
 namespace qwen3_decoder_constants {
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_NORM_WEIGHT = 0,      // weight
   IN_NORM_BIAS = 1,        // bias
   IN_NORM_NEW_WEIGHT = 2,  // new weight
@@ -234,7 +236,7 @@ enum DecoderLayerTensorId : int {
   K_NORM_WEIGHT = 55,
 };
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {
     {IN_NORM_WEIGHT, "input_layernorm.weight"},
     {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
     {IN_K_WEIGHT, "self_attn.k_proj.weight"},
@@ -247,7 +249,7 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {Q_NORM_WEIGHT, "self_attn.q_norm.weight"},
     {K_NORM_WEIGHT, "self_attn.k_norm.weight"}};
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING_W8A8 = {
     {IN_NORM_WEIGHT, "input_layernorm.weight"},
     {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
     {IN_Q_BIAS, "self_attn.q_proj.quant_bias"},
@@ -284,36 +286,37 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
     {Q_NORM_WEIGHT, "self_attn.q_norm.weight"},
     {K_NORM_WEIGHT, "self_attn.k_norm.weight"}};
 
-static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
-                                          {IN_K_WEIGHT, 0},
-                                          {IN_V_WEIGHT, 0},
-                                          {IN_ATTENTION_OUT_WEIGHT, 1},
-                                          {IN_MLP_W2_WEIGHT, 0},
-                                          {IN_MLP_W1_WEIGHT, 0},
-                                          {IN_MLP_CPROJ_WEIGHT, 1}};
+static std::map<int32_t, int32_t> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
+                                                  {IN_K_WEIGHT, 0},
+                                                  {IN_V_WEIGHT, 0},
+                                                  {IN_ATTENTION_OUT_WEIGHT, 1},
+                                                  {IN_MLP_W2_WEIGHT, 0},
+                                                  {IN_MLP_W1_WEIGHT, 0},
+                                                  {IN_MLP_CPROJ_WEIGHT, 1}};
 
-static std::map<int, int> WEIGHT_SHARD_W8A8 = {{IN_Q_WEIGHT, 0},
-                                               {IN_Q_BIAS, 0},
-                                               {IN_Q_DEQSCALE, 0},
-                                               {IN_K_WEIGHT, 0},
-                                               {IN_K_BIAS, 0},
-                                               {IN_K_DEQSCALE, 0},
-                                               {IN_V_WEIGHT, 0},
-                                               {IN_V_BIAS, 0},
-                                               {IN_V_DEQSCALE, 0},
-                                               {IN_ATTENTION_OUT_WEIGHT, 1},
-                                               {IN_MLP_W2_WEIGHT, 0},
-                                               {IN_MLP_W2_BIAS, 0},
-                                               {IN_MLP_W2_DEQSCALE, 0},
-                                               {IN_MLP_W1_WEIGHT, 0},
-                                               {IN_MLP_W1_BIAS, 0},
-                                               {IN_MLP_W1_DEQSCALE, 0},
-                                               {IN_MLP_CPROJ_WEIGHT, 1}};
+static std::map<int32_t, int32_t> WEIGHT_SHARD_W8A8 = {
+    {IN_Q_WEIGHT, 0},
+    {IN_Q_BIAS, 0},
+    {IN_Q_DEQSCALE, 0},
+    {IN_K_WEIGHT, 0},
+    {IN_K_BIAS, 0},
+    {IN_K_DEQSCALE, 0},
+    {IN_V_WEIGHT, 0},
+    {IN_V_BIAS, 0},
+    {IN_V_DEQSCALE, 0},
+    {IN_ATTENTION_OUT_WEIGHT, 1},
+    {IN_MLP_W2_WEIGHT, 0},
+    {IN_MLP_W2_BIAS, 0},
+    {IN_MLP_W2_DEQSCALE, 0},
+    {IN_MLP_W1_WEIGHT, 0},
+    {IN_MLP_W1_BIAS, 0},
+    {IN_MLP_W1_DEQSCALE, 0},
+    {IN_MLP_CPROJ_WEIGHT, 1}};
 
 }  // namespace qwen3_decoder_constants
 
 namespace qwen3_moe_decoder_constants {
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,  // [2048]
   IN_INPUT_NORM_BIAS = 1,
   IN_INPUT_NORM_NEW_WEIGHT = 2,
@@ -381,7 +384,7 @@ enum DecoderLayerTensorId : int {
   IN_MLP_SHARED_EXPERT_GATE = 54,
 };
 
-static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
+static const std::unordered_map<std::string, int32_t> WEIGHT_MAPPING = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
 
     {"self_attn.q_proj.weight", IN_QKV_WEIGHT_0},
@@ -410,7 +413,7 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
 
 };
 
-static const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
+static const std::unordered_map<std::string, int32_t> WEIGHT_MAPPING_W8A8 = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
     {"input_layernorm.bias", IN_INPUT_NORM_NEW_BIAS},
 
@@ -459,7 +462,7 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"down_proj.weight_scale", IN_MLP_DOWN_SCALE_EXPERT},
 };
 
-static const std::unordered_map<std::string, std::vector<int>>
+static const std::unordered_map<std::string, std::vector<int32_t>>
     SPECIAL_MULTI_ASSIGN_W8A8 = {
         {"input_layernorm.weight",
          {IN_INPUT_NORM_WEIGHT, IN_INPUT_NORM_NEW_WEIGHT}},
@@ -468,7 +471,7 @@ static const std::unordered_map<std::string, std::vector<int>>
           IN_SELFATTENTION_OUT_NEW_NORM_WEIGHT}},
 };
 
-static const std::map<int, int> WEIGHT_SHARD = {
+static const std::map<int32_t, int32_t> WEIGHT_SHARD = {
     {IN_QKV_WEIGHT_0, 0},
     {IN_QKV_WEIGHT_1, 0},
     {IN_QKV_WEIGHT_2, 0},
@@ -477,7 +480,7 @@ static const std::map<int, int> WEIGHT_SHARD = {
     {IN_MLP_DOWN_WEIGHT_EXPERT, 1},
 };
 
-static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
+static const std::map<int32_t, int32_t> WEIGHT_SHARD_W8A8 = {
     {IN_QKV_WEIGHT_0, 0},
     {IN_QKV_OFFSET_0, 0},
     {IN_QKV_SCALE_0, 0},
@@ -497,7 +500,7 @@ static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
 }  // namespace qwen3_moe_decoder_constants
 
 namespace qwen2_vision_encoder_constants {
-enum VisionEncoderLayerTensorId : int {
+enum VisionEncoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_INPUT_NORM_BIAS,
   IN_POST_NORM_WEIGHT,
@@ -518,7 +521,7 @@ enum VisionEncoderLayerTensorId : int {
   IN_VISION_V_BIAS
 };
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {
     {IN_INPUT_NORM_WEIGHT, "norm1.weight"},
     {IN_INPUT_NORM_BIAS, "norm1.bias"},
     {IN_POST_NORM_WEIGHT, "norm2.weight"},
@@ -533,7 +536,7 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_LINEAR_FC2_BIAS, "mlp.fc2.bias"}};
 
 // {weight,dim}
-static std::map<int, int> WEIGHT_SHARD = {
+static std::map<int32_t, int32_t> WEIGHT_SHARD = {
     {IN_WATTENTION_OUT_WEIGHT, 1},
     {IN_LINEAR_FC1_WEIGHT, 0},
     {IN_LINEAR_FC1_BIAS, 0},
@@ -543,7 +546,7 @@ static std::map<int, int> WEIGHT_SHARD = {
 }  // namespace qwen2_vision_encoder_constants
 
 namespace qwen2dot5_vision_encoder_constants {
-enum VisionEncoderLayerTensorId : int {
+enum VisionEncoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_POST_NORM_WEIGHT,
   IN_QKV_WEIGHT,
@@ -564,7 +567,7 @@ enum VisionEncoderLayerTensorId : int {
   IN_VISION_V_BIAS
 };
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {
     {IN_INPUT_NORM_WEIGHT, "norm1.weight"},
     {IN_POST_NORM_WEIGHT, "norm2.weight"},
     {IN_QKV_WEIGHT, "qkv.weight"},
@@ -580,7 +583,7 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
 };
 
 // {weight,dim}
-static std::map<int, int> WEIGHT_SHARD = {
+static std::map<int32_t, int32_t> WEIGHT_SHARD = {
     {IN_WATTENTION_OUT_WEIGHT, 1},
     {IN_MLP_GATE_WEIGHT, 0},
     {IN_MLP_GATE_BIAS, 0},
@@ -592,7 +595,7 @@ static std::map<int, int> WEIGHT_SHARD = {
 }  // namespace qwen2dot5_vision_encoder_constants
 
 namespace qwen3_vision_encoder_constants {
-enum VisionEncoderLayerTensorId : int {
+enum VisionEncoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_INPUT_NORM_BIAS,
   IN_POST_NORM_WEIGHT,
@@ -613,7 +616,7 @@ enum VisionEncoderLayerTensorId : int {
   IN_VISION_V_BIAS
 };
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {
     {IN_INPUT_NORM_WEIGHT, "norm1.weight"},
     {IN_INPUT_NORM_BIAS, "norm1.bias"},
     {IN_POST_NORM_WEIGHT, "norm2.weight"},
@@ -628,7 +631,7 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_LINEAR_FC2_BIAS, "mlp.linear_fc2.bias"}};
 
 // {weight,dim}
-static std::map<int, int> WEIGHT_SHARD = {
+static std::map<int32_t, int32_t> WEIGHT_SHARD = {
     {IN_WATTENTION_OUT_WEIGHT, 1},
     {IN_LINEAR_FC1_WEIGHT, 0},
     {IN_LINEAR_FC1_BIAS, 0},

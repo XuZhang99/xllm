@@ -38,7 +38,7 @@ class LlamaDecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
                         ModelInputParams& input_params,
-                        int node_id) {
+                        int32_t node_id) {
     return decoder_layer_(
         x, cos_pos, sin_pos, attn_mask, kv_cache, input_params, node_id);
   }
@@ -156,25 +156,26 @@ class LlamaModelImpl : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     // torch::Tensor max_of_seq =
     // torch::max(input_params.attention.device.kv_seq_lens); max_seq_len_ =
-    // std::max(max_of_seq.item<int>(), max_seq_len_);
+    // std::max(max_of_seq.item<int32_t>(), max_seq_len_);
     torch::Tensor max_of_seq =
         torch::max(input_params.attention.device.kv_seq_lens);
     max_seq_len_ =
         ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
-            ? std::max(max_of_seq.item<int>(), max_seq_len_)
+            ? std::max(max_of_seq.item<int32_t>(), max_seq_len_)
             : 128;
     auto attn_mask = attn_mask_.get_attn_mask(
         max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
     if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      int batch_size = input_params.attention.host.q_seq_lens.size();
+      int32_t batch_size =
+          static_cast<int32_t>(input_params.attention.host.q_seq_lens.size());
       std::vector<torch::Tensor> req_mask_vec;
-      req_mask_vec.reserve(batch_size);
+      req_mask_vec.reserve(static_cast<size_t>(batch_size));
 
-      for (int i = 0; i < batch_size; i++) {
-        int start = input_params.attention.host.kv_seq_lens[i] -
-                    input_params.attention.host.q_seq_lens[i];
-        int end = input_params.attention.host.kv_seq_lens[i];
+      for (int32_t i = 0; i < batch_size; i++) {
+        int64_t start = input_params.attention.host.kv_seq_lens[i] -
+                        input_params.attention.host.q_seq_lens[i];
+        int64_t end = input_params.attention.host.kv_seq_lens[i];
 
         auto req_mask_slice = attn_mask.slice(0, start, end);
         req_mask_vec.emplace_back(req_mask_slice);
@@ -184,9 +185,15 @@ class LlamaModelImpl : public torch::nn::Module {
     RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
       rolling_guard.before_layer(layer_index);
-      layer(h, cos_pos, sin_pos, attn_mask, kv_caches[i], input_params_new, i);
+      layer(h,
+            cos_pos,
+            sin_pos,
+            attn_mask,
+            kv_caches[i],
+            input_params_new,
+            layer_index);
       rolling_guard.after_layer(layer_index);
     }
     auto hidden_states = norm_(h, 0);
@@ -198,7 +205,7 @@ class LlamaModelImpl : public torch::nn::Module {
     npu_embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
     // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
@@ -207,7 +214,7 @@ class LlamaModelImpl : public torch::nn::Module {
 
   void verify_loaded_weights(const std::string& prefix) const {
     npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
@@ -217,7 +224,7 @@ class LlamaModelImpl : public torch::nn::Module {
   void merge_loaded_weights() {
     // test
     npu_embed_tokens_->merge_loaded_weights();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
@@ -288,8 +295,8 @@ class LlamaModelImpl : public torch::nn::Module {
  private:
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
-  int max_seq_len_ = 0;
-  int device_id_ = 0;
+  int32_t max_seq_len_ = 0;
+  int32_t device_id_ = 0;
   layer::AttentionMask attn_mask_;
   layer::NpuWordEmbedding npu_embed_tokens_{nullptr};
   layer::NpuRMSNorm norm_{nullptr};

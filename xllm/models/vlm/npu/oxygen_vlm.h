@@ -100,10 +100,10 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
     }
     if (video_input) {
       std::vector<torch::Tensor> temp_frames_hw;
-      for (int i = 0; i < video_input->video_grid_thw.size(0); ++i) {
-        auto t = video_input->video_grid_thw[i][0].item<int32_t>();
-        auto h = video_input->video_grid_thw[i][1].item<int32_t>();
-        auto w = video_input->video_grid_thw[i][2].item<int32_t>();
+      for (int64_t i = 0; i < video_input->video_grid_thw.size(0); ++i) {
+        auto t = video_input->video_grid_thw[i][0].item<int64_t>();
+        auto h = video_input->video_grid_thw[i][1].item<int64_t>();
+        auto w = video_input->video_grid_thw[i][2].item<int64_t>();
         auto repeated_row =
             torch::tensor({1, h, w}).unsqueeze(0).repeat({t, 1});
         temp_frames_hw.push_back(repeated_row);

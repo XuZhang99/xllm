@@ -82,7 +82,7 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
     // Cache data structure
     struct CacheData {
       std::vector<int32_t> encoder_tokens;
-      std::vector<int> encoder_seq_lens;
+      std::vector<int32_t> encoder_seq_lens;
       std::vector<torch::Tensor> encoder_sparse_embeddings;
       std::vector<torch::Tensor> decoder_context_embeddings;
     };

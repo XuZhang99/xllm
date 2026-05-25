@@ -72,7 +72,7 @@ int32_t select_launch_num_tokens(int64_t num_tokens,
       << "TileLang split_qkv_rmsnorm_mrope: no compiled num_tokens variant for "
       << "head_size=" << head_size << ", rope_dim=" << rope_dim
       << ", num_q_heads=" << num_q_heads << ", num_kv_heads=" << num_kv_heads
-      << ", dtype=" << static_cast<int>(dtype);
+      << ", dtype=" << static_cast<int32_t>(dtype);
   CHECK_GE(max_num_tokens, kTokenSpecializationMin)
       << "TileLang split_qkv_rmsnorm_mrope: compiled num_tokens variants must "
       << "be >= " << kTokenSpecializationMin;

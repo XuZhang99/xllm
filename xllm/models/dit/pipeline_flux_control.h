@@ -179,8 +179,8 @@ class FluxControlPipelineImpl : public FluxPipelineBaseImpl {
                               int64_t height,
                               int64_t batch_size,
                               int64_t num_images_per_prompt) {
-    int image_batch_size = image.size(0);
-    int repeat_times;
+    int64_t image_batch_size = image.size(0);
+    int64_t repeat_times;
     image = image_processor_->preprocess(
         image, height, width, "default", std::nullopt);
     if (image_batch_size == 1) {

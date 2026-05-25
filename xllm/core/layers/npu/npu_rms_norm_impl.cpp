@@ -79,7 +79,7 @@ int64_t NpuRMSNormImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuRMSNormImpl::forward(torch::Tensor& x, int nodeId) {
+torch::Tensor NpuRMSNormImpl::forward(torch::Tensor& x, int32_t nodeId) {
   atb::Status st;
 
   build_node_variant_pack(norm_node_, x);

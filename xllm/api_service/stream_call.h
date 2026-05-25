@@ -21,6 +21,7 @@ limitations under the License.
 #include <json2pb/pb_to_json.h>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -157,7 +158,7 @@ class StreamCall : public Call {
 
   json2pb::Pb2JsonOptions json_options_;
 
-  int connection_status_ = 0;
+  int32_t connection_status_ = 0;
 };
 
 // Anthropic SSE stream call with custom event formatting

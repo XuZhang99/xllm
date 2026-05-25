@@ -88,7 +88,7 @@ void DeekseekV2DecoderLoader::initialize_tensors(
 void DeekseekV2DecoderLoader::load_state_dict(const StateDict& state_dict) {
   for (const auto& [name, tensor] : state_dict) {
     if (absl::EndsWith(name, "self_attn.kv_b_proj.weight")) {
-      int index = WEIGHT_MAPPING_W8A8.at(name);
+      int32_t index = WEIGHT_MAPPING_W8A8.at(name);
       set_kv_weight(state_dict, name, index, WEIGHT_SHARD_W8A8.at(index));
       continue;
     }
@@ -121,17 +121,18 @@ void DeekseekV2DecoderLoader::verify_loaded_weights(
   }
 }
 
-int DeekseekV2DecoderLoader::extract_expert_index(const std::string& name) {
+int32_t DeekseekV2DecoderLoader::extract_expert_index(const std::string& name) {
   std::string prefix = "experts.";
   size_t pos = name.find(prefix);
   if (pos != std::string::npos) {
     pos += prefix.length();
     size_t end_pos = pos;
-    while (end_pos < name.length() && std::isdigit(name[end_pos])) {
+    while (end_pos < name.length() &&
+           std::isdigit(static_cast<unsigned char>(name[end_pos]))) {
       ++end_pos;
     }
     if (end_pos > pos) {
-      return std::stoi(name.substr(pos, end_pos - pos));
+      return static_cast<int32_t>(std::stoll(name.substr(pos, end_pos - pos)));
     }
   }
   return -1;
@@ -141,9 +142,9 @@ void DeekseekV2DecoderLoader::process_expert_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
-  int expert_index = extract_expert_index(name);
+  int32_t expert_index = extract_expert_index(name);
   const std::string suffix = extract_endswith(name);
-  const int index = get_mapped_index(suffix, WEIGHT_MAPPING_W8A8);
+  const int32_t index = get_mapped_index(suffix, WEIGHT_MAPPING_W8A8);
   if (index == -1) {
     return;
   }
@@ -153,10 +154,10 @@ void DeekseekV2DecoderLoader::process_expert_weights(
       ::xllm::EPLBConfig::get_instance().enable_eplb() &&
       (rank_ % localWorldSize_ == expert_index % localWorldSize_);
 
-  const int start_idx = ep_rank_ * num_experts_per_partition_;
-  const int end_idx = (ep_rank_ + 1) * num_experts_per_partition_;
-  const int safe_end =
-      std::min(end_idx, static_cast<int>(device_expert_list_.size()));
+  const int32_t start_idx = ep_rank_ * num_experts_per_partition_;
+  const int32_t end_idx = (ep_rank_ + 1) * num_experts_per_partition_;
+  const int32_t safe_end =
+      std::min(end_idx, static_cast<int32_t>(device_expert_list_.size()));
 
   auto it = std::find(device_expert_list_.cbegin() + start_idx,
                       device_expert_list_.cbegin() + safe_end,
@@ -224,7 +225,8 @@ void DeekseekV2DecoderLoader::initialize_weight_tensors(
 
   if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     const int64_t size =
-        50LL * 1024LL * 1024LL * int64_t(n_layers_ - first_k_dense_replace_);
+        50LL * 1024LL * 1024LL *
+        static_cast<int64_t>(n_layers_ - first_k_dense_replace_);
     shared_buffer_ = std::make_unique<ExpertBufferManager>(
         num_experts_, n_layers_ - first_k_dense_replace_, size);
   }
@@ -232,7 +234,7 @@ void DeekseekV2DecoderLoader::initialize_weight_tensors(
 
 void DeekseekV2DecoderLoader::convert_offsets_to_int8() {
   auto& t = working_tensors();
-  auto convert_to_int8 = [this, &t](int index) {
+  auto convert_to_int8 = [this, &t](int32_t index) {
     t[index] = t[index].to(torch::kInt8);
     if (!load_to_host()) {
       t[index] = t[index].to(target_device());
@@ -274,7 +276,7 @@ std::string DeekseekV2DecoderLoader::extract_endswith(
 torch::Tensor DeekseekV2DecoderLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
-    int dim) {
+    int32_t dim) {
   if (parallel_args_.world_size() > 1) {
     return state_dict.get_sharded_tensor(
         name, dim, parallel_args_.rank(), parallel_args_.world_size());
@@ -286,9 +288,9 @@ torch::Tensor DeekseekV2DecoderLoader::get_sharded_tensor(
 torch::Tensor DeekseekV2DecoderLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
-    int dim,
-    int local_tp_rank,
-    int local_tp_size) {
+    int32_t dim,
+    int32_t local_tp_rank,
+    int32_t local_tp_size) {
   if (local_tp_size > 1) {
     return state_dict.get_sharded_tensor(
         name, dim, local_tp_rank, local_tp_size);
@@ -297,9 +299,9 @@ torch::Tensor DeekseekV2DecoderLoader::get_sharded_tensor(
   }
 }
 
-int DeekseekV2DecoderLoader::get_mapped_index(
+int32_t DeekseekV2DecoderLoader::get_mapped_index(
     const std::string& name,
-    const std::unordered_map<std::string, int>& mapping) {
+    const std::unordered_map<std::string, int32_t>& mapping) {
   const auto it = mapping.find(name);
   if (it == mapping.end()) {
     LOG(WARNING) << "Parameter '" << name
@@ -322,7 +324,7 @@ void DeekseekV2DecoderLoader::process_general_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
-  const int index = get_mapped_index(name, WEIGHT_MAPPING_W8A8);
+  const int32_t index = get_mapped_index(name, WEIGHT_MAPPING_W8A8);
   if (index == -1) {
     return;
   }
@@ -345,7 +347,7 @@ void DeekseekV2DecoderLoader::process_mlp_common_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
-  const int index = get_mapped_index(name, WEIGHT_MAPPING_W8A8);
+  const int32_t index = get_mapped_index(name, WEIGHT_MAPPING_W8A8);
   if (index == -1) {
     return;
   }
@@ -470,7 +472,7 @@ void DeekseekV2DecoderLoader::process_shared_expert_weights(
     const torch::Tensor& tensor) {
   torch::Tensor tmp_tensor;
   std::lock_guard<std::mutex> lock(shared_experts_mutex_);
-  const int index = get_mapped_index(name, WEIGHT_MAPPING_W8A8);
+  const int32_t index = get_mapped_index(name, WEIGHT_MAPPING_W8A8);
   if (index == -1) {
     return;
   }
@@ -492,8 +494,8 @@ void DeekseekV2DecoderLoader::process_shared_expert_weights(
 
 void DeekseekV2DecoderLoader::set_kv_weight(const StateDict& state_dict,
                                             const std::string& tensor_name,
-                                            int weight_position,
-                                            int dim) {
+                                            int32_t weight_position,
+                                            int32_t dim) {
   torch::Tensor mutable_tensor;
   if (parallel_args_.world_size() <= 1) {
     mutable_tensor = state_dict.get_tensor(tensor_name).to(target_device());
@@ -530,7 +532,7 @@ void DeekseekV2DecoderLoader::preprocess_linear_for_rope() {
         continue;
       }
     }
-    int index = WEIGHT_MAPPING_W8A8.at(name);
+    int32_t index = WEIGHT_MAPPING_W8A8.at(name);
     t[index] = view_tensor(t[index], name, true);
     t[index] = trans_rope_weight(t[index]);
     t[index] = (!absl::EndsWith(name, "weight"))
@@ -591,17 +593,18 @@ torch::Tensor DeekseekV2DecoderLoader::trans_rope_weight(torch::Tensor weight) {
 }
 
 void DeekseekV2DecoderLoader::initialize_device_expert_list(
-    int num_device,
-    int num_device_expert) {
+    int32_t num_device,
+    int32_t num_device_expert) {
   int32_t num_device_route_expert = num_device_expert;
   if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     num_device_route_expert = num_device_expert - redundant_experts_num_;
   }
-  for (int i = 0; i < num_device * num_device_route_expert; ++i) {
+  for (int32_t i = 0; i < num_device * num_device_route_expert; ++i) {
     device_expert_list_.emplace_back(i);
     if (::xllm::EPLBConfig::get_instance().enable_eplb() &&
         (i + 1) % num_device_route_expert == 0) {
-      for (int redundant_expert = 0; redundant_expert < redundant_experts_num_;
+      for (int32_t redundant_expert = 0;
+           redundant_expert < redundant_experts_num_;
            ++redundant_expert)
         device_expert_list_.emplace_back(i);
     }
@@ -618,7 +621,7 @@ torch::Tensor DeekseekV2DecoderLoader::convert_fp16_to_int64(
 
 void DeekseekV2DecoderLoader::convert_descaled_weights_to_float() {
   auto& t = working_tensors();
-  auto convert_to_float = [&t](int index) {
+  auto convert_to_float = [&t](int32_t index) {
     t[index] = t[index].to(torch::kFloat32);
   };
   convert_to_float(IN_Q_PROJ_A_DESCALE);
@@ -628,7 +631,7 @@ void DeekseekV2DecoderLoader::convert_descaled_weights_to_float() {
 }
 
 void DeekseekV2DecoderLoader::reserve_experts_weights(
-    int num_of_device_experts) {
+    int32_t num_of_device_experts) {
   experts_weights_.clear();
   std::vector<std::string> weight_names = {
       "gate_proj.weight", "up_proj.weight", "down_proj.weight"};
@@ -643,7 +646,7 @@ void DeekseekV2DecoderLoader::reserve_experts_weights(
   std::lock_guard<std::mutex> lock(experts_mutex_);
   for (const auto& weight_name : weight_names) {
     experts_weights_[weight_name] =
-        std::vector<torch::Tensor>(num_of_device_experts);
+        std::vector<torch::Tensor>(static_cast<size_t>(num_of_device_experts));
   }
 }
 
@@ -659,7 +662,7 @@ std::string DeekseekV2DecoderLoader::get_expert_shm_key(
 
 void DeekseekV2DecoderLoader::merge_shared_experts_weights() {
   auto& t = working_tensors();
-  auto merge_and_clear = [this, &t](int index,
+  auto merge_and_clear = [this, &t](int32_t index,
                                     torch::Tensor& shared_experts_gate,
                                     torch::Tensor& shared_experts_up) {
     t[index] = torch::cat({shared_experts_gate, shared_experts_up}, 0)

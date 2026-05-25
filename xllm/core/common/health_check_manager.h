@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -70,12 +71,12 @@ class HealthCheckManager {
   }
 
   // Register a health check function for a worker
-  void register_health_check(int worker_rank, HealthCheckFunc func) {
+  void register_health_check(int32_t worker_rank, HealthCheckFunc func) {
     health_checks_[worker_rank] = std::move(func);
   }
 
   // Start background health check thread
-  void start_health_check_thread(int interval_ms = 3000) {
+  void start_health_check_thread(int32_t interval_ms = 3000) {
     if (health_check_running_.load()) {
       return;
     }
@@ -121,7 +122,7 @@ class HealthCheckManager {
   std::atomic<bool> health_check_running_;
   mutable std::mutex reason_mutex_;
   std::string unhealthy_reason_;
-  std::unordered_map<int, HealthCheckFunc> health_checks_;
+  std::unordered_map<int32_t, HealthCheckFunc> health_checks_;
   std::thread health_check_thread_;
 };
 

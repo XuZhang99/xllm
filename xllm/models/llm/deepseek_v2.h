@@ -61,7 +61,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
     dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
     rank_ = parallel_args.rank();
-    for (int i = 0; i < parallel_args.world_size(); i += dp_local_tp_size_) {
+    for (int32_t i = 0; i < parallel_args.world_size();
+         i += dp_local_tp_size_) {
       indices.push_back(i);
     }
   }
@@ -125,7 +126,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
     // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }

@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <functional>
 
 #include "common/dense_mlp.h"
@@ -42,7 +43,7 @@ class OxygenVisionLayerImpl : public torch::nn::Module {
                         torch::Tensor& cu_seq_len,
                         std::vector<int32_t>& cu_seq_len_vec,
                         ModelInputParams& input_params,
-                        int node_id);
+                        int32_t node_id);
 
  private:
   OxygenVisionAttention attention_{nullptr};

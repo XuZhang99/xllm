@@ -54,15 +54,15 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-enum class TransposeType : int {
+enum class TransposeType : int32_t {
   INVALID = -1,
   NOT_TRANSPOSE = 0,
   TRANSPOSE = 1
 };
 
-enum class LinearType : int { INVALID = -1, FP = 0, INT = 1 };
+enum class LinearType : int32_t { INVALID = -1, FP = 0, INT = 1 };
 
-enum class PackType : int {
+enum class PackType : int32_t {
   PACK_QUANT_UNDEFINED = 0,
   ALL_FP = 1,
   ALL_W8A8 = 2,
@@ -87,7 +87,7 @@ enum class PackType : int {
   MIX_W8A8_DYNAMIC_ANTI = 21
 };
 
-enum class LinearTypeV2 : int {
+enum class LinearTypeV2 : int32_t {
   INVALID = -1,
   FLOAT16 = 0,
   BFLOAT16 = 1,
@@ -107,7 +107,7 @@ class BaseLayer : public torch::nn::Module {
   virtual ~BaseLayer() override = default;
 
   atb::Status execute_node(atb_speed::Model::Node& node,
-                           int nodeId = 0,
+                           int32_t nodeId = 0,
                            aclrtEvent* event = nullptr,
                            std::atomic<bool>* event_flag = nullptr);
 
@@ -138,7 +138,7 @@ class BaseLayer : public torch::nn::Module {
     if (loader_) {
       loader_->merge_loaded_weights();
       auto& at_weight_tensors = loader_->get_at_weight_tensors();
-      for (int i = 0; i < atb_weight_tensors_.size(); i++) {
+      for (size_t i = 0; i < atb_weight_tensors_.size(); ++i) {
         atb_weight_tensors_[i] =
             atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
       }
@@ -157,7 +157,7 @@ class BaseLayer : public torch::nn::Module {
     if (loader_) {
       loader_->reload_weights();
       auto& at_weight_tensors = loader_->get_at_weight_tensors();
-      for (int i = 0; i < atb_weight_tensors_.size(); i++) {
+      for (size_t i = 0; i < atb_weight_tensors_.size(); ++i) {
         atb_weight_tensors_[i] =
             atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
       }
@@ -168,7 +168,7 @@ class BaseLayer : public torch::nn::Module {
     if (loader_) {
       loader_->reload_weights_from_device();
       auto& at_weight_tensors = loader_->get_at_weight_tensors();
-      for (int i = 0; i < atb_weight_tensors_.size(); i++) {
+      for (size_t i = 0; i < atb_weight_tensors_.size(); ++i) {
         atb_weight_tensors_[i] =
             atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
       }
@@ -186,7 +186,7 @@ class BaseLayer : public torch::nn::Module {
     if (loader_) {
       loader_->refresh_rolling_weights();
       auto& at_weight_tensors = loader_->get_at_weight_tensors();
-      for (int i = 0; i < atb_weight_tensors_.size(); i++) {
+      for (size_t i = 0; i < atb_weight_tensors_.size(); ++i) {
         atb_weight_tensors_[i] =
             atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
       }

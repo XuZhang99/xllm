@@ -140,7 +140,7 @@ inline void bind_tvmffi_stream_to_current_torch_stream(
   const auto cur = c10::cuda::getCurrentCUDAStream(device.index());
   // DLPack device type for CUDA is 2 (kDLCUDA).
   void* original_stream = nullptr;
-  const int rc = TVMFFIEnvSetStream(
+  const int32_t rc = TVMFFIEnvSetStream(
       /*device_type=*/2,
       /*device_id=*/device.index(),
       reinterpret_cast<void*>(cur.stream()),

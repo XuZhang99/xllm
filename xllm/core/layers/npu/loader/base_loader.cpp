@@ -77,7 +77,7 @@ BaseLoader::~BaseLoader() {
 
 void BaseLoader::set_weight(const StateDict& state_dict,
                             const std::string& tensor_name,
-                            int weight_position,
+                            int32_t weight_position,
                             bool to_host) {
   auto device = to_host ? at::kCPU : device_;
   for (const auto& [name, tensor] : state_dict) {
@@ -95,8 +95,8 @@ void BaseLoader::set_weight(const StateDict& state_dict,
 
 void BaseLoader::set_weight(const StateDict& state_dict,
                             const std::string& tensor_name,
-                            int weight_position,
-                            int dim,
+                            int32_t weight_position,
+                            int32_t dim,
                             bool to_host) {
   auto device = to_host ? at::kCPU : device_;
   if (parallel_args_.world_size() <= 1) {
@@ -132,10 +132,10 @@ void BaseLoader::set_weight(const StateDict& state_dict,
 
 void BaseLoader::set_weight(const StateDict& state_dict,
                             const std::string& tensor_name,
-                            int weight_position,
-                            int dim,
-                            int rank,
-                            int world_size,
+                            int32_t weight_position,
+                            int32_t dim,
+                            int32_t rank,
+                            int32_t world_size,
                             bool to_host) {
   auto device = to_host ? at::kCPU : device_;
   if (world_size <= 1) {
@@ -222,9 +222,9 @@ at::Tensor BaseLoader::pad_vocab_tensor(const at::Tensor& tensor,
 }
 
 at::Tensor BaseLoader::shard_padded_tensor(const at::Tensor& padded_tensor,
-                                           int dim,
-                                           int rank,
-                                           int world_size) const {
+                                           int32_t dim,
+                                           int32_t rank,
+                                           int32_t world_size) const {
   if (world_size <= 1) {
     return padded_tensor;
   }
@@ -234,8 +234,8 @@ at::Tensor BaseLoader::shard_padded_tensor(const at::Tensor& padded_tensor,
 
 void BaseLoader::set_weight_with_padding(const StateDict& state_dict,
                                          const std::string& tensor_name,
-                                         int weight_position,
-                                         int dim,
+                                         int32_t weight_position,
+                                         int32_t dim,
                                          int64_t padded_vocab_size,
                                          bool to_host) {
   auto device = to_host ? at::kCPU : device_;
@@ -257,10 +257,10 @@ void BaseLoader::set_weight_with_padding(const StateDict& state_dict,
 
 void BaseLoader::set_weight_with_padding(const StateDict& state_dict,
                                          const std::string& tensor_name,
-                                         int weight_position,
-                                         int dim,
-                                         int rank,
-                                         int world_size,
+                                         int32_t weight_position,
+                                         int32_t dim,
+                                         int32_t rank,
+                                         int32_t world_size,
                                          int64_t padded_vocab_size,
                                          bool to_host) {
   auto device = to_host ? at::kCPU : device_;
@@ -327,14 +327,14 @@ int64_t BaseLoader::get_padded_vocab_size(const ModelContext& context) const {
 
 // ----------------------- uniform staging helpers --------------------------
 
-at::Tensor BaseLoader::zero_like_working(int idx) const {
+at::Tensor BaseLoader::zero_like_working(int32_t idx) const {
   const auto& ref = working_tensors()[idx];
   return torch::zeros(
       {1},
       torch::TensorOptions().dtype(ref.scalar_type()).device(target_device()));
 }
 
-at::Tensor BaseLoader::cast_nz(at::Tensor t, int idx) {
+at::Tensor BaseLoader::cast_nz(at::Tensor t, int32_t idx) {
   if (mode_ == LoadMode::kManual) {
     // Defer NZ conversion; BaseLoader::copy_weights_to_device will route this
     // slice through `copy_host_nd_to_nz` based on `nz_indices_`.
@@ -344,7 +344,7 @@ at::Tensor BaseLoader::cast_nz(at::Tensor t, int idx) {
   return at_npu::native::npu_format_cast(t.contiguous(), ACL_FORMAT_FRACTAL_NZ);
 }
 
-bool BaseLoader::is_nz_format_tensor(int weight_index) {
+bool BaseLoader::is_nz_format_tensor(int32_t weight_index) {
   return nz_indices_.count(weight_index) > 0;
 }
 
@@ -471,8 +471,8 @@ void BaseLoader::copy_weights_to_pinned_host() {
                 static_cast<ptrdiff_t>(slice.offset);
     auto host_tensor = at_host_weight_tensors_[i].to(torch::kCPU).contiguous();
 
-    if (is_nz_format_tensor(i)) {
-      int err = copy_host_nd_to_nz(
+    if (is_nz_format_tensor(static_cast<int32_t>(i))) {
+      int32_t err = copy_host_nd_to_nz(
           host_tensor, dst, slice.bytes, ACL_MEMCPY_DEVICE_TO_HOST);
       CHECK_EQ(err, ACL_SUCCESS)
           << "copy_host_nd_to_nz failed for tensor index " << i;
@@ -516,8 +516,8 @@ void BaseLoader::copy_weights_to_device() {
     void* dst = static_cast<char*>(device_storage_) +
                 static_cast<ptrdiff_t>(slice.offset);
     auto host_tensor = at_host_weight_tensors_[i].contiguous();
-    int err;
-    if (is_nz_format_tensor(i)) {
+    int32_t err;
+    if (is_nz_format_tensor(static_cast<int32_t>(i))) {
       err = copy_host_nd_to_nz(host_tensor, dst, slice.bytes);
     } else {
       err = aclrtMemcpy(dst,
@@ -531,10 +531,10 @@ void BaseLoader::copy_weights_to_device() {
   }
 }
 
-int BaseLoader::copy_host_nd_to_nz(torch::Tensor host_tensor,
-                                   void* dst_ptr,
-                                   uint64_t len,
-                                   aclrtMemcpyKind kind) {
+int32_t BaseLoader::copy_host_nd_to_nz(torch::Tensor host_tensor,
+                                       void* dst_ptr,
+                                       uint64_t len,
+                                       aclrtMemcpyKind kind) {
   auto tmp_tensor = at_npu::native::npu_format_cast(host_tensor.to(device_),
                                                     ACL_FORMAT_FRACTAL_NZ);
   const void* src_ptr = tmp_tensor.data_ptr();
@@ -554,7 +554,7 @@ void BaseLoader::init_device_at_weights() {
     }
     void* base = static_cast<char*>(device_storage_) +
                  static_cast<ptrdiff_t>(slice.offset);
-    if (is_nz_format_tensor(i)) {
+    if (is_nz_format_tensor(static_cast<int32_t>(i))) {
       at_weight_tensors_[i] =
           convert_to_torch_tensor(slice.sizes,
                                   slice.dtype,
@@ -596,7 +596,7 @@ torch::Tensor BaseLoader::convert_to_torch_tensor(
     const std::vector<int64_t>& dims,
     const torch::ScalarType dtype,
     const uintptr_t& dev_addr,
-    int acl_format) {
+    int32_t acl_format) {
   c10::DeviceType device_type = c10::DeviceType::PrivateUse1;
   torch::TensorOptions option =
       torch::TensorOptions().dtype(dtype).device(device_type);

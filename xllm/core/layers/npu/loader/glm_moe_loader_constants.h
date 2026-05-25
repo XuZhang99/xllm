@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <unordered_map>
@@ -24,7 +25,7 @@ namespace layer {
 
 namespace glm4_moe_decoder_constants {
 
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_INPUT_NORM_BIAS = 1,
   IN_INPUT_NORM_NEW_WEIGHT = 2,
@@ -109,7 +110,7 @@ enum DecoderLayerTensorId : int {
   K_NORM_WEIGHT = 69
 };
 
-inline const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
+inline const std::unordered_map<std::string, int32_t> WEIGHT_MAPPING = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
 
     {"self_attn.q_proj.weight", IN_QKV_WEIGHT_0},
@@ -141,7 +142,7 @@ inline const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
     {"down_proj.weight", IN_MLP_DOWN_WEIGHT},
 };
 
-inline const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
+inline const std::unordered_map<std::string, int32_t> WEIGHT_MAPPING_W8A8 = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
     {"input_layernorm.bias", IN_INPUT_NORM_NEW_BIAS},
 
@@ -213,7 +214,7 @@ inline const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"down_proj.weight_scale", IN_MLP_DOWN_SCALE},
 };
 
-inline const std::unordered_map<std::string, std::vector<int>>
+inline const std::unordered_map<std::string, std::vector<int32_t>>
     SPECIAL_MULTI_ASSIGN_W8A8 = {
         {"input_layernorm.weight",
          {IN_INPUT_NORM_WEIGHT, IN_INPUT_NORM_NEW_WEIGHT}},
@@ -221,7 +222,7 @@ inline const std::unordered_map<std::string, std::vector<int>>
          {IN_POST_ATTN_NORM_WEIGHT, IN_POST_ATTN_NORM_NEW_WEIGHT}},
 };
 
-inline const std::map<int, int> WEIGHT_SHARD = {
+inline const std::map<int32_t, int32_t> WEIGHT_SHARD = {
     {IN_QKV_WEIGHT_0, 0},
     {IN_QKV_BIAS_0, 0},
     {IN_QKV_WEIGHT_1, 0},
@@ -235,7 +236,7 @@ inline const std::map<int, int> WEIGHT_SHARD = {
     {IN_MLP_DOWN_WEIGHT, 1},
 };
 
-inline const std::map<int, int> WEIGHT_SHARD_W8A8 = {
+inline const std::map<int32_t, int32_t> WEIGHT_SHARD_W8A8 = {
     {IN_QKV_WEIGHT_0, 0},
     {IN_QKV_BIAS_0, 0},
     {IN_QKV_DESCALE_0, 0},
@@ -260,7 +261,7 @@ inline const std::map<int, int> WEIGHT_SHARD_W8A8 = {
 
 namespace glm4_moe_lite_decoder_constants {
 
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_INPUT_NORM_BIAS = 1,
   IN_INPUT_NORM_NEW_WEIGHT = 2,
@@ -361,7 +362,7 @@ enum DecoderLayerTensorId : int {
   KV_NORM_BIAS = 83
 };
 
-inline const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
+inline const std::unordered_map<std::string, int32_t> WEIGHT_MAPPING = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
     {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
 
@@ -398,7 +399,7 @@ inline const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
     {"down_proj.weight", IN_MLP_DOWN_WEIGHT},
 };
 
-inline const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
+inline const std::unordered_map<std::string, int32_t> WEIGHT_MAPPING_W8A8 = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
     {"input_layernorm.bias", IN_INPUT_NORM_NEW_BIAS},
 
@@ -484,7 +485,7 @@ inline const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"down_proj.weight_scale", IN_MLP_DOWN_SCALE},
 };
 
-inline const std::unordered_map<std::string, std::vector<int>>
+inline const std::unordered_map<std::string, std::vector<int32_t>>
     SPECIAL_MULTI_ASSIGN_W8A8 = {
         {"input_layernorm.weight",
          {IN_INPUT_NORM_WEIGHT, IN_INPUT_NORM_NEW_WEIGHT}},
@@ -492,7 +493,7 @@ inline const std::unordered_map<std::string, std::vector<int>>
          {IN_POST_ATTN_NORM_WEIGHT, IN_POST_ATTN_NORM_NEW_WEIGHT}},
 };
 
-inline const std::map<int, int> WEIGHT_SHARD = {
+inline const std::map<int32_t, int32_t> WEIGHT_SHARD = {
     {IN_Q_B_WEIGHT, 0},
     {IN_Q_B_BIAS, 0},
     {IN_K_B_WEIGHT, 0},
@@ -505,7 +506,7 @@ inline const std::map<int, int> WEIGHT_SHARD = {
     {IN_MLP_DOWN_WEIGHT, 1},
 };
 
-inline const std::map<int, int> WEIGHT_SHARD_W8A8 = {
+inline const std::map<int32_t, int32_t> WEIGHT_SHARD_W8A8 = {
     {IN_Q_B_WEIGHT, 0},
     {IN_Q_B_BIAS, 0},
     {IN_Q_B_SCALE, 0},

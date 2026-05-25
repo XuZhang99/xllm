@@ -52,7 +52,7 @@ constexpr const char* kOneRecDecoderContextEmbeddingName =
 std::string format_tensor_shape(const proto::InferInputTensor& tensor) {
   std::vector<std::string> dims;
   dims.reserve(tensor.shape_size());
-  for (int i = 0; i < tensor.shape_size(); ++i) {
+  for (int32_t i = 0; i < tensor.shape_size(); ++i) {
     dims.emplace_back(std::to_string(tensor.shape(i)));
   }
   return "[" + absl::StrJoin(dims, ", ") + "]";
@@ -72,7 +72,7 @@ RecType get_rec_type(const ModelArgs& model_args) {
 }
 
 bool process_onerec_inputs(
-    const std::optional<std::vector<int>>& prompt_tokens,
+    const std::optional<std::vector<int32_t>>& prompt_tokens,
     const std::optional<std::vector<proto::InferInputTensor>>& input_tensors,
     const ModelArgs& model_args,
     std::vector<int32_t>* local_prompt_tokens,
@@ -227,7 +227,7 @@ bool process_onerec_inputs(
 }
 
 bool process_llmrec_with_mm_data_inputs(
-    const std::vector<int>& prompt_tokens,
+    const std::vector<int32_t>& prompt_tokens,
     std::optional<MMData> mm_data,
     std::vector<int32_t>* local_prompt_tokens,
     MMData* processed_mm_data,
@@ -316,7 +316,7 @@ bool process_llmrec_with_mm_data_inputs(
 // ============================================================
 std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
     std::string /*prompt*/,
-    std::optional<std::vector<int>> /*prompt_tokens*/,
+    std::optional<std::vector<int32_t>> /*prompt_tokens*/,
     std::optional<std::vector<proto::InferInputTensor>> /*input_tensors*/,
     const RequestParams& /*sp*/,
     OutputCallback callback) {
@@ -326,7 +326,7 @@ std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
 }
 
 std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
-    const std::vector<int>& prompt_tokens,
+    const std::vector<int32_t>& prompt_tokens,
     std::optional<MMData> mm_data,
     const RequestParams& sp,
     OutputCallback callback) {
@@ -338,7 +338,7 @@ std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
 std::shared_ptr<Request>
 RecMaster::RecMasterPipeline::generate_onerec_request_common(
     std::string prompt,
-    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<int32_t>> prompt_tokens,
     std::optional<std::vector<proto::InferInputTensor>> input_tensors,
     const RequestParams& sp,
     OutputCallback callback,
@@ -374,7 +374,7 @@ RecMaster::LlmRecMasterPipeline::LlmRecMasterPipeline(RecMaster& master)
 
 std::shared_ptr<Request> RecMaster::LlmRecMasterPipeline::generate_request(
     std::string prompt,
-    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<int32_t>> prompt_tokens,
     std::optional<std::vector<proto::InferInputTensor>> /*input_tensors*/,
     const RequestParams& sp,
     OutputCallback callback) {
@@ -393,7 +393,7 @@ std::shared_ptr<Request> RecMaster::LlmRecMasterPipeline::generate_request(
                           "Tokenizer is required for prompt-based input");
       return nullptr;
     }
-    std::vector<int> tmp_tokens;
+    std::vector<int32_t> tmp_tokens;
     if (!master_.tokenizer_->encode(
             prompt, &tmp_tokens, sp.add_special_tokens)) {
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
@@ -429,7 +429,7 @@ RecMaster::LlmRecWithMmDataMasterPipeline::LlmRecWithMmDataMasterPipeline(
 
 std::shared_ptr<Request>
 RecMaster::LlmRecWithMmDataMasterPipeline::generate_request(
-    const std::vector<int>& prompt_tokens,
+    const std::vector<int32_t>& prompt_tokens,
     std::optional<MMData> mm_data,
     const RequestParams& sp,
     OutputCallback callback) {
@@ -465,7 +465,7 @@ RecMaster::OneRecPrefillOnlyMasterPipeline::OneRecPrefillOnlyMasterPipeline(
 std::shared_ptr<Request>
 RecMaster::OneRecPrefillOnlyMasterPipeline::generate_request(
     std::string prompt,
-    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<int32_t>> prompt_tokens,
     std::optional<std::vector<proto::InferInputTensor>> input_tensors,
     const RequestParams& sp,
     OutputCallback callback) {
@@ -480,7 +480,7 @@ RecMaster::OneRecPrefillOnlyMasterPipeline::generate_request(
 std::shared_ptr<Request>
 RecMaster::OneRecXAttentionMasterPipeline::generate_request(
     std::string prompt,
-    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<int32_t>> prompt_tokens,
     std::optional<std::vector<proto::InferInputTensor>> input_tensors,
     const RequestParams& sp,
     OutputCallback callback) {
@@ -510,7 +510,7 @@ std::unique_ptr<RecMaster::RecMasterPipeline> RecMaster::create_pipeline(
       return std::make_unique<OneRecXAttentionMasterPipeline>(master);
     default:
       LOG(FATAL) << "Unknown RecMaster pipeline type: "
-                 << static_cast<int>(type);
+                 << static_cast<int32_t>(type);
       return nullptr;
   }
 }
@@ -610,7 +610,7 @@ RecMaster::~RecMaster() {
 
 void RecMaster::handle_request(
     std::string prompt,
-    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<int32_t>> prompt_tokens,
     std::optional<std::vector<proto::InferInputTensor>> input_tensors,
     RequestParams sp,
     OutputCallback callback) {
@@ -638,7 +638,7 @@ void RecMaster::handle_request(
 
 void RecMaster::handle_request(
     std::vector<Message> messages,
-    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<int32_t>> prompt_tokens,
     std::optional<std::vector<proto::InferInputTensor>> input_tensors,
     RequestParams sp,
     OutputCallback callback) {
@@ -684,7 +684,7 @@ void RecMaster::handle_request(
                    });
 }
 
-void RecMaster::handle_request(const std::vector<int>& prompt_tokens,
+void RecMaster::handle_request(const std::vector<int32_t>& prompt_tokens,
                                std::optional<MMData> mm_data,
                                RequestParams sp,
                                OutputCallback callback) {
@@ -817,7 +817,7 @@ std::shared_ptr<Request> RecMaster::build_request_common(
         return nullptr;
       }
       for (const auto& s : sp.stop.value()) {
-        std::vector<int> tmp_tokens;
+        std::vector<int32_t> tmp_tokens;
         if (!tokenizer_->encode(s, &tmp_tokens)) {
           CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                               "Failed to encode stop sequence");

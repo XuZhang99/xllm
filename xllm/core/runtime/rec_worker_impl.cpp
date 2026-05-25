@@ -3095,7 +3095,7 @@ std::unique_ptr<RecWorkerImpl::RecWorkPipeline> RecWorkerImpl::create_pipeline(
       return std::make_unique<OneRecXAttentionWorkPipeline>(runtime);
     default:
       LOG(FATAL) << "Unknown RecWorkerImpl pipeline type: "
-                 << static_cast<int>(type);
+                 << static_cast<int32_t>(type);
       return nullptr;
   }
 }

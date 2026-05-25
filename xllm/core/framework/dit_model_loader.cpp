@@ -201,15 +201,15 @@ bool DiTFolderLoader::load_image_preprocessor_args(
   }
   LOG(INFO) << "Loaded image preprocessor config from " << path;
   args_.mm_image_min_pixels() =
-      reader.value_or<int>("min_pixels", args_.mm_image_min_pixels());
+      reader.value_or<int32_t>("min_pixels", args_.mm_image_min_pixels());
   args_.mm_image_max_pixels() =
-      reader.value_or<int>("max_pixels", args_.mm_image_max_pixels());
+      reader.value_or<int32_t>("max_pixels", args_.mm_image_max_pixels());
   args_.mm_image_patch_size() =
-      reader.value_or<int>("patch_size", args_.mm_image_patch_size());
-  args_.mm_image_temporal_patch_size() = reader.value_or<int>(
+      reader.value_or<int32_t>("patch_size", args_.mm_image_patch_size());
+  args_.mm_image_temporal_patch_size() = reader.value_or<int32_t>(
       "temporal_patch_size", args_.mm_image_temporal_patch_size());
   args_.mm_image_merge_size() =
-      reader.value_or<int>("merge_size", args_.mm_image_merge_size());
+      reader.value_or<int32_t>("merge_size", args_.mm_image_merge_size());
   if (reader.contains("image_mean")) {
     args_.mm_image_normalize_mean() =
         reader.data()["image_mean"].get<std::vector<double>>();

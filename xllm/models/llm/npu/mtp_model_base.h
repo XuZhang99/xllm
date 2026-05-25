@@ -129,12 +129,12 @@ class MtpModelImplBase : public torch::nn::Module {
     torch::Tensor attn_mask;
     // TODO(liangzhiwei20): support prefix cache for deepseek .
     if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      int num_sequences = input_params.meta.num_sequences;
+      int32_t num_sequences = input_params.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(num_sequences);
+        req_mask_vec.reserve(static_cast<size_t>(num_sequences));
 
-        for (int j = 0; j < num_sequences; j++) {
+        for (int32_t j = 0; j < num_sequences; j++) {
           auto mask = attn_mask_.gen_append_mask(
               input_params.attention.host.q_seq_lens[j],
               input_params.attention.host.kv_seq_lens[j],
@@ -219,7 +219,7 @@ class MtpModelImplBase : public torch::nn::Module {
     }
 
     // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
@@ -231,7 +231,7 @@ class MtpModelImplBase : public torch::nn::Module {
   }
 
   virtual void verify_loaded_weights(const std::string& prefix) const {
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
@@ -245,7 +245,7 @@ class MtpModelImplBase : public torch::nn::Module {
   }
 
   virtual void merge_loaded_weights() {
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
     if (enable_rot_) {

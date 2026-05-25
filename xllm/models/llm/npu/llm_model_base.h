@@ -201,12 +201,12 @@ class LlmModelImplBase : public torch::nn::Module {
           max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
       if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-        int num_sequences = input_params.meta.num_sequences;
+        int32_t num_sequences = input_params.meta.num_sequences;
         if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;
-          req_mask_vec.reserve(num_sequences);
+          req_mask_vec.reserve(static_cast<size_t>(num_sequences));
 
-          for (int j = 0; j < num_sequences; j++) {
+          for (int32_t j = 0; j < num_sequences; j++) {
             auto mask = attn_mask_.gen_append_mask(
                 input_params.attention.host.q_seq_lens[j],
                 input_params.attention.host.kv_seq_lens[j],
@@ -243,7 +243,7 @@ class LlmModelImplBase : public torch::nn::Module {
         LOG(INFO) << "Forward interrupted at layer: " << i;
         return ModelOutput();
       }
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
       rolling_guard.before_layer(layer_index);
 
       layer(h,
@@ -267,7 +267,7 @@ class LlmModelImplBase : public torch::nn::Module {
     npu_embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
     // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
@@ -277,7 +277,7 @@ class LlmModelImplBase : public torch::nn::Module {
   virtual void verify_loaded_weights(const std::string& prefix) const {
     npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
 
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
@@ -287,7 +287,7 @@ class LlmModelImplBase : public torch::nn::Module {
   virtual void merge_loaded_weights() {
     npu_embed_tokens_->merge_loaded_weights();
 
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
@@ -295,7 +295,7 @@ class LlmModelImplBase : public torch::nn::Module {
 
   virtual void free_weights() {
     npu_embed_tokens_->free_weights();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->free_weights();
     }
     norm_->free_weights();
@@ -303,7 +303,7 @@ class LlmModelImplBase : public torch::nn::Module {
 
   virtual void reload_weights() {
     npu_embed_tokens_->reload_weights();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->reload_weights();
     }
     norm_->reload_weights();
@@ -316,7 +316,7 @@ class LlmModelImplBase : public torch::nn::Module {
 
   virtual void reload_weights_from_device() {
     npu_embed_tokens_->reload_weights_from_device();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->reload_weights_from_device();
     }
     norm_->reload_weights_from_device();
@@ -324,7 +324,7 @@ class LlmModelImplBase : public torch::nn::Module {
 
   virtual void merge_and_move_pinned_host() {
     npu_embed_tokens_->merge_and_move_pinned_host();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_and_move_pinned_host();
     }
     norm_->merge_and_move_pinned_host();
@@ -364,9 +364,9 @@ class LlmModelImplBase : public torch::nn::Module {
   torch::Tensor cos_sin_;
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
-  int device_id = 0;
+  int32_t device_id = 0;
   layer::AttentionMask attn_mask_;
-  int dp_rank_ = 0;
+  int32_t dp_rank_ = 0;
   layer::NpuPosEmbedding atb_pos_emb_{nullptr};
 
   std::vector<int64_t> mrope_section_;
@@ -604,7 +604,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
                 << ", max_decoder_layer_storage_size=" << max_storage_size;
 
       for (size_t i = 0; i < loaders.size(); ++i) {
-        const int32_t layer_index = i;
+        const int32_t layer_index = static_cast<int32_t>(i);
         const int32_t slot = rolling_load_manager_->slot_for_layer(layer_index);
         loaders[i]->set_rolling_buffer(rolling_weight_buffer_, slot);
       }
@@ -621,7 +621,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
  protected:
   // parameter members, must be registered
   LlmModelType model_{nullptr};
-  int device_id = 0;
+  int32_t device_id = 0;
   bool tie_word_embeddings{false};
   bool keep_host_weights{false};
   std::shared_ptr<layer::RollingWeightBuffer> rolling_weight_buffer_{nullptr};

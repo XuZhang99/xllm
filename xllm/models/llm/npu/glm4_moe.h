@@ -130,7 +130,8 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     rank_ = parallel_args.rank();
     mapping_data_ = parallel_args.mapping_data();
     num_experts_per_tok_ = model_args.num_experts_per_tok();
-    for (int i = 0; i < parallel_args.world_size(); i += dp_local_tp_size_) {
+    for (int32_t i = 0; i < parallel_args.world_size();
+         i += dp_local_tp_size_) {
       indices.push_back(i);
     }
   }
@@ -192,13 +193,13 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     sin_pos = sin_pos.view(at::IntArrayRef{-1, 2, sin_pos.size(-1) / 2});
     torch::Tensor attn_mask;
     if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      int max_kv_seq = input_params.meta.kv_max_seq_len;
-      int num_sequences = input_params.meta.num_sequences;
+      int32_t max_kv_seq = input_params.meta.kv_max_seq_len;
+      int32_t num_sequences = input_params.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(num_sequences);
+        req_mask_vec.reserve(static_cast<size_t>(num_sequences));
 
-        for (int j = 0; j < num_sequences; j++) {
+        for (int32_t j = 0; j < num_sequences; j++) {
           auto mask = attn_mask_.gen_append_mask(
               input_params.attention.host.q_seq_lens[j],
               input_params.attention.host.kv_seq_lens[j],
@@ -231,7 +232,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
       rolling_guard.before_layer(layer_index);
       layer(h,
             cos_pos,
@@ -252,7 +253,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     npu_embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
     // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
@@ -261,7 +262,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
 
   void verify_loaded_weights(const std::string& prefix) const {
     npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
@@ -270,7 +271,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
 
   void merge_loaded_weights() {
     npu_embed_tokens_->merge_loaded_weights();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
@@ -380,7 +381,7 @@ REGISTER_MODEL_ARGS(glm4_moe, [&] {
   LOAD_ARG_OR(attention_bias, "attention_bias", false);
   LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0f);
   LOAD_ARG_OR(decoder_sparse_step, "decoder_sparse_step", 1);
-  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int>{151329});
+  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int32_t>{151329});
   LOAD_ARG_OR(head_dim, "head_dim", 128);
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(hidden_size, "hidden_size", 2048);

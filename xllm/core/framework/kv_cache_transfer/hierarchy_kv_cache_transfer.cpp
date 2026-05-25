@@ -41,7 +41,8 @@ HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
       2, [this]() mutable { device_.set_device(); });
   d2h_threadpool_ = std::make_unique<ThreadPool>(
       5, [this]() mutable { device_.set_device(); });
-  for (int i = 0; i < h2d_threadpool_->size() + d2h_threadpool_->size(); i++) {
+  for (size_t i = 0; i < h2d_threadpool_->size() + d2h_threadpool_->size();
+       i++) {
     copy_stream_.enqueue(device_.get_stream_from_pool(TIMEOUT_MS));
   }
 
@@ -216,7 +217,7 @@ bool HierarchyKVCacheTransfer::d2h_batch_copy(
     auto dst_index_cache =
         host_kv_caches_.at(info.dst_block_id).get_index_cache();
 
-    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+    for (int64_t layer_id = 0; layer_id < num_layers; layer_id++) {
       auto src_k_cache = kv_caches_ptr_->at(layer_id).get_k_cache();
       srcs[curr_index] = src_k_cache[info.src_block_id].data_ptr();
       dsts[curr_index] = dst_k_cache[layer_id].data_ptr();
@@ -321,8 +322,8 @@ bool HierarchyKVCacheTransfer::h2d_batch_copy(
   void** dsts = new void*[num_batches * layers_per_bacth_copy];
   size_t* copy_size = new size_t[num_batches * layers_per_bacth_copy];
 
-  for (int index = 0; index < copy_cnt; index++) {
-    int layer_id = index * layers_per_bacth_copy;
+  for (uint32_t index = 0; index < copy_cnt; index++) {
+    uint32_t layer_id = index * layers_per_bacth_copy;
     size_t fail_index = 0;
     uint32_t curr_index = 0;
     uint32_t layer_cnt = 0;
@@ -490,7 +491,7 @@ void HierarchyKVCacheTransfer::create_page_aligned_host_cache() {
   }
 
   if (mlock(page_aligned_data_, page_aligned_data_size_) != 0) {
-    int err = errno;
+    int32_t err = errno;
     munmap(page_aligned_data_, page_aligned_data_size_);
     uint64_t limit_kb = (page_aligned_data_size_ + 1023) / 1024;
     LOG(FATAL) << "Failed to lock memory pool! mlock errno=" << err << " ("

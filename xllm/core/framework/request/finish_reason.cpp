@@ -30,7 +30,7 @@ std::optional<std::string> FinishReason::to_string() {
     case Value::FUNCTION_CALL:
       return "function_call";
     default:
-      LOG(WARNING) << "Unknown finish reason: " << static_cast<int>(value);
+      LOG(WARNING) << "Unknown finish reason: " << static_cast<int32_t>(value);
   }
   return std::nullopt;
 }

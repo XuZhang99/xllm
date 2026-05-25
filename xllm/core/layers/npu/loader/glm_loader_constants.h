@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <utility>
@@ -23,7 +24,7 @@ namespace xllm {
 namespace layer {
 
 namespace glm4_decoder_constants {
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_NORM_WEIGHT = 0,      // weight
   IN_NORM_BIAS = 1,        // bias
   IN_NORM_NEW_WEIGHT = 2,  // new weight
@@ -87,7 +88,7 @@ enum DecoderLayerTensorId : int {
   IN_MLPOUT_NORM_WEIGHT = 51
 };
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
+static std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {
     {IN_NORM_WEIGHT, "input_layernorm.weight"},
     {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
     {IN_Q_BIAS, "self_attn.q_proj.bias"},
@@ -102,15 +103,15 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_SELFIN_NORM_WEIGHT, "post_self_attn_layernorm.weight"},
     {IN_MLPOUT_NORM_WEIGHT, "post_mlp_layernorm.weight"}};
 
-static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
-                                          {IN_Q_BIAS, 0},
-                                          {IN_K_WEIGHT, 0},
-                                          {IN_K_BIAS, 0},
-                                          {IN_V_WEIGHT, 0},
-                                          {IN_V_BIAS, 0},
-                                          {IN_ATTENTION_OUT_WEIGHT, 1},
-                                          {IN_MLP_GATEUP_WEIGHT, 0},
-                                          {IN_MLP_CPROJ_WEIGHT, 1}};
+static std::map<int32_t, int32_t> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
+                                                  {IN_Q_BIAS, 0},
+                                                  {IN_K_WEIGHT, 0},
+                                                  {IN_K_BIAS, 0},
+                                                  {IN_V_WEIGHT, 0},
+                                                  {IN_V_BIAS, 0},
+                                                  {IN_ATTENTION_OUT_WEIGHT, 1},
+                                                  {IN_MLP_GATEUP_WEIGHT, 0},
+                                                  {IN_MLP_CPROJ_WEIGHT, 1}};
 
 }  // namespace glm4_decoder_constants
 

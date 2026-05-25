@@ -62,9 +62,9 @@ class NpuQwen3VisionEncoderLayerImpl : public BaseLayer {
                         torch::Tensor& cos_pos,
                         torch::Tensor& sin_pos,
                         torch::Tensor& cu_seqlen,
-                        std::vector<int>& cu_seqlen_vec,
+                        std::vector<int32_t>& cu_seqlen_vec,
                         ModelInputParams& input_params,
-                        int node_id = 0,
+                        int32_t node_id = 0,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr);
 
@@ -74,7 +74,7 @@ class NpuQwen3VisionEncoderLayerImpl : public BaseLayer {
                                torch::Tensor& cos_pos,
                                torch::Tensor& sin_pos,
                                torch::Tensor& cu_seqlen,
-                               std::vector<int>& cu_seqlen_vec,
+                               std::vector<int32_t>& cu_seqlen_vec,
                                ModelInputParams& input_params,
                                bool is_prefill);
 
@@ -119,7 +119,7 @@ class NpuQwen3VisionEncoderLayerImpl : public BaseLayer {
   at::Tensor at_placeholder_;
   std::vector<torch::Tensor> qkv_weight;
   std::vector<torch::Tensor> qkv_bias;
-  int device_id_;
+  int32_t device_id_;
 };
 TORCH_MODULE(NpuQwen3VisionEncoderLayer);
 

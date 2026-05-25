@@ -79,13 +79,13 @@ class OxygenModelImpl : public QWen3ModelImpl {
     // for chunked prefill, generate the attn mask.
     if (!input_params.meta.batch_forward_type.is_decode()) {
       if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-        int max_kv_seq = input_params.meta.kv_max_seq_len;
-        int num_sequences = input_params.meta.num_sequences;
+        int32_t max_kv_seq = input_params.meta.kv_max_seq_len;
+        int32_t num_sequences = input_params.meta.num_sequences;
         if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;
-          req_mask_vec.reserve(num_sequences);
+          req_mask_vec.reserve(static_cast<size_t>(num_sequences));
 
-          for (int j = 0; j < num_sequences; j++) {
+          for (int32_t j = 0; j < num_sequences; j++) {
             auto mask = attn_mask_.gen_append_mask(
                 input_params.attention.host.q_seq_lens[j],
                 input_params.attention.host.kv_seq_lens[j],

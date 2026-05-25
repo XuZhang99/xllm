@@ -48,9 +48,9 @@ void NpuGlm4VisionEncoderLayerImpl::param_from_args(
       args.mm_num_attention_heads() / param.worldSize;
   param.hiddenSizePerAttentionHead =
       args.mm_hidden_size() / args.mm_num_attention_heads();
-  std::optional<long int> optionalValue = args.mm_num_attention_heads();
+  std::optional<int64_t> optionalValue = args.mm_num_attention_heads();
   param.numKeyValueHeadsPerRank =
-      static_cast<int>(optionalValue.value()) / param.worldSize;
+      static_cast<int32_t>(optionalValue.value()) / param.worldSize;
 
   param.rmsNormEps = args.rms_norm_eps();
 }
@@ -76,7 +76,7 @@ void NpuGlm4VisionEncoderLayerImpl::merge_loaded_weights() {
   CHECK(loader_ != nullptr) << "glm4 vision encoder loader is not initialized";
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
+  for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
   }
@@ -127,9 +127,9 @@ torch::Tensor NpuGlm4VisionEncoderLayerImpl::forward(
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
     torch::Tensor& cu_seqlen,
-    std::vector<int>& cu_seqlen_vec,
+    std::vector<int32_t>& cu_seqlen_vec,
     ModelInputParams& input_params,
-    int node_id,
+    int32_t node_id,
     aclrtEvent* event,
     std::atomic<bool>* event_flag) {
   atb::Status st;
@@ -155,7 +155,7 @@ void NpuGlm4VisionEncoderLayerImpl::build_node_variant_pack(
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
     torch::Tensor& cu_seqlen,
-    std::vector<int>& cu_seqlen_vec,
+    std::vector<int32_t>& cu_seqlen_vec,
     ModelInputParams& input_params,
     bool is_prefill) {
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);

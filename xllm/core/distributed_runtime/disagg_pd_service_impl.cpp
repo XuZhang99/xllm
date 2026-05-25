@@ -43,8 +43,8 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
   // to allocate blocks for the first sequence in the request.
   // But request maybe expend_sequence in running stage.
   std::string prompt = req.prompt();
-  std::vector<int> prompt_tokens(req.prompt_tokens().begin(),
-                                 req.prompt_tokens().end());
+  std::vector<int32_t> prompt_tokens(req.prompt_tokens().begin(),
+                                     req.prompt_tokens().end());
 
   RequestSamplingParam sampling_param;
   sampling_param.frequency_penalty = req.frequency_penalty();

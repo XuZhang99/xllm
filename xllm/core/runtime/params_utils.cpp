@@ -271,7 +271,9 @@ uint64_t proto_to_block_transfer_info(
     std::vector<BlockTransferInfo>& block_transfer_info) {
   block_transfer_info.reserve(pb_block_transfer_info.transfer_infos_size());
 
-  for (int i = 0; i < pb_block_transfer_info.transfer_infos_size(); ++i) {
+  const int32_t transfer_infos_size =
+      pb_block_transfer_info.transfer_infos_size();
+  for (int32_t i = 0; i < transfer_infos_size; ++i) {
     block_transfer_info.emplace_back(
         pb_block_transfer_info.transfer_infos(i).src_block_id(),
         pb_block_transfer_info.transfer_infos(i).dst_block_id(),

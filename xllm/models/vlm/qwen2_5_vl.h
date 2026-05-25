@@ -101,13 +101,13 @@ class Qwen2_5_VisionRotaryEmbeddingImpl : public torch::nn::Module {
     freqs_cached_ = torch::outer(seq, inv_freq_);
   }
 
-  torch::Tensor forward(int seqlen) {
+  torch::Tensor forward(int64_t seqlen) {
     update_freqs_cache(seqlen);
     return freqs_cached_.slice(0, 0, seqlen);
   }
 
  private:
-  int dim_ = 0;
+  int64_t dim_ = 0;
   double theta_ = 0.0;
 
   int64_t seq_len_cached_ = 0;
@@ -125,11 +125,10 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
     auto parallel_args = context.get_parallel_args();
 
     int64_t d_model = model_args.mm_projection_dim();  // out_hidden_size
-    int context_dim = model_args.mm_hidden_size();
-    int spatial_merge_size = model_args.mm_spatial_merge_size();
+    int64_t context_dim = model_args.mm_hidden_size();
+    int64_t spatial_merge_size = model_args.mm_spatial_merge_size();
 
-    hidden_size_ =
-        context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
+    hidden_size_ = context_dim * spatial_merge_size * spatial_merge_size;
 
     ln_q_ = register_module(
         "ln_q",
@@ -220,7 +219,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
     spatial_merge_size_ = model_args.mm_spatial_merge_size();
     const auto& block_indexes = model_args.mm_fullatt_block_indexes();
     fullatt_block_indexes_.insert(block_indexes.begin(), block_indexes.end());
-    spatial_merge_unit_ = static_cast<int>(std::pow(spatial_merge_size_, 2));
+    spatial_merge_unit_ = spatial_merge_size_ * spatial_merge_size_;
 
     patch_embed_ =
         register_module("patch_embed", Qwen2_5_VisionPatchEmbed(context));
@@ -238,14 +237,14 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
 
   torch::Tensor rot_pos_emb(torch::Tensor grid_thw) {
     std::vector<torch::Tensor> pos_ids_vec;
-    auto count = grid_thw.sizes()[0];
+    int64_t count = grid_thw.sizes()[0];
     pos_ids_vec.reserve(count);
 
     auto grid_thw_cpu = grid_thw.cpu();
     auto options =
         torch::TensorOptions().dtype(torch::kLong).device(grid_thw.device());
 
-    for (int idx = 0; idx < count; ++idx) {
+    for (int64_t idx = 0; idx < count; ++idx) {
       auto t = grid_thw_cpu[idx][0].item<int64_t>();
       auto h = grid_thw_cpu[idx][1].item<int64_t>();
       auto w = grid_thw_cpu[idx][2].item<int64_t>();
@@ -286,22 +285,22 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
   }
 
   torch::Tensor get_window_index(torch::Tensor grid_thw,
-                                 std::vector<int>& cu_window_seqlens) {
-    auto count = grid_thw.sizes()[0];
+                                 std::vector<int32_t>& cu_window_seqlens) {
+    int64_t count = grid_thw.sizes()[0];
     std::vector<torch::Tensor> window_index;
     window_index.reserve(count);
     cu_window_seqlens.reserve(count * 128);
     cu_window_seqlens.emplace_back(0);
 
-    int window_index_id = 0;
-    int vit_merger_window_size =
+    int64_t window_index_id = 0;
+    int64_t vit_merger_window_size =
         window_size_ / spatial_merge_size_ / patch_size_;
 
     auto grid_thw_cpu = grid_thw.cpu();
     auto options =
         torch::TensorOptions().dtype(torch::kLong).device(grid_thw.device());
 
-    for (int idx = 0; idx < count; ++idx) {
+    for (int64_t idx = 0; idx < count; ++idx) {
       auto grid_t = grid_thw_cpu[idx][0].item<int64_t>();
       auto grid_h = grid_thw_cpu[idx][1].item<int64_t>();
       auto grid_w = grid_thw_cpu[idx][2].item<int64_t>();
@@ -347,8 +346,8 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
               .cpu();
       cu_window_seqlens.insert(
           cu_window_seqlens.end(),
-          cu_seqlens_tmp.data_ptr<int>(),
-          cu_seqlens_tmp.data_ptr<int>() + cu_seqlens_tmp.numel());
+          cu_seqlens_tmp.data_ptr<int32_t>(),
+          cu_seqlens_tmp.data_ptr<int32_t>() + cu_seqlens_tmp.numel());
       window_index_id += grid_t * llm_grid_h * llm_grid_w;
     }
 
@@ -365,7 +364,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
     auto rotary_pos_emb = rot_pos_emb(grid_thw);
 
     // windows attention
-    std::vector<int> cu_window_seqlens_vec;
+    std::vector<int32_t> cu_window_seqlens_vec;
     auto window_index = get_window_index(grid_thw, cu_window_seqlens_vec);
     torch::TensorOptions options = torch::TensorOptions()
                                        .dtype(torch::kInt32)
@@ -405,15 +404,16 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
     torch::Tensor cu_window_seqlens_cpu = cu_window_seqlens.cpu();
-    std::vector<int> cu_seqlens_vec(
-        cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec
-        cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
-    std::vector<int> cu_w_seqlens_vec(
-        cu_window_seqlens_cpu.data_ptr<int>(),  // windows seqlen vec
-        cu_window_seqlens_cpu.data_ptr<int>() + cu_window_seqlens_cpu.numel());
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    std::vector<int32_t> cu_seqlens_vec(
+        cu_seqlens_cpu.data_ptr<int32_t>(),  // full seqlen vec
+        cu_seqlens_cpu.data_ptr<int32_t>() + cu_seqlens_cpu.numel());
+    std::vector<int32_t> cu_w_seqlens_vec(
+        cu_window_seqlens_cpu.data_ptr<int32_t>(),  // windows seqlen vec
+        cu_window_seqlens_cpu.data_ptr<int32_t>() +
+            cu_window_seqlens_cpu.numel());
+    for (size_t idx = 0; idx < blocks_->size(); ++idx) {
       torch::Tensor cu_seqlens_now;
-      std::vector<int> cu_seqlens_now_vec;
+      std::vector<int32_t> cu_seqlens_now_vec;
       if (fullatt_block_indexes_.find(idx) != fullatt_block_indexes_.end()) {
         cu_seqlens_now = cu_seqlens;
         cu_seqlens_now_vec = cu_seqlens_vec;
@@ -427,7 +427,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
                                    cu_seqlens_now,
                                    cu_seqlens_now_vec,
                                    input_params_new,
-                                   idx);
+                                   static_cast<int32_t>(idx));
     }
     // adapter
     hidden_states = merger_(hidden_states);
@@ -441,7 +441,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict) {
     patch_embed_->load_state_dict(
         state_dict.get_dict_with_prefix("patch_embed."));
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    for (size_t idx = 0; idx < blocks_->size(); ++idx) {
       layers_[idx]->load_state_dict(state_dict.get_dict_with_prefix(
           "blocks." + std::to_string(idx) + "."));
     }
@@ -450,13 +450,13 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
   }
 
  private:
-  int hidden_size_ = 0;
-  int num_heads_ = 0;
-  int window_size_ = 0;
-  int patch_size_ = 0;
-  int spatial_merge_size_ = 0;
-  std::unordered_set<int> fullatt_block_indexes_;
-  int spatial_merge_unit_ = 0;
+  int64_t hidden_size_ = 0;
+  int64_t num_heads_ = 0;
+  int64_t window_size_ = 0;
+  int64_t patch_size_ = 0;
+  int64_t spatial_merge_size_ = 0;
+  std::unordered_set<int32_t> fullatt_block_indexes_;
+  int64_t spatial_merge_unit_ = 0;
 
   Qwen2_5_VisionPatchEmbed patch_embed_{nullptr};
   Qwen2_5_VisionRotaryEmbedding rotary_pos_emb_{nullptr};
@@ -466,7 +466,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
 
   torch::Tensor m_cos;
   torch::Tensor m_sin;
-  int device_id = 0;
+  int32_t device_id = 0;
 };
 TORCH_MODULE(Qwen2_5_VisionTransformer);
 
@@ -735,7 +735,7 @@ REGISTER_IMAGE_PROCESSOR(qwen2_5_vl, Qwen2VLImageProcessor);
     LOAD_ARG_OR(mm_window_size, "vision_config.window_size", 112);             \
     LOAD_ARG_OR(mm_fullatt_block_indexes,                                      \
                 "vision_config.fullatt_block_indexes",                         \
-                std::vector<int64_t>({7, 15, 23, 31}));                        \
+                std::vector<int32_t>({7, 15, 23, 31}));                        \
     LOAD_ARG_OR(mm_tokens_per_second, "vision_config.tokens_per_second", 2);   \
     LOAD_ARG_OR(                                                               \
         mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);       \

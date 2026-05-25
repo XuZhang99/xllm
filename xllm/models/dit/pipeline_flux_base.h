@@ -63,13 +63,13 @@ std::pair<torch::Tensor, int64_t> retrieve_timesteps(
   if (sigmas.has_value()) {
     steps = sigmas->size();
     scheduler->set_timesteps(
-        static_cast<int>(steps), device, *sigmas, mu, std::nullopt);
+        static_cast<int64_t>(steps), device, *sigmas, mu, std::nullopt);
 
     scheduler_timesteps = scheduler->timesteps();
   } else {
     steps = num_inference_steps;
     scheduler->set_timesteps(
-        static_cast<int>(steps), device, std::nullopt, mu, std::nullopt);
+        static_cast<int64_t>(steps), device, std::nullopt, mu, std::nullopt);
     scheduler_timesteps = scheduler->timesteps();
   }
   if (scheduler_timesteps.device() != device) {
@@ -295,8 +295,8 @@ class FluxPipelineBaseImpl : public torch::nn::Module {
   std::unique_ptr<Tokenizer> tokenizer_;
   std::unique_ptr<Tokenizer> tokenizer_2_;
   torch::TensorOptions options_;
-  int tokenizer_max_length_;
-  int vae_scale_factor_;
+  int32_t tokenizer_max_length_;
+  int32_t vae_scale_factor_;
 };
 
 }  // namespace xllm

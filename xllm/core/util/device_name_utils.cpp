@@ -35,7 +35,7 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
       return {torch::kCPU};
     }
     devices.reserve(num_devices);
-    for (int i = 0; i < num_devices; ++i) {
+    for (int32_t i = 0; i < num_devices; ++i) {
       std::string device_name = Device::type_str() + ":" + std::to_string(i);
       devices.emplace_back(torch::Device(device_name));
     }
@@ -52,7 +52,7 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
     CHECK(parts[0] == Device::type_str())
         << "Unsupported device type: " << parts[0];
 
-    int device_index;
+    int32_t device_index;
     CHECK(absl::SimpleAtoi(parts[1], &device_index))
         << "Invalid device index: " << parts[1];
 

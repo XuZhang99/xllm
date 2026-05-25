@@ -203,7 +203,7 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_llm_chat_completions(
 
   std::vector<xllm::Message> xllm_messages;
   xllm_messages.reserve(messages_count);
-  for (int i = 0; i < messages_count; i++) {
+  for (size_t i = 0; i < messages_count; i++) {
     xllm_messages.emplace_back(messages[i].role, messages[i].content);
   }
 

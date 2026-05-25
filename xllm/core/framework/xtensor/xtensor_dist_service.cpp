@@ -121,7 +121,7 @@ void XTensorDistService::MapToKvTensors(
     // Convert proto offsets to vector
     std::vector<offset_t> offsets;
     offsets.reserve(request->offsets_size());
-    for (int i = 0; i < request->offsets_size(); ++i) {
+    for (int32_t i = 0; i < request->offsets_size(); ++i) {
       offsets.push_back(request->offsets(i));
     }
 
@@ -145,7 +145,7 @@ void XTensorDistService::UnmapFromKvTensors(
     // Convert proto offsets to vector
     std::vector<offset_t> offsets;
     offsets.reserve(request->offsets_size());
-    for (int i = 0; i < request->offsets_size(); ++i) {
+    for (int32_t i = 0; i < request->offsets_size(); ++i) {
       offsets.push_back(request->offsets(i));
     }
 
@@ -239,7 +239,7 @@ void XTensorDistService::GetXTensorOffsets(
     // Convert proto block_ids to vector
     std::vector<int32_t> block_ids;
     block_ids.reserve(request->block_ids_size());
-    for (int i = 0; i < request->block_ids_size(); ++i) {
+    for (int32_t i = 0; i < request->block_ids_size(); ++i) {
       block_ids.push_back(request->block_ids(i));
     }
 

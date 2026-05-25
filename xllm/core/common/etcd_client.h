@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <etcd/KeepAlive.hpp>
 #include <etcd/SyncClient.hpp>
 #include <etcd/Watcher.hpp>
@@ -47,7 +48,7 @@ class EtcdClient {
 
   bool register_instance(const std::string& key,
                          const std::string& value,
-                         const int ttl);
+                         int32_t ttl);
   bool get(const std::string& key, std::string* value);
 
   bool get_master_service(const std::string& key_prefix, std::string* values);

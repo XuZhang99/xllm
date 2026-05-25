@@ -65,8 +65,8 @@ DistManager::~DistManager() {
 
 namespace {
 std::unique_ptr<CommChannel> create_channel(const std::string& worker_addrs,
-                                            int r,
-                                            int dp_local_tp_size,
+                                            int32_t r,
+                                            int32_t dp_local_tp_size,
                                             const runtime::Options& options) {
   std::unique_ptr<CommChannel> channel;
 
@@ -75,7 +75,7 @@ std::unique_ptr<CommChannel> create_channel(const std::string& worker_addrs,
       options.enable_shm()) {
     // create shared memory manager for local rank
     bool is_driver = false;
-    int dp_group = r / dp_local_tp_size;
+    int32_t dp_group = r / dp_local_tp_size;
     if (r % dp_local_tp_size == 0) {
       is_driver = true;
     }
@@ -295,7 +295,7 @@ void DistManager::setup_multi_node_workers(
 
     // check if all workers connected
     // and then create worker clients
-    for (size_t r = 0; r < world_size; ++r) {
+    for (int32_t r = 0; r < world_size; ++r) {
       if (worker_addrs_map.find(r) == worker_addrs_map.end()) {
         LOG(FATAL) << "Not all worker connect to engine server. Miss rank is "
                    << r;
@@ -315,7 +315,7 @@ void DistManager::setup_multi_node_workers(
     for (auto& worker_client : worker_clients_) {
       auto* remote_worker = dynamic_cast<RemoteWorker*>(worker_client.get());
       if (remote_worker) {
-        int rank = remote_worker->global_rank();
+        int32_t rank = remote_worker->global_rank();
         HealthCheckManager::instance().register_health_check(
             rank, [remote_worker]() { return remote_worker->check_health(); });
       }
@@ -327,7 +327,7 @@ void DistManager::setup_multi_node_workers(
     LOG(INFO) << "Started cluster health check thread";
   }
 
-  for (int idx = 0; idx < dones.size(); ++idx) {
+  for (size_t idx = 0; idx < dones.size(); ++idx) {
     while (!dones[idx].load()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }

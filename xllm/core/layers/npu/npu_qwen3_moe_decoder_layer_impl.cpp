@@ -51,7 +51,7 @@ NpuQwen3MoeDecoderLayerImpl::NpuQwen3MoeDecoderLayerImpl(
   ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
   num_experts_per_partition_ = model_args.num_experts() / ep_size_;
   ep_rank_ = parallel_args.rank() / ep_local_tp_size_;
-  // int ep_rank = prefill_param_.rank /  ep_local_tp_size_;
+  // int32_t ep_rank = prefill_param_.rank / ep_local_tp_size_;
   start_expert_id_ = ep_rank_ * num_experts_per_partition_;
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
 
@@ -133,21 +133,22 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   param.enableAclnnAddRmsNorm = !is_prefill;
 
   param.swigluBackend = atb_speed::common::OpBackend::ACLNN;
-  param.mlpLinearTransposeType = {static_cast<int>(TransposeType::INVALID),
-                                  static_cast<int>(TransposeType::INVALID),
-                                  static_cast<int>(TransposeType::INVALID),
-                                  static_cast<int>(TransposeType::INVALID)};
+  param.mlpLinearTransposeType = {static_cast<int32_t>(TransposeType::INVALID),
+                                  static_cast<int32_t>(TransposeType::INVALID),
+                                  static_cast<int32_t>(TransposeType::INVALID),
+                                  static_cast<int32_t>(TransposeType::INVALID)};
   if (quantize_type_.empty()) {
-    param.moeLinearTransposeType = {static_cast<int>(TransposeType::TRANSPOSE),
-                                    static_cast<int>(TransposeType::TRANSPOSE),
-                                    static_cast<int>(TransposeType::INVALID),
-                                    static_cast<int>(TransposeType::TRANSPOSE)};
+    param.moeLinearTransposeType = {
+        static_cast<int32_t>(TransposeType::TRANSPOSE),
+        static_cast<int32_t>(TransposeType::TRANSPOSE),
+        static_cast<int32_t>(TransposeType::INVALID),
+        static_cast<int32_t>(TransposeType::TRANSPOSE)};
   } else {
     param.moeLinearTransposeType = {
-        static_cast<int>(TransposeType::TRANSPOSE),
-        static_cast<int>(TransposeType::NOT_TRANSPOSE),
-        static_cast<int>(TransposeType::INVALID),
-        static_cast<int>(TransposeType::TRANSPOSE)};
+        static_cast<int32_t>(TransposeType::TRANSPOSE),
+        static_cast<int32_t>(TransposeType::NOT_TRANSPOSE),
+        static_cast<int32_t>(TransposeType::INVALID),
+        static_cast<int32_t>(TransposeType::TRANSPOSE)};
   }
   param.normEps = args.rms_norm_eps();
   param.rank = parallel_args.rank();
@@ -173,17 +174,20 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   param.useQKNorm = true;
   param.rmsnormQKNorm = true;
   param.hiddenSizePerAttentionHead = args.head_dim();
-  std::optional<long int> optionalValue = args.n_kv_heads();
-  param.numKeyValueHeadsPerRank = std::max(
-      1, static_cast<int>(optionalValue.value()) / parallel_args.world_size());
+  std::optional<int64_t> optional_value = args.n_kv_heads();
+  param.numKeyValueHeadsPerRank =
+      std::max(1,
+               static_cast<int32_t>(optional_value.value()) /
+                   parallel_args.world_size());
   param.numAttentionHeadsPerRank = args.n_heads() / dp_local_tp_size_;
 
-  param.attnLinearTransposeType = {static_cast<int>(TransposeType::TRANSPOSE),
-                                   static_cast<int>(TransposeType::INVALID),
-                                   static_cast<int>(TransposeType::INVALID),
-                                   static_cast<int>(TransposeType::TRANSPOSE),
-                                   static_cast<int>(TransposeType::INVALID),
-                                   static_cast<int>(TransposeType::INVALID)};
+  param.attnLinearTransposeType = {
+      static_cast<int32_t>(TransposeType::TRANSPOSE),
+      static_cast<int32_t>(TransposeType::INVALID),
+      static_cast<int32_t>(TransposeType::INVALID),
+      static_cast<int32_t>(TransposeType::TRANSPOSE),
+      static_cast<int32_t>(TransposeType::INVALID),
+      static_cast<int32_t>(TransposeType::INVALID)};
   param.worldSize = parallel_args.world_size();
 
   if (is_prefill) {
@@ -239,40 +243,41 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_parallel_parameters(
 void NpuQwen3MoeDecoderLayerImpl::initialize_quantization_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param) {
   if (quantize_type_.empty()) {
-    param.packQuantType = {static_cast<int>(PackType::ALL_FP),
-                           static_cast<int>(PackType::ALL_FP)};
-    param.attnLinearQuantType = {static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INVALID)};
-    param.mlpLinearQuantType = {static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::INVALID)};
+    param.packQuantType = {static_cast<int32_t>(PackType::ALL_FP),
+                           static_cast<int32_t>(PackType::ALL_FP)};
+    param.attnLinearQuantType = {static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::INVALID),
+                                 static_cast<int32_t>(LinearType::INVALID),
+                                 static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::INVALID),
+                                 static_cast<int32_t>(LinearType::INVALID)};
+    param.mlpLinearQuantType = {static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::INVALID)};
 
-    param.moeLinearQuantType = {static_cast<int>(LinearType::FP),
-                                static_cast<int>(LinearType::FP),
-                                static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::FP)};
+    param.moeLinearQuantType = {static_cast<int32_t>(LinearType::FP),
+                                static_cast<int32_t>(LinearType::FP),
+                                static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::FP)};
   } else {
-    param.packQuantType = {static_cast<int>(PackType::ALL_W8A8_DYNAMIC_ANTI),
-                           static_cast<int>(PackType::ALL_W8A8_DYNAMIC_ANTI)};
-    param.attnLinearQuantType = {static_cast<int>(LinearType::INT),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INT),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INVALID)};
-    param.mlpLinearQuantType = {static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::INVALID)};
-    param.moeLinearQuantType = {static_cast<int>(LinearType::FP),
-                                static_cast<int>(LinearType::INT),
-                                static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::INT)};
+    param.packQuantType = {
+        static_cast<int32_t>(PackType::ALL_W8A8_DYNAMIC_ANTI),
+        static_cast<int32_t>(PackType::ALL_W8A8_DYNAMIC_ANTI)};
+    param.attnLinearQuantType = {static_cast<int32_t>(LinearType::INT),
+                                 static_cast<int32_t>(LinearType::INVALID),
+                                 static_cast<int32_t>(LinearType::INVALID),
+                                 static_cast<int32_t>(LinearType::INT),
+                                 static_cast<int32_t>(LinearType::INVALID),
+                                 static_cast<int32_t>(LinearType::INVALID)};
+    param.mlpLinearQuantType = {static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::INVALID)};
+    param.moeLinearQuantType = {static_cast<int32_t>(LinearType::FP),
+                                static_cast<int32_t>(LinearType::INT),
+                                static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::INT)};
   }
 }
 
@@ -280,7 +285,7 @@ void NpuQwen3MoeDecoderLayerImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   Device::empty_cache(device_.index());
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
+  for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
   }
@@ -331,7 +336,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
     const ModelInputParams& input_params,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
-    int node_id) {
+    int32_t node_id) {
   atb::Status st;
   if (!input_params.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,

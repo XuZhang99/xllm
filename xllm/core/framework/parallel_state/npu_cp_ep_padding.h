@@ -62,7 +62,7 @@ class CpEpPadding {
  private:
   void prepare_indices();
   void handle_expert_parallel();
-  float get_all2all_buffer_factor(int length) const;
+  float get_all2all_buffer_factor(int64_t length) const;
   CpEpPaddingData assemble_result() const;
 
   bool is_dynamic_ep_ = false;

@@ -209,7 +209,7 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
 
 void DiTBatch::process_forward_output(const DiTForwardOutput& output) {
   CHECK(request_vec_.size() == output.tensors.size());
-  for (int idx = 0; idx < request_vec_.size(); ++idx) {
+  for (size_t idx = 0; idx < request_vec_.size(); ++idx) {
     auto& request = request_vec_[idx];
     request->handle_forward_output(output.tensors[idx]);
   }

@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
+
 #include "core/common/message.h"
 #include "core/common/types.h"
 #include "multimodal.pb.h"
@@ -27,7 +29,7 @@ bool build_messages(const google::protobuf::RepeatedPtrField<
                         xllm::proto::MMChatMessage>& req_messages,
                     std::vector<Message>& out_messages,
                     std::shared_ptr<Call> call,
-                    int image_limit) {
+                    int32_t image_limit) {
   out_messages.clear();
   out_messages.reserve(req_messages.size());
 

@@ -179,7 +179,7 @@ void SentencePieceTokenizer::decode_internal(const Slice<int32_t>& ids,
 
   sentencepiece::SentencePieceText spt;
   std::vector<std::string> pieces;
-  const int num_pieces = sp_processor_.GetPieceSize();
+  const int32_t num_pieces = sp_processor_.GetPieceSize();
   pieces.reserve(end - start);
   for (size_t i = start; i < end; ++i) {
     const auto id = ids[i];

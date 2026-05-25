@@ -41,7 +41,7 @@ class Device {
 
   void init_device_context() const;
 
-  static int device_count();
+  static int32_t device_count();
   static std::string type_str();
   static torch::DeviceType type_torch();
   static int32_t sm_count();
@@ -55,7 +55,7 @@ class Device {
   int64_t free_memory();
   static void empty_cache(int32_t device_index);
 
-  int synchronize_default_stream();
+  int32_t synchronize_default_stream();
   std::unique_ptr<Stream> get_stream_from_pool(const int32_t timeout = -1);
 
   // get the current stream

@@ -318,7 +318,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
   Timer timer;
   input_processor_->process(prompt, mm_data);
 
-  std::vector<int> prompt_tokens;
+  std::vector<int32_t> prompt_tokens;
   if (!tokenizer_->encode(prompt, &prompt_tokens)) {
     LOG(ERROR) << "Failed to encode prompt: " << prompt;
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
@@ -378,7 +378,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
   std::vector<std::vector<int32_t>> stop_sequences;
   if (sp.stop.has_value()) {
     for (const auto& s : sp.stop.value()) {
-      std::vector<int> tmp_tokens;
+      std::vector<int32_t> tmp_tokens;
       if (!tokenizer_->encode(s, &tmp_tokens)) {
         CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                             "Failed to encode stop sequence");

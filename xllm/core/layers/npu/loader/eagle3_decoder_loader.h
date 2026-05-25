@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -35,7 +36,7 @@ class Eagle3DecoderLoader : public BaseLoader {
  protected:
   void merge_host_at_weights() override;
   TransposeType check_transpose(at::Tensor& tensor);
-  int device_id_;
+  int32_t device_id_;
 };
 
 }  // namespace layer

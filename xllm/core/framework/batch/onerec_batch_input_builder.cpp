@@ -105,12 +105,13 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
   // ========== Fast sequence information extraction ==========
   const int32_t num_sequences =
       !sequence_groups_.empty()
-          ? std::accumulate(sequence_groups_.begin(),
-                            sequence_groups_.end(),
-                            0,
-                            [](int sum, const auto& group) {
-                              return sum + group->sequences().size();
-                            })
+          ? std::accumulate(
+                sequence_groups_.begin(),
+                sequence_groups_.end(),
+                int32_t{0},
+                [](int32_t sum, const auto& group) {
+                  return sum + static_cast<int32_t>(group->sequences().size());
+                })
           : 0;
   const int32_t THREADPOOL_THRESHOLD = 16;
   if (num_sequences == 0) {
@@ -464,12 +465,12 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
         auto tensor =
             torch::empty({static_cast<int64_t>(flatten_tokens_vec.size())},
                          torch::TensorOptions()
-                             .dtype(torch::kInt)
+                             .dtype(torch::kInt32)
                              .device(torch::kCPU)
                              .pinned_memory(true));
-        std::memcpy(tensor.data_ptr<int>(),
+        std::memcpy(tensor.data_ptr<int32_t>(),
                     flatten_tokens_vec.data(),
-                    flatten_tokens_vec.size() * sizeof(int));
+                    flatten_tokens_vec.size() * sizeof(int32_t));
         promise.set_value(std::move(tensor));
       } catch (...) {
         promise.set_exception(std::current_exception());
@@ -491,12 +492,12 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
               tensor =
                   torch::empty({static_cast<int64_t>(encoder_tokens.size())},
                                torch::TensorOptions()
-                                   .dtype(torch::kInt)
+                                   .dtype(torch::kInt32)
                                    .device(torch::kCPU)
                                    .pinned_memory(true));
-              std::memcpy(tensor.data_ptr<int>(),
+              std::memcpy(tensor.data_ptr<int32_t>(),
                           encoder_tokens.data(),
-                          encoder_tokens.size() * sizeof(int));
+                          encoder_tokens.size() * sizeof(int32_t));
             }
             promise.set_value(std::move(tensor));
           } catch (...) {
@@ -621,12 +622,12 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
       encoder_seq_lens_tensor = torch::empty(
           {static_cast<int64_t>(cache_data.encoder_seq_lens.size())},
           torch::TensorOptions()
-              .dtype(torch::kInt)
+              .dtype(torch::kInt32)
               .device(torch::kCPU)
               .pinned_memory(true));
-      std::memcpy(encoder_seq_lens_tensor.data_ptr<int>(),
+      std::memcpy(encoder_seq_lens_tensor.data_ptr<int32_t>(),
                   cache_data.encoder_seq_lens.data(),
-                  cache_data.encoder_seq_lens.size() * sizeof(int));
+                  cache_data.encoder_seq_lens.size() * sizeof(int32_t));
     }
 
     // Set basic parameters simultaneously (not dependent on asynchronous tasks)
@@ -647,28 +648,28 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     input_params.attention.device.kv_seq_lens =
         torch::empty({static_cast<int64_t>(cu_seq_lens.size())},
                      torch::TensorOptions()
-                         .dtype(torch::kInt)
+                         .dtype(torch::kInt32)
                          .device(torch::kCPU)
                          .pinned_memory(true));
-    std::memcpy(input_params.attention.device.kv_seq_lens.data_ptr<int>(),
+    std::memcpy(input_params.attention.device.kv_seq_lens.data_ptr<int32_t>(),
                 cu_seq_lens.data(),
-                cu_seq_lens.size() * sizeof(int));
+                cu_seq_lens.size() * sizeof(int32_t));
 
     input_params.attention.device.q_seq_lens =
         torch::empty({static_cast<int64_t>(q_cu_seq_lens.size())},
                      torch::TensorOptions()
-                         .dtype(torch::kInt)
+                         .dtype(torch::kInt32)
                          .device(torch::kCPU)
                          .pinned_memory(true));
-    std::memcpy(input_params.attention.device.q_seq_lens.data_ptr<int>(),
+    std::memcpy(input_params.attention.device.q_seq_lens.data_ptr<int32_t>(),
                 q_cu_seq_lens.data(),
-                q_cu_seq_lens.size() * sizeof(int));
+                q_cu_seq_lens.size() * sizeof(int32_t));
     std::vector<int32_t> device_q_cu_seq_lens =
         build_q_cu_seq_lens_vec(q_cu_seq_lens);
     input_params.attention.device.q_cu_seq_lens =
         torch::tensor(device_q_cu_seq_lens,
                       torch::TensorOptions()
-                          .dtype(torch::kInt)
+                          .dtype(torch::kInt32)
                           .device(torch::kCPU)
                           .pinned_memory(true));
     input_params.attention.host.kv_seq_lens = std::move(cu_seq_lens);
@@ -690,12 +691,12 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     forward_input.token_ids =
         torch::empty({static_cast<int64_t>(flatten_tokens_vec.size())},
                      torch::TensorOptions()
-                         .dtype(torch::kInt)
+                         .dtype(torch::kInt32)
                          .device(torch::kCPU)
                          .pinned_memory(true));
-    std::memcpy(forward_input.token_ids.data_ptr<int>(),
+    std::memcpy(forward_input.token_ids.data_ptr<int32_t>(),
                 flatten_tokens_vec.data(),
-                flatten_tokens_vec.size() * sizeof(int));
+                flatten_tokens_vec.size() * sizeof(int32_t));
     forward_input.positions = perf_cache.fixed_positions_tensor;
 
     if (!encoder_tokens.empty()) {
@@ -704,12 +705,12 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
       onerec_params.encoder_token_ids =
           torch::empty({static_cast<int64_t>(encoder_tokens.size())},
                        torch::TensorOptions()
-                           .dtype(torch::kInt)
+                           .dtype(torch::kInt32)
                            .device(torch::kCPU)
                            .pinned_memory(true));
-      std::memcpy(onerec_params.encoder_token_ids.data_ptr<int>(),
+      std::memcpy(onerec_params.encoder_token_ids.data_ptr<int32_t>(),
                   encoder_tokens.data(),
-                  encoder_tokens.size() * sizeof(int));
+                  encoder_tokens.size() * sizeof(int32_t));
     }
     onerec_params.encoder_positions = perf_cache.fixed_encoder_positions_tensor;
     // Pre-allocate and batch fill
@@ -741,29 +742,29 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     input_params.attention.device.kv_seq_lens =
         torch::empty({static_cast<int64_t>(cu_seq_lens.size())},
                      torch::TensorOptions()
-                         .dtype(torch::kInt)
+                         .dtype(torch::kInt32)
                          .device(torch::kCPU)
                          .pinned_memory(true));
-    std::memcpy(input_params.attention.device.kv_seq_lens.data_ptr<int>(),
+    std::memcpy(input_params.attention.device.kv_seq_lens.data_ptr<int32_t>(),
                 cu_seq_lens.data(),
-                cu_seq_lens.size() * sizeof(int));
+                cu_seq_lens.size() * sizeof(int32_t));
 
     input_params.attention.device.q_seq_lens =
         torch::empty({static_cast<int64_t>(q_cu_seq_lens.size())},
                      torch::TensorOptions()
-                         .dtype(torch::kInt)
+                         .dtype(torch::kInt32)
                          .device(torch::kCPU)
                          .pinned_memory(true));
-    std::memcpy(input_params.attention.device.q_seq_lens.data_ptr<int>(),
+    std::memcpy(input_params.attention.device.q_seq_lens.data_ptr<int32_t>(),
                 q_cu_seq_lens.data(),
-                q_cu_seq_lens.size() * sizeof(int));
+                q_cu_seq_lens.size() * sizeof(int32_t));
 
     std::vector<int32_t> device_q_cu_seq_lens =
         build_q_cu_seq_lens_vec(q_cu_seq_lens);
     input_params.attention.device.q_cu_seq_lens =
         torch::tensor(device_q_cu_seq_lens,
                       torch::TensorOptions()
-                          .dtype(torch::kInt)
+                          .dtype(torch::kInt32)
                           .device(torch::kCPU)
                           .pinned_memory(true));
     input_params.attention.host.kv_seq_lens = std::move(cu_seq_lens);
@@ -779,12 +780,12 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
       onerec_params.encoder_seq_lens_tensor = torch::empty(
           {static_cast<int64_t>(cache_data.encoder_seq_lens.size())},
           torch::TensorOptions()
-              .dtype(torch::kInt)
+              .dtype(torch::kInt32)
               .device(torch::kCPU)
               .pinned_memory(true));
-      std::memcpy(onerec_params.encoder_seq_lens_tensor.data_ptr<int>(),
+      std::memcpy(onerec_params.encoder_seq_lens_tensor.data_ptr<int32_t>(),
                   cache_data.encoder_seq_lens.data(),
-                  cache_data.encoder_seq_lens.size() * sizeof(int));
+                  cache_data.encoder_seq_lens.size() * sizeof(int32_t));
     }
   }
 
@@ -796,44 +797,45 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
 
     // Task 1: Empty block tables processing - use thread pool (relatively
     // time-consuming)
-    thread_pool_->schedule(
-        [&input_params, num_sequences, &block_tables_promise]() mutable {
-          try {
-            std::vector<std::vector<int32_t>> empty_block_tables(num_sequences);
-            util::pad_2d_vector(empty_block_tables, 0);
-            // Optimization: Use create_2d_tensor_optimized, has special
-            // optimization for all-zero matrices
-            input_params.attention.device.block_tables =
-                create_2d_tensor(empty_block_tables, torch::kInt);
-            input_params.attention.host.block_tables =
-                input_params.attention.device.block_tables;
+    thread_pool_->schedule([&input_params,
+                            num_sequences,
+                            &block_tables_promise]() mutable {
+      try {
+        std::vector<std::vector<int32_t>> empty_block_tables(num_sequences);
+        util::pad_2d_vector(empty_block_tables, 0);
+        // Optimization: Use create_2d_tensor_optimized, has special
+        // optimization for all-zero matrices
+        input_params.attention.device.block_tables =
+            create_2d_tensor(empty_block_tables, torch::kInt32);
+        input_params.attention.host.block_tables =
+            input_params.attention.device.block_tables;
 
-            std::vector<int32_t> paged_kv_indptr(num_sequences + 1, 0);
-            // Optimization: Use torch::empty+std::memcpy instead of
-            // torch::from_blob().clone()
-            input_params.attention.device.new_cache_slots =
-                torch::empty({static_cast<int64_t>(paged_kv_indptr.size())},
-                             torch::TensorOptions()
-                                 .dtype(torch::kInt)
-                                 .device(torch::kCPU)
-                                 .pinned_memory(true));
-            std::memcpy(
-                input_params.attention.device.new_cache_slots.data_ptr<int>(),
-                paged_kv_indptr.data(),
-                paged_kv_indptr.size() * sizeof(int));
+        std::vector<int32_t> paged_kv_indptr(num_sequences + 1, 0);
+        // Optimization: Use torch::empty+std::memcpy instead of
+        // torch::from_blob().clone()
+        input_params.attention.device.new_cache_slots =
+            torch::empty({static_cast<int64_t>(paged_kv_indptr.size())},
+                         torch::TensorOptions()
+                             .dtype(torch::kInt32)
+                             .device(torch::kCPU)
+                             .pinned_memory(true));
+        std::memcpy(
+            input_params.attention.device.new_cache_slots.data_ptr<int32_t>(),
+            paged_kv_indptr.data(),
+            paged_kv_indptr.size() * sizeof(int32_t));
 
-            block_tables_promise.set_value();
-          } catch (...) {
-            block_tables_promise.set_exception(std::current_exception());
-          }
-        });
+        block_tables_promise.set_value();
+      } catch (...) {
+        block_tables_promise.set_exception(std::current_exception());
+      }
+    });
 
     // Optimization: Merge small tasks into sequential execution to reduce
     // thread switching overhead Cross-attention parameter construction - use
     // placeholder
-    onerec_params.cross_attn_kv_cu_seq_lens = torch::zeros({1}, torch::kInt);
+    onerec_params.cross_attn_kv_cu_seq_lens = torch::zeros({1}, torch::kInt32);
     onerec_params.cross_attn_kv_cu_seq_lens_vec = {0};
-    onerec_params.cross_attn_block_tables = torch::zeros({1, 1}, torch::kInt);
+    onerec_params.cross_attn_block_tables = torch::zeros({1, 1}, torch::kInt32);
 
     // Sampling parameter processing
     if (!selected_token_idxes.empty()) {
@@ -849,7 +851,8 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     if (is_first_prefill) {
       // Use placeholder instead of complex cross_attn_new_cache_slots
       // construction
-      onerec_params.cross_attn_new_cache_slots = torch::zeros({1}, torch::kInt);
+      onerec_params.cross_attn_new_cache_slots =
+          torch::zeros({1}, torch::kInt32);
     }
 
     // Wait for parallel tasks to complete (only block_tables uses thread pool)
@@ -862,7 +865,7 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     // Optimization: Use create_2d_tensor_optimized, has special optimization
     // for all-zero matrices
     input_params.attention.device.block_tables =
-        create_2d_tensor(empty_block_tables, torch::kInt);
+        create_2d_tensor(empty_block_tables, torch::kInt32);
     input_params.attention.host.block_tables =
         input_params.attention.device.block_tables;
 
@@ -872,20 +875,21 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     input_params.attention.device.new_cache_slots =
         torch::empty({static_cast<int64_t>(paged_kv_indptr.size())},
                      torch::TensorOptions()
-                         .dtype(torch::kInt)
+                         .dtype(torch::kInt32)
                          .device(torch::kCPU)
                          .pinned_memory(true));
-    std::memcpy(input_params.attention.device.new_cache_slots.data_ptr<int>(),
-                paged_kv_indptr.data(),
-                paged_kv_indptr.size() * sizeof(int));
+    std::memcpy(
+        input_params.attention.device.new_cache_slots.data_ptr<int32_t>(),
+        paged_kv_indptr.data(),
+        paged_kv_indptr.size() * sizeof(int32_t));
 
     // ========== Cross-attention parameter construction (using placeholder)
     // ========== Use placeholder tensor instead of actual data
-    onerec_params.cross_attn_kv_cu_seq_lens = torch::zeros({1}, torch::kInt);
+    onerec_params.cross_attn_kv_cu_seq_lens = torch::zeros({1}, torch::kInt32);
     onerec_params.cross_attn_kv_cu_seq_lens_vec = {0};
 
     // Use placeholder tensor instead of actual data
-    onerec_params.cross_attn_block_tables = torch::zeros({1, 1}, torch::kInt);
+    onerec_params.cross_attn_block_tables = torch::zeros({1, 1}, torch::kInt32);
 
     // ========== Optimize sampling parameter processing ==========
     if (!selected_token_idxes.empty()) {
@@ -900,7 +904,8 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     // ========== First prefill processing (using placeholder) ==========
     if (is_first_prefill) {
       // Use placeholder tensor instead of actual data
-      onerec_params.cross_attn_new_cache_slots = torch::zeros({1}, torch::kInt);
+      onerec_params.cross_attn_new_cache_slots =
+          torch::zeros({1}, torch::kInt32);
     }
   }
 

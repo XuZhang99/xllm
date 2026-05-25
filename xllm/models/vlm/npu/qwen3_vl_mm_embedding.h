@@ -72,7 +72,7 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
                 input_params);
     input_params.multimodal.deep_stacks = deep_stacks;
 
-    std::vector<int> image_sizes = get_images_size(image_grid_thw);
+    std::vector<int32_t> image_sizes = get_images_size(image_grid_thw);
 
     std::vector<torch::Tensor> mm_embeddings;
     mm_embeddings.reserve(image_sizes.size());

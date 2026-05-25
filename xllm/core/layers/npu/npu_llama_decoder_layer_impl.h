@@ -59,7 +59,7 @@ class NpuLlamaDecoderLayerImpl : public BaseLayer {
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
                         ModelInputParams& input_params,
-                        int node_id = 0);
+                        int32_t node_id = 0);
 
  private:
   void build_node_variant_pack(atb_speed::Model::Node& node,
@@ -94,7 +94,7 @@ class NpuLlamaDecoderLayerImpl : public BaseLayer {
 
   at::Tensor at_placeholder_;
 
-  int device_id_;
+  int32_t device_id_;
 };
 TORCH_MODULE(NpuLlamaDecoderLayer);
 

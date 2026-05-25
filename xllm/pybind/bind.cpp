@@ -19,6 +19,8 @@ limitations under the License.
 #include <pybind11/stl_bind.h>
 #include <torch/python.h>
 
+#include <cstdint>
+
 #include "api_service/call.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
@@ -110,14 +112,14 @@ PYBIND11_MODULE(xllm_export, m) {
            py::call_guard<py::gil_scoped_release>())
       .def("handle_request",
            py::overload_cast<std::string,
-                             std::optional<std::vector<int>>,
+                             std::optional<std::vector<int32_t>>,
                              RequestParams,
                              std::optional<Call*>,
                              OutputCallback>(&LLMMaster::handle_request),
            py::call_guard<py::gil_scoped_release>())
       .def("handle_request",
            py::overload_cast<std::vector<Message>,
-                             std::optional<std::vector<int>>,
+                             std::optional<std::vector<int32_t>>,
                              RequestParams,
                              std::optional<Call*>,
                              OutputCallback>(&LLMMaster::handle_request),
@@ -310,7 +312,7 @@ PYBIND11_MODULE(xllm_export, m) {
 
   // 12. export MMData
   py::class_<MMData>(m, "MMData")
-      .def(py::init<int, const MMDict&>(), py::arg("ty"), py::arg("data"))
+      .def(py::init<uint32_t, const MMDict&>(), py::arg("ty"), py::arg("data"))
       .def("get",
            [](const MMData& self, const MMKey& key) -> py::object {
              auto value = self.get<torch::Tensor>(key);

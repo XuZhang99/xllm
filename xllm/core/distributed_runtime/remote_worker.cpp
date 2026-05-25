@@ -49,8 +49,8 @@ RemoteWorker::RemoteWorker(int32_t global_rank,
 
 bool RemoteWorker::wait_for_server_ready(const std::string& server_address) {
   // Retry until server initialize ready
-  int try_count = 0;
-  const int sleep_time_second = 3;
+  int32_t try_count = 0;
+  constexpr int32_t kSleepTimeSecond = 3;
   while (try_count <
          ::xllm::ServiceConfig::get_instance().max_reconnect_count()) {
     if (channel_->hello()) {
@@ -58,7 +58,7 @@ bool RemoteWorker::wait_for_server_ready(const std::string& server_address) {
                 << server_address << ", global_rank_: " << global_rank_;
       break;
     } else {
-      std::this_thread::sleep_for(std::chrono::seconds(sleep_time_second));
+      std::this_thread::sleep_for(std::chrono::seconds(kSleepTimeSecond));
     }
 
     try_count++;

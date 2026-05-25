@@ -16,9 +16,11 @@ limitations under the License.
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <thread>
+#include <vector>
 
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/model/model_args.h"
@@ -41,7 +43,7 @@ class RecMaster : public Master {
   // completion/encode
   void handle_request(
       std::string prompt,
-      std::optional<std::vector<int>> prompt_tokens,
+      std::optional<std::vector<int32_t>> prompt_tokens,
       std::optional<std::vector<proto::InferInputTensor>> input_tensors,
       RequestParams sp,
       OutputCallback callback);
@@ -50,12 +52,12 @@ class RecMaster : public Master {
   // Only supported for LlmRec models.
   void handle_request(
       std::vector<Message> messages,
-      std::optional<std::vector<int>> prompt_tokens,
+      std::optional<std::vector<int32_t>> prompt_tokens,
       std::optional<std::vector<proto::InferInputTensor>> input_tensors,
       RequestParams sp,
       OutputCallback callback);
 
-  void handle_request(const std::vector<int>& prompt_tokens,
+  void handle_request(const std::vector<int32_t>& prompt_tokens,
                       std::optional<MMData> mm_data,
                       RequestParams sp,
                       OutputCallback callback);
@@ -81,14 +83,14 @@ class RecMaster : public Master {
     // For prompt-based input (OneRec and LlmRec without mm_data)
     virtual std::shared_ptr<Request> generate_request(
         std::string prompt,
-        std::optional<std::vector<int>> prompt_tokens,
+        std::optional<std::vector<int32_t>> prompt_tokens,
         std::optional<std::vector<proto::InferInputTensor>> input_tensors,
         const RequestParams& sp,
         OutputCallback callback);
 
     // For raw input (LlmRec with mm_data)
     virtual std::shared_ptr<Request> generate_request(
-        const std::vector<int>& prompt_tokens,
+        const std::vector<int32_t>& prompt_tokens,
         std::optional<MMData> mm_data,
         const RequestParams& sp,
         OutputCallback callback);
@@ -96,7 +98,7 @@ class RecMaster : public Master {
    protected:
     std::shared_ptr<Request> generate_onerec_request_common(
         std::string prompt,
-        std::optional<std::vector<int>> prompt_tokens,
+        std::optional<std::vector<int32_t>> prompt_tokens,
         std::optional<std::vector<proto::InferInputTensor>> input_tensors,
         const RequestParams& sp,
         OutputCallback callback,
@@ -111,7 +113,7 @@ class RecMaster : public Master {
     explicit LlmRecMasterPipeline(RecMaster& master);
     std::shared_ptr<Request> generate_request(
         std::string prompt,
-        std::optional<std::vector<int>> prompt_tokens,
+        std::optional<std::vector<int32_t>> prompt_tokens,
         std::optional<std::vector<proto::InferInputTensor>> input_tensors,
         const RequestParams& sp,
         OutputCallback callback) override;
@@ -122,7 +124,7 @@ class RecMaster : public Master {
    public:
     explicit LlmRecWithMmDataMasterPipeline(RecMaster& master);
     std::shared_ptr<Request> generate_request(
-        const std::vector<int>& prompt_tokens,
+        const std::vector<int32_t>& prompt_tokens,
         std::optional<MMData> mm_data,
         const RequestParams& sp,
         OutputCallback callback) override;
@@ -134,7 +136,7 @@ class RecMaster : public Master {
     explicit OneRecPrefillOnlyMasterPipeline(RecMaster& master);
     std::shared_ptr<Request> generate_request(
         std::string prompt,
-        std::optional<std::vector<int>> prompt_tokens,
+        std::optional<std::vector<int32_t>> prompt_tokens,
         std::optional<std::vector<proto::InferInputTensor>> input_tensors,
         const RequestParams& sp,
         OutputCallback callback) override;
@@ -149,7 +151,7 @@ class RecMaster : public Master {
 
     std::shared_ptr<Request> generate_request(
         std::string prompt,
-        std::optional<std::vector<int>> prompt_tokens,
+        std::optional<std::vector<int32_t>> prompt_tokens,
         std::optional<std::vector<proto::InferInputTensor>> input_tensors,
         const RequestParams& sp,
         OutputCallback callback) override;

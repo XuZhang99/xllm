@@ -34,11 +34,11 @@ Eagle3DecoderLoader::Eagle3DecoderLoader(uint64_t weight_count,
   if (load_to_host()) {
     auto host_options =
         torch::TensorOptions().dtype(options.dtype()).device(torch::kCPU);
-    for (int i = 0; i < weight_count; ++i) {
+    for (int32_t i = 0; i < weight_count; ++i) {
       working_tensors()[i] = torch::zeros({1}, host_options);
     }
   } else {
-    for (int i = 0; i < weight_count; ++i) {
+    for (int32_t i = 0; i < weight_count; ++i) {
       working_tensors()[i] = torch::zeros({1}).to(options);
     }
   }

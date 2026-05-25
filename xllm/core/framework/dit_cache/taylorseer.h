@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include "dit_cache_impl.h"
@@ -63,10 +64,10 @@ class TaylorSeer : public DitCacheImpl {
 
  private:
   bool use_cache_ = false;
-  int n_derivatives_;
-  int order_;
-  int skip_interval_steps_;
-  int last_non_approximated_step_;
+  int32_t n_derivatives_;
+  int32_t order_;
+  int32_t skip_interval_steps_;
+  int64_t last_non_approximated_step_;
 
   std::vector<torch::Tensor> dY_prev_;
   std::vector<torch::Tensor> dY_current_;

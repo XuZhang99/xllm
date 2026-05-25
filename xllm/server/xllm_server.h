@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
+
 #include "api_service/api_service.h"
 #include "core/distributed_runtime/collective_service.h"
 #include "core/distributed_runtime/disagg_pd_service.h"
@@ -44,18 +46,18 @@ class XllmServer final {
 
   bool has_initialized() const { return has_initialized_; }
   std::string listen_address() const { return listen_address_; }
-  int listen_port() const { return listen_port_; }
+  int32_t listen_port() const { return listen_port_; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(XllmServer);
   bool create_server(google::protobuf::Service* service,
                      const std::string& addr,
-                     int port,
+                     int32_t port,
                      const std::string& server_name);
 
  private:
   bool has_initialized_ = false;
-  int listen_port_ = -1;
+  int32_t listen_port_ = -1;
   std::string listen_address_;
   std::unique_ptr<brpc::Server> server_;
   std::unique_ptr<std::thread> running_thread_;

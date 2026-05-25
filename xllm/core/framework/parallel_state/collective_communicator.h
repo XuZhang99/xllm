@@ -21,11 +21,11 @@ namespace xllm {
 
 class CollectiveCommunicator : public CollectiveCommunicatorBase {
  public:
-  CollectiveCommunicator(int global_rank,
-                         int world_size,
-                         int dp_size,
-                         int ep_size,
-                         int cp_size);
+  CollectiveCommunicator(int32_t global_rank,
+                         int32_t world_size,
+                         int32_t dp_size,
+                         int32_t ep_size,
+                         int32_t cp_size);
   ~CollectiveCommunicator() = default;
 
   void create_process_groups(const std::string& master_addr,

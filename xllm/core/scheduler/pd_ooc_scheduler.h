@@ -129,7 +129,7 @@ class PDOOCScheduler : public DisaggPDScheduler {
   moodycamel::BlockingConcurrentQueue<proto::PullSignal> pull_signals_;
 
   std::vector<std::string> prefill_inst_names_;
-  int current_prefill_idx_ = 0;
+  size_t current_prefill_idx_ = 0;
 
   std::unique_ptr<std::thread> send_pull_signal_thread_;
 
@@ -146,10 +146,10 @@ class PDOOCScheduler : public DisaggPDScheduler {
       offline_requests_to_transfer_;
 
   perf_model::LLMFlops llm_flops_;
-  int linear_saturation_bs_;
-  vector<int> decode_step_global_batch_req_lens_;
+  int64_t linear_saturation_bs_;
+  vector<int64_t> decode_step_global_batch_req_lens_;
   double decode_last_step_latency_ = 0;
-  vector<int> last_decode_step_global_batch_req_lens_;
+  vector<int64_t> last_decode_step_global_batch_req_lens_;
 
   // for prefill save all remote requests
   std::unordered_map<std::string, std::shared_ptr<Request>>

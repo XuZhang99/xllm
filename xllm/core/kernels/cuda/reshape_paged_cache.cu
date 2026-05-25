@@ -15,15 +15,17 @@ limitations under the License.
 
 #include <c10/cuda/CUDAStream.h>
 
+#include <cstdint>
+
 #include "cuda_ops_api.h"
 
 namespace xllm::kernel::cuda {
 
 template <typename T>
 __global__ void reshape_paged_cache_kernel(
-    const int* __restrict__ slot_ids,  // [n_tokens]
-    const T* __restrict__ keys,        // [n_tokens, n_heads, head_dim]
-    const T* __restrict__ values,      // [n_tokens, n_heads, head_dim]
+    const int32_t* __restrict__ slot_ids,  // [n_tokens]
+    const T* __restrict__ keys,            // [n_tokens, n_heads, head_dim]
+    const T* __restrict__ values,          // [n_tokens, n_heads, head_dim]
     T* __restrict__ key_cache,
     T* __restrict__ value_cache,
     int64_t k_stride,
@@ -49,9 +51,9 @@ __global__ void reshape_paged_cache_kernel(
     const int64_t head_base_idx =
         block_base_idx + block_offset * n_kv_heads * head_dim;
     // which head to write to
-    const int head_idx = i / head_dim;
+    const int64_t head_idx = i / head_dim;
     // which dim within head to write to
-    const int head_offset = i % head_dim;
+    const int64_t head_offset = i % head_dim;
     const int64_t dst_idx = head_base_idx + head_idx * head_dim + head_offset;
     key_cache[dst_idx] = keys[k_src_idx];
     value_cache[dst_idx] = values[v_src_idx];
@@ -76,12 +78,12 @@ void reshape_paged_cache(
   const int64_t v_stride = values.stride(-3);
   const int64_t n = n_kv_heads * head_dim;
   dim3 grid(n_tokens);
-  dim3 block(std::min<int>(n, 1024));
+  dim3 block(std::min<int64_t>(n, 1024));
   DISPATCH_FLOATING_TYPES(
       keys.scalar_type(), "reshape_paged_cache_kernel", [&] {
         reshape_paged_cache_kernel<scalar_t>
             <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-                slot_ids.data_ptr<int>(),
+                slot_ids.data_ptr<int32_t>(),
                 keys.data_ptr<scalar_t>(),
                 values.data_ptr<scalar_t>(),
                 key_cache.data_ptr<scalar_t>(),

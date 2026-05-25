@@ -76,14 +76,14 @@ class DpEpPadding {
   std::vector<torch::Tensor> build_attn_padding_indices();
   void prepare_gather_indices();
   void handle_expert_parallel();
-  float get_all2all_buffer_factor(int length);
+  float get_all2all_buffer_factor(int64_t length);
   DpEpPaddingData assemble_result() const;
 
   bool is_prefill_ = true;
   int32_t num_experts_per_tok_;
   torch::Tensor token_size_per_dp_group_;
   const nlohmann::json mapping_npu_;
-  int expert_parallel_degree_;
+  int32_t expert_parallel_degree_;
   int64_t rank_;
   int64_t input_ids_len_;
   int64_t max_dp_batch_size_;

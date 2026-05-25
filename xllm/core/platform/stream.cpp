@@ -47,7 +47,7 @@ Stream::Stream(c10::musa::MUSAStream stream, const int32_t timeout)
     : stream_(stream), timeout_(timeout) {}
 #endif
 
-int Stream::synchronize() const {
+int32_t Stream::synchronize() const {
 #if defined(USE_NPU)
   return aclrtSynchronizeStreamWithTimeout(stream_.stream(), timeout_);
 #elif defined(USE_MLU)

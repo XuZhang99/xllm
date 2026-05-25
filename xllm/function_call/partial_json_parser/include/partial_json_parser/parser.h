@@ -1,6 +1,7 @@
 #ifndef PARTIAL_JSON_PARSER_PARSER_H
 #define PARTIAL_JSON_PARSER_PARSER_H
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 

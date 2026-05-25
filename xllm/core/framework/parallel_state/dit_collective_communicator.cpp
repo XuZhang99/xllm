@@ -91,7 +91,7 @@ void DiTCollectiveCommunicator::create_process_groups(
     auto num_group = tp_parallel_info.num_group();
     auto local_rank = tp_parallel_info.rank();
     auto& rank_per_group = tp_parallel_info.rank_per_group()[group_id];
-    int port_offset = group_id + 1;
+    int32_t port_offset = group_id + 1;
 #if defined(USE_NPU) || defined(USE_MLU)
     dit_tp_group_ = create_process_group(global_rank,
                                          local_rank,
@@ -113,7 +113,7 @@ void DiTCollectiveCommunicator::create_process_groups(
     auto num_group = sp_parallel_info.num_group();
     auto local_rank = sp_parallel_info.rank();
     auto& rank_per_group = sp_parallel_info.rank_per_group()[group_id];
-    int port_offset = group_id + 1;
+    int32_t port_offset = group_id + 1;
 #if defined(USE_NPU) || defined(USE_MLU)
     dit_sp_group_ = create_process_group(global_rank,
                                          local_rank,
@@ -135,7 +135,7 @@ void DiTCollectiveCommunicator::create_process_groups(
     auto num_group = cfg_parallel_info.num_group();
     auto local_rank = cfg_parallel_info.rank();
     auto& rank_per_group = cfg_parallel_info.rank_per_group()[group_id];
-    int port_offset = group_id + 1;
+    int32_t port_offset = group_id + 1;
 #if defined(USE_NPU) || defined(USE_MLU)
     dit_cfg_group_ = create_process_group(global_rank,
                                           local_rank,
@@ -157,7 +157,7 @@ void DiTCollectiveCommunicator::create_process_groups(
     auto num_group = dp_parallel_info.num_group();
     auto local_rank = dp_parallel_info.rank();
     auto& rank_per_group = dp_parallel_info.rank_per_group()[group_id];
-    int port_offset = group_id + 1;
+    int32_t port_offset = group_id + 1;
 #if defined(USE_NPU) || defined(USE_MLU)
     dit_dp_group_ = create_process_group(global_rank,
                                          local_rank,

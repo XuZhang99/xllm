@@ -137,7 +137,7 @@ torch::Tensor air_log_softmax_last_dim(const torch::Tensor& input,
   const int64_t stride = k64;
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  constexpr int kThreads = 256;
+  constexpr int32_t kThreads = 256;
   dim3 grid(batch);
   dim3 block(std::min<int32_t>(kThreads, 1024));
   const size_t shared_mem_bytes = k * sizeof(float);
@@ -154,9 +154,9 @@ torch::Tensor air_log_softmax_last_dim(const torch::Tensor& input,
 
   // Use ATen's per-device cached properties to avoid repeated driver queries
   // and correctly handle multi-GPU environments.
-  const int max_smem =
-      at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
-  CHECK(total_shared_bytes <= static_cast<size_t>(max_smem))
+  const size_t max_smem = static_cast<size_t>(
+      at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock);
+  CHECK(total_shared_bytes <= max_smem)
       << "air_log_softmax_last_dim: k (" << k << ") requires "
       << total_shared_bytes << " bytes shared memory "
       << "(dynamic=" << shared_mem_bytes << " + static=" << kStaticSmem

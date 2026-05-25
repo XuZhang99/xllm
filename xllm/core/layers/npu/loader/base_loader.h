@@ -19,6 +19,7 @@ limitations under the License.
 #include <acl/acl.h>
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -70,7 +71,7 @@ class BaseLoader {
   // device storage. Asserts in eager mode.
   virtual void merge_and_move_pinned_host();
 
-  virtual void resize_experts_weights(int num_of_device_experts) {};
+  virtual void resize_experts_weights(int32_t num_of_device_experts) {};
 
   // Manual-mode: release the pinned host buffer. Harmless in eager mode.
   virtual void free_weights();
@@ -158,7 +159,7 @@ class BaseLoader {
 
   // Return a {1}-shaped zeros tensor with the same dtype as the working slot
   // at `idx`, placed on the correct target device for the current mode.
-  at::Tensor zero_like_working(int idx) const;
+  at::Tensor zero_like_working(int32_t idx) const;
 
   // Eager mode  : returns `at_npu::native::npu_format_cast(t.contiguous(),
   //               ACL_FORMAT_FRACTAL_NZ)`.
@@ -166,7 +167,7 @@ class BaseLoader {
   //               converts this slice via `copy_host_nd_to_nz`; returns the
   //               tensor as contiguous ND for staging into the pinned host
   //               buffer.
-  at::Tensor cast_nz(at::Tensor t, int idx);
+  at::Tensor cast_nz(at::Tensor t, int32_t idx);
 
   // Subclass hook executed by `merge_loaded_weights` /
   // `merge_and_move_pinned_host` to do model-specific tensor combining
@@ -175,19 +176,20 @@ class BaseLoader {
 
   // Default impl consults `nz_indices_`; subclasses may override to return a
   // static policy (kept for backward compatibility with legacy loaders).
-  virtual bool is_nz_format_tensor(int weight_index);
+  virtual bool is_nz_format_tensor(int32_t weight_index);
 
   // -------------------- manual-mode pipeline (ex BaseManualLoader) --------
   // (declarations moved to public section above for legacy call sites.)
 
-  int copy_host_nd_to_nz(torch::Tensor host_tensor,
-                         void* dst_ptr,
-                         uint64_t len,
-                         aclrtMemcpyKind kind = ACL_MEMCPY_DEVICE_TO_DEVICE);
+  int32_t copy_host_nd_to_nz(
+      torch::Tensor host_tensor,
+      void* dst_ptr,
+      uint64_t len,
+      aclrtMemcpyKind kind = ACL_MEMCPY_DEVICE_TO_DEVICE);
   torch::Tensor convert_to_torch_tensor(const std::vector<int64_t>& dims,
                                         const torch::ScalarType dtype,
                                         const uintptr_t& dev_addr,
-                                        int acl_format = ACL_FORMAT_ND);
+                                        int32_t acl_format = ACL_FORMAT_ND);
 
   void release_device_storage();
   void release_host_storage();
@@ -195,36 +197,36 @@ class BaseLoader {
   // -------------------- legacy set_weight helpers -------------------------
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
-                  int weight_position,
+                  int32_t weight_position,
                   bool to_host = false);
 
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
-                  int weight_position,
-                  int dim,
+                  int32_t weight_position,
+                  int32_t dim,
                   bool to_host = false);
 
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
-                  int weight_position,
-                  int dim,
-                  int rank,
-                  int world_size,
+                  int32_t weight_position,
+                  int32_t dim,
+                  int32_t rank,
+                  int32_t world_size,
                   bool to_host = false);
 
   void set_weight_with_padding(const StateDict& state_dict,
                                const std::string& tensor_name,
-                               int weight_position,
-                               int dim,
+                               int32_t weight_position,
+                               int32_t dim,
                                int64_t padded_vocab_size,
                                bool to_host = false);
 
   void set_weight_with_padding(const StateDict& state_dict,
                                const std::string& tensor_name,
-                               int weight_position,
-                               int dim,
-                               int rank,
-                               int world_size,
+                               int32_t weight_position,
+                               int32_t dim,
+                               int32_t rank,
+                               int32_t world_size,
                                int64_t padded_vocab_size,
                                bool to_host = false);
 
@@ -232,9 +234,9 @@ class BaseLoader {
                               int64_t padded_vocab_size) const;
 
   at::Tensor shard_padded_tensor(const at::Tensor& padded_tensor,
-                                 int dim,
-                                 int rank,
-                                 int world_size) const;
+                                 int32_t dim,
+                                 int32_t rank,
+                                 int32_t world_size) const;
 
   int64_t get_padded_vocab_size(const ModelContext& context) const;
 
@@ -270,7 +272,7 @@ class BaseLoader {
   void* device_storage_ = nullptr;
   uint64_t storage_size_ = 0;
   std::vector<WeightSlice> weight_slices_;
-  std::unordered_set<int> nz_indices_;
+  std::unordered_set<int32_t> nz_indices_;
   std::shared_ptr<RollingWeightBuffer> rolling_buffer_ = nullptr;
   int32_t layer_index_ = -1;
   static constexpr size_t kDeviceAlignment = 64;

@@ -28,14 +28,14 @@ namespace xllm {
 
 class ProcessGroupImpl;
 
-std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,
-                                                     int global_rank,
-                                                     int split_size,
-                                                     bool trans);
+std::pair<int32_t, std::vector<uint64_t>> get_group_rank(int32_t world_size,
+                                                         int32_t global_rank,
+                                                         int32_t split_size,
+                                                         bool trans);
 
 c10::intrusive_ptr<c10d::Store> create_tcp_store(const std::string& host,
-                                                 int port,
-                                                 int rank);
+                                                 int32_t port,
+                                                 int32_t rank);
 
 class ProcessGroup {
  public:

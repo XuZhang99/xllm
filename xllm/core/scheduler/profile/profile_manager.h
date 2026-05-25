@@ -56,7 +56,7 @@ class ProfileManager {
 
   struct CopyBlockProfile {
     std::string model_name;
-    int block_size;
+    int32_t block_size;
     double slope;      // milliseconds per block
     double intercept;  // milliseconds constant overhead
     std::string note;
@@ -165,7 +165,7 @@ class ProfileManager {
 
   const ProfileManager::CopyBlockProfile* find_profile(
       const std::string& model_name,
-      int block_size) const;
+      int32_t block_size) const;
 
   std::unique_ptr<TimePredictor> prefill_time_predictor_;
   std::unique_ptr<TimePredictor> decode_time_predictor_;

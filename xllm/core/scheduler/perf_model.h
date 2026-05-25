@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -122,7 +123,8 @@ class MLP_Flops {
             int64_t intermediate_dim,
             int64_t dtype_byte = 2,
             int64_t tp = 1);
-  Resource operator()(const std::vector<int>& req_lens, bool is_decode) const;
+  Resource operator()(const std::vector<int64_t>& req_lens,
+                      bool is_decode) const;
   int64_t size() const;
 };
 
@@ -143,8 +145,8 @@ class AttentionFlops {
                  int64_t dtype_byte = 2,
                  int64_t q_per_kv_head = 1,
                  int64_t tp = 1);
-  Resource operator()(const std::vector<int>& q_lens,
-                      const std::vector<int>& kv_lens,
+  Resource operator()(const std::vector<int64_t>& q_lens,
+                      const std::vector<int64_t>& kv_lens,
                       bool is_decode) const;
   int64_t size() const;
 };
@@ -165,7 +167,8 @@ class TransformerLayerFlops {
                         int64_t q_per_kv_head = 1,
                         int64_t dtype_byte = 2,
                         int64_t tp = 1);
-  Resource operator()(bool is_decode, const std::vector<int>& req_lens) const;
+  Resource operator()(bool is_decode,
+                      const std::vector<int64_t>& req_lens) const;
   int64_t size() const;
 };
 
@@ -192,13 +195,14 @@ class LLMFlops {
            int64_t dtype_byte = 2,
            int64_t tp = 1);
 
-  Resource operator()(bool is_decode, const std::vector<int>& req_lens) const;
-  Resource prefill(const std::vector<int>& req_lens) const;
-  Resource decode(const std::vector<int>& req_lens) const;
+  Resource operator()(bool is_decode,
+                      const std::vector<int64_t>& req_lens) const;
+  Resource prefill(const std::vector<int64_t>& req_lens) const;
+  Resource decode(const std::vector<int64_t>& req_lens) const;
   int64_t size() const;
-  int64_t kv_size(const std::vector<int>& req_lens) const;
+  int64_t kv_size(const std::vector<int64_t>& req_lens) const;
   int64_t linear_saturation_bs() const;
-  int64_t decode_preferred_req_len(const std::vector<int>& current_batch,
+  int64_t decode_preferred_req_len(const std::vector<int64_t>& current_batch,
                                    int64_t target_bs,
                                    double target_slo,
                                    int64_t remain_vram_req_total_len) const;

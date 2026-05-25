@@ -71,7 +71,7 @@ int64_t NpuRotaryEmbeddingImpl::init_node(atb_speed::Model::Node& node) {
 
 torch::Tensor NpuRotaryEmbeddingImpl::forward(const torch::Tensor& cos_sin_pos,
                                               const torch::Tensor& position,
-                                              int nodeId) {
+                                              int32_t nodeId) {
   atb::Status st;
   build_node_variant_pack(embedding_node_, cos_sin_pos, position);
   st = execute_node(embedding_node_, nodeId);

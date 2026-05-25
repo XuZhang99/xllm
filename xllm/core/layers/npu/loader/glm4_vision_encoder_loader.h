@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -38,8 +39,8 @@ class Glm4VisionEncoderLoader : public BaseLoader {
  private:
   void get_weights_col_packed_qkv();
 
-  int encode_param_rank_ = 0;
-  int encode_param_world_size_ = 1;
+  int32_t encode_param_rank_ = 0;
+  int32_t encode_param_world_size_ = 1;
 };
 
 }  // namespace layer

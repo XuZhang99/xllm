@@ -55,9 +55,9 @@ void NpuGlm4DecoderLayerImpl::param_from_args(
   param.normEps = args.rms_norm_eps();
   param.numAttentionHeadsPerRank = args.n_heads() / parallel_args.world_size();
   param.hiddenSizePerAttentionHead = args.head_dim();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  std::optional<int64_t> optional_value = args.n_kv_heads();
   param.numKeyValueHeadsPerRank =
-      static_cast<int>(optionalValue.value()) / parallel_args.world_size();
+      static_cast<int32_t>(optional_value.value()) / parallel_args.world_size();
   param.backend =
       ::xllm::ParallelConfig::get_instance().communication_backend();
   param.tensorParallelInfo = {
@@ -76,22 +76,22 @@ void NpuGlm4DecoderLayerImpl::param_from_args(
 
 void NpuGlm4DecoderLayerImpl::initialize_quantization_parameters(
     atb_speed::chatglm::ChatglmLayerParam& param) {
-  param.linearDescs = {static_cast<int>(LinearTypeV2::INVALID),
-                       static_cast<int>(LinearTypeV2::INVALID),
-                       static_cast<int>(LinearTypeV2::INVALID),
-                       static_cast<int>(LinearTypeV2::INVALID),
-                       static_cast<int>(LinearTypeV2::INVALID),
-                       static_cast<int>(LinearTypeV2::INVALID),
-                       static_cast<int>(LinearTypeV2::INVALID)};
-  param.packQuantType = {static_cast<int>(PackType::ALL_FP),
-                         static_cast<int>(PackType::ALL_FP)};
-  param.linearQuantType = {static_cast<int>(LinearType::FP),
-                           static_cast<int>(LinearType::INVALID),
-                           static_cast<int>(LinearType::INVALID),
-                           static_cast<int>(LinearType::FP),
-                           static_cast<int>(LinearType::FP),
-                           static_cast<int>(LinearType::INVALID),
-                           static_cast<int>(LinearType::FP)};
+  param.linearDescs = {static_cast<int32_t>(LinearTypeV2::INVALID),
+                       static_cast<int32_t>(LinearTypeV2::INVALID),
+                       static_cast<int32_t>(LinearTypeV2::INVALID),
+                       static_cast<int32_t>(LinearTypeV2::INVALID),
+                       static_cast<int32_t>(LinearTypeV2::INVALID),
+                       static_cast<int32_t>(LinearTypeV2::INVALID),
+                       static_cast<int32_t>(LinearTypeV2::INVALID)};
+  param.packQuantType = {static_cast<int32_t>(PackType::ALL_FP),
+                         static_cast<int32_t>(PackType::ALL_FP)};
+  param.linearQuantType = {static_cast<int32_t>(LinearType::FP),
+                           static_cast<int32_t>(LinearType::INVALID),
+                           static_cast<int32_t>(LinearType::INVALID),
+                           static_cast<int32_t>(LinearType::FP),
+                           static_cast<int32_t>(LinearType::FP),
+                           static_cast<int32_t>(LinearType::INVALID),
+                           static_cast<int32_t>(LinearType::FP)};
 }
 
 NpuGlm4DecoderLayerImpl::NpuGlm4DecoderLayerImpl(const ModelContext& context)
@@ -174,7 +174,7 @@ torch::Tensor NpuGlm4DecoderLayerImpl::forward(torch::Tensor& x,
                                                ModelInputParams& input_params,
                                                aclrtEvent* event,
                                                std::atomic<bool>* event_flag,
-                                               int node_id) {
+                                               int32_t node_id) {
   atb::Status st;
   if (!input_params.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,

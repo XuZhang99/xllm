@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -29,9 +30,9 @@ limitations under the License.
 namespace xllm {
 
 // Maximum number of tensors each expert-layer pair can store
-constexpr int MAX_TENSORS_PER_LAYER = 16;
+constexpr int32_t MAX_TENSORS_PER_LAYER = 16;
 // Maximum number of layers per expert
-constexpr int MAX_LAYERS_PER_EXPERT = 128;
+constexpr int32_t MAX_LAYERS_PER_EXPERT = 128;
 
 // Shared memory header structure containing control information
 struct SharedHeader {

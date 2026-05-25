@@ -65,13 +65,13 @@ struct CpPrefillInputs {
 //                    default) to mean "follow cp_size" - this preserves the
 //                    legacy behavior byte-for-byte.
 CpPrefillInputs prepare_cp_prefill_inputs(
-    int cp_size,
+    int32_t cp_size,
     const torch::Tensor& input_ids,
     const torch::Tensor& position_ids,
     const torch::Tensor& input_lengths,
     bool enable_kvcache_split,
     const std::vector<int32_t>& kv_cache_tokens_per_seq,
-    int block_size,
-    int kv_split_size = -1);
+    int32_t block_size,
+    int32_t kv_split_size = -1);
 
 }  // namespace xllm

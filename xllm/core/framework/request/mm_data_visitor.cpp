@@ -154,7 +154,7 @@ bool EncoderOutputScatterVisitor::finish() const {
 bool EncoderEmbeddingGatherVisitor::visit(MMDataItem& item) {
   const auto& state = item.state();
 
-  int modality_tokens = state.token_pos().length;
+  int64_t modality_tokens = state.token_pos().length;
   uint32_t cached_token_num = state.prefix_cache().cached_token_num;
   auto mask = torch::ones({modality_tokens}, torch::dtype(torch::kBool));
   mask.index({torch::indexing::Slice(0, cached_token_num)}) = false;

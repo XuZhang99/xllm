@@ -191,7 +191,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
       rolling_guard.before_layer(layer_index);
       layer(h,
             cos_pos,
@@ -212,7 +212,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     npu_embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
     // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
@@ -221,7 +221,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
   void verify_loaded_weights(const std::string& prefix) const {
     npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
@@ -230,7 +230,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
   void merge_loaded_weights() {
     npu_embed_tokens_->merge_loaded_weights();
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
@@ -292,11 +292,11 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
   void prepare_expert_weight(int32_t layer_id,
                              const std::vector<int32_t>& expert_ids) {
-    layers_[layer_id]->prepare_expert_weight(expert_ids);
+    layers_[static_cast<size_t>(layer_id)]->prepare_expert_weight(expert_ids);
   }
 
   void update_expert_weight(int32_t layer_id) {
-    layers_[layer_id]->update_expert_weight();
+    layers_[static_cast<size_t>(layer_id)]->update_expert_weight();
   }
 
   layer::NpuWordEmbedding get_npu_word_embedding() { return npu_embed_tokens_; }
@@ -308,7 +308,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
  private:
   torch::nn::ModuleList blocks_{nullptr};
   std::vector<DeepseekV2DecoderLayer> layers_;
-  int32_t max_seq_len_ = 0;
+  int64_t max_seq_len_ = 0;
   int32_t dp_rank_;
   int32_t rank_;
   int32_t dp_size_;

@@ -15,6 +15,7 @@ limitations under the License.
 
 #include <stddef.h>
 
+#include <cstdint>
 #include <memory>
 
 #include "dit_forward_params.h"
@@ -51,9 +52,9 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
                                       ForwardType type);
   ~ForwardSharedMemoryManager();
   static std::string create_unique_name(const std::string& prefix,
-                                        int dp_group,
+                                        int32_t dp_group,
                                         ForwardType forward_type,
-                                        int rank);
+                                        int32_t rank);
 
   template <typename PbType>
   bool pb_write(const PbType* pb_data) {

@@ -76,7 +76,7 @@ bool Request::expand_sequences(bool share_prefix) {
 
 void Request::log_statistic(double total_latency) {
   // log the request statistics
-  int idx = 0;
+  int32_t idx = 0;
   for (const auto& seq : sequences()) {
     double ttft = seq->time_to_first_token_latency_seconds();
     size_t gen_tokens = state_.enable_schedule_overlap
@@ -113,7 +113,7 @@ void Request::log_statistic(double total_latency) {
 
 void Request::log_error_statistic(Status status) {
   // log the request statistics
-  int idx = 0;
+  int32_t idx = 0;
   for (const auto& seq : sequences()) {
     LOG(INFO) << "x-request-id: " << x_request_id_ << ", "
               << "x-request-time: " << x_request_time_ << ", "

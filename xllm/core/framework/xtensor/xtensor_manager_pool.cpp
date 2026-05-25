@@ -119,7 +119,7 @@ void XTensorManagerPool::setup_multi_node_xtensor_managers(
       }
     }
 
-    for (int idx = 0; idx < dones.size(); ++idx) {
+    for (size_t idx = 0; idx < dones.size(); ++idx) {
       while (!dones[idx].load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }

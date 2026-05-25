@@ -28,15 +28,15 @@ namespace xllm {
 class ProcessGroupImpl : public ProcessGroup {
  public:
   // Constructor.
-  ProcessGroupImpl(int rank,
-                   int world_size,
+  ProcessGroupImpl(int32_t rank,
+                   int32_t world_size,
                    const torch::Device& device,
                    HcclComm comm);
 
-  ProcessGroupImpl(int rank,
-                   int world_size,
-                   int rank_size,
-                   int port,
+  ProcessGroupImpl(int32_t rank,
+                   int32_t world_size,
+                   int32_t rank_size,
+                   int32_t port,
                    bool trans,
                    const std::string& host,
                    const std::string& group_name,

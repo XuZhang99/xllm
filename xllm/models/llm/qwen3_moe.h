@@ -81,7 +81,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       // mrop_length == freqs_length == head_dim / 2
       int64_t mrop_length = static_cast<int64_t>(freqs_t.size(-1) / 2);
 
-      for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
+      for (int64_t dim_idx = 1; dim_idx <= 2; ++dim_idx) {
         int64_t offset = dim_idx;  // H -> offset=1, W -> offset=2
         int64_t section_len = mrope_section_[dim_idx];
         int64_t length = section_len * 3;
@@ -128,7 +128,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
     }
 
     auto deep_stacks = input_params.multimodal.deep_stacks;
-    int deep_stack_size = deep_stacks.size();
+    size_t deep_stack_size = deep_stacks.size();
     if (!modified_input_params.attn_metadata) {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
@@ -208,7 +208,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       torch::Tensor expert_up = chunks[1].permute({0, 2, 1});
       expert_down = expert_down.permute({0, 2, 1});
 
-      for (int j = 0; j < num_experts; ++j) {
+      for (int32_t j = 0; j < num_experts; ++j) {
         const std::string expert_key = prefix + std::to_string(j) + ".";
         expert_dict[expert_key + "gate_proj.weight"] = expert_gate[j];
         expert_dict[expert_key + "up_proj.weight"] = expert_up[j];
@@ -322,7 +322,7 @@ REGISTER_MODEL_ARGS(qwen3_moe, [&] {
   LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
   LOAD_ARG_OR(vocab_size, "vocab_size", 151936);
-  LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int>());
+  LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int32_t>());
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 

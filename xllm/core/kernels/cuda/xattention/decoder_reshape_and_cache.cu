@@ -208,7 +208,7 @@ void decoder_reshape_and_cache(torch::Tensor proj_k,
   // Launch kernel: one block per (batch, beam), threads cover
   // kv_heads*head_dim.
   const int64_t total_tokens = batch_size * beam_size;
-  dim3 grid_dim(1, static_cast<unsigned int>(total_tokens), 1);
+  dim3 grid_dim(1, static_cast<uint32_t>(total_tokens), 1);
 
   DISPATCH_FLOATING_TYPES(
       proj_k.scalar_type(), "decoder_reshape_and_cache_kernel", [&] {

@@ -60,7 +60,7 @@ class NpuGlm4DecoderLayerImpl : public BaseLayer {
                         ModelInputParams& input_params,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
-                        int node_id = 0);
+                        int32_t node_id = 0);
 
  private:
   void param_from_args(atb_speed::chatglm::ChatglmLayerParam& param,

@@ -47,7 +47,7 @@ struct XXH3Key {
 
   std::string debug_string() const {
     std::string rt;
-    for (int i = 0; i < XXH3_128BITS_HASH_VALUE_LEN; i++) {
+    for (uint32_t i = 0; i < XXH3_128BITS_HASH_VALUE_LEN; i++) {
       rt += std::to_string(int64_t(data[i])) + " ";
     }
 

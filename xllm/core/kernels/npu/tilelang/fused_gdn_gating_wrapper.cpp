@@ -61,7 +61,7 @@ int32_t select_launch_batch_size(int64_t num_batches,
   const int32_t max_batch_size = max_compiled_batch_size(num_heads, dtype);
   CHECK_GT(max_batch_size, 0)
       << "TileLang fused_gdn_gating: no compiled batch_size variant for "
-      << "num_heads=" << num_heads << ", dtype=" << static_cast<int>(dtype);
+      << "num_heads=" << num_heads << ", dtype=" << static_cast<int32_t>(dtype);
   CHECK_GE(max_batch_size, kBatchSpecializationMin)
       << "TileLang fused_gdn_gating: compiled batch_size variants must be >= "
       << kBatchSpecializationMin;

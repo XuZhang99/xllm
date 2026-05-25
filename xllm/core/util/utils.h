@@ -41,7 +41,7 @@ limitations under the License.
 namespace xllm {
 namespace util {
 
-std::pair<int, int> find_ones_indices(std::vector<int>& q_seq_lens);
+std::pair<int32_t, int32_t> find_ones_indices(std::vector<int32_t>& q_seq_lens);
 
 template <typename T>
 void pad_2d_vector(std::vector<std::vector<T>>& vec, T pad_value) {

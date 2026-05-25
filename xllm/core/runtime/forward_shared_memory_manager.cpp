@@ -332,7 +332,7 @@ inline size_t get_dit_generation_params_size(
 }
 
 inline size_t get_dit_forward_input_size(const DiTForwardInput& input) {
-  size_t size = type_size<int>;  // batch_size
+  size_t size = type_size<int32_t>;  // batch_size
 
   // Vector of strings
   size += get_string_vector_size(input.prompts);
@@ -1602,7 +1602,7 @@ inline void read_swap_blocks(const char*& buffer,
 
   int32_t src_block_id;
   int32_t dst_block_id;
-  for (int i = 0; i < size; i++) {
+  for (uint64_t i = 0; i < size; i++) {
     read_data(buffer, src_block_id, device_buffer);
     read_data(buffer, dst_block_id, device_buffer);
     blocks.emplace_back(src_block_id, dst_block_id);
@@ -2793,9 +2793,9 @@ ForwardSharedMemoryManager::~ForwardSharedMemoryManager() = default;
   this doesn't affect usage.*/
 std::string ForwardSharedMemoryManager::create_unique_name(
     const std::string& prefix,
-    int dp_group,
+    int32_t dp_group,
     ForwardType forward_type,
-    int rank) {
+    int32_t rank) {
   std::string filename = prefix;
   if (forward_type == ForwardType::PB_INPUT ||
       forward_type == ForwardType::RAW_INPUT) {

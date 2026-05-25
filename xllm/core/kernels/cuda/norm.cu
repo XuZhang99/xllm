@@ -16,6 +16,7 @@ limitations under the License.
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/cuda.h>
 
+#include <cstdint>
 #include <cub/cub.cuh>
 
 #include "cuda_ops_api.h"
@@ -45,12 +46,12 @@ __global__ void rms_norm_kernel(
     const int64_t input_stride,
     const scalar_t* __restrict__ weight,  // [hidden_size]
     const float epsilon,
-    const int num_tokens,
-    const int hidden_size) {
+    const int32_t num_tokens,
+    const int32_t hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 
-  for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+  for (int32_t idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     const float x = (float)input[blockIdx.x * input_stride + idx];
     variance += x * x;
   }
@@ -64,7 +65,7 @@ __global__ void rms_norm_kernel(
   }
   __syncthreads();
 
-  for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+  for (int32_t idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     float x = (float)input[blockIdx.x * input_stride + idx];
     out[blockIdx.x * hidden_size + idx] =
         ((scalar_t)(x * s_variance)) * weight[idx];
@@ -83,13 +84,13 @@ fused_add_rms_norm_kernel(
     scalar_t* __restrict__ residual,      // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
     const float epsilon,
-    const int num_tokens,
-    const int hidden_size) {
+    const int32_t num_tokens,
+    const int32_t hidden_size) {
   // Sanity checks on our vector struct and type-punned pointer arithmetic
   static_assert(std::is_pod_v<_f16Vec<scalar_t, width>>);
   static_assert(sizeof(_f16Vec<scalar_t, width>) == sizeof(scalar_t) * width);
 
-  const int vec_hidden_size = hidden_size / width;
+  const int32_t vec_hidden_size = hidden_size / width;
   const int64_t vec_input_stride = input_stride / width;
   __shared__ float s_variance;
   float variance = 0.0f;
@@ -103,8 +104,8 @@ fused_add_rms_norm_kernel(
   auto* __restrict__ weight_v =
       reinterpret_cast<const _f16Vec<scalar_t, width>*>(weight);
 
-  for (int idx = threadIdx.x; idx < vec_hidden_size; idx += blockDim.x) {
-    int id = blockIdx.x * vec_hidden_size + idx;
+  for (int32_t idx = threadIdx.x; idx < vec_hidden_size; idx += blockDim.x) {
+    int32_t id = blockIdx.x * vec_hidden_size + idx;
     int64_t strided_id = blockIdx.x * vec_input_stride + idx;
     _f16Vec<scalar_t, width> temp = input_v[strided_id];
     temp += residual_v[id];
@@ -121,8 +122,8 @@ fused_add_rms_norm_kernel(
   }
   __syncthreads();
 
-  for (int idx = threadIdx.x; idx < vec_hidden_size; idx += blockDim.x) {
-    int id = blockIdx.x * vec_hidden_size + idx;
+  for (int32_t idx = threadIdx.x; idx < vec_hidden_size; idx += blockDim.x) {
+    int32_t id = blockIdx.x * vec_hidden_size + idx;
     int64_t strided_id = blockIdx.x * vec_input_stride + idx;
     _f16Vec<scalar_t, width> temp = residual_v[id];
     temp *= s_variance;
@@ -142,12 +143,12 @@ fused_add_rms_norm_kernel(
     scalar_t* __restrict__ residual,      // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
     const float epsilon,
-    const int num_tokens,
-    const int hidden_size) {
+    const int32_t num_tokens,
+    const int32_t hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 
-  for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+  for (int32_t idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     scalar_t z = input[blockIdx.x * input_stride + idx];
     z += residual[blockIdx.x * hidden_size + idx];
     float x = (float)z;
@@ -164,7 +165,7 @@ fused_add_rms_norm_kernel(
   }
   __syncthreads();
 
-  for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+  for (int32_t idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     float x = (float)residual[blockIdx.x * hidden_size + idx];
     input[blockIdx.x * input_stride + idx] =
         ((scalar_t)(x * s_variance)) * weight[idx];
@@ -231,15 +232,15 @@ __global__ void rms_norm_static_fp8_quant_kernel(
     const scalar_t* __restrict__ weight,  // [hidden_size]
     const float* __restrict__ scale,      // [1]
     const float epsilon,
-    const int num_tokens,
-    const int hidden_size) {
+    const int32_t num_tokens,
+    const int32_t hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 
   const scalar_t* input_row = input + blockIdx.x * input_stride;
 
   // Step 1: Compute variance for RMSNorm
-  for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+  for (int32_t idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     const float x = static_cast<float>(input_row[idx]);
     variance += x * x;
   }
@@ -257,7 +258,7 @@ __global__ void rms_norm_static_fp8_quant_kernel(
   const float scale_inv = 1.0f / (*scale);
 
   // Step 3: Fused RMSNorm + FP8 quantization
-  for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+  for (int32_t idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     float x = static_cast<float>(input_row[idx]);
     float out_norm = (static_cast<scalar_t>(x * s_variance)) *
                      static_cast<float>(weight[idx]);
@@ -285,12 +286,12 @@ fused_add_rms_norm_static_fp8_quant_kernel(
     const scalar_t* __restrict__ weight,  // [hidden_size]
     const float* __restrict__ scale,      // [1]
     const float epsilon,
-    const int num_tokens,
-    const int hidden_size) {
+    const int32_t num_tokens,
+    const int32_t hidden_size) {
   static_assert(std::is_pod_v<_f16Vec<scalar_t, width>>);
   static_assert(sizeof(_f16Vec<scalar_t, width>) == sizeof(scalar_t) * width);
 
-  const int vec_hidden_size = hidden_size / width;
+  const int32_t vec_hidden_size = hidden_size / width;
   const int64_t vec_input_stride = input_stride / width;
   __shared__ float s_variance;
   float variance = 0.0f;
@@ -303,8 +304,8 @@ fused_add_rms_norm_static_fp8_quant_kernel(
       reinterpret_cast<const _f16Vec<scalar_t, width>*>(weight);
 
   // Step 1: Fused add and compute variance
-  for (int idx = threadIdx.x; idx < vec_hidden_size; idx += blockDim.x) {
-    int id = blockIdx.x * vec_hidden_size + idx;
+  for (int32_t idx = threadIdx.x; idx < vec_hidden_size; idx += blockDim.x) {
+    int32_t id = blockIdx.x * vec_hidden_size + idx;
     int64_t strided_id = blockIdx.x * vec_input_stride + idx;
     _f16Vec<scalar_t, width> temp = input_v[strided_id];
     temp += residual_v[id];
@@ -325,15 +326,15 @@ fused_add_rms_norm_static_fp8_quant_kernel(
   const float scale_inv = 1.0f / (*scale);
 
   // Step 3: Fused RMSNorm + FP8 quantization
-  for (int idx = threadIdx.x; idx < vec_hidden_size; idx += blockDim.x) {
-    int id = blockIdx.x * vec_hidden_size + idx;
+  for (int32_t idx = threadIdx.x; idx < vec_hidden_size; idx += blockDim.x) {
+    int32_t id = blockIdx.x * vec_hidden_size + idx;
     _f16Vec<scalar_t, width> temp = residual_v[id];
     temp *= s_variance;
     temp *= weight_v[idx];
 
     // Convert each element to FP8
 #pragma unroll
-    for (int i = 0; i < width; ++i) {
+    for (int32_t i = 0; i < width; ++i) {
       float val = _typeConvert<scalar_t>::convert(temp.data[i]);
       out[id * width + i] =
           xllm::kernel::cuda::scaled_fp8_conversion<true, fp8_type>(val,
@@ -355,13 +356,13 @@ fused_add_rms_norm_static_fp8_quant_kernel(
     const scalar_t* __restrict__ weight,  // [hidden_size]
     const float* __restrict__ scale,      // [1]
     const float epsilon,
-    const int num_tokens,
-    const int hidden_size) {
+    const int32_t num_tokens,
+    const int32_t hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 
   // Step 1: Fused add and compute variance
-  for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+  for (int32_t idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     scalar_t z = input[blockIdx.x * input_stride + idx];
     z += residual[blockIdx.x * hidden_size + idx];
     float x = static_cast<float>(z);
@@ -382,7 +383,7 @@ fused_add_rms_norm_static_fp8_quant_kernel(
   const float scale_inv = 1.0f / (*scale);
 
   // Step 3: Fused RMSNorm + FP8 quantization
-  for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+  for (int32_t idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     float x = static_cast<float>(residual[blockIdx.x * hidden_size + idx]);
     float out_norm = (static_cast<scalar_t>(x * s_variance)) *
                      static_cast<float>(weight[idx]);
@@ -433,8 +434,8 @@ void rms_norm(torch::Tensor output,  // [..., hidden_size]
   CHECK(input.stride(-1) == 1);
   CHECK(weight.is_contiguous());
 
-  int hidden_size = input.size(-1);
-  int num_tokens = input.numel() / hidden_size;
+  const int32_t hidden_size = static_cast<int32_t>(input.size(-1));
+  const int32_t num_tokens = static_cast<int32_t>(input.numel() / hidden_size);
   int64_t input_stride = input.stride(-2);
 
   dim3 grid(num_tokens);
@@ -461,16 +462,16 @@ void fused_add_rms_norm(torch::Tensor& input,     // [..., hidden_size]
   CHECK(input.scalar_type() == residual.scalar_type());
   CHECK(residual.is_contiguous());
   CHECK(weight.is_contiguous());
-  int hidden_size = input.size(-1);
+  const int32_t hidden_size = static_cast<int32_t>(input.size(-1));
   int64_t input_stride = input.stride(-2);
-  int num_tokens = input.numel() / hidden_size;
+  const int32_t num_tokens = static_cast<int32_t>(input.numel() / hidden_size);
 
   dim3 grid(num_tokens);
   /* This kernel is memory-latency bound in many scenarios.
      When num_tokens is large, a smaller block size allows
      for increased block occupancy on CUs and better latency
      hiding on global mem ops. */
-  const int max_block_size = (num_tokens < 256) ? 1024 : 256;
+  const int32_t max_block_size = (num_tokens < 256) ? 1024 : 256;
   dim3 block(std::min(hidden_size, max_block_size));
   const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -484,8 +485,8 @@ void fused_add_rms_norm(torch::Tensor& input,     // [..., hidden_size]
   auto inp_ptr = reinterpret_cast<std::uintptr_t>(input.data_ptr());
   auto res_ptr = reinterpret_cast<std::uintptr_t>(residual.data_ptr());
   auto wt_ptr = reinterpret_cast<std::uintptr_t>(weight.data_ptr());
-  constexpr int vector_width = 8;
-  constexpr int req_alignment_bytes =
+  constexpr int32_t vector_width = 8;
+  constexpr int32_t req_alignment_bytes =
       vector_width * 2;  // vector_width * sizeof(bfloat16 or float16) (float32
                          // falls back to non-vectorized version anyway)
   bool ptrs_are_aligned = inp_ptr % req_alignment_bytes == 0 &&
@@ -514,12 +515,12 @@ void rms_norm_static_fp8_quant(torch::Tensor& out,    // [..., hidden_size], FP8
   CHECK(weight.is_contiguous());
   CHECK(scale.is_contiguous());
 
-  int hidden_size = input.size(-1);
+  const int32_t hidden_size = static_cast<int32_t>(input.size(-1));
   int64_t input_stride = input.stride(-2);
-  int num_tokens = input.numel() / hidden_size;
+  const int32_t num_tokens = static_cast<int32_t>(input.numel() / hidden_size);
 
   // For large num_tokens, use smaller blocks to increase SM concurrency
-  const int max_block_size = (num_tokens < 256) ? 1024 : 256;
+  const int32_t max_block_size = (num_tokens < 256) ? 1024 : 256;
   dim3 grid(num_tokens);
   dim3 block(std::min(hidden_size, max_block_size));
 
@@ -556,12 +557,12 @@ void fused_add_rms_norm_static_fp8_quant(
   CHECK(residual.scalar_type() == input.scalar_type());
   CHECK(weight.scalar_type() == input.scalar_type());
 
-  int hidden_size = input.size(-1);
+  const int32_t hidden_size = static_cast<int32_t>(input.size(-1));
   int64_t input_stride = input.stride(-2);
-  int num_tokens = input.numel() / hidden_size;
+  const int32_t num_tokens = static_cast<int32_t>(input.numel() / hidden_size);
 
   dim3 grid(num_tokens);
-  const int max_block_size = (num_tokens < 256) ? 1024 : 256;
+  const int32_t max_block_size = (num_tokens < 256) ? 1024 : 256;
   dim3 block(std::min(hidden_size, max_block_size));
 
   const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
@@ -571,8 +572,8 @@ void fused_add_rms_norm_static_fp8_quant(
   auto inp_ptr = reinterpret_cast<std::uintptr_t>(input.data_ptr());
   auto res_ptr = reinterpret_cast<std::uintptr_t>(residual.data_ptr());
   auto wt_ptr = reinterpret_cast<std::uintptr_t>(weight.data_ptr());
-  constexpr int vector_width = 8;
-  constexpr int req_alignment_bytes = vector_width * 2;
+  constexpr int32_t vector_width = 8;
+  constexpr int32_t req_alignment_bytes = vector_width * 2;
 
   bool ptrs_are_aligned = inp_ptr % req_alignment_bytes == 0 &&
                           res_ptr % req_alignment_bytes == 0 &&

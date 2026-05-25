@@ -116,7 +116,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     capture_aux_hidden_states_ = true;
     layers_to_capture_set_.clear();
     if (!layer_ids.has_value()) {
-      int32_t num_layers = layers_.size();
+      int32_t num_layers = static_cast<int32_t>(layers_.size());
       layers_to_capture_set_.insert(2);
       layers_to_capture_set_.insert(num_layers / 2);
       layers_to_capture_set_.insert(num_layers - 3);
@@ -162,9 +162,9 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         // mrop_length == freqs_length == head_dim / 2
         int64_t mrop_length = freqs_t.size(-1) / 2;
 
-        for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
+        for (int64_t dim_idx = 1; dim_idx <= 2; ++dim_idx) {
           int64_t offset = dim_idx;
-          int64_t section_len = mrope_section_[dim_idx];
+          int64_t section_len = mrope_section_[static_cast<size_t>(dim_idx)];
           int64_t length = section_len * 3;
 
           // Since the last dim of freqs is repeated to 2*mrop_length
@@ -194,13 +194,13 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     // for chunked prefill, generate the attn mask.
     if (!input_params.meta.batch_forward_type.is_decode()) {
       if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-        int max_kv_seq = input_params.meta.kv_max_seq_len;
-        int num_sequences = input_params.meta.num_sequences;
+        int32_t max_kv_seq = input_params.meta.kv_max_seq_len;
+        int32_t num_sequences = input_params.meta.num_sequences;
         if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;
-          req_mask_vec.reserve(num_sequences);
+          req_mask_vec.reserve(static_cast<size_t>(num_sequences));
 
-          for (int j = 0; j < num_sequences; j++) {
+          for (int32_t j = 0; j < num_sequences; j++) {
             auto mask = attn_mask_.gen_append_mask(
                 input_params.attention.host.q_seq_lens[j],
                 input_params.attention.host.kv_seq_lens[j],
@@ -237,7 +237,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
 
       auto& layer = layers_[i];
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
       if (capture_aux_hidden_states_ &&
           layers_to_capture_set_.count(layer_index) != 0) {
         aux_output_buffer_.slice(0, 0, num_tokens)

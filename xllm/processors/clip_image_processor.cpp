@@ -36,11 +36,11 @@ bool CLIPImageProcessor::process(const MMInput& mm_inputs, MMData& mm_datas) {
 }
 
 torch::Tensor CLIPImageProcessor::process_images(const torch::Tensor& images) {
-  int batch_size = images.size(0);
+  int64_t batch_size = images.size(0);
   std::vector<torch::Tensor> processed_images;
   auto size = get_resize_output_image_size(images[0], shortest_edge_);
 
-  for (int i = 0; i < batch_size; ++i) {
+  for (int64_t i = 0; i < batch_size; ++i) {
     torch::Tensor image = images[i];
 
     if (do_resize_) {
@@ -67,16 +67,17 @@ torch::Tensor CLIPImageProcessor::process_images(const torch::Tensor& images) {
 
 std::vector<int64_t> CLIPImageProcessor::get_resize_output_image_size(
     const torch::Tensor& image,
-    int shortest_edge) {
-  int height = image.size(1);
-  int width = image.size(2);
+    int32_t shortest_edge) {
+  int64_t height = image.size(1);
+  int64_t width = image.size(2);
 
-  int short_size = std::min(height, width);
-  int long_size = std::max(height, width);
+  int64_t short_size = std::min(height, width);
+  int64_t long_size = std::max(height, width);
 
-  int new_short = shortest_edge;
-  int new_long = static_cast<int>(shortest_edge *
-                                  static_cast<float>(long_size) / short_size);
+  int64_t new_short = shortest_edge;
+  int64_t new_long =
+      static_cast<int64_t>(shortest_edge * static_cast<double>(long_size) /
+                           static_cast<double>(short_size));
 
   return height < width ? std::vector<int64_t>({new_short, new_long})
                         : std::vector<int64_t>({new_long, new_short});

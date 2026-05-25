@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <unordered_map>
@@ -24,7 +25,7 @@ namespace xllm {
 namespace layer {
 namespace deepseek_v2_decoder_constants {
 
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_INPUT_NORM_BIAS = 1,
   IN_INPUT_NORM_NEW_WEIGHT = 2,
@@ -125,9 +126,9 @@ enum DecoderLayerTensorId : int {
   IN_MLP_DOWN_COMPRESS_IDX_EXPERT = 83,
 };
 
-inline const std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {};
+inline const std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {};
 
-inline const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
+inline const std::unordered_map<std::string, int32_t> WEIGHT_MAPPING_W8A8 = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
     {"input_layernorm.bias", IN_INPUT_NORM_BIAS},
 
@@ -212,9 +213,9 @@ inline const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"down_proj.weight_scale", IN_MLP_DOWN_SCALE_EXPERT},
 };
 
-inline const std::map<int, int> WEIGHT_SHARD = {};
+inline const std::map<int32_t, int32_t> WEIGHT_SHARD = {};
 
-inline const std::map<int, int> WEIGHT_SHARD_W8A8 = {
+inline const std::map<int32_t, int32_t> WEIGHT_SHARD_W8A8 = {
     {IN_Q_PROJ_B_WEIGHT, 0},
     {IN_Q_PROJ_B_BIAS, 0},
     {IN_Q_PROJ_B_DESCALE, 0},
@@ -231,7 +232,7 @@ inline const std::map<int, int> WEIGHT_SHARD_W8A8 = {
     {IN_MLP_DOWN_WEIGHT_EXPERT, 1},
 };
 
-inline const std::vector<int> SQUEEZE_WEIGHT_VEC = {
+inline const std::vector<int32_t> SQUEEZE_WEIGHT_VEC = {
     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT,
     IN_MLP_GATEUP_SCALE_SHARED_EXPERT,
     IN_MLP_DOWN_OFFSET_SHARED_EXPERT,
@@ -250,7 +251,7 @@ inline const std::vector<std::string> LINEAR_FOR_ROPE = {
 
 namespace deepseek_v32_decoder_constants {
 
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_INPUT_NORM_BIAS = 1,
   IN_INPUT_NORM_NEW_WEIGHT = 2,
@@ -381,9 +382,9 @@ enum DecoderLayerTensorId : int {
   IN_Q_PROJ_A_RECOMPUTE_COMPRESS_IDX = 109,
 };
 
-inline const std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {};
+inline const std::vector<std::pair<int32_t, std::string>> WEIGHT_MAPPING = {};
 
-inline const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
+inline const std::unordered_map<std::string, int32_t> WEIGHT_MAPPING_W8A8 = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
     {"input_layernorm.bias", IN_INPUT_NORM_BIAS},
 
@@ -474,7 +475,7 @@ inline const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"down_proj.weight_scale", IN_MLP_DOWN_SCALE_EXPERT},
 };
 
-inline const std::unordered_map<std::string, int>
+inline const std::unordered_map<std::string, int32_t>
     WEIGHT_MAPPING_W8A8_RECOMPUTE = {
         {"self_attn.q_a_proj.weight", IN_Q_PROJ_A_RECOMPUTE_WEIGHT},
         {"self_attn.q_a_proj.quant_bias", IN_Q_PROJ_A_RECOMPUTE_BIAS},
@@ -483,9 +484,9 @@ inline const std::unordered_map<std::string, int>
         {"self_attn.q_a_proj.input_scale", IN_Q_PROJ_A_RECOMPUTE_SCALE},
 };
 
-inline const std::map<int, int> WEIGHT_SHARD = {};
+inline const std::map<int32_t, int32_t> WEIGHT_SHARD = {};
 
-inline const std::map<int, int> WEIGHT_SHARD_W8A8 = {
+inline const std::map<int32_t, int32_t> WEIGHT_SHARD_W8A8 = {
     {IN_Q_PROJ_B_WEIGHT, 0},
     {IN_Q_PROJ_B_BIAS, 0},
     {IN_Q_PROJ_B_DESCALE, 0},
@@ -502,7 +503,7 @@ inline const std::map<int, int> WEIGHT_SHARD_W8A8 = {
     {IN_MLP_DOWN_WEIGHT_EXPERT, 1},
 };
 
-inline const std::vector<int> SQUEEZE_WEIGHT_VEC = {
+inline const std::vector<int32_t> SQUEEZE_WEIGHT_VEC = {
     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT,
     IN_MLP_GATEUP_SCALE_SHARED_EXPERT,
     IN_MLP_DOWN_OFFSET_SHARED_EXPERT,

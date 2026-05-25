@@ -197,7 +197,7 @@ MLP_Flops::MLP_Flops(int64_t hidden_dim,
       down(intermediate_dim / tp, hidden_dim, dtype_byte),
       all_reduce(dtype_byte, tp) {}
 
-Resource MLP_Flops::operator()(const std::vector<int>& req_lens,
+Resource MLP_Flops::operator()(const std::vector<int64_t>& req_lens,
                                bool is_decode) const {
   Resource r;
   int64_t total_len = 0;
@@ -233,8 +233,8 @@ AttentionFlops::AttentionFlops(int64_t hidden_dim,
       o_proj(hidden_dim / tp, hidden_dim, dtype_byte),
       all_reduce(dtype_byte, tp) {}
 
-Resource AttentionFlops::operator()(const std::vector<int>& q_lens,
-                                    const std::vector<int>& kv_lens,
+Resource AttentionFlops::operator()(const std::vector<int64_t>& q_lens,
+                                    const std::vector<int64_t>& kv_lens,
                                     bool is_decode) const {
   if (q_lens.size() != kv_lens.size()) {
     LOG(FATAL) << "q_lens and kv_lens must have the same length";
@@ -275,14 +275,14 @@ TransformerLayerFlops::TransformerLayerFlops(int64_t hidden_dim,
 
 Resource TransformerLayerFlops::operator()(
     bool is_decode,
-    const std::vector<int>& req_lens) const {
+    const std::vector<int64_t>& req_lens) const {
   Resource r;
 
   if (!is_decode) {
     r += attention(req_lens, req_lens, is_decode);
     r += mlp(req_lens, is_decode);
   } else {
-    std::vector<int> new_tokens(req_lens.size(), 1);
+    std::vector<int64_t> new_tokens(req_lens.size(), 1);
     r += attention(new_tokens, req_lens, is_decode);
     r += mlp(new_tokens, is_decode);
   }
@@ -324,7 +324,7 @@ LLMFlops::LLMFlops(int64_t num_layers,
 }
 
 Resource LLMFlops::operator()(bool is_decode,
-                              const std::vector<int>& req_lens) const {
+                              const std::vector<int64_t>& req_lens) const {
   Resource r;
 
   // for (const auto& layer : transformer_layers) {
@@ -341,11 +341,11 @@ Resource LLMFlops::operator()(bool is_decode,
   return r;
 }
 
-Resource LLMFlops::prefill(const std::vector<int>& req_lens) const {
+Resource LLMFlops::prefill(const std::vector<int64_t>& req_lens) const {
   return this->operator()(false, req_lens);
 }
 
-Resource LLMFlops::decode(const std::vector<int>& req_lens) const {
+Resource LLMFlops::decode(const std::vector<int64_t>& req_lens) const {
   return this->operator()(true, req_lens);
 }
 
@@ -357,7 +357,7 @@ int64_t LLMFlops::size() const {
   return total_size;
 }
 
-int64_t LLMFlops::kv_size(const std::vector<int>& req_lens) const {
+int64_t LLMFlops::kv_size(const std::vector<int64_t>& req_lens) const {
   int64_t total_len = 0;
   for (int64_t len : req_lens) {
     total_len += len;
@@ -390,7 +390,7 @@ int64_t LLMFlops::linear_saturation_bs() const {
 }
 
 int64_t LLMFlops::decode_preferred_req_len(
-    const std::vector<int>& current_batch,
+    const std::vector<int64_t>& current_batch,
     int64_t target_bs,
     double target_slo,
     int64_t remain_vram_req_total_len) const {
@@ -399,7 +399,8 @@ int64_t LLMFlops::decode_preferred_req_len(
     LOG(FATAL) << "Performance model is not set";
   }
 
-  int64_t left_bs = std::max(target_bs - current_batch.size(), 1UL);
+  int64_t left_bs =
+      std::max(target_bs - static_cast<int64_t>(current_batch.size()), 1L);
 
   // binary search
   int64_t low = 1;
@@ -407,7 +408,7 @@ int64_t LLMFlops::decode_preferred_req_len(
 
   while (low < high - low / 100) {
     int64_t mid = (low + high) / 2;
-    std::vector<int> target_batch = current_batch;
+    std::vector<int64_t> target_batch = current_batch;
     target_batch.insert(target_batch.end(), left_bs, mid);
 
     double latency = this->decode(target_batch).latency;

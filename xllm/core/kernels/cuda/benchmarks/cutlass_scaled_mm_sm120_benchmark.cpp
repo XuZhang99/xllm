@@ -48,6 +48,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -86,12 +87,12 @@ const std::vector<int64_t> kQuickMValues = {
 };
 
 struct BenchmarkConfig {
-  int warmup_iters = 10;
-  int bench_iters = 100;
+  int32_t warmup_iters = 10;
+  int32_t bench_iters = 100;
   bool quick_mode = false;
-  int m_start = 1;
-  int m_end = 4000;
-  int m_step = 32;
+  int64_t m_start = 1;
+  int64_t m_end = 4000;
+  int64_t m_step = 32;
   bool save_results = true;
   std::string output_dir = "./benchmark_results";
 };
@@ -132,10 +133,10 @@ double ComputeMemoryBandwidth(int64_t m,
 BenchmarkResult RunBenchmark(int64_t m,
                              int64_t n,
                              int64_t k,
-                             int warmup_iters,
-                             int bench_iters,
+                             int32_t warmup_iters,
+                             int32_t bench_iters,
                              torch::Device device,
-                             int num_sms = 0) {
+                             uint32_t num_sms = 0) {
   BenchmarkResult result;
   result.m = m;
   result.n = n;
@@ -143,16 +144,23 @@ BenchmarkResult RunBenchmark(int64_t m,
 
   // Get SM count if not provided
   if (num_sms == 0) {
-    num_sms = static_cast<int>(
-        xllm::kernel::cuda::get_sm120_num_sms_for_device(device.index()));
+    num_sms = xllm::kernel::cuda::get_sm120_num_sms_for_device(device.index());
   }
 
-  auto dispatch = xllm::kernel::cuda::select_sm120_dispatch(m, n, k, num_sms);
+  auto dispatch =
+      xllm::kernel::cuda::select_sm120_dispatch(static_cast<uint32_t>(m),
+                                                static_cast<uint32_t>(n),
+                                                static_cast<uint32_t>(k),
+                                                num_sms);
   result.kernel = dispatch.kernel;
   result.config_name =
       xllm::kernel::cuda::get_sm120_dispatch_kernel_name(dispatch.kernel);
   result.wave_efficiency = xllm::kernel::cuda::compute_sm120_wave_efficiency(
-      m, n, dispatch.tile_m, dispatch.tile_n, num_sms);
+      static_cast<uint32_t>(m),
+      static_cast<uint32_t>(n),
+      dispatch.tile_m,
+      dispatch.tile_n,
+      num_sms);
 
   auto fp32_options =
       torch::TensorOptions().device(device).dtype(torch::kFloat32);
@@ -178,7 +186,7 @@ BenchmarkResult RunBenchmark(int64_t m,
   torch::Tensor c = torch::zeros({m, n}, fp16_options);
 
   // Warmup
-  for (int i = 0; i < warmup_iters; ++i) {
+  for (int32_t i = 0; i < warmup_iters; ++i) {
     xllm::kernel::cuda::cutlass_scaled_mm(
         c, a, b, a_scales, b_scales, std::nullopt);
   }
@@ -186,7 +194,7 @@ BenchmarkResult RunBenchmark(int64_t m,
 
   // Benchmark
   auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < bench_iters; ++i) {
+  for (int32_t i = 0; i < bench_iters; ++i) {
     xllm::kernel::cuda::cutlass_scaled_mm(
         c, a, b, a_scales, b_scales, std::nullopt);
   }
@@ -424,7 +432,7 @@ void SaveAnalysisToJSON(
     const std::map<std::pair<int64_t, int64_t>, std::vector<BenchmarkResult>>&
         all_results,
     const std::string& output_dir,
-    int compute_capability) {
+    int32_t compute_capability) {
   std::ostringstream filename;
   filename << output_dir << "/sm120_analysis.json";
 
@@ -545,11 +553,11 @@ BenchmarkConfig ParseArgs(int argc, char* argv[]) {
     } else if (arg == "--quick") {
       config.quick_mode = true;
     } else if (arg == "--m-start" && i + 1 < argc) {
-      config.m_start = std::stoi(argv[++i]);
+      config.m_start = std::stoll(argv[++i]);
     } else if (arg == "--m-end" && i + 1 < argc) {
-      config.m_end = std::stoi(argv[++i]);
+      config.m_end = std::stoll(argv[++i]);
     } else if (arg == "--m-step" && i + 1 < argc) {
-      config.m_step = std::stoi(argv[++i]);
+      config.m_step = std::stoll(argv[++i]);
     } else if (arg == "--no-save") {
       config.save_results = false;
     } else if (arg == "--output" && i + 1 < argc) {
@@ -585,7 +593,7 @@ int main(int argc, char* argv[]) {
   torch::Device device(torch::kCUDA, current_device);
 
   // Check compute capability, SM120 benchmark only runs on SM120 architecture
-  int compute_capability = xllm::kernel::cuda::get_sm_version_num();
+  int32_t compute_capability = xllm::kernel::cuda::get_sm_version_num();
 
   // SM120 requires compute capability >= 12.0 (Blackwell)
   if (compute_capability < 120) {
@@ -601,7 +609,7 @@ int main(int argc, char* argv[]) {
   if (config.quick_mode) {
     m_values = kQuickMValues;
   } else {
-    for (int m = config.m_start; m <= config.m_end; m += config.m_step) {
+    for (int64_t m = config.m_start; m <= config.m_end; m += config.m_step) {
       m_values.push_back(m);
     }
     // Add key boundary points

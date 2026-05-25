@@ -96,7 +96,7 @@ torch::Tensor EplbPolicy::compute_balanced_pack(
   for (int64_t origin_id = 0; origin_id < num_experts; ++origin_id) {
     auto redundant_ids = redundancy_map[origin_id];
     for (int64_t i = 0; i < redundant_ids.size(0); ++i) {
-      if (redundant_ids[i].item<int>() == -1) {
+      if (redundant_ids[i].item<int64_t>() == -1) {
         break;
       }
       auto min_idx = torch::argmin(device_loads).item<int64_t>();
@@ -118,7 +118,7 @@ torch::Tensor EplbPolicy::compute_balanced_pack(
     auto weight = updated_weights[expert_id].item<int64_t>();
 
     auto candidate = (device_assignments == -1).sum(1) > 0;
-    if (candidate.sum().item<int>() == 0) break;
+    if (candidate.sum().item<int64_t>() == 0) break;
 
     auto valid_devices_vec = torch::where(candidate);
     auto valid_devices = valid_devices_vec[0];
@@ -151,10 +151,10 @@ std::pair<torch::Tensor, torch::Tensor> EplbPolicy::update_origin_weights(
   auto current_weights = expert_loads.clone();
 
   //  Dynamic Weight Adjustment
-  for (int i = 0; i < redundancy_experts; ++i) {
+  for (int32_t i = 0; i < redundancy_experts; ++i) {
     auto max_idx = torch::argmax(current_weights).item<int64_t>();
     auto redundancy_count =
-        torch::sum(redundancy_map[max_idx] != -1).item<int>() + 1;
+        torch::sum(redundancy_map[max_idx] != -1).item<int64_t>() + 1;
 
     // Update redundancy mapping
     redundancy_map[max_idx][redundancy_count - 1] = num_experts + i;

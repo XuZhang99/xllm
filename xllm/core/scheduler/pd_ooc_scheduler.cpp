@@ -192,12 +192,13 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
 
     if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
       if (request->offline()) {
-        int current_offline_decode_bs =
+        const size_t current_offline_decode_bs =
             running_requests_.size() + waiting_priority_queue_offline_->size();
         VLOG(1) << "Current offline decode batch size: "
                 << current_offline_decode_bs
                 << ", linear_saturation_bs_: " << linear_saturation_bs_;
-        if (current_offline_decode_bs < linear_saturation_bs_) {
+        if (current_offline_decode_bs <
+            static_cast<size_t>(linear_saturation_bs_)) {
           waiting_priority_queue_offline_->push(request);
         } else {
           deferred_reqs.emplace_back(request);
@@ -513,10 +514,10 @@ void PDOOCScheduler::handle_decode_requests(
   //           << options_.enable_latency_aware_schedule()
   //           << ", max_global_tpot_ms=" << options_.max_global_tpot_ms();
 
-  double DECODE_SLO = options_.max_global_tpot_ms() / 1000.0;
-  int CHECK_INTERVAL = 3;
+  const double decode_slo = options_.max_global_tpot_ms() / 1000.0;
+  constexpr size_t kCheckInterval = 3;
 
-  int num_offline = 0;
+  size_t num_offline = 0;
   double new_batch_latency = 0.0;
   std::vector<Sequence*> candidate_sequences;
   std::vector<size_t> candidate_token_budgets;
@@ -550,14 +551,14 @@ void PDOOCScheduler::handle_decode_requests(
       // no budget left
 
       decode_step_global_batch_req_lens_.push_back(
-          sequence.get()->num_tokens());
-      if (decode_step_global_batch_req_lens_.size() % CHECK_INTERVAL == 0 ||
+          static_cast<int64_t>(sequence.get()->num_tokens()));
+      if (decode_step_global_batch_req_lens_.size() % kCheckInterval == 0 ||
           !new_batch_latency) {
         new_batch_latency =
             llm_flops_.decode(decode_step_global_batch_req_lens_).latency;
         decode_last_step_latency_ = new_batch_latency;
 
-        if (new_batch_latency > DECODE_SLO * 0.98) {
+        if (new_batch_latency > decode_slo * 0.98) {
           LOG(INFO) << "DEBUG - Estimated decode latency for request "
                     << request->request_id() << " with "
                     << decode_step_global_batch_req_lens_.size() << " reqs ("
@@ -816,7 +817,7 @@ void PDOOCScheduler::dispatch_requests() {
     // If no decoding instance is specified, randomly select one to create a
     // stub.
     if (selected_instance.empty() && !stub) {
-      int try_decode_count = 0;
+      size_t try_decode_count = 0;
       while (!stub) {
         if (try_decode_count == decode_inst_names_.size()) {
           LOG(FATAL) << "Can not connect to all decode instances.";
@@ -1157,7 +1158,7 @@ void PDOOCScheduler::prepare_offline_dispatch_queue() {
     // Find an offline decoding request in running_requests_ to move to dispatch
     // queue
     size_t selected_red_idx = running_requests_.size();
-    int minimal_diff = std::numeric_limits<int>::max();
+    size_t minimal_diff = std::numeric_limits<size_t>::max();
     std::shared_ptr<Request> offline_request = nullptr;
     for (size_t i = 0; i < running_requests_.size(); ++i) {
       auto& request = running_requests_[i];

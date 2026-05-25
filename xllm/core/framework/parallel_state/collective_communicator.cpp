@@ -40,11 +40,11 @@ limitations under the License.
 
 namespace xllm {
 
-CollectiveCommunicator::CollectiveCommunicator(int global_rank,
-                                               int world_size,
-                                               int dp_size,
-                                               int ep_size,
-                                               int cp_size)
+CollectiveCommunicator::CollectiveCommunicator(int32_t global_rank,
+                                               int32_t world_size,
+                                               int32_t dp_size,
+                                               int32_t ep_size,
+                                               int32_t cp_size)
     : CollectiveCommunicatorBase(global_rank, world_size) {
 #if defined(USE_NPU)
   // create hccl process group with hccl_root_info
@@ -139,14 +139,14 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
 void CollectiveCommunicator::create_process_groups(
     const std::string& master_addr,
     const torch::Device& device) {
-  int global_rank = parallel_args_->rank();
-  int world_size = parallel_args_->world_size();
-  int dp_size = parallel_args_->dp_size();
-  int ep_size = parallel_args_->ep_size();
-  int cp_size = parallel_args_->cp_size();
+  int32_t global_rank = parallel_args_->rank();
+  int32_t world_size = parallel_args_->world_size();
+  int32_t dp_size = parallel_args_->dp_size();
+  int32_t ep_size = parallel_args_->ep_size();
+  int32_t cp_size = parallel_args_->cp_size();
 
   std::string host;
-  int port;
+  int32_t port;
   net::parse_host_port_from_addr(master_addr, host, port);
 
 #if defined(USE_NPU)
@@ -165,9 +165,9 @@ void CollectiveCommunicator::create_process_groups(
                                         device);
   parallel_args_->process_group_ = process_group_.get();
 
-  int tp_size = world_size / dp_size;
+  int32_t tp_size = world_size / dp_size;
   CHECK_EQ(tp_size * dp_size, world_size);
-  int port_offset = global_rank / tp_size + 1;
+  int32_t port_offset = global_rank / tp_size + 1;
   tp_group_ = create_process_group(global_rank,
                                    world_size,
                                    tp_size,
@@ -216,7 +216,7 @@ void CollectiveCommunicator::create_process_groups(
   }
 
   if (ep_size > 1) {
-    int moe_tp_size = world_size / ep_size;
+    int32_t moe_tp_size = world_size / ep_size;
     port_offset = global_rank / moe_tp_size + 1;
     moe_tp_group_ = create_process_group(global_rank,
                                          world_size,

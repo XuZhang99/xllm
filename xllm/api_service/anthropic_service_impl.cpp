@@ -322,7 +322,7 @@ bool start_new_content_block(std::shared_ptr<AnthropicCall> call,
                              std::string& last_content_block_type,
                              const std::string& curr_content_block_type,
                              const ContentBlockInfo& content_block_info,
-                             int& content_block_index) {
+                             int32_t& content_block_index) {
   // if not the first content block,
   // we need to create a content_block_stop
   if (!last_content_block_type.empty()) {
@@ -366,7 +366,7 @@ bool send_content_block_delta(std::shared_ptr<AnthropicCall> call,
                               const std::string& curr_content_block_type,
                               const std::string& delta_type,
                               const ContentBlockInfo& content_block_info,
-                              int& content_block_index) {
+                              int32_t& content_block_index) {
   // counter new block or tool function call, we need a new content block
   // <content_block_start> ... <content_block_stop>
   if (last_content_block_type != curr_content_block_type ||
@@ -411,7 +411,7 @@ bool send_content_block_delta(std::shared_ptr<AnthropicCall> call,
 // process tool call stream and send content block delta back
 bool process_tool_call_stream(std::shared_ptr<AnthropicCall> call,
                               std::string& last_content_block_type,
-                              int& content_block_index,
+                              int32_t& content_block_index,
                               std::shared_ptr<StreamOutputParser> stream_parser,
                               size_t index,
                               const std::string& delta) {
@@ -469,7 +469,7 @@ bool send_delta_to_client(
     std::shared_ptr<AnthropicCall> call,
     ContentBlockInfo& content_block_info,
     bool& content_block_started,
-    int& content_block_index,
+    int32_t& content_block_index,
     std::string& last_content_block_type,
     const std::string& request_id,
     const std::string& model,
@@ -538,7 +538,7 @@ bool send_delta_to_client(
       // Check for unstreamed tool args before sending finish reason
       if (stream_parser && stream_parser->get_has_tool_call(index)) {
         auto send_func = [&](const std::string& arguments,
-                             int tool_index) -> bool {
+                             int32_t tool_index) -> bool {
           ContentBlockInfo content_block_info;
           content_block_info.function_calls.push_back(FunctionCallInfo{
               .arguments = arguments,

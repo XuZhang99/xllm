@@ -116,8 +116,8 @@ class Sequence final {
 
   // get mm data
   const MMData& get_mm_data() const { return mm_data_; }
-  void set_mrope_position_delta(int val) { mrope_position_delta_ = val; }
-  int get_mrope_position_delta() { return mrope_position_delta_; }
+  void set_mrope_position_delta(int32_t val) { mrope_position_delta_ = val; }
+  int32_t get_mrope_position_delta() { return mrope_position_delta_; }
 
   // get token ids to count map
   const std::unordered_map<int32_t, int32_t>& token_to_count_map() const {
@@ -463,7 +463,7 @@ class Sequence final {
   torch::Tensor input_embedding_;
 
   MMData mm_data_;
-  int mrope_position_delta_ = 0;
+  int32_t mrope_position_delta_ = 0;
 
   // mm embedding of the sequence
   std::vector<torch::Tensor> output_mm_embeddings_;

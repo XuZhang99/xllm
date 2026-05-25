@@ -431,8 +431,8 @@ REGISTER_MODEL_ARGS(minimax_m2, [&] {
   LOAD_ARG_OR(n_group, "n_group", 1);
   LOAD_ARG_OR(n_layers, "num_hidden_layers", 62);
   if (json.contains("attn_type_list")) {
-    const auto attn_type_list =
-        json.value_or<std::vector<int>>("attn_type_list", std::vector<int>());
+    const auto attn_type_list = json.value_or<std::vector<int32_t>>(
+        "attn_type_list", std::vector<int32_t>());
     if (!attn_type_list.empty() &&
         args->n_layers() != static_cast<int32_t>(attn_type_list.size())) {
       LOG(WARNING) << "MiniMax config mismatch: num_hidden_layers="
@@ -453,7 +453,7 @@ REGISTER_MODEL_ARGS(minimax_m2, [&] {
   LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
   LOAD_ARG_OR(vocab_size, "vocab_size", 200064);
-  LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int>());
+  LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int32_t>());
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
   SET_ARG(topk_method, "noaux_tc");

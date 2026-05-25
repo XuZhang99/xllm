@@ -17,6 +17,8 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch/types.h>
 
+#include <cstdint>
+
 #include "constrained_decoding.h"
 #include "util/threadpool.h"
 
@@ -44,7 +46,7 @@ class RecConstrainedDecoding : public ConstrainedDecoding {
 
  private:
   constexpr static float PRE_MASK_FACTOR = -10000.0f;
-  constexpr static int GEN_MASK_THREAD_NUM = 16;
+  constexpr static int32_t GEN_MASK_THREAD_NUM = 16;
 
  private:
   bool build_mask_cache_;

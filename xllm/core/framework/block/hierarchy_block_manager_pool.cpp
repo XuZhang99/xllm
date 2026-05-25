@@ -132,7 +132,7 @@ bool HierarchyBlockManagerPool::allocate(Sequence* sequence,
   }
   auto hbm_blocks = sequence->kv_state().kv_blocks();
   auto host_blocks = sequence->host_kv_state().kv_blocks();
-  for (int i = hbm_cache_token_num / options_.block_size();
+  for (size_t i = hbm_cache_token_num / options_.block_size();
        i <
        max_copy_in_blocks_num + (hbm_cache_token_num / options_.block_size());
        i++) {
@@ -174,7 +174,7 @@ bool HierarchyBlockManagerPool::allocate(Sequence* sequence,
     auto hbm_blocks = sequence->kv_state().kv_blocks();
     auto host_blocks = sequence->host_kv_state().kv_blocks();
 
-    for (int i = hbm_cache_token_num / options_.block_size();
+    for (size_t i = hbm_cache_token_num / options_.block_size();
          i < host_cache_token_num / options_.block_size();
          i++) {
       load_block_transfer_infos_[dp_rank].emplace_back(
@@ -247,7 +247,7 @@ void HierarchyBlockManagerPool::prefetch_from_storage(
       const auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
       std::vector<BlockTransferInfo> block_transfer_infos;
       block_transfer_infos.reserve(num_additional_blocks);
-      for (int i = 0; i < num_additional_blocks - 1; i++) {
+      for (size_t i = 0; i < num_additional_blocks - 1; i++) {
         block_transfer_infos.emplace_back(BlockTransferInfo(
             -1,
             host_blocks[shared_blocks_num + i].id(),
@@ -308,7 +308,7 @@ void HierarchyBlockManagerPool::transfer_blocks(std::vector<Batch>& batches) {
 
 void HierarchyBlockManagerPool::transfer_blocks() {
   // offload blocks from device to host and kvcache store
-  for (int i = 0; i < offload_block_pair_queues_.size(); i++) {
+  for (size_t i = 0; i < offload_block_pair_queues_.size(); i++) {
     std::vector<BlockTransferInfo> transfer_infos;
     std::vector<Block> src_blocks;
     std::vector<Block> dst_blocks;

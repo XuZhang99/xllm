@@ -49,7 +49,7 @@ class NpuRMSNormImpl : public BaseLayer {
 
   ~NpuRMSNormImpl() override = default;
 
-  torch::Tensor forward(torch::Tensor& x, int nodeId);
+  torch::Tensor forward(torch::Tensor& x, int32_t nodeId);
 
  private:
   int64_t init_layer() override;

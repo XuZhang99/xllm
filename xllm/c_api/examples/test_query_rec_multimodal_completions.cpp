@@ -146,7 +146,7 @@ class XLLM_MM_Data_Wrapper {
     memset(item.data.data.tensor.dims.dim,
            0,
            sizeof(item.data.data.tensor.dims.dim));
-    item.data.data.tensor.dims.dim[0] = static_cast<int>(length);
+    item.data.data.tensor.dims.dim[0] = static_cast<int32_t>(length);
     item.data.data.tensor.dims.dim[1] = MODEL_WORD_EMBEDDING_SIZE;
 
     const size_t element_count = length * MODEL_WORD_EMBEDDING_SIZE;
@@ -203,7 +203,7 @@ void service_stop_hook(XLLM_REC_Handler* rec_handler) {
   std::cout << "REC stop" << std::endl;
 }
 
-int generate_random_int(int min, int max) {
+int32_t generate_random_int(int32_t min, int32_t max) {
   if (min > max) {
     throw std::invalid_argument("min cannot be greater than max");
   }
@@ -211,7 +211,7 @@ int generate_random_int(int min, int max) {
   static std::random_device rd;
   static std::mt19937 gen(rd());
 
-  std::uniform_int_distribution<int> dist(min, max);
+  std::uniform_int_distribution<int32_t> dist(min, max);
 
   return dist(gen);
 }
@@ -347,18 +347,18 @@ int main(int argc, char** argv) {
               << resp->choices.entries_size << std::endl;
 
     if (nullptr != resp->choices.entries) {
-      for (int i = 0; i < resp->choices.entries_size; ++i) {
+      for (size_t i = 0; i < resp->choices.entries_size; ++i) {
         XLLM_Choice& choice = resp->choices.entries[i];
         std::cout << "token size: " << choice.token_size
                   << ",logprobs size:" << choice.logprobs.entries_size
                   << std::endl;
 
-        for (int j = 0; j < choice.token_size; j++) {
+        for (size_t j = 0; j < choice.token_size; j++) {
           std::cout << "xllm answer[" << choice.index
                     << "]: token id=" << choice.token_ids[j] << std::endl;
         }
 
-        for (int j = 0; j < choice.logprobs.entries_size; j++) {
+        for (size_t j = 0; j < choice.logprobs.entries_size; j++) {
           XLLM_LogProb& logprob = choice.logprobs.entries[j];
           std::cout << "xllm answer[" << choice.index
                     << "]: token id=" << logprob.token_id

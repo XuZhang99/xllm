@@ -35,9 +35,9 @@ void XTensorDistServer::create_server(const xtensor::Options& options,
                                       std::atomic<bool>& done,
                                       const std::string& master_node_addr,
                                       const torch::Device& d,
-                                      int world_size,
-                                      int global_rank,
-                                      int local_rank) {
+                                      int32_t world_size,
+                                      int32_t global_rank,
+                                      int32_t local_rank) {
   Device device(d);
   device.set_device();
 
@@ -71,7 +71,7 @@ void XTensorDistServer::create_server(const xtensor::Options& options,
   server->run();
 }
 
-XTensorDistServer::XTensorDistServer(int local_rank,
+XTensorDistServer::XTensorDistServer(int32_t local_rank,
                                      const std::string& master_node_addr,
                                      std::atomic<bool>& done,
                                      const torch::Device& device,
@@ -119,9 +119,9 @@ bool XTensorDistServer::sync_master_node(const std::string& master_node_addr,
   proto::Collective_Stub stub(&channel);
 
   // Retry until master node ready
-  int try_count = 0;
+  int32_t try_count = 0;
   brpc::Controller cntl;
-  const int sleep_time_second = 3;
+  constexpr int32_t kSleepTimeSecond = 3;
   while (try_count <
          ::xllm::ServiceConfig::get_instance().max_reconnect_count()) {
     cntl.Reset();
@@ -130,7 +130,7 @@ bool XTensorDistServer::sync_master_node(const std::string& master_node_addr,
       LOG(WARNING) << "XTensorDistServer#" << addr_info.global_rank()
                    << " try connect to engine server error, try again."
                    << " Error message: " << cntl.ErrorText();
-      std::this_thread::sleep_for(std::chrono::seconds(sleep_time_second));
+      std::this_thread::sleep_for(std::chrono::seconds(kSleepTimeSecond));
     } else {
       LOG(INFO) << "XTensorDistServer#" << addr_info.global_rank()
                 << " connect to " << master_node_addr << " success.";

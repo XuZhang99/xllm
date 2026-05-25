@@ -124,18 +124,18 @@ int main(int argc, char** argv) {
               << resp->choices.entries_size << std::endl;
 
     if (nullptr != resp->choices.entries) {
-      for (int i = 0; i < resp->choices.entries_size; ++i) {
+      for (size_t i = 0; i < resp->choices.entries_size; ++i) {
         XLLM_Choice& choice = resp->choices.entries[i];
         std::cout << "token size: " << choice.token_size
                   << ",logprobs size:" << choice.logprobs.entries_size
                   << std::endl;
 
-        for (int j = 0; j < choice.token_size; j++) {
+        for (size_t j = 0; j < choice.token_size; j++) {
           std::cout << "xllm answer[" << choice.index
                     << "]: token id=" << choice.token_ids[j] << std::endl;
         }
 
-        for (int j = 0; j < choice.logprobs.entries_size; j++) {
+        for (size_t j = 0; j < choice.logprobs.entries_size; j++) {
           XLLM_LogProb& logprob = choice.logprobs.entries[j];
           std::cout << "xllm answer[" << choice.index
                     << "]: token id=" << logprob.token_id

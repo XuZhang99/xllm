@@ -56,7 +56,7 @@ class NpuColumnParallelLinearImpl : public BaseLayer {
 
   virtual int64_t init_layer() override;
 
-  virtual torch::Tensor forward(const torch::Tensor& input, int nodeId);
+  virtual torch::Tensor forward(const torch::Tensor& input, int32_t nodeId);
 
  protected:
   void build_node_variant_pack(atb_speed::Model::Node& node,

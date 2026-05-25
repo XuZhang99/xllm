@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -46,8 +47,8 @@ class Qwen2dot5VisionEncoderLoader : public BaseLoader {
 
   std::vector<torch::Tensor> qkv_weight_;
   std::vector<torch::Tensor> qkv_bias_;
-  int encode_param_rank_;
-  int encode_param_world_size_;
+  int32_t encode_param_rank_;
+  int32_t encode_param_world_size_;
   int64_t encode_param_num_attention_heads_per_rank_;
 };
 

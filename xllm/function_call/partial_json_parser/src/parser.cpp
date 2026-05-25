@@ -59,7 +59,7 @@ std::string parse_malformed_string(const std::string& malformed,
 int32_t skip_blank(const std::string& text, int32_t index) {
   int32_t i = index;
   while (
-      i < static_cast<int>(text.length()) &&
+      i < static_cast<int32_t>(text.length()) &&
       (std::isspace(static_cast<unsigned char>(text[i])) || text[i] == '\n')) {
     i += 1;
   }
@@ -112,7 +112,8 @@ JsonCompletion complete_any(const std::string& json_string,
 
   // Handle NULL
   if (json_string.substr(
-          0, std::min(4, static_cast<int>(json_string.length()))) == "null") {
+          0, std::min(4, static_cast<int32_t>(json_string.length()))) ==
+      "null") {
     return JsonCompletion(4, "");
   }
 
@@ -126,7 +127,8 @@ JsonCompletion complete_any(const std::string& json_string,
 
   // Handle boolean true
   if (json_string.substr(
-          0, std::min(4, static_cast<int>(json_string.length()))) == "true") {
+          0, std::min(4, static_cast<int32_t>(json_string.length()))) ==
+      "true") {
     return JsonCompletion(4, "");
   }
 
@@ -140,7 +142,8 @@ JsonCompletion complete_any(const std::string& json_string,
 
   // Handle boolean false
   if (json_string.substr(
-          0, std::min(5, static_cast<int>(json_string.length()))) == "false") {
+          0, std::min(5, static_cast<int32_t>(json_string.length()))) ==
+      "false") {
     return JsonCompletion(5, "");
   }
 
@@ -153,8 +156,8 @@ JsonCompletion complete_any(const std::string& json_string,
   }
 
   // Handle infinity
-  if (json_string.substr(0,
-                         std::min(8, static_cast<int>(json_string.length()))) ==
+  if (json_string.substr(
+          0, std::min(8, static_cast<int32_t>(json_string.length()))) ==
       "Infinity") {
     return JsonCompletion(8, "");
   }
@@ -168,8 +171,8 @@ JsonCompletion complete_any(const std::string& json_string,
   }
 
   // Handle negative infinity
-  if (json_string.substr(0,
-                         std::min(9, static_cast<int>(json_string.length()))) ==
+  if (json_string.substr(
+          0, std::min(9, static_cast<int32_t>(json_string.length()))) ==
       "-Infinity") {
     return JsonCompletion(9, "");
   }
@@ -184,7 +187,8 @@ JsonCompletion complete_any(const std::string& json_string,
 
   // Handle NaN
   if (json_string.substr(
-          0, std::min(3, static_cast<int>(json_string.length()))) == "NaN") {
+          0, std::min(3, static_cast<int32_t>(json_string.length()))) ==
+      "NaN") {
     return JsonCompletion(3, "");
   }
 
@@ -231,28 +235,28 @@ JsonCompletion complete_string(const std::string& json_string,
   // Handle \uXXXX
   size_t u_index = json_string.rfind("\\u");
   if (u_index != std::string::npos) {
-    if (static_cast<int>(u_index) + 6 == string_length) {
-      return JsonCompletion(static_cast<int>(u_index) + 6, "\"");
+    if (static_cast<int32_t>(u_index) + 6 == string_length) {
+      return JsonCompletion(static_cast<int32_t>(u_index) + 6, "\"");
     }
-    return JsonCompletion(static_cast<int>(u_index) + 2, "\"");
+    return JsonCompletion(static_cast<int32_t>(u_index) + 2, "\"");
   }
 
   // Handle \UXXXXXXXX
   size_t U_index = json_string.rfind("\\U");
   if (U_index != std::string::npos) {
-    if (static_cast<int>(U_index) + 10 == string_length) {
-      return JsonCompletion(static_cast<int>(U_index) + 10, "\"");
+    if (static_cast<int32_t>(U_index) + 10 == string_length) {
+      return JsonCompletion(static_cast<int32_t>(U_index) + 10, "\"");
     }
-    return JsonCompletion(static_cast<int>(U_index) + 2, "\"");
+    return JsonCompletion(static_cast<int32_t>(U_index) + 2, "\"");
   }
 
   // Handle \xXX
   size_t x_index = json_string.rfind("\\x");
   if (x_index != std::string::npos) {
-    if (static_cast<int>(x_index) + 4 == string_length) {
-      return JsonCompletion(static_cast<int>(x_index) + 4, "\"");
+    if (static_cast<int32_t>(x_index) + 4 == string_length) {
+      return JsonCompletion(static_cast<int32_t>(x_index) + 4, "\"");
     }
-    return JsonCompletion(static_cast<int>(x_index) + 2, "\"");
+    return JsonCompletion(static_cast<int32_t>(x_index) + 2, "\"");
   }
 
   if (char_escaped) {

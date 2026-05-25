@@ -60,7 +60,7 @@ class Stream {
   Stream(c10::musa::MUSAStream stream, const int32_t timeout = -1);
 #endif
 
-  int synchronize() const;
+  int32_t synchronize() const;
   c10::StreamGuard set_stream_guard() const;
 #if defined(USE_NPU)
   c10_npu::NPUStream* get_stream() { return &stream_; }

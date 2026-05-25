@@ -66,7 +66,7 @@ REGISTER_MODEL_ARGS(glm4_moe_mtp, [&] {
   LOAD_ARG_OR(attention_bias, "attention_bias", false);
   LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0f);
   LOAD_ARG_OR(decoder_sparse_step, "decoder_sparse_step", 1);
-  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int>{151329});
+  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int32_t>{151329});
   LOAD_ARG_OR(head_dim, "head_dim", 128);
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(hidden_size, "hidden_size", 2048);

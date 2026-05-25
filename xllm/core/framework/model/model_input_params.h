@@ -407,7 +407,8 @@ struct AttentionInput {
   torch::Tensor attention_device_buffer;
   uint64_t attention_buffer_bytes = 0;
   uint64_t attention_buffer_capacity = 0;
-  std::shared_ptr<int> attention_buffer_owner = std::make_shared<int>(0);
+  std::shared_ptr<int32_t> attention_buffer_owner =
+      std::make_shared<int32_t>(0);
 
   AttentionInput to(const torch::Device& target_device) const {
     AttentionInput out;
@@ -584,12 +585,12 @@ struct AttentionInput {
  private:
   void detach_attention_buffer_if_shared() {
     if (attention_buffer_owner == nullptr) {
-      attention_buffer_owner = std::make_shared<int>(0);
+      attention_buffer_owner = std::make_shared<int32_t>(0);
     }
     if (attention_buffer_owner.use_count() <= 1) {
       return;
     }
-    attention_buffer_owner = std::make_shared<int>(0);
+    attention_buffer_owner = std::make_shared<int32_t>(0);
     attention_host_buffer = torch::Tensor();
     attention_device_buffer = torch::Tensor();
     attention_buffer_bytes = 0;
@@ -683,7 +684,7 @@ struct BlockTransferInfo {
 
   std::string to_string() const {
     std::string rt = ", has_key:";
-    for (int i = 0; i < 16; i++) {
+    for (int32_t i = 0; i < 16; i++) {
       rt += std::to_string(int64_t(hash_key[i])) + " ";
     }
     return std::to_string(src_block_id) + "->" + std::to_string(dst_block_id) +

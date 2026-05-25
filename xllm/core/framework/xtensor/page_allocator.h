@@ -219,7 +219,7 @@ class PageAllocator {
     size_t weight_pages_allocated = 0;  // Not cleared on free, used for wakeup
     bool is_sleeping = false;
     // Count of pending map operations (for safe sleep)
-    std::atomic<int> pending_map_ops{0};
+    std::atomic<int32_t> pending_map_ops{0};
     std::vector<DpGroupPages> dp_group_pages;
     // Model-specific parallel strategy (for fork master with different dp/tp)
     int32_t model_dp_size = 0;     // 0 means use global dp_size_

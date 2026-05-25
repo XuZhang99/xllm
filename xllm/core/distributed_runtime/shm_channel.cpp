@@ -20,8 +20,8 @@ limitations under the License.
 
 namespace xllm {
 
-ShmChannel::ShmChannel(int dp_group,
-                       int rank,
+ShmChannel::ShmChannel(int32_t dp_group,
+                       int32_t rank,
                        bool is_driver,
                        const runtime::Options& options)
     : enable_shm_(options.enable_shm()) {

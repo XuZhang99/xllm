@@ -66,12 +66,12 @@ std::vector<Batch> BatchFactory::create_batches(
     }
   }
 
-  for (int i = 0; i < dp_size_; i++) {
+  for (int32_t i = 0; i < dp_size_; ++i) {
     if (batches[i].empty()) {
       continue;
     }
     if (swap_block_transfer_infos != nullptr &&
-        swap_block_transfer_infos->size() == dp_size_) {
+        swap_block_transfer_infos->size() == static_cast<size_t>(dp_size_)) {
       batches[i].set_swap_block_transfer_infos(
           std::move(swap_block_transfer_infos->at(i)));
       swap_block_transfer_infos->at(i).clear();
@@ -126,12 +126,12 @@ std::vector<Batch> BatchFactory::create_rec_batches(
     batches[dp_rank].add(seq_group);
   }
 
-  for (int i = 0; i < dp_size_; i++) {
+  for (int32_t i = 0; i < dp_size_; ++i) {
     if (batches[i].empty()) {
       continue;
     }
     if (swap_block_transfer_infos != nullptr &&
-        swap_block_transfer_infos->size() == dp_size_) {
+        swap_block_transfer_infos->size() == static_cast<size_t>(dp_size_)) {
       batches[i].set_swap_block_transfer_infos(
           std::move(swap_block_transfer_infos->at(i)));
       swap_block_transfer_infos->at(i).clear();

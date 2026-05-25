@@ -135,7 +135,7 @@ class EmbeddingMmDataBuilder {
       item.data.is_single_tensor = true;
       item.data.data.tensor.dtype = XLLM_DTYPE_BFLOAT16;
       item.data.data.tensor.dims.rank = 2;
-      item.data.data.tensor.dims.dim[0] = static_cast<int>(length);
+      item.data.data.tensor.dims.dim[0] = static_cast<int32_t>(length);
       item.data.data.tensor.dims.dim[1] = hidden_size;
 
       auto buffer = std::make_unique<uint16_t[]>(
@@ -284,7 +284,7 @@ const std::string* FindObjectRange(const std::string& content,
   }
 
   const size_t begin = pos;
-  int depth = 0;
+  int32_t depth = 0;
   bool in_string = false;
   bool escape = false;
   for (; pos < content.size(); ++pos) {
@@ -499,9 +499,9 @@ void PrintUsage(const char* argv0) {
       << "  --seed N                 default: 20260410\n";
 }
 
-CliOptions ParseArgs(int argc, char** argv) {
+CliOptions ParseArgs(int32_t argc, char** argv) {
   CliOptions options;
-  for (int i = 1; i < argc; ++i) {
+  for (int32_t i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     auto next = [&](const char* name) -> std::string {
       if (i + 1 >= argc) {

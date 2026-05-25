@@ -28,13 +28,20 @@ namespace util {
 // Find the range of decode sequence indices (q_seq_lens == 1) in q_seq_lens
 // Returns {start_index, end_index} of decode sequences,
 // or {-1, -1} if no decode sequences found
-std::pair<int, int> find_ones_indices(std::vector<int>& q_seq_lens) {
-  int left = 0, right = q_seq_lens.size() - 1;
-  int start_index = -1, end_index = -1;
+std::pair<int32_t, int32_t> find_ones_indices(
+    std::vector<int32_t>& q_seq_lens) {
+  if (q_seq_lens.empty()) {
+    return {-1, -1};
+  }
+
+  int32_t left = 0;
+  int32_t right = static_cast<int32_t>(q_seq_lens.size()) - 1;
+  int32_t start_index = -1;
+  int32_t end_index = -1;
 
   // Binary search for the start index of decode sequences (q_seq_lens == 1)
   while (left < right) {
-    int mid = (left + right) / 2;
+    int32_t mid = (left + right) / 2;
     if (q_seq_lens[mid] < 1) {
       left = mid + 1;
     } else {
@@ -48,11 +55,11 @@ std::pair<int, int> find_ones_indices(std::vector<int>& q_seq_lens) {
   }
 
   left = 0;
-  right = q_seq_lens.size() - 1;
+  right = static_cast<int32_t>(q_seq_lens.size()) - 1;
 
   // Binary search for the end index of decode sequences (q_seq_lens == 1)
   while (left < right) {
-    int mid = (left + right + 1) / 2;
+    int32_t mid = (left + right + 1) / 2;
     if (q_seq_lens[mid] > 1) {
       right = mid - 1;
     } else {
@@ -172,7 +179,8 @@ torch::ScalarType convert_rec_type_to_torch(proto::DataType data_type) {
       return torch::kInt16;
 
     default:
-      LOG(FATAL) << "Unsupported data type: " << static_cast<int>(data_type);
+      LOG(FATAL) << "Unsupported data type: "
+                 << static_cast<int32_t>(data_type);
   }
 }
 
@@ -180,7 +188,7 @@ torch::Tensor convert_rec_tensor_to_torch(
     const proto::InferInputTensor& input_tensor) {
   std::vector<int64_t> shape;
   shape.reserve(input_tensor.shape_size());
-  for (int i = 0; i < input_tensor.shape_size(); ++i) {
+  for (int32_t i = 0; i < input_tensor.shape_size(); ++i) {
     shape.push_back(input_tensor.shape(i));
   }
 
@@ -240,7 +248,7 @@ torch::Tensor convert_rec_tensor_to_torch(
 
     default:
       LOG(FATAL) << "Unhandled data type conversion for: "
-                 << static_cast<int>(dtype);
+                 << static_cast<int32_t>(dtype);
   }
 }
 

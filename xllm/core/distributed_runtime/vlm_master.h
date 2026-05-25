@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <folly/Function.h>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -82,7 +83,7 @@ class VLMMaster : public Master {
   // generate will run all requests, this is an blocking call
   void generate();
 
-  int get_image_limit() { return options_.limit_image_per_prompt(); }
+  int32_t get_image_limit() { return options_.limit_image_per_prompt(); }
 
  private:
   using Task = folly::Function<void()>;

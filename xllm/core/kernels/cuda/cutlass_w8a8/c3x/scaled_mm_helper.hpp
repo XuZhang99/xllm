@@ -38,8 +38,6 @@ void dispatch_scaled_mm(torch::Tensor& c,
   TORCH_CHECK(a_scales.dtype() == torch::kFloat32);
   TORCH_CHECK(b_scales.dtype() == torch::kFloat32);
 
-  int M = a.size(0), N = b.size(1), K = a.size(1);
-
   if ((a_scales.numel() == 1 || a_scales.numel() == a.size(0)) &&
       (b_scales.numel() == 1 || b_scales.numel() == b.size(1))) {
     // Standard per-tensor/per-token/per-channel scaling

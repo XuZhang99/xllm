@@ -101,7 +101,7 @@ class Qwen2_VisionRotaryEmbeddingImpl : public torch::nn::Module {
     freqs_cached_ = torch::outer(seq, inv_freq_);
   }
 
-  torch::Tensor forward(int seqlen) {
+  torch::Tensor forward(int64_t seqlen) {
     update_freqs_cache(seqlen);
     return freqs_cached_.slice(0, 0, seqlen);
   }
@@ -128,8 +128,7 @@ class Qwen2_VisionPatchMergerImpl : public torch::nn::Module {
     int64_t context_dim = model_args.mm_hidden_size();
     int64_t spatial_merge_size = model_args.mm_spatial_merge_size();
 
-    hidden_size_ =
-        context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
+    hidden_size_ = context_dim * spatial_merge_size * spatial_merge_size;
     norm_ = register_module(
         "norm",
         torch::nn::LayerNorm(torch::nn::LayerNormOptions({context_dim})
@@ -220,7 +219,7 @@ class Qwen2_VisionPatchMergerImpl : public torch::nn::Module {
   }
 
  private:
-  int hidden_size_;
+  int64_t hidden_size_;
   torch::nn::LayerNorm norm_{nullptr};
   torch::nn::Sequential mlp_{nullptr};
   std::tuple<torch::nn::Linear, torch::nn::GELU, torch::nn::Linear> layers_ = {
@@ -248,7 +247,7 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
     window_size_ = model_args.mm_window_size();
     patch_size_ = model_args.mm_patch_size();
     spatial_merge_size_ = model_args.mm_spatial_merge_size();
-    spatial_merge_unit_ = static_cast<int>(std::pow(spatial_merge_size_, 2));
+    spatial_merge_unit_ = spatial_merge_size_ * spatial_merge_size_;
     // mlp_ratio_ = model_args.mm_mlp_ratio();
 
     patch_embed_ =
@@ -267,14 +266,14 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
 
   torch::Tensor rot_pos_emb(torch::Tensor grid_thw) {
     std::vector<torch::Tensor> pos_ids_vec;
-    auto count = grid_thw.sizes()[0];
+    int64_t count = grid_thw.sizes()[0];
     pos_ids_vec.reserve(count);
 
     auto grid_thw_cpu = grid_thw.cpu();
     auto options =
         torch::TensorOptions().dtype(torch::kLong).device(grid_thw.device());
 
-    for (int idx = 0; idx < count; ++idx) {
+    for (int64_t idx = 0; idx < count; ++idx) {
       auto t = grid_thw_cpu[idx][0].item<int64_t>();
       auto h = grid_thw_cpu[idx][1].item<int64_t>();
       auto w = grid_thw_cpu[idx][2].item<int64_t>();
@@ -341,17 +340,17 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
-    std::vector<int> cu_seqlens_vec(
-        cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec
-        cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    std::vector<int32_t> cu_seqlens_vec(
+        cu_seqlens_cpu.data_ptr<int32_t>(),  // full seqlen vec
+        cu_seqlens_cpu.data_ptr<int32_t>() + cu_seqlens_cpu.numel());
+    for (size_t idx = 0; idx < blocks_->size(); ++idx) {
       hidden_states = layers_[idx](hidden_states,
                                    m_cos,
                                    m_sin,
                                    cu_seqlens,
                                    cu_seqlens_vec,
                                    input_params_new,
-                                   idx);
+                                   static_cast<int32_t>(idx));
     }
     // adapter
     hidden_states = merger_(hidden_states);
@@ -361,7 +360,7 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict) {
     patch_embed_->load_state_dict(
         state_dict.get_dict_with_prefix("patch_embed."));
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    for (size_t idx = 0; idx < blocks_->size(); ++idx) {
       layers_[idx]->load_state_dict(state_dict.get_dict_with_prefix(
           "blocks." + std::to_string(idx) + "."));
     }
@@ -370,14 +369,14 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
   }
 
  private:
-  int hidden_size_ = 0;
-  int num_heads_ = 0;
-  int window_size_ = 0;
-  int patch_size_ = 0;
-  int spatial_merge_size_ = 0;
-  std::unordered_set<int> fullatt_block_indexes_;
-  int spatial_merge_unit_ = 0;
-  // int mlp_ratio_ = 4;
+  int64_t hidden_size_ = 0;
+  int64_t num_heads_ = 0;
+  int64_t window_size_ = 0;
+  int64_t patch_size_ = 0;
+  int64_t spatial_merge_size_ = 0;
+  std::unordered_set<int32_t> fullatt_block_indexes_;
+  int64_t spatial_merge_unit_ = 0;
+  // int32_t mlp_ratio_ = 4;
 
   Qwen2_VisionPatchEmbed patch_embed_{nullptr};
   Qwen2_VisionRotaryEmbedding rotary_pos_emb_{nullptr};
@@ -387,7 +386,7 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
 
   torch::Tensor m_cos;
   torch::Tensor m_sin;
-  int device_id = 0;
+  int32_t device_id = 0;
 };
 TORCH_MODULE(Qwen2_VisionTransformer);
 

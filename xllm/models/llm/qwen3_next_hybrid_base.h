@@ -132,7 +132,7 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
   void load_state_dict(const StateDict& state_dict) override {
     embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
-    for (int i = 0; i < static_cast<int>(layers_.size()); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }

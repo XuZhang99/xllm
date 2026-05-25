@@ -69,7 +69,7 @@ bool MooncakeWeightTransfer::register_global_xtensor() {
 
 bool MooncakeWeightTransfer::link_d2d(const std::string& remote_addr) {
   std::string host;
-  int port = 0;
+  int32_t port = 0;
   net::parse_host_port_from_addr(remote_addr, host, port);
   auto remote_cluster_id =
       net::convert_ip_port_to_uint64(host, static_cast<uint16_t>(port));
@@ -92,7 +92,7 @@ bool MooncakeWeightTransfer::link_d2d(
 
 bool MooncakeWeightTransfer::unlink_d2d(const std::string& remote_addr) {
   std::string host;
-  int port = 0;
+  int32_t port = 0;
   net::parse_host_port_from_addr(remote_addr, host, port);
   auto remote_cluster_id =
       net::convert_ip_port_to_uint64(host, static_cast<uint16_t>(port));

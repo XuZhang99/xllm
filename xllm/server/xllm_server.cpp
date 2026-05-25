@@ -254,7 +254,7 @@ bool XllmServer::start(std::shared_ptr<XTensorDistService> service,
 
 bool XllmServer::create_server(google::protobuf::Service* service,
                                const std::string& addr,
-                               int port,
+                               int32_t port,
                                const std::string& server_name) {
   server_ = std::make_unique<brpc::Server>();
   if (!configure_generic_server(server_.get(), service, server_name)) {

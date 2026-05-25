@@ -601,7 +601,7 @@ void Sequence::generate_mm_embeddings_output(SequenceOutput& output) {
   std::unordered_map<MMKey, std::vector<torch::Tensor>> metadata;
   CollectItemTensorVisitor visitor(metadata, {"pixel_values"});
   mm_data_.foreach (visitor);
-  for (int i = 0; i < output_mm_embeddings_.size(); i++) {
+  for (size_t i = 0; i < output_mm_embeddings_.size(); i++) {
     const auto& output_mm_embedding = output_mm_embeddings_[i];
     EmbeddingOutput embedding_output;
     embedding_output.embedding = output_mm_embedding;

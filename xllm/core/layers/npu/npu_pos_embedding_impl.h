@@ -52,7 +52,7 @@ class NpuRotaryEmbeddingImpl : public BaseLayer {
 
   torch::Tensor forward(const torch::Tensor& cos_sin_pos,
                         const torch::Tensor& position,
-                        int nodeId);
+                        int32_t nodeId);
 
  private:
   int64_t init_layer() override;

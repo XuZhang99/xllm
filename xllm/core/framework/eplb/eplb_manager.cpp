@@ -227,9 +227,9 @@ EplbInfo EplbManager::get_eplb_info() {
       info.prepare_layer_id = state_.to_be_prepared;
       torch::Tensor distribution =
           state_.expert_distribution[state_.to_be_prepared].contiguous();
-      info.expert_ids =
-          std::vector<int>(distribution.data_ptr<int>(),
-                           distribution.data_ptr<int>() + distribution.numel());
+      info.expert_ids = std::vector<int32_t>(
+          distribution.data_ptr<int32_t>(),
+          distribution.data_ptr<int32_t>() + distribution.numel());
       state_.preparing_layer_id = state_.to_be_prepared;
     } else {
       info.prepare_layer_id = -1;

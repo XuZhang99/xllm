@@ -456,10 +456,10 @@ typedef enum XLLM_CAPI_EXPORT XLLM_DataType {
  */
 typedef struct XLLM_CAPI_EXPORT XLLM_Dims {
   /** Number of dimensions (0=scalar, 1=vector, ..., 8) */
-  int rank;
+  int32_t rank;
 
   /** Size of each dimension (unused dims must be 0) */
-  int dim[8];
+  int32_t dim[8];
 } XLLM_Dims;
 
 /**

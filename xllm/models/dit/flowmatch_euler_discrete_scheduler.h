@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -50,9 +51,9 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
       shift_terminal_ = args_.shift_terminal();
     }
     time_shift_type_ = "exponential";
-    std::vector<float> timesteps_vec(num_train_timesteps_);
-    for (int i = 0; i < num_train_timesteps_; ++i) {
-      timesteps_vec[i] = num_train_timesteps_ - i;
+    std::vector<float> timesteps_vec(static_cast<size_t>(num_train_timesteps_));
+    for (int64_t i = 0; i < num_train_timesteps_; ++i) {
+      timesteps_vec[static_cast<size_t>(i)] = num_train_timesteps_ - i;
     }
     torch::Tensor timesteps = torch::from_blob(
         timesteps_vec.data(), {num_train_timesteps_}, torch::kFloat32);
@@ -68,10 +69,10 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     begin_index_ = std::nullopt;
   }
 
-  void set_begin_index(int begin_index) { begin_index_ = begin_index; }
+  void set_begin_index(int64_t begin_index) { begin_index_ = begin_index; }
   void set_shift(float shift) { shift_ = shift; }
-  int base_image_seq_len() { return base_image_seq_len_.value(); }
-  int max_image_seq_len() { return max_image_seq_len_.value(); }
+  int64_t base_image_seq_len() { return base_image_seq_len_.value(); }
+  int64_t max_image_seq_len() { return max_image_seq_len_.value(); }
   float base_shift() { return base_shift_.value(); }
   float max_shift() { return max_shift_.value(); }
   int64_t order() { return order_; }
@@ -84,16 +85,18 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     torch::Tensor schedule_timesteps = timesteps_.to(sample.device());
     torch::Tensor ts = timestep.to(sample.device());
 
-    std::vector<int> step_indices;
+    std::vector<int64_t> step_indices;
     if (!begin_index_.has_value()) {
-      for (int i = 0; i < ts.size(0); ++i) {
+      for (int64_t i = 0; i < ts.size(0); ++i) {
         step_indices.emplace_back(
             index_for_timestep(ts[i], schedule_timesteps));
       }
     } else if (step_index_.has_value()) {
-      step_indices = std::vector<int>(ts.size(0), step_index_.value());
+      step_indices = std::vector<int64_t>(static_cast<size_t>(ts.size(0)),
+                                          step_index_.value());
     } else {
-      step_indices = std::vector<int>(ts.size(0), begin_index_.value());
+      step_indices = std::vector<int64_t>(static_cast<size_t>(ts.size(0)),
+                                          begin_index_.value());
     }
 
     torch::Tensor sigma_indices = torch::tensor(
@@ -127,7 +130,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   }
 
   void set_timesteps(
-      int num_inference_steps,
+      int64_t num_inference_steps,
       const torch::Device& device = torch::kCPU,
       const std::optional<std::vector<float>>& sigmas = std::nullopt,
       const std::optional<float>& mu = std::nullopt,
@@ -140,9 +143,10 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
       LOG(FATAL) << "sigmas and timesteps must have the same length";
     }
 
-    int num_steps = num_inference_steps;
+    int64_t num_steps = num_inference_steps;
     if (num_steps <= 0) {
-      num_steps = sigmas.has_value() ? sigmas->size() : timesteps->size();
+      num_steps = static_cast<int64_t>(sigmas.has_value() ? sigmas->size()
+                                                          : timesteps->size());
     }
 
     bool is_timesteps_provided = timesteps.has_value();
@@ -157,11 +161,12 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
 
     if (!sigmas.has_value()) {
       if (!timesteps.has_value()) {
-        std::vector<float> ts_vec(num_steps);
+        std::vector<float> ts_vec(static_cast<size_t>(num_steps));
         float start = sigma_max_ * num_train_timesteps_;
         float end = sigma_min_ * num_train_timesteps_;
-        for (int i = 0; i < num_steps; ++i) {
-          ts_vec[i] = start + (end - start) * i / (num_steps - 1);
+        for (int64_t i = 0; i < num_steps; ++i) {
+          ts_vec[static_cast<size_t>(i)] =
+              start + (end - start) * i / (num_steps - 1);
         }
         ts_tensor =
             torch::from_blob(ts_vec.data(), {num_steps}, torch::kFloat32)
@@ -255,7 +260,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
         prev_sample = sample_float + dt * model_output;
       }
     } else {
-      int sigma_idx = step_index_.value();
+      int64_t sigma_idx = step_index_.value();
       torch::Tensor sigma = sigmas_[sigma_idx];
       torch::Tensor sigma_next = sigmas_[sigma_idx + 1];
       torch::Tensor dt = sigma_next - sigma;
@@ -275,15 +280,15 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     return prev_sample;
   }
 
-  std::optional<int> step_index() const { return step_index_; }
-  std::optional<int> begin_index() const { return begin_index_; }
+  std::optional<int64_t> step_index() const { return step_index_; }
+  std::optional<int64_t> begin_index() const { return begin_index_; }
   const torch::Tensor& timesteps() const { return timesteps_; }
   const torch::Tensor& sigmas() const { return sigmas_; }
-  int size() const { return num_train_timesteps_; }
+  int64_t size() const { return num_train_timesteps_; }
 
  private:
   torch::Tensor convert_to_karras(const torch::Tensor& in_sigmas,
-                                  int num_inference_steps) {
+                                  int64_t num_inference_steps) {
     float sigma_min = sigma_min_;
     float sigma_max = sigma_max_;
     if (in_sigmas.numel() > 0) {
@@ -292,9 +297,10 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     }
 
     const float rho = 7.0f;
-    std::vector<float> ramp(num_inference_steps);
-    for (int i = 0; i < num_inference_steps; ++i) {
-      ramp[i] = static_cast<float>(i) / (num_inference_steps - 1);
+    std::vector<float> ramp(static_cast<size_t>(num_inference_steps));
+    for (int64_t i = 0; i < num_inference_steps; ++i) {
+      ramp[static_cast<size_t>(i)] =
+          static_cast<float>(i) / (num_inference_steps - 1);
     }
     torch::Tensor ramp_tensor =
         torch::from_blob(ramp.data(), {num_inference_steps}, torch::kFloat32);
@@ -306,7 +312,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   }
 
   torch::Tensor convert_to_exponential(const torch::Tensor& in_sigmas,
-                                       int num_inference_steps) {
+                                       int64_t num_inference_steps) {
     float sigma_min = sigma_min_;
     float sigma_max = sigma_max_;
     if (in_sigmas.numel() > 0) {
@@ -314,12 +320,12 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
       sigma_max = in_sigmas[0].item<float>();
     }
 
-    std::vector<float> exp_sigmas(num_inference_steps);
+    std::vector<float> exp_sigmas(static_cast<size_t>(num_inference_steps));
     float log_sigma_max = std::log(sigma_max);
     float log_sigma_min = std::log(sigma_min);
-    for (int i = 0; i < num_inference_steps; ++i) {
+    for (int64_t i = 0; i < num_inference_steps; ++i) {
       float t = static_cast<float>(i) / (num_inference_steps - 1);
-      exp_sigmas[i] =
+      exp_sigmas[static_cast<size_t>(i)] =
           std::exp(log_sigma_max + t * (log_sigma_min - log_sigma_max));
     }
     return torch::from_blob(
@@ -349,24 +355,24 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     }
   }
 
-  int index_for_timestep(const torch::Tensor& timestep,
-                         const torch::Tensor& schedule_timesteps = {}) {
+  int64_t index_for_timestep(const torch::Tensor& timestep,
+                             const torch::Tensor& schedule_timesteps = {}) {
     torch::Tensor sched =
         schedule_timesteps.defined() ? schedule_timesteps : timesteps_;
     torch::Tensor indices = (sched == timestep).nonzero();
 
-    int pos = indices.size(0) > 1 ? 1 : 0;
-    return indices.index({pos, 0}).item<int>();
+    int64_t pos = indices.size(0) > 1 ? 1 : 0;
+    return indices.index({pos, 0}).item<int64_t>();
   }
 
  private:
-  int num_train_timesteps_;
+  int64_t num_train_timesteps_;
   float shift_;
   bool use_dynamic_shifting_;
   std::optional<float> base_shift_;
   std::optional<float> max_shift_;
-  std::optional<int> base_image_seq_len_;
-  std::optional<int> max_image_seq_len_;
+  std::optional<int64_t> base_image_seq_len_;
+  std::optional<int64_t> max_image_seq_len_;
   std::optional<float> shift_terminal_;
   bool invert_sigmas_ = false;
   bool use_karras_sigmas_ = false;
@@ -379,8 +385,8 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   torch::Tensor sigmas_;
   float sigma_min_;
   float sigma_max_;
-  std::optional<int> step_index_;
-  std::optional<int> begin_index_;
+  std::optional<int64_t> step_index_;
+  std::optional<int64_t> begin_index_;
 
   int64_t order_ = 1;  // default value is 1
   ModelArgs args_;

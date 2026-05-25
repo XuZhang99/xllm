@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
+
 #include "base_loader.h"
 
 static const uint64_t WEIGHT_COUNT_PER_LAYER = 84;
@@ -31,7 +33,7 @@ class Glm4MoeDecoderLiteLoader : public BaseLoader {
                            LoadMode mode = LoadMode::kEager);
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
-  void resize_experts_weights(int num_of_device_experts) override;
+  void resize_experts_weights(int32_t num_of_device_experts) override;
 
  protected:
   void merge_host_at_weights() override;
@@ -96,16 +98,16 @@ class Glm4MoeDecoderLiteLoader : public BaseLoader {
 
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,
-                                   int dim);
+                                   int32_t dim);
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,
-                                   int dim,
-                                   int local_tp_rank,
-                                   int local_tp_size);
+                                   int32_t dim,
+                                   int32_t local_tp_rank,
+                                   int32_t local_tp_size);
 
   std::string extract_endswith(const std::string& input);
 
-  int extract_expert_index(const std::string& name);
+  int32_t extract_expert_index(const std::string& name);
 
   void merge_shared_experts_weights();
 
@@ -118,8 +120,9 @@ class Glm4MoeDecoderLiteLoader : public BaseLoader {
                                       std::vector<torch::Tensor>& experts_gate,
                                       bool transpose = false);
 
-  int get_mapped_index(const std::string& name,
-                       const std::unordered_map<std::string, int>& mapping);
+  int32_t get_mapped_index(
+      const std::string& name,
+      const std::unordered_map<std::string, int32_t>& mapping);
 };
 
 }  // namespace layer

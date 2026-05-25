@@ -115,7 +115,7 @@ int32_t MappingNPU::get_num_nodes() {
       const std::string& str = data.value();
       if (str.empty()) return 1;
       size_t pos;
-      int value = std::stoi(str, &pos);
+      int32_t value = static_cast<int32_t>(std::stoi(str, &pos));
       return value;
     }
   }
@@ -305,7 +305,7 @@ void MappingNPU::get_tp_group(ParallelInfo& parallel_info) {
   parallel_info.num_group(world_size_ / parallel_info.group_size());
   std::vector<std::vector<int32_t>> rank_per_group =
       parallel_info.rank_per_group();
-  for (int i = 0; i <= parallel_info.num_group(); i++) {
+  for (int32_t i = 0; i <= parallel_info.num_group(); i++) {
     std::vector<int32_t> ranks;
     int32_t start = i * parallel_info.group_size();
     int32_t end = (i + 1) * parallel_info.group_size();
@@ -328,7 +328,7 @@ void MappingNPU::get_dp_group(ParallelInfo& parallel_info) {
   parallel_info.num_group(world_size_ / parallel_info.group_size());
   std::vector<std::vector<int32_t>> rank_per_group =
       parallel_info.rank_per_group();
-  for (int i = 0; i <= parallel_info.num_group(); i++) {
+  for (int32_t i = 0; i <= parallel_info.num_group(); i++) {
     std::vector<int32_t> ranks;
     for (int32_t j = i; j < world_size_; j += parallel_info.num_group()) {
       ranks.push_back(j);

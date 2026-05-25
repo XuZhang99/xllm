@@ -190,7 +190,7 @@ std::string XServiceClient::get_instance_name() { return instance_name_; }
 
 bool XServiceClient::register_instance_with_retry(const std::string& key,
                                                   const std::string& value) {
-  int retry_cnt = 0;
+  int32_t retry_cnt = 0;
   while (!etcd_client_->register_instance(
       key, value, ::xllm::DistributedConfig::get_instance().etcd_ttl())) {
     if (retry_cnt >= 30) {
@@ -673,7 +673,7 @@ std::vector<bool> XServiceClient::generations(
       continue;
     }
 
-    CHECK_EQ(ctx.resp.all_status_size(), static_cast<int>(indices.size()))
+    CHECK_EQ(ctx.resp.all_status_size(), static_cast<int32_t>(indices.size()))
         << "The size of status set is not equal to the size of outputs for "
            "service: "
         << service_addr;

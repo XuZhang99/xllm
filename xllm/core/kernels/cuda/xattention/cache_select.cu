@@ -160,20 +160,20 @@ void cache_select_cuda_launch_ptrs(
   const int32_t decode_step_i32 = static_cast<int32_t>(decode_step);
 
   // Warp-aligned threads, capped to keep occupancy reasonable.
-  int threads_per_block = ((D + 31) / 32) * 32;
+  int32_t threads_per_block = ((D + 31) / 32) * 32;
   if (threads_per_block < 32) {
     threads_per_block = 32;
   }
   if (threads_per_block > 256) {
     threads_per_block = 256;
   }
-  dim3 block_dim(static_cast<unsigned int>(threads_per_block), 1, 1);
+  dim3 block_dim(static_cast<uint32_t>(threads_per_block), 1, 1);
 
   CHECK_LE(Kv64, static_cast<int64_t>(UINT32_MAX)) << "Kv too large for grid.y";
   CHECK_LE(Layer64, 65535) << "layer_num too large for grid.z";
-  dim3 grid_dim(static_cast<unsigned int>(B),
-                static_cast<unsigned int>(Kv),
-                static_cast<unsigned int>(Layer));
+  dim3 grid_dim(static_cast<uint32_t>(B),
+                static_cast<uint32_t>(Kv),
+                static_cast<uint32_t>(Layer));
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 

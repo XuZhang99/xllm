@@ -21,6 +21,7 @@ limitations under the License.
 #include <torch/script.h>
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <utility>
 
 #include "common/global_flags.h"
@@ -661,7 +662,7 @@ __global__ void beam_search_step_with_sort_kernel(
       int32_t key_idx = shared_indices[i];
       int32_t key_order = shared_order[i];
       T key_prob = shared_probs[i];
-      int j = i - 1;
+      int32_t j = i - 1;
       while (j >= 0 && shared_indices[j] > key_idx) {
         shared_indices[j + 1] = shared_indices[j];
         shared_order[j + 1] = shared_order[j];

@@ -80,13 +80,13 @@ inline torch::Tensor load_tensor(std::string filename) {
 inline void print_tensor(
     const torch::Tensor& tensor,
     const std::string& tensor_name = "tensor",
-    int num = 10,
+    int32_t num = 10,
     bool part = true,
     bool print_value = true,
     const std::source_location& loc = std::source_location::current()) {
   auto& log_stream =
       google::LogMessage(
-          loc.file_name(), static_cast<int>(loc.line()), google::GLOG_INFO)
+          loc.file_name(), static_cast<int32_t>(loc.line()), google::GLOG_INFO)
           .stream();
   if (!tensor.defined()) {
     log_stream << tensor_name << ", Undefined tensor." << std::endl;
@@ -103,14 +103,15 @@ inline void print_tensor(
 
   if (part) {
     const auto& flat_tensor = tensor.contiguous().view(-1);
-    int max_elements = std::min(static_cast<int>(flat_tensor.size(0)), num);
+    int64_t max_elements =
+        std::min(flat_tensor.size(0), static_cast<int64_t>(num));
     // const auto& front_elements = flat_tensor.slice(0, 0, max_elements);
     const auto& front_elements =
         flat_tensor.slice(0, 0, max_elements).to(torch::kCPU);
     log_stream << "First " << max_elements << " elements: \n"
                << front_elements << std::endl;
 
-    int back_num = flat_tensor.size(0) > num ? num : flat_tensor.size(0);
+    int64_t back_num = flat_tensor.size(0) > num ? num : flat_tensor.size(0);
     // const auto& back_elements = flat_tensor.slice(0, flat_tensor.size(0) -
     // back_num, flat_tensor.size(0));
     const auto& back_elements =

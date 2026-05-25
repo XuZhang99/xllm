@@ -36,8 +36,8 @@ class StateDict {
   // get the sharded tensor with the given name for the given rank.
   virtual torch::Tensor get_sharded_tensor(const std::string& tensor_name,
                                            int64_t dim,
-                                           int rank,
-                                           int world_size) const;
+                                           int32_t rank,
+                                           int32_t world_size) const;
 
   // get all the tensors whose name starts with prefix.
   // the returned tensor name will be the suffix of the original name.

@@ -44,33 +44,35 @@ class DeekseekV2DecoderLoader : public BaseLoader {
  protected:
   void merge_host_at_weights() override;
 
-  void initialize_device_expert_list(int num_device, int num_device_expert);
+  void initialize_device_expert_list(int32_t num_device,
+                                     int32_t num_device_expert);
 
-  int extract_expert_index(const std::string& name);
+  int32_t extract_expert_index(const std::string& name);
 
   std::string get_expert_shm_key(int32_t layer_id,
                                  int32_t expert_index,
                                  const std::string& suffix);
 
-  int get_mapped_index(const std::string& name,
-                       const std::unordered_map<std::string, int>& mapping);
+  int32_t get_mapped_index(
+      const std::string& name,
+      const std::unordered_map<std::string, int32_t>& mapping);
 
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,
-                                   int dim);
+                                   int32_t dim);
 
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,
-                                   int dim,
-                                   int local_tp_rank,
-                                   int local_tp_size);
+                                   int32_t dim,
+                                   int32_t local_tp_rank,
+                                   int32_t local_tp_size);
 
   std::string extract_endswith(const std::string& input);
 
   void set_kv_weight(const StateDict& state_dict,
                      const std::string& tensor_name,
-                     int weight_position,
-                     int dim);
+                     int32_t weight_position,
+                     int32_t dim);
 
   void preprocess_linear_for_rope();
 
@@ -123,7 +125,7 @@ class DeekseekV2DecoderLoader : public BaseLoader {
                             const std::string& name,
                             bool pre_view);
 
-  void reserve_experts_weights(int num_of_device_experts);
+  void reserve_experts_weights(int32_t num_of_device_experts);
 
   torch::Tensor trans_rope_weight(torch::Tensor weight);
 

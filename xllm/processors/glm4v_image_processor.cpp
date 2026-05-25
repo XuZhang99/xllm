@@ -22,15 +22,15 @@ namespace xllm {
 
 namespace {
 
-using Size = std::pair<int, int>;
+using Size = std::pair<int64_t, int64_t>;
 
-std::optional<Size> smart_resize(int num_frames,
-                                 int height,
-                                 int width,
-                                 int temporal_factor,
-                                 int factor = 28,
-                                 int min_pixels = 56 * 56,
-                                 int max_pixels = 14 * 14 * 4 * 1280) {
+std::optional<Size> smart_resize(int64_t num_frames,
+                                 int64_t height,
+                                 int64_t width,
+                                 int64_t temporal_factor,
+                                 int64_t factor = 28,
+                                 int64_t min_pixels = 56 * 56,
+                                 int64_t max_pixels = 14 * 14 * 4 * 1280) {
   if (height < factor || width < factor) {
     LOG(ERROR) << "Height or width must be larger than factor";
     return std::nullopt;
@@ -46,31 +46,32 @@ std::optional<Size> smart_resize(int num_frames,
     LOG(ERROR) << "Absolute aspect ratio must be smaller than 200";
     return std::nullopt;
   }
-  int t_bar = static_cast<int>(std::rint(
-                  num_frames / static_cast<double>(temporal_factor))) *
-              temporal_factor;
-  int h_bar =
-      static_cast<int>(std::rint(height / static_cast<double>(factor))) *
+  int64_t t_bar = static_cast<int64_t>(std::rint(
+                      num_frames / static_cast<double>(temporal_factor))) *
+                  temporal_factor;
+  int64_t h_bar =
+      static_cast<int64_t>(std::rint(height / static_cast<double>(factor))) *
       factor;
-  int w_bar =
-      static_cast<int>(std::rint(width / static_cast<double>(factor))) * factor;
+  int64_t w_bar =
+      static_cast<int64_t>(std::rint(width / static_cast<double>(factor))) *
+      factor;
 
   if (t_bar * h_bar * w_bar > max_pixels) {
     double beta = std::sqrt((num_frames * height * width) /
                             static_cast<double>(max_pixels));
-    h_bar = static_cast<int>(
+    h_bar = static_cast<int64_t>(
                 std::floor(height / beta / static_cast<double>(factor))) *
             factor;
-    w_bar = static_cast<int>(
+    w_bar = static_cast<int64_t>(
                 std::floor(width / beta / static_cast<double>(factor))) *
             factor;
   } else if (t_bar * h_bar * w_bar < min_pixels) {
     double beta = std::sqrt(min_pixels /
                             static_cast<double>(height * width * num_frames));
-    h_bar = static_cast<int>(
+    h_bar = static_cast<int64_t>(
                 std::ceil(height * beta / static_cast<double>(factor))) *
             factor;
-    w_bar = static_cast<int>(
+    w_bar = static_cast<int64_t>(
                 std::ceil(width * beta / static_cast<double>(factor))) *
             factor;
   }
@@ -80,9 +81,9 @@ std::optional<Size> smart_resize(int num_frames,
 }  // namespace
 
 torch::Tensor Glm4VImageProcessor::sample_frames(const VideoMetadata& metadata,
-                                                 int temporal_patch_size) {
+                                                 int32_t temporal_patch_size) {
   // video: [T, C, H, W]
-  const int total_frames = metadata.total_num_frames;
+  const int32_t total_frames = metadata.total_num_frames;
   if (total_frames <= 0) {
     return torch::empty({0}, torch::dtype(torch::kLong));
   }
@@ -91,7 +92,7 @@ torch::Tensor Glm4VImageProcessor::sample_frames(const VideoMetadata& metadata,
     LOG(FATAL) << "invalid metadata.fps <= 0";
   }
 
-  const int max_frame_idx = total_frames - 1;
+  const int32_t max_frame_idx = total_frames - 1;
 
   // duration = metadata.duration or round(max_idx / fps) + 1
   double duration = metadata.duration;
@@ -103,7 +104,7 @@ torch::Tensor Glm4VImageProcessor::sample_frames(const VideoMetadata& metadata,
   constexpr double DYN_FPS_30 = 3.0;
   constexpr double DYN_FPS_300 = 1.0;
   constexpr double DYN_FPS_2400 = 0.5;
-  constexpr int MAX_FRAME_COUNT_DYNAMIC = 640;
+  constexpr int32_t MAX_FRAME_COUNT_DYNAMIC = 640;
   constexpr double MAX_DURATION = 2400.0;
 
   const double effective_duration = std::min(duration, MAX_DURATION);
@@ -117,17 +118,18 @@ torch::Tensor Glm4VImageProcessor::sample_frames(const VideoMetadata& metadata,
     target_fps = DYN_FPS_2400;
   }
 
-  // extract_t = int(effective_duration * target_fps * temporal_patch_size)
-  int extract_t = static_cast<int>(effective_duration * target_fps *
-                                   static_cast<double>(temporal_patch_size));
+  // Truncate to match Python-style integer frame count selection.
+  int32_t extract_t =
+      static_cast<int32_t>(effective_duration * target_fps *
+                           static_cast<double>(temporal_patch_size));
   extract_t = std::min(extract_t, MAX_FRAME_COUNT_DYNAMIC);
 
   const double duration_per_frame = 1.0 / metadata.fps;
   std::vector<double> timestamps(total_frames);
-  for (int i = 0; i < total_frames; ++i) {
+  for (int32_t i = 0; i < total_frames; ++i) {
     timestamps[i] = static_cast<double>(i) * duration_per_frame;
   }
-  const int max_second = static_cast<int>(duration);
+  const int32_t max_second = static_cast<int32_t>(duration);
 
   torch::Tensor frame_indices;
 
@@ -141,7 +143,7 @@ torch::Tensor Glm4VImageProcessor::sample_frames(const VideoMetadata& metadata,
     const double inv_fps =
         1.0 / (static_cast<double>(temporal_patch_size) * target_fps);
 
-    for (int frame_index = 0; frame_index < total_frames; frame_index++) {
+    for (int32_t frame_index = 0; frame_index < total_frames; ++frame_index) {
       if (timestamps[frame_index] >= current_second) {
         current_second += inv_fps;
         tmp.push_back(frame_index);

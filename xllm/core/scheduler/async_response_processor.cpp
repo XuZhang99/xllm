@@ -107,15 +107,15 @@ void AsyncResponseProcessor::process_completed_request(
 void AsyncResponseProcessor::batch_process_completed_requests(
     std::vector<std::shared_ptr<Request>>& requests) {
   size_t requests_size = requests.size();
-  auto counter = new BlockingCounter(requests_size);
+  auto counter = new BlockingCounter(static_cast<int32_t>(requests_size));
   std::vector<RequestOutput> request_outputs;
   request_outputs.resize(requests_size);
-  for (int i = 0; i < requests_size; ++i) {
-    auto& request = requests[i];
+  for (size_t request_idx = 0; request_idx < requests_size; ++request_idx) {
+    auto& request = requests[request_idx];
     auto runnable = [counter,
                      this,
                      request = request,
-                     request_output = &request_outputs[i]]() mutable {
+                     request_output = &request_outputs[request_idx]]() mutable {
       AUTO_COUNTER(responsing_latency_seconds_non_stream);
       double end_2_end_latency_seconds = request->elapsed_seconds();
       // update the metrics for the request
@@ -230,11 +230,11 @@ void AsyncResponseProcessor::process_stream_request(
 void AsyncResponseProcessor::batch_process_stream_requests(
     std::vector<std::shared_ptr<Request>>& requests) {
   size_t requests_size = requests.size();
-  auto counter = new BlockingCounter(requests_size);
+  auto counter = new BlockingCounter(static_cast<int32_t>(requests_size));
   std::vector<RequestOutput> request_outputs;
   request_outputs.resize(requests_size);
-  for (int i = 0; i < requests_size; ++i) {
-    auto& request = requests[i];
+  for (size_t request_idx = 0; request_idx < requests_size; ++request_idx) {
+    auto& request = requests[request_idx];
     CHECK(request->state().stream) << "request is not a streaming request";
 
     std::vector<size_t> indexes;
@@ -264,7 +264,7 @@ void AsyncResponseProcessor::batch_process_stream_requests(
                      request,
                      indexes = std::move(indexes),
                      num_tokens = std::move(num_tokens),
-                     req_output = &request_outputs[i]]() mutable {
+                     req_output = &request_outputs[request_idx]]() mutable {
       AUTO_COUNTER(responsing_latency_seconds_stream);
 
       // RequestOutput req_output;

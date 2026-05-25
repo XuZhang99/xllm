@@ -20,6 +20,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <csignal>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <random>
@@ -310,7 +311,7 @@ void validate_config(const std::string& model_type) {
   model_config.normalize_cpp_chat_template(model_type);
 }
 
-int run() {
+int32_t run() {
   ModelConfig& model_config = ModelConfig::get_instance();
   KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
   BeamSearchConfig& beam_search_config = BeamSearchConfig::get_instance();
@@ -467,7 +468,7 @@ int run() {
 
 int main(int argc, char** argv) {
   // Check for --help flag before parsing other flags
-  for (int i = 1; i < argc; ++i) {
+  for (int32_t i = 1; i < argc; ++i) {
     std::string arg(argv[i]);
     if (arg == "--help" || arg == "-h") {
       HelpFormatter::print_help();

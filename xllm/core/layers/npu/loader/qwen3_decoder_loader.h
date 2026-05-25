@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -38,7 +39,7 @@ class Qwen3DecoderLoader : public BaseLoader {
 
   torch::Tensor at_placeholder_;
   bool enableAddNorm_;
-  int rank_id_;
+  int32_t rank_id_;
 };
 
 }  // namespace layer

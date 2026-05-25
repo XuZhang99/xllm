@@ -71,7 +71,7 @@ REGISTER_MODEL_ARGS(glm_moe_dsa_mtp, [&] {
   LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 202752);
   LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-5);
   // LOAD_ARG_OR(eos_token_id, "eos_token_id", 1);
-  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int>{154820});
+  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int32_t>{154820});
 
   LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
   LOAD_ARG_OR(sliding_window, "sliding_window", 4096);

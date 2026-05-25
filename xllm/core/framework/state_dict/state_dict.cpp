@@ -69,7 +69,7 @@ torch::ScalarType get_dtype(const Dtype& dtype) {
     case Dtype::U32:
     case Dtype::U64:
     default:
-      LOG(FATAL) << "Unsupported dtype " << static_cast<int>(dtype);
+      LOG(FATAL) << "Unsupported dtype " << static_cast<int32_t>(dtype);
   }
   __builtin_unreachable();
 }
@@ -138,8 +138,8 @@ torch::Tensor StateDict::get_tensor(const std::string& tensor_name) const {
 
 torch::Tensor StateDict::get_sharded_tensor(const std::string& tensor_name,
                                             int64_t dim,
-                                            int rank,
-                                            int world_size) const {
+                                            int32_t rank,
+                                            int32_t world_size) const {
   CHECK(dim == 0 || dim == 1) << "Only support 1D or 2D sharding";
   CHECK(rank >= 0 && rank < world_size)
       << "Invalid rank " << rank << " for " << world_size << " shards";

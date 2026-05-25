@@ -187,7 +187,7 @@ class ContinuousScheduler : public Scheduler {
 
   const InstanceInfo& get_instance_info() { return instance_info_; }
 
-  std::vector<int> last_batch_lengths_;
+  std::vector<int64_t> last_batch_lengths_;
 
  protected:
   const Options options_;

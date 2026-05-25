@@ -72,10 +72,10 @@ bool decode_prompt_audio(const std::string& b64_audio,
 
 }  // namespace
 
-std::pair<int, int> splitResolution(const std::string& s) {
+std::pair<int32_t, int32_t> splitResolution(const std::string& s) {
   size_t pos = s.find('*');
-  int width = std::stoi(s.substr(0, pos));
-  int height = std::stoi(s.substr(pos + 1));
+  int32_t width = static_cast<int32_t>(std::stoi(s.substr(0, pos)));
+  int32_t height = static_cast<int32_t>(std::stoi(s.substr(pos + 1)));
   return {width, height};
 }
 

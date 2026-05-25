@@ -37,7 +37,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-enum DecoderLayerTensorId : int {
+enum DecoderLayerTensorId : int32_t {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_INPUT_NORM_BIAS = 1,
   IN_INPUT_NORM_NEW_WEIGHT = 2,
@@ -276,7 +276,7 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_tensors(
     auto layer_expert_routing_map_ =
         build_expert_routing_map(device_expert_list);
     std::vector<torch::Tensor> tensors_vec;
-    for (int i = 0; i < n_layers_ - first_k_dense_replace_; i++) {
+    for (int32_t i = 0; i < n_layers_ - first_k_dense_replace_; ++i) {
       tensors_vec.emplace_back(layer_expert_routing_map_);
     }
     expert_routing_map_ = torch::stack(tensors_vec, 0);
@@ -311,16 +311,14 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
-                                     ? std::vector<int>{-1, -1, -1, -1}
-                                     : std::vector<int>{1, 0, -1, 1};
+                                     ? {-1, -1, -1, -1}
+                                     : {1, 0, -1, 1};
 
   param.worldSize = parallel_args.world_size();
   param.normEps = args.rms_norm_eps();
   param.numAttentionHeadsPerRank = args.n_heads() / dp_local_tp_size_;
   param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
-  std::optional<long int> optionalValue = args.n_kv_heads();
   param.numKeyValueHeadsPerRank = 1;
-  // static_cast<int>(optionalValue.value()) / param.worldSize;
   param.rank = parallel_args.rank();
   param.backend =
       ::xllm::ParallelConfig::get_instance().communication_backend();
@@ -357,7 +355,7 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
     param.enablePrefixCacheLocal =
         (parallel_args.kv_split_size_effective() == 1);
   }
-  num_key_value_heads_ = static_cast<int>(args.n_kv_heads().value());
+  num_key_value_heads_ = static_cast<int32_t>(args.n_kv_heads().value());
   qk_nope_head_dim_ = args.qk_nope_head_dim();
   v_head_dim_ = args.v_head_dim();
   kv_lora_rank_ = args.kv_lora_rank();
@@ -498,54 +496,54 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_parallel_parameters(
 void NpuDeepseekV32DecoderLayerImpl::initialize_quantization_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param) {
   if (quantize_type_ == "") {
-    param.moePackQuantType = static_cast<int>(PackType::ALL_FP);
-    param.packQuantType = {static_cast<int>(PackType::ALL_FP),
-                           static_cast<int>(PackType::ALL_FP)};
-    param.attnLinearQuantType = {static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::FP)};
-    param.mlpLinearQuantType = {static_cast<int>(LinearType::FP),
-                                static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::FP),
-                                static_cast<int>(LinearType::INVALID)};
+    param.moePackQuantType = static_cast<int32_t>(PackType::ALL_FP);
+    param.packQuantType = {static_cast<int32_t>(PackType::ALL_FP),
+                           static_cast<int32_t>(PackType::ALL_FP)};
+    param.attnLinearQuantType = {static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::FP)};
+    param.mlpLinearQuantType = {static_cast<int32_t>(LinearType::FP),
+                                static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::FP),
+                                static_cast<int32_t>(LinearType::INVALID)};
     if (layer_id_ < param.firstKDenseReplace) {
-      param.moeLinearQuantType = {static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID)};
+      param.moeLinearQuantType = {static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID)};
     } else {
-      param.moeLinearQuantType = {static_cast<int>(LinearType::FP),
-                                  static_cast<int>(LinearType::FP),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::FP)};
+      param.moeLinearQuantType = {static_cast<int32_t>(LinearType::FP),
+                                  static_cast<int32_t>(LinearType::FP),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::FP)};
     }
   } else {
-    param.moePackQuantType = static_cast<int>(PackType::ALL_W8A8_DYNAMIC);
-    param.packQuantType = {static_cast<int>(PackType::MIX_W8A8),
-                           static_cast<int>(PackType::ALL_W8A8_DYNAMIC)};
-    param.attnLinearQuantType = {static_cast<int>(LinearType::INT),
-                                 static_cast<int>(LinearType::INT),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::INT)};
-    param.mlpLinearQuantType = {static_cast<int>(LinearType::INT),
-                                static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::INT),
-                                static_cast<int>(LinearType::INVALID)};
+    param.moePackQuantType = static_cast<int32_t>(PackType::ALL_W8A8_DYNAMIC);
+    param.packQuantType = {static_cast<int32_t>(PackType::MIX_W8A8),
+                           static_cast<int32_t>(PackType::ALL_W8A8_DYNAMIC)};
+    param.attnLinearQuantType = {static_cast<int32_t>(LinearType::INT),
+                                 static_cast<int32_t>(LinearType::INT),
+                                 static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::FP),
+                                 static_cast<int32_t>(LinearType::INT)};
+    param.mlpLinearQuantType = {static_cast<int32_t>(LinearType::INT),
+                                static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::INT),
+                                static_cast<int32_t>(LinearType::INVALID)};
     if (layer_id_ < param.firstKDenseReplace) {
-      param.moeLinearQuantType = {static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID)};
+      param.moeLinearQuantType = {static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID)};
     } else {
-      param.moeLinearQuantType = {static_cast<int>(LinearType::FP),
-                                  static_cast<int>(LinearType::INT),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INT)};
+      param.moeLinearQuantType = {static_cast<int32_t>(LinearType::FP),
+                                  static_cast<int32_t>(LinearType::INT),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INT)};
     }
   }
 }
@@ -554,7 +552,7 @@ void NpuDeepseekV32DecoderLayerImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   Device::empty_cache(device_.index());
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
+  for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
   }
@@ -573,8 +571,9 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::build_expert_routing_map(
   std::vector<int64_t> keys;
   std::vector<int32_t> values;
   for (auto& [key, indices] : expert_routing_map) {
-    int num_of_duplications = indices.size();
-    int selected_index = ep_rank_ % num_of_duplications;
+    const size_t num_of_duplications = indices.size();
+    const size_t selected_index =
+        static_cast<size_t>(ep_rank_) % num_of_duplications;
     indices = {indices[selected_index]};
 
     keys.emplace_back(key);
@@ -632,12 +631,13 @@ void NpuDeepseekV32DecoderLayerImpl::prepare_expert_weight(
 
   );
 
-  const int start_expert_idx = num_experts_per_partition_ * ep_rank_;
-  const int end_expert_idx = start_expert_idx + num_experts_per_partition_ - 1;
+  const int32_t start_expert_idx = num_experts_per_partition_ * ep_rank_;
+  const int32_t end_expert_idx =
+      start_expert_idx + num_experts_per_partition_ - 1;
 
   auto& shared_buffer = loader_->get_expert_shared_buffer();
   for (const auto& pair : experts_weights) {
-    for (int expert_idx = start_expert_idx; expert_idx <= end_expert_idx;
+    for (int32_t expert_idx = start_expert_idx; expert_idx <= end_expert_idx;
          ++expert_idx) {
       std::string shm_key =
           get_expert_shm_key(layer_id_, expert_list[expert_idx], pair.first);
@@ -805,7 +805,7 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
     const ModelInputParams& input_params,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
-    int node_id) {
+    int32_t node_id) {
   atb::Status st;
   ModelInputParams& input_params_new =
       const_cast<ModelInputParams&>(input_params);

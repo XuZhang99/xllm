@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <optional>
 #include <tuple>
 
@@ -95,7 +96,7 @@ torch::Tensor apply_npu_moe_token_unpermute(
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
 apply_moe_gating_topk_softmax(const torch::Tensor& x,
                               const std::optional<torch::Tensor>& finished,
-                              int k);
+                              int32_t k);
 
 std::vector<torch::Tensor> apply_npu_grouped_matmul(
     const torch::TensorList x,
@@ -122,15 +123,15 @@ apply_npu_moe_init_routing_v2(const torch::Tensor& x,
                               const torch::Tensor& expert_idx,
                               const std::optional<torch::Tensor>& scale,
                               const std::optional<torch::Tensor>& offset,
-                              int active_num,
-                              int expert_capacity,
-                              int expert_num,
-                              int drop_pad_mode,
-                              int expert_tokens_num_type,
+                              int32_t active_num,
+                              int32_t expert_capacity,
+                              int32_t expert_num,
+                              int32_t drop_pad_mode,
+                              int32_t expert_tokens_num_type,
                               bool expert_tokens_num_flag,
-                              int quant_mode,
+                              int32_t quant_mode,
                               torch::IntArrayRef active_expert_range,
-                              int row_idx_type);
+                              int32_t row_idx_type);
 
 std::pair<torch::Tensor, torch::Tensor> apply_npu_partial_rotary_embedding(
     const torch::Tensor& positions,

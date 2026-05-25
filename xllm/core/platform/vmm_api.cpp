@@ -37,7 +37,7 @@ size_t get_recommended_granularity(int32_t device_id) {
   prop.reserve = 0;
 
   // get the recommended granularity size
-  int ret = aclrtMemGetAllocationGranularity(
+  int32_t ret = aclrtMemGetAllocationGranularity(
       &prop, ACL_RT_MEM_ALLOC_GRANULARITY_RECOMMENDED, &granularity_size);
   CHECK_EQ(ret, 0) << "Failed to get allocation granularity";
 #elif defined(USE_MLU)
@@ -54,7 +54,7 @@ size_t get_recommended_granularity(int32_t device_id) {
   prop.allocFlags.compressionType = CN_MEM_ALLOCATION_COMP_NONE;
 
   // get the recommended granularity size
-  int ret = cnMemGetAllocationGranularity(
+  int32_t ret = cnMemGetAllocationGranularity(
       &granularity_size, &prop, CN_MEM_ALLOC_GRANULARITY_RECOMMENDED);
   CHECK_EQ(ret, 0) << "Failed to get allocation granularity";
 #elif defined(USE_CUDA) || defined(USE_ILU)
@@ -64,7 +64,7 @@ size_t get_recommended_granularity(int32_t device_id) {
   prop.location.id = device_id;
 
   // get the recommended granularity size FIRST
-  int ret = cuMemGetAllocationGranularity(
+  int32_t ret = cuMemGetAllocationGranularity(
       &granularity_size, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED);
   CHECK_EQ(ret, 0) << "Failed to get allocation granularity";
 #else
@@ -76,7 +76,7 @@ size_t get_recommended_granularity(int32_t device_id) {
 }
 
 void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
-  int ret = 0;
+  int32_t ret = 0;
   const size_t granularity_size = get_recommended_granularity(device_id);
 #if defined(USE_NPU)
   aclrtPhysicalMemProp prop = {};
@@ -124,7 +124,7 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
 }
 
 void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
-  int ret = 0;
+  int32_t ret = 0;
 #if defined(USE_NPU)
   ret = aclrtReserveMemAddress(&vir_ptr, aligned_size, 0, nullptr, 0);
 #elif defined(USE_MLU)
@@ -138,7 +138,7 @@ void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
 }
 
 void release_phy_mem_handle(PhyMemHandle& phy_mem_handle) {
-  int ret = 0;
+  int32_t ret = 0;
 #if defined(USE_NPU)
   ret = aclrtFreePhysical(phy_mem_handle);
 #elif defined(USE_MLU)
@@ -152,7 +152,7 @@ void release_phy_mem_handle(PhyMemHandle& phy_mem_handle) {
 }
 
 void release_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
-  int ret = 0;
+  int32_t ret = 0;
 #if defined(USE_NPU)
   ret = aclrtReleaseMemAddress(vir_ptr);
 #elif defined(USE_MLU)
@@ -177,7 +177,7 @@ void map(VirPtr& vir_ptr,
          PhyMemHandle& phy_mem_handle,
          size_t granularity_size,
          int32_t device_id) {
-  int ret = 0;
+  int32_t ret = 0;
 #if defined(USE_NPU)
   ret = aclrtMapMem(vir_ptr, granularity_size, 0, phy_mem_handle, 0);
 #elif defined(USE_MLU)
@@ -220,16 +220,16 @@ void unmap(VirPtr& vir_ptr, size_t aligned_size) {
   auto* base = reinterpret_cast<std::uint8_t*>(vir_ptr);
   for (size_t offset = 0; offset < aligned_size; offset += granularity_size) {
     void* addr = base + offset;
-    int ret = aclrtUnmapMem(addr);
+    int32_t ret = aclrtUnmapMem(addr);
     CHECK_EQ(ret, 0) << "Failed to unmap virtual memory from physical memory";
   }
   return;
 #elif defined(USE_MLU)
-  int ret = 0;
+  int32_t ret = 0;
   ret = cnMemUnmap(vir_ptr, aligned_size);
   CHECK_EQ(ret, 0) << "Failed to unmap virtual memory from physical memory";
 #elif defined(USE_CUDA) || defined(USE_ILU)
-  int ret = 0;
+  int32_t ret = 0;
   ret = cuMemUnmap(vir_ptr, aligned_size);
   CHECK_EQ(ret, 0) << "Failed to unmap virtual memory from physical memory";
 #endif

@@ -493,7 +493,7 @@ std::vector<ToolCallItem> DeepSeekV32Detector::parse_json_tool_calls(
     }
 
     // Find the matching closing brace
-    int brace_count = 0;
+    int32_t brace_count = 0;
     size_t json_end = json_start;
     bool in_string = false;
     bool escape_next = false;
@@ -540,7 +540,7 @@ std::vector<ToolCallItem> DeepSeekV32Detector::parse_json_tool_calls(
         size_t array_start = text.find('[', tool_calls_pos);
         if (array_start != std::string::npos) {
           // Try to parse array
-          int bracket_count = 0;
+          int32_t bracket_count = 0;
           size_t array_end = array_start;
           for (size_t i = array_start; i < text.length(); ++i) {
             char c = text[i];
@@ -842,7 +842,7 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
   bool potentially_json_block = false;
   size_t first_brace = current_text.find('{');
   if (first_brace != std::string::npos) {
-    int brace_count = 0;
+    int32_t brace_count = 0;
     bool in_string = false;
     bool escape_next = false;
     for (size_t i = first_brace; i < current_text.length(); ++i) {
@@ -986,7 +986,7 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
         std::string normal_text = current_text;
         size_t json_start = current_text.find('{');
         if (json_start != std::string::npos) {
-          int brace_count = 0;
+          int32_t brace_count = 0;
           bool in_string = false;
           bool escape_next = false;
           size_t json_end = std::string::npos;

@@ -17,7 +17,9 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 #include "core/framework/request/mm_data.h"
 
@@ -28,8 +30,8 @@ class InputProcessor {
   virtual ~InputProcessor() = default;
 
   virtual void process(std::string& prompt, const MMData& mm_data) = 0;
-  virtual void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) {
-  };
+  virtual void find_mm_spans(const std::vector<int32_t>& prompt,
+                             MMData& mm_data) {};
 };
 
 }  // namespace xllm

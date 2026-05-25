@@ -106,7 +106,7 @@ class OxygenVisionEmbeddingsImpl : public torch::nn::Module {
         position_embedding_->weight.to(options));
   }
   torch::Tensor forward(torch::Tensor x,
-                        std::vector<int> lengths,
+                        std::vector<int32_t> lengths,
                         torch::Tensor image_shapes,
                         torch::Tensor h_coords,
                         torch::Tensor w_coords) {
@@ -367,13 +367,13 @@ class OxygenVisionTransformerImpl : public torch::nn::Module {
 
   std::tuple<torch::Tensor, torch::Tensor> rot_pos_emb(torch::Tensor grid_thw) {
     std::vector<torch::Tensor> pos_ids_vec;
-    auto count = grid_thw.sizes()[0];
+    int64_t count = grid_thw.sizes()[0];
     pos_ids_vec.reserve(count);
     auto options =
         torch::TensorOptions().dtype(torch::kLong).device(grid_thw.device());
 
     auto grid_thw_cpu = grid_thw.cpu();
-    for (int idx = 0; idx < count; ++idx) {
+    for (int64_t idx = 0; idx < count; ++idx) {
       auto t = grid_thw_cpu[idx][0].item<int64_t>();
       auto h = grid_thw_cpu[idx][1].item<int64_t>();
       auto w = grid_thw_cpu[idx][2].item<int64_t>();
@@ -443,9 +443,9 @@ class OxygenVisionTransformerImpl : public torch::nn::Module {
     cu_seqlens = F::pad(
         cu_seqlens, F::PadFuncOptions({1, 0}).mode(torch::kConstant).value(0));
     auto seqlens_cpu = torch::diff(cu_seqlens).cpu().to(torch::kInt);
-    std::vector<int> seqlens;
-    seqlens.assign(seqlens_cpu.data_ptr<int>(),
-                   seqlens_cpu.data_ptr<int>() + seqlens_cpu.numel());
+    std::vector<int32_t> seqlens;
+    seqlens.assign(seqlens_cpu.data_ptr<int32_t>(),
+                   seqlens_cpu.data_ptr<int32_t>() + seqlens_cpu.numel());
 
     hidden_states = embeddings_(hidden_states,
                                 seqlens,
@@ -455,18 +455,18 @@ class OxygenVisionTransformerImpl : public torch::nn::Module {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
-    std::vector<int> cu_seqlens_vec(
-        cu_seqlens_cpu.data_ptr<int>(),
-        cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
+    std::vector<int32_t> cu_seqlens_vec(
+        cu_seqlens_cpu.data_ptr<int32_t>(),
+        cu_seqlens_cpu.data_ptr<int32_t>() + cu_seqlens_cpu.numel());
     cu_seqlens = cu_seqlens.to(hidden_states.device());
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    for (size_t idx = 0; idx < blocks_->size(); ++idx) {
       hidden_states = layers_[idx](hidden_states,
                                    m_cos,
                                    m_sin,
                                    cu_seqlens,
                                    cu_seqlens_vec,
                                    input_params_new,
-                                   idx);
+                                   static_cast<int32_t>(idx));
     }
     hidden_states = std::get<0>(post_layernorm_(hidden_states));
     hidden_states = hidden_states.view(
@@ -491,7 +491,7 @@ class OxygenVisionTransformerImpl : public torch::nn::Module {
       post_conv_layernorm_->weight().data().copy_(norm_weight);
       is_post_conv_layernorm_weight_loaded = true;
     }
-    for (int idx = 0; idx < layers_.size(); ++idx) {
+    for (size_t idx = 0; idx < layers_.size(); ++idx) {
       layers_[idx]->load_state_dict(state_dict.get_dict_with_prefix(
           "blocks." + std::to_string(idx) + "."));
     }
@@ -535,9 +535,9 @@ class OxygenVisionTransformerImpl : public torch::nn::Module {
   }
 
  private:
-  int hidden_size_ = 0;
-  int out_hidden_size_ = 0;
-  int spatial_merge_size_ = 0;
+  int64_t hidden_size_ = 0;
+  int64_t out_hidden_size_ = 0;
+  int64_t spatial_merge_size_ = 0;
 
   OxygenVisionPatchEmbed patch_embed_{nullptr};
   Qwen2_5_VisionRotaryEmbedding rotary_pos_emb_{nullptr};
@@ -622,10 +622,10 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
     }
     if (video_input) {
       std::vector<torch::Tensor> temp_frames_hw;
-      for (int i = 0; i < video_input->video_grid_thw.size(0); ++i) {
-        auto t = video_input->video_grid_thw[i][0].item<int32_t>();
-        auto h = video_input->video_grid_thw[i][1].item<int32_t>();
-        auto w = video_input->video_grid_thw[i][2].item<int32_t>();
+      for (int64_t i = 0; i < video_input->video_grid_thw.size(0); ++i) {
+        auto t = video_input->video_grid_thw[i][0].item<int64_t>();
+        auto h = video_input->video_grid_thw[i][1].item<int64_t>();
+        auto w = video_input->video_grid_thw[i][2].item<int64_t>();
         auto repeated_row =
             torch::tensor({1, h, w}).unsqueeze(0).repeat({t, 1});
         temp_frames_hw.push_back(repeated_row);
@@ -639,10 +639,10 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
       // video_grid_thw has shape [num_videos, 3], video_embeds is flattened
       // We need to split video_embeds back to match num_videos
       std::vector<int64_t> split_sizes;
-      for (int i = 0; i < video_input->video_grid_thw.size(0); ++i) {
-        auto t = video_input->video_grid_thw[i][0].item<int32_t>();
-        auto h = video_input->video_grid_thw[i][1].item<int32_t>();
-        auto w = video_input->video_grid_thw[i][2].item<int32_t>();
+      for (int64_t i = 0; i < video_input->video_grid_thw.size(0); ++i) {
+        auto t = video_input->video_grid_thw[i][0].item<int64_t>();
+        auto h = video_input->video_grid_thw[i][1].item<int64_t>();
+        auto w = video_input->video_grid_thw[i][2].item<int64_t>();
         // Tokens for this video = t frames * (h * w / merge_size / merge_size)
         auto tokens = t * h * w / merge_size / merge_size;
         split_sizes.push_back(tokens);

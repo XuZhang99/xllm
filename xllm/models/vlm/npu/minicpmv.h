@@ -81,7 +81,7 @@ class BaseResamplerImpl : public torch::nn::Module {
   }
 
  protected:
-  int num_queries_, num_heads_, embed_dim_, kv_dim_;
+  int64_t num_queries_, num_heads_, embed_dim_, kv_dim_;
   torch::Tensor query_;
   layer::MultiheadAttention attn_{nullptr};
   torch::TensorOptions options_;
@@ -97,13 +97,13 @@ class BaseResamplerImpl : public torch::nn::Module {
     torch::nn::init::normal_(tensor, mean, std::sqrt(variance));
   }
 
-  torch::Tensor repeat(const torch::Tensor& query, int N) {
+  torch::Tensor repeat(const torch::Tensor& query, int64_t n) {
     // query shape: [64, 3584]
     // Step 1: Unsqueeze the tensor at dimension 1
     auto unsqueezed = query.unsqueeze(1);  // Shape: [64, 1, 3584]
 
     // Step 2: Repeat the tensor along the specified dimensions
-    auto repeated = unsqueezed.repeat({1, N, 1});  // Shape: [64, N, 3584]
+    auto repeated = unsqueezed.repeat({1, n, 1});  // Shape: [64, N, 3584]
     return repeated;
   }
 };
@@ -150,11 +150,10 @@ class KVProjectorLinearImpl : public torch::nn::Module {
 };
 TORCH_MODULE(KVProjectorLinear);
 
-torch::Tensor get_1d_sincos_pos_embed_from_grid(int embed_dim,
-                                                const torch::Tensor& pos,
-                                                std::pair<int, int> version = {
-                                                    2,
-                                                    0}) {
+torch::Tensor get_1d_sincos_pos_embed_from_grid(
+    int64_t embed_dim,
+    const torch::Tensor& pos,
+    std::pair<int32_t, int32_t> version = {2, 0}) {
   CHECK_EQ(embed_dim % 2, 0) << "embed_dim must be even";
 
   // compute omega
@@ -176,11 +175,10 @@ torch::Tensor get_1d_sincos_pos_embed_from_grid(int embed_dim,
   }
 }
 
-torch::Tensor get_2d_sincos_pos_embed_from_grid(int embed_dim,
-                                                const torch::Tensor& grid,
-                                                std::pair<int, int> version = {
-                                                    2,
-                                                    0}) {
+torch::Tensor get_2d_sincos_pos_embed_from_grid(
+    int64_t embed_dim,
+    const torch::Tensor& grid,
+    std::pair<int32_t, int32_t> version = {2, 0}) {
   CHECK_EQ(embed_dim % 2, 0) << "embed_dim must be even";
 
   auto emb_h =
@@ -195,12 +193,13 @@ torch::Tensor get_2d_sincos_pos_embed_from_grid(int embed_dim,
   }
 }
 
-torch::Tensor get_2d_sincos_pos_embed(int embed_dim,
-                                      const std::pair<int, int>& grid_size,
-                                      bool cls_token = false,
-                                      std::pair<int, int> version = {2, 0}) {
-  int grid_h_size = grid_size.first;
-  int grid_w_size = grid_size.second;
+torch::Tensor get_2d_sincos_pos_embed(
+    int64_t embed_dim,
+    const std::pair<int32_t, int32_t>& grid_size,
+    bool cls_token = false,
+    std::pair<int32_t, int32_t> version = {2, 0}) {
+  int32_t grid_h_size = grid_size.first;
+  int32_t grid_w_size = grid_size.second;
 
   auto grid_h = torch::arange(grid_h_size, torch::kFloat32);
   auto grid_w = torch::arange(grid_w_size, torch::kFloat32);
@@ -365,7 +364,7 @@ class Resampler2_5Impl : public BaseResamplerImpl {
   }
 
  private:
-  std::pair<int, int> max_size_ = {70, 70};
+  std::pair<int32_t, int32_t> max_size_ = {70, 70};
   torch::Tensor pos_embed_;
   KVProjectorLinear kv_proj_{nullptr};
   std::unordered_map<std::string, bool> is_norm_weight_loaded = {
@@ -385,7 +384,7 @@ class Resampler2_5Impl : public BaseResamplerImpl {
     return name.substr(0, pos) + '.' + name.substr(pos + 1);
   }
 
-  void set_2d_pos_cache(const std::pair<int, int>& max_size,
+  void set_2d_pos_cache(const std::pair<int32_t, int32_t>& max_size,
                         const torch::Device& device) {
     auto pos_embed_arr = get_2d_sincos_pos_embed(
         embed_dim_, max_size, false, std::make_pair(2, 5));
@@ -394,10 +393,10 @@ class Resampler2_5Impl : public BaseResamplerImpl {
 
   void adjust_pos_cache(const torch::Tensor& tgt_sizes,
                         const torch::Device& device) {
-    int max_h =
-        tgt_sizes.index({torch::indexing::Slice(), 0}).max().item<int>();
-    int max_w =
-        tgt_sizes.index({torch::indexing::Slice(), 1}).max().item<int>();
+    int32_t max_h =
+        tgt_sizes.index({torch::indexing::Slice(), 0}).max().item<int32_t>();
+    int32_t max_w =
+        tgt_sizes.index({torch::indexing::Slice(), 1}).max().item<int32_t>();
 
     if (max_h > max_size_.first || max_w > max_size_.second) {
       max_size_.first = std::max(max_h, max_size_.first);
@@ -427,7 +426,7 @@ class Idefics2VisionEmbeddingsImpl : public torch::nn::Module {
     patch_embedding_->bias.set_data(patch_embedding_->bias.to(options));
     image_size_ = model_args.mm_image_size();
     num_patches_per_side_ = image_size_ / patch_size_;
-    int num_patches = num_patches_per_side_ * num_patches_per_side_;
+    int64_t num_patches = num_patches_per_side_ * num_patches_per_side_;
     position_embedding_ =
         register_module("position_embedding",
                         torch::nn::Embedding(torch::nn::EmbeddingOptions(
@@ -544,7 +543,7 @@ class Idefics2VisionEmbeddingsImpl : public torch::nn::Module {
   }
 
  private:
-  int embed_dim_, patch_size_, image_size_, num_patches_per_side_;
+  int64_t embed_dim_, patch_size_, image_size_, num_patches_per_side_;
   torch::nn::Linear patch_embedding_{nullptr};
   torch::nn::Embedding position_embedding_{nullptr};
   bool is_patch_embedding_weight_loaded = false;
@@ -612,10 +611,10 @@ class VisionAdapterMLPImpl : public torch::nn::Module {
   VisionAdapterMLPImpl(const ModelContext& context) {
     auto options = context.get_tensor_options();
 
-    auto embed_dim = context.get_model_args().hidden_size();
-    int num_layers = 3;
+    int64_t embed_dim = context.get_model_args().hidden_size();
+    int32_t num_layers = 3;
     layers_ = register_module("layers", torch::nn::ModuleList());
-    for (int idx = 0; idx < num_layers; ++idx) {
+    for (int32_t idx = 0; idx < num_layers; ++idx) {
       auto lni = register_module(
           "lni",
           torch::nn::LayerNorm(torch::nn::LayerNormOptions({embed_dim})
@@ -645,7 +644,7 @@ class VisionAdapterMLPImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor x) {
-    for (int idx = 0; idx < mlps_.size(); ++idx) {
+    for (size_t idx = 0; idx < mlps_.size(); ++idx) {
       auto& mlp = mlps_[idx];
       auto res = std::get<0>(mlp)(x);
       res = std::get<1>(mlp)(res);
@@ -657,7 +656,7 @@ class VisionAdapterMLPImpl : public torch::nn::Module {
   }
 
   void load_state_dict(const StateDict& state_dict) {
-    for (int idx = 0; idx < mlps_.size(); ++idx) {
+    for (size_t idx = 0; idx < mlps_.size(); ++idx) {
       auto& mlp = mlps_[idx];
       const auto& lni_weight =
           state_dict
@@ -722,7 +721,7 @@ class VisionAdapterMLPImpl : public torch::nn::Module {
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    for (int idx = 0; idx < mlps_.size(); ++idx) {
+    for (size_t idx = 0; idx < mlps_.size(); ++idx) {
       CHECK(is_mpls_loaded.at(idx)) << "weight is not loaded for "
                                     << prefix + "layer." + std::to_string(idx);
     }
@@ -882,7 +881,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
       const std::optional<int64_t>& slice_start_id = std::nullopt,
       const std::optional<int64_t>& slice_end_id = std::nullopt) {
     std::vector<torch::Tensor> pixel_value_flat;
-    constexpr const int channel = 3;
+    constexpr int32_t channel = 3;
     std::vector<int64_t> num_slices;
     num_slices.reserve(pixel_values.size());
 

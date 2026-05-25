@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 
@@ -219,7 +220,7 @@ struct DiTForwardInput {
     return input;
   }
 
-  int batch_size = 0;
+  int32_t batch_size = 0;
 
   // Primary input text description for image generation
   std::vector<std::string> prompts;

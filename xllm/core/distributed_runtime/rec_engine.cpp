@@ -409,7 +409,7 @@ ForwardOutput RecEngine::LlmRecEnginePipeline::step(
       << "Split DP batch failed with dp_size as " << engine_.dp_size_
       << " and actual batch size as " << batches.size() << ".";
 
-  auto run_one_step = [this, &batches](int step_idx) -> bool {
+  auto run_one_step = [this, &batches](size_t step_idx) -> bool {
     Timer timer;
     auto forward_inputs = prepare_inputs(batches);
     COUNTER_ADD(prepare_input_latency_microseconds,
@@ -1017,7 +1017,7 @@ bool RecEngine::RecMultiRoundEnginePipeline::init_model_workers(
 #if defined(USE_NPU)
   if (world_size == 1) {
     std::string host;
-    int port;
+    int32_t port;
     net::parse_host_port_from_addr(
         engine_.options_.master_node_addr().value(), host, port);
     engine_.process_groups_.clear();
@@ -1224,7 +1224,7 @@ std::unique_ptr<RecEngine::RecEnginePipeline> RecEngine::create_pipeline(
       return std::make_unique<OneRecXAttentionEnginePipeline>(engine);
     default:
       LOG(FATAL) << "Unknown RecEngine pipeline type: "
-                 << static_cast<int>(type);
+                 << static_cast<int32_t>(type);
       return nullptr;
   }
 }

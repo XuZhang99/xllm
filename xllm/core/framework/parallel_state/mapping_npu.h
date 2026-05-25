@@ -141,8 +141,8 @@ class MappingNPU final {
                   const int32_t start_idx);
 
   std::tuple<int32_t, int32_t> get_current_group_id(
-      const std::vector<std::vector<int>>& rank_per_group,
-      int target_rank_id);
+      const std::vector<std::vector<int32_t>>& rank_per_group,
+      int32_t target_rank_id);
 
   nlohmann::json to_json();
 

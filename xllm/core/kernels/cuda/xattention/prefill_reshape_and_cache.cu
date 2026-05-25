@@ -148,7 +148,7 @@ void prefill_reshape_and_cache(
   const int64_t k_stride0 = proj_k.stride(0);
   const int64_t v_stride0 = proj_v.stride(0);
   const int64_t v_stride1 = proj_v.stride(1);
-  dim3 grid_dim(1, static_cast<unsigned int>(shared_len), 1);
+  dim3 grid_dim(1, static_cast<uint32_t>(shared_len), 1);
 
   DISPATCH_FLOATING_TYPES(
       proj_k.scalar_type(), "prefill_reshape_and_cache_kernel", [&] {

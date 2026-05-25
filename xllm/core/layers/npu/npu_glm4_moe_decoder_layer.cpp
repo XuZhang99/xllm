@@ -103,7 +103,7 @@ void NpuGlm4MoeDecoderImpl::param_from_args(
 void NpuGlm4MoeDecoderImpl::initialize_weight_tensors(
     const torch::TensorOptions& options) {
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
+  for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     at_weight_tensors[i] = torch::zeros({1}).to(options);
   }
 }
@@ -132,8 +132,8 @@ void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
       args.n_layers() > 1;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
-                                     ? std::vector<int>{-1, -1, -1, -1}
-                                     : std::vector<int>{1, 1, -1, 1};
+                                     ? {-1, -1, -1, -1}
+                                     : {1, 1, -1, 1};
 
   param.normEps = args.rms_norm_eps();
   // param.rank = parallel_args.rank();
@@ -159,9 +159,11 @@ void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
     WEIGHT_COUNT_PER_LAYER = 70;
   }
   param.hiddenSizePerAttentionHead = args.head_dim();
-  std::optional<long int> optionalValue = args.n_kv_heads();
-  param.numKeyValueHeadsPerRank = std::max(
-      1, static_cast<int>(optionalValue.value()) / parallel_args.world_size());
+  std::optional<int64_t> optional_value = args.n_kv_heads();
+  param.numKeyValueHeadsPerRank =
+      std::max(1,
+               static_cast<int32_t>(optional_value.value()) /
+                   parallel_args.world_size());
 
   param.numAttentionHeadsPerRank = args.n_heads() / dp_local_tp_size_;
 
@@ -232,65 +234,67 @@ void NpuGlm4MoeDecoderImpl::initialize_parallel_parameters(
 void NpuGlm4MoeDecoderImpl::initialize_quantization_parameters(
     atb_speed::glm::MoeLayerParam& param) {
   if (quantize_type_.empty()) {
-    param.packQuantType = {static_cast<int>(PackType::ALL_FP),
-                           static_cast<int>(PackType::ALL_FP)};
-    param.linearQuantType = {static_cast<int>(LinearType::FP),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::FP),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID)};
-    param.mlpLinearQuantType = {static_cast<int>(LinearType::FP),
-                                static_cast<int>(LinearType::INVALID),
-                                static_cast<int>(LinearType::FP),
-                                static_cast<int>(LinearType::INVALID)};
+    param.packQuantType = {static_cast<int32_t>(PackType::ALL_FP),
+                           static_cast<int32_t>(PackType::ALL_FP)};
+    param.linearQuantType = {static_cast<int32_t>(LinearType::FP),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::FP),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID)};
+    param.mlpLinearQuantType = {static_cast<int32_t>(LinearType::FP),
+                                static_cast<int32_t>(LinearType::INVALID),
+                                static_cast<int32_t>(LinearType::FP),
+                                static_cast<int32_t>(LinearType::INVALID)};
 
     if (layer_id_ < param.firstKDenseReplace) {
-      param.moeLinearQuantType = {static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID)};
+      param.moeLinearQuantType = {static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID)};
     } else {
-      param.moeLinearQuantType = {static_cast<int>(LinearType::FP),
-                                  static_cast<int>(LinearType::FP),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::FP)};
+      param.moeLinearQuantType = {static_cast<int32_t>(LinearType::FP),
+                                  static_cast<int32_t>(LinearType::FP),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::FP)};
     }
   } else {
     param.kvQuantHasOffset = 1;
     param.enableGMMSwigluQuant = 1;
     param.enableInitQuant = 1;
-    param.moePackQuantType = static_cast<int>(PackType::PACK_QUANT_UNDEFINED);
-    param.packQuantType = {static_cast<int>(PackType::ALL_W8A8_ANTI),
-                           static_cast<int>(PackType::ALL_W8A8_DYNAMIC_ANTI)};
-    param.linearQuantType = {static_cast<int>(LinearType::INT),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::FP),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID),
-                             static_cast<int>(LinearType::INVALID)};
+    param.moePackQuantType =
+        static_cast<int32_t>(PackType::PACK_QUANT_UNDEFINED);
+    param.packQuantType = {
+        static_cast<int32_t>(PackType::ALL_W8A8_ANTI),
+        static_cast<int32_t>(PackType::ALL_W8A8_DYNAMIC_ANTI)};
+    param.linearQuantType = {static_cast<int32_t>(LinearType::INT),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::FP),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID),
+                             static_cast<int32_t>(LinearType::INVALID)};
 
     if (layer_id_ < param.firstKDenseReplace) {
-      param.moeLinearQuantType = {static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INVALID)};
+      param.moeLinearQuantType = {static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INVALID)};
 
-      param.mlpLinearQuantType = {static_cast<int>(LinearType::INT),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::FP),
-                                  static_cast<int>(LinearType::INVALID)};
+      param.mlpLinearQuantType = {static_cast<int32_t>(LinearType::INT),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::FP),
+                                  static_cast<int32_t>(LinearType::INVALID)};
     } else {
-      param.moeLinearQuantType = {static_cast<int>(LinearType::INT),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INT),
-                                  static_cast<int>(LinearType::INVALID)};
+      param.moeLinearQuantType = {static_cast<int32_t>(LinearType::INT),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INT),
+                                  static_cast<int32_t>(LinearType::INVALID)};
 
-      param.mlpLinearQuantType = {static_cast<int>(LinearType::INT),
-                                  static_cast<int>(LinearType::INVALID),
-                                  static_cast<int>(LinearType::INT),
-                                  static_cast<int>(LinearType::INVALID)};
+      param.mlpLinearQuantType = {static_cast<int32_t>(LinearType::INT),
+                                  static_cast<int32_t>(LinearType::INVALID),
+                                  static_cast<int32_t>(LinearType::INT),
+                                  static_cast<int32_t>(LinearType::INVALID)};
     }
   }
 }
@@ -299,7 +303,7 @@ void NpuGlm4MoeDecoderImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   Device::empty_cache(device_.index());
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
+  for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
   }
@@ -356,7 +360,7 @@ torch::Tensor NpuGlm4MoeDecoderImpl::forward(
     const ModelInputParams& input_params,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
-    int node_id) {
+    int32_t node_id) {
   atb::Status st;
   if (!input_params.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
@@ -438,7 +442,7 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
       atb_speed::Utils::AtTensor2Tensor(zero_hot_);
 
-  int32_t input_idx = WEIGHT_COUNT_PER_LAYER + 15;
+  size_t input_idx = WEIGHT_COUNT_PER_LAYER + 15;
 
   if (is_prefill &&
       (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||

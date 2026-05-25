@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
+
 namespace xllm {
 
 enum class PolicyType {
@@ -27,7 +29,7 @@ enum class PolicyType {
 
 struct DiTBaseCacheOptions {
   // the number of warmup steps.
-  int warmup_steps = 0;
+  int32_t warmup_steps = 0;
 };
 
 struct FBCacheOptions : public DiTBaseCacheOptions {
@@ -37,10 +39,10 @@ struct FBCacheOptions : public DiTBaseCacheOptions {
 
 struct TaylorSeerOptions : public DiTBaseCacheOptions {
   // the number of derivatives to use in TaylorSeer.
-  int n_derivatives = 3;
+  int32_t n_derivatives = 3;
 
   // the interval steps to skip for derivative calculation.
-  int skip_interval_steps = 3;
+  int32_t skip_interval_steps = 3;
 };
 
 struct FBCacheTaylorSeerOptions : public DiTBaseCacheOptions {
@@ -48,7 +50,7 @@ struct FBCacheTaylorSeerOptions : public DiTBaseCacheOptions {
   float residual_diff_threshold = 0.09f;
 
   // the number of derivatives to use in TaylorSeer.
-  int n_derivatives = 3;
+  int32_t n_derivatives = 3;
 };
 
 struct ResidualCacheOptions {

@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -36,7 +37,7 @@ class LlamaDecoderLoader : public BaseLoader {
   void merge_host_at_weights() override;
 
   bool enableAddNorm_ = false;
-  int rank_id_ = 0;
+  int32_t rank_id_ = 0;
 };
 
 }  // namespace layer
