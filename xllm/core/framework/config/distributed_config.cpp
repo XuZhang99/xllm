@@ -69,7 +69,7 @@ void DistributedConfig::from_json(const JsonReader& json) {
       .xtensor_master_node_addr(json.value_or<std::string>(
           "xtensor_master_node_addr", xtensor_master_node_addr()))
       .nnodes(json.value_or<int32_t>("nnodes", nnodes()))
-      .node_rank(json.value_or<int32_t>("node_rank", node_rank()))
+      .node_rank(config::rank_value_or<int32_t>(json, "node_rank", node_rank()))
       .device_ip(json.value_or<std::string>("device_ip", device_ip()))
       .etcd_addr(json.value_or<std::string>("etcd_addr", etcd_addr()))
       .etcd_namespace(

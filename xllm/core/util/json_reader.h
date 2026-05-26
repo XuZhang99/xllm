@@ -46,6 +46,9 @@ class JsonReader {
   // check if the json contains the key, key can be nested with dot notation
   bool contains(const std::string& key) const;
 
+  // get raw json value by key, key can be nested with dot notation
+  std::optional<nlohmann::json> json_value(const std::string& key) const;
+
   template <typename T, typename T2>
   T value_or(const std::vector<std::string>& keys, T2 default_value) const {
     for (const auto& key : keys) {
@@ -68,22 +71,12 @@ class JsonReader {
 
   template <typename T>
   std::optional<T> value(const std::string& key) const {
-    // slipt the key by '.' then traverse the json object
-    const std::vector<std::string> keys = absl::StrSplit(key, '.');
-    nlohmann::json data = data_;
-    for (const auto& k : keys) {
-      if (data.contains(k)) {
-        data = data[k];
-      } else {
-        return std::nullopt;
-      }
-    }
-
-    if (data.is_null() || data.is_object()) {
+    const std::optional<nlohmann::json> data = json_value(key);
+    if (!data || data->is_null() || data->is_object()) {
       // cannot convert null or object data to T
       return std::nullopt;
     }
-    return data.get<T>();
+    return data->get<T>();
   }
 
   nlohmann::json data() const { return data_; }

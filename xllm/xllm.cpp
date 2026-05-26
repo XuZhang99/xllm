@@ -385,9 +385,7 @@ int run() {
     execution_config.random_seed(std::random_device{}() % (1 << 30));
   }
 
-  if (distributed_config.node_rank() == 0) {
-    config::dump_startup_config();
-  }
+  config::dump_startup_config();
 
   // Create Master
   Options options = create_options(
@@ -484,7 +482,7 @@ int main(int argc, char** argv) {
 
   // Check if model path is provided
   if (::xllm::ModelConfig::get_instance().model().empty()) {
-    HelpFormatter::print_error("--model flag is required");
+    HelpFormatter::print_error("--model and --node_rank flags are required");
     return 1;
   }
 

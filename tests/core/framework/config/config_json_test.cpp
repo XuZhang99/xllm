@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <gflags/gflags.h>
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -23,8 +24,12 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/distributed_config.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "core/framework/config/service_config.h"
+#include "core/framework/config/speculative_config.h"
 
 namespace xllm {
 namespace {
@@ -46,6 +51,14 @@ inline constexpr std::string_view kMalformedConfig = R"json({
   "block_size":
 })json";
 
+inline constexpr std::string_view kRankBoundConfig = R"json({
+  "port": [29000, 29001],
+  "devices": ["cuda:0", "cuda:1"],
+  "draft_devices": ["cuda:0", "cuda:1"],
+  "node_rank": [0, 1],
+  "nnodes": 2
+})json";
+
 class ConfigJsonFileFlagGuard final {
  public:
   explicit ConfigJsonFileFlagGuard(const std::string& config_json_file)
@@ -57,6 +70,19 @@ class ConfigJsonFileFlagGuard final {
 
  private:
   std::string old_config_json_file_;
+};
+
+class NodeRankFlagGuard final {
+ public:
+  explicit NodeRankFlagGuard(int32_t node_rank)
+      : old_node_rank_(FLAGS_node_rank) {
+    FLAGS_node_rank = node_rank;
+  }
+
+  ~NodeRankFlagGuard() { FLAGS_node_rank = old_node_rank_; }
+
+ private:
+  int32_t old_node_rank_;
 };
 
 class DumpConfigJsonFlagGuard final {
@@ -75,6 +101,38 @@ class DumpConfigJsonFlagGuard final {
  private:
   bool old_enable_dump_config_json_;
   std::string old_dump_config_json_file_;
+};
+
+class RankBoundStartupConfigGuard final {
+ public:
+  RankBoundStartupConfigGuard()
+      : service_config_(ServiceConfig::get_instance()),
+        model_config_(ModelConfig::get_instance()),
+        speculative_config_(SpeculativeConfig::get_instance()),
+        distributed_config_(DistributedConfig::get_instance()),
+        old_port_(service_config_.port()),
+        old_devices_(model_config_.devices()),
+        old_draft_devices_(speculative_config_.draft_devices()),
+        old_nnodes_(distributed_config_.nnodes()),
+        old_node_rank_(distributed_config_.node_rank()) {}
+
+  ~RankBoundStartupConfigGuard() {
+    service_config_.port(old_port_);
+    model_config_.devices(old_devices_);
+    speculative_config_.draft_devices(old_draft_devices_);
+    distributed_config_.nnodes(old_nnodes_).node_rank(old_node_rank_);
+  }
+
+ private:
+  ServiceConfig& service_config_;
+  ModelConfig& model_config_;
+  SpeculativeConfig& speculative_config_;
+  DistributedConfig& distributed_config_;
+  int32_t old_port_;
+  std::string old_devices_;
+  std::string old_draft_devices_;
+  int32_t old_nnodes_;
+  int32_t old_node_rank_;
 };
 
 class StartupConfigGuard final {
@@ -274,6 +332,73 @@ TEST(ConfigJsonTest, MissingJsonFileKeepsFlagDefaults) {
   EXPECT_EQ(scheduler_config.max_seqs_per_batch(), 1024);
 }
 
+TEST(ConfigJsonTest, InitializeReadsRankBoundValuesFromArray) {
+  const std::filesystem::path config_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_config_json_test_rank_bound.json";
+  write_config_file(config_path, kRankBoundConfig);
+
+  ConfigJsonFileFlagGuard flag_guard(config_path.string());
+  NodeRankFlagGuard node_rank_guard(1);
+
+  ServiceConfig service_config;
+  service_config.initialize();
+
+  ModelConfig model_config;
+  model_config.initialize();
+
+  SpeculativeConfig speculative_config;
+  speculative_config.initialize();
+
+  DistributedConfig distributed_config;
+  distributed_config.initialize();
+
+  EXPECT_EQ(service_config.port(), 29001);
+  EXPECT_EQ(model_config.devices(), "cuda:1");
+  EXPECT_EQ(speculative_config.draft_devices(), "cuda:1");
+  EXPECT_EQ(distributed_config.nnodes(), 2);
+  EXPECT_EQ(distributed_config.node_rank(), 1);
+
+  std::filesystem::remove(config_path);
+}
+
+TEST(ConfigJsonTest, FromJsonReadsRankZeroWhenNodeRankExplicitlySet) {
+  GFLAGS_NAMESPACE::FlagSaver flag_saver;
+  ASSERT_FALSE(
+      GFLAGS_NAMESPACE::SetCommandLineOption("node_rank", "0").empty());
+  const JsonReader json = config::parse_json_string(kRankBoundConfig);
+
+  ServiceConfig service_config;
+  service_config.from_flags();
+  service_config.from_json(json);
+
+  ModelConfig model_config;
+  model_config.from_flags();
+  model_config.from_json(json);
+
+  DistributedConfig distributed_config;
+  distributed_config.from_flags();
+  distributed_config.from_json(json);
+
+  EXPECT_EQ(service_config.port(), 29000);
+  EXPECT_EQ(model_config.devices(), "cuda:0");
+  EXPECT_EQ(distributed_config.node_rank(), 0);
+}
+
+TEST(ConfigJsonTest, RankBoundJsonRequiresExplicitNodeRankSelector) {
+  GFLAGS_NAMESPACE::FlagSaver flag_saver;
+  FLAGS_node_rank = 0;
+  const JsonReader json = config::parse_json_string(kRankBoundConfig);
+
+  EXPECT_DEATH(
+      {
+        ServiceConfig service_config;
+        service_config.from_flags();
+        service_config.from_json(json);
+      },
+      "--node_rank");
+}
+
 TEST(ConfigJsonTest, DumpStartupConfigSkipsWhenDisabled) {
   const std::filesystem::path dump_path =
       std::filesystem::temp_directory_path() /
@@ -314,6 +439,208 @@ TEST(ConfigJsonTest, DumpStartupConfigWritesNonDefaultValuesOnly) {
   EXPECT_FALSE(config_json.contains("kv_cache_dtype"));
   EXPECT_FALSE(config_json.contains("max_seqs_per_batch"));
   EXPECT_FALSE(config_json.contains("priority_strategy"));
+
+  std::filesystem::remove(dump_path);
+}
+
+TEST(ConfigJsonTest, DumpStartupConfigMergesRankBoundValuesIntoArrays) {
+  const std::filesystem::path dump_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_dump_config_json_test_rank_bound.json";
+  std::filesystem::remove(dump_path);
+  DumpConfigJsonFlagGuard flag_guard(dump_path.string());
+  StartupConfigGuard startup_config_guard;
+  RankBoundStartupConfigGuard rank_bound_startup_config_guard;
+
+  FLAGS_enable_dump_config_json = true;
+
+  DistributedConfig::get_instance().nnodes(2).node_rank(1);
+  ServiceConfig::get_instance().port(29001);
+  ModelConfig::get_instance().devices("cuda:1");
+  SpeculativeConfig::get_instance().draft_devices("cuda:1");
+  KVCacheConfig::get_instance().block_size(512);
+  config::dump_startup_config();
+
+  DistributedConfig::get_instance().nnodes(2).node_rank(0);
+  ServiceConfig::get_instance().port(29000);
+  ModelConfig::get_instance().devices("cuda:0");
+  SpeculativeConfig::get_instance().draft_devices("cuda:0");
+  KVCacheConfig::get_instance().block_size(256);
+  config::dump_startup_config();
+
+  ASSERT_TRUE(std::filesystem::exists(dump_path));
+  const nlohmann::ordered_json config_json = read_json_file(dump_path);
+  ASSERT_TRUE(config_json.at("port").is_array());
+  ASSERT_TRUE(config_json.at("devices").is_array());
+  ASSERT_TRUE(config_json.at("draft_devices").is_array());
+  ASSERT_TRUE(config_json.at("node_rank").is_array());
+
+  EXPECT_EQ(config_json.at("port").at(0).get<int32_t>(), 29000);
+  EXPECT_EQ(config_json.at("port").at(1).get<int32_t>(), 29001);
+  EXPECT_EQ(config_json.at("devices").at(0).get<std::string>(), "cuda:0");
+  EXPECT_EQ(config_json.at("devices").at(1).get<std::string>(), "cuda:1");
+  EXPECT_EQ(config_json.at("draft_devices").at(0).get<std::string>(), "cuda:0");
+  EXPECT_EQ(config_json.at("draft_devices").at(1).get<std::string>(), "cuda:1");
+  EXPECT_EQ(config_json.at("node_rank").at(0).get<int32_t>(), 0);
+  EXPECT_EQ(config_json.at("node_rank").at(1).get<int32_t>(), 1);
+  EXPECT_EQ(config_json.at("nnodes").get<int32_t>(), 2);
+  EXPECT_EQ(config_json.at("block_size").get<int32_t>(), 256);
+
+  std::filesystem::remove(dump_path);
+}
+
+TEST(ConfigJsonTest, DumpStartupConfigOmitsRankValuesMatchingRankZero) {
+  const std::filesystem::path dump_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_dump_config_json_test_rank_zero_default.json";
+  std::filesystem::remove(dump_path);
+  DumpConfigJsonFlagGuard flag_guard(dump_path.string());
+  StartupConfigGuard startup_config_guard;
+  RankBoundStartupConfigGuard rank_bound_startup_config_guard;
+
+  FLAGS_enable_dump_config_json = true;
+
+  DistributedConfig::get_instance().nnodes(2).node_rank(1);
+  ServiceConfig::get_instance().port(29000);
+  ModelConfig::get_instance().devices("cuda:0");
+  config::dump_startup_config();
+
+  DistributedConfig::get_instance().nnodes(2).node_rank(0);
+  ServiceConfig::get_instance().port(29000);
+  ModelConfig::get_instance().devices("cuda:0");
+  config::dump_startup_config();
+
+  ASSERT_TRUE(std::filesystem::exists(dump_path));
+  const nlohmann::ordered_json config_json = read_json_file(dump_path);
+  ASSERT_TRUE(config_json.at("port").is_array());
+  ASSERT_TRUE(config_json.at("devices").is_array());
+  EXPECT_FALSE(config_json.contains("draft_devices"));
+  EXPECT_EQ(config_json.at("port").size(), 1);
+  EXPECT_EQ(config_json.at("devices").size(), 1);
+  EXPECT_EQ(config_json.at("port").at(0).get<int32_t>(), 29000);
+  EXPECT_EQ(config_json.at("devices").at(0).get<std::string>(), "cuda:0");
+
+  const JsonReader json = config::parse_json_string(config_json.dump());
+  NodeRankFlagGuard node_rank_guard(1);
+
+  ServiceConfig service_config;
+  service_config.from_flags();
+  service_config.from_json(json);
+
+  ModelConfig model_config;
+  model_config.from_flags();
+  model_config.from_json(json);
+
+  SpeculativeConfig speculative_config;
+  speculative_config.from_flags();
+  speculative_config.from_json(json);
+
+  EXPECT_EQ(service_config.port(), 29000);
+  EXPECT_EQ(model_config.devices(), "cuda:0");
+  EXPECT_EQ(speculative_config.draft_devices(), "npu:0");
+
+  std::filesystem::remove(dump_path);
+}
+
+TEST(ConfigJsonTest,
+     DumpStartupConfigOmitsDefaultRankValuesAfterRankZeroFirst) {
+  const std::filesystem::path dump_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_dump_config_json_test_rank_zero_first_default.json";
+  std::filesystem::remove(dump_path);
+  DumpConfigJsonFlagGuard flag_guard(dump_path.string());
+  StartupConfigGuard startup_config_guard;
+  RankBoundStartupConfigGuard rank_bound_startup_config_guard;
+
+  FLAGS_enable_dump_config_json = true;
+
+  DistributedConfig::get_instance().nnodes(2).node_rank(0);
+  ServiceConfig::get_instance().port(29000);
+  ModelConfig::get_instance().devices("cuda:0");
+  config::dump_startup_config();
+
+  DistributedConfig::get_instance().nnodes(2).node_rank(1);
+  ServiceConfig::get_instance().port(29000);
+  ModelConfig::get_instance().devices("cuda:0");
+  config::dump_startup_config();
+
+  ASSERT_TRUE(std::filesystem::exists(dump_path));
+  const nlohmann::ordered_json config_json = read_json_file(dump_path);
+  EXPECT_FALSE(config_json.contains("draft_devices"));
+  EXPECT_FALSE(config_json.contains("__rank_dump_seen"));
+
+  std::filesystem::remove(dump_path);
+}
+
+TEST(ConfigJsonTest,
+     DumpStartupConfigKeepsDefaultRankValueWhenRankZeroDiffers) {
+  const std::filesystem::path dump_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_dump_config_json_test_rank_default_override.json";
+  std::filesystem::remove(dump_path);
+  DumpConfigJsonFlagGuard flag_guard(dump_path.string());
+  StartupConfigGuard startup_config_guard;
+  RankBoundStartupConfigGuard rank_bound_startup_config_guard;
+
+  FLAGS_enable_dump_config_json = true;
+
+  DistributedConfig::get_instance().nnodes(2).node_rank(1);
+  ServiceConfig::get_instance().port(29001);
+  ModelConfig::get_instance().devices("cuda:1");
+  SpeculativeConfig::get_instance().draft_devices("npu:0");
+  config::dump_startup_config();
+
+  DistributedConfig::get_instance().nnodes(2).node_rank(0);
+  ServiceConfig::get_instance().port(29000);
+  ModelConfig::get_instance().devices("cuda:0");
+  SpeculativeConfig::get_instance().draft_devices("cuda:0");
+  config::dump_startup_config();
+
+  ASSERT_TRUE(std::filesystem::exists(dump_path));
+  const nlohmann::ordered_json config_json = read_json_file(dump_path);
+  ASSERT_TRUE(config_json.at("draft_devices").is_array());
+  EXPECT_EQ(config_json.at("draft_devices").at(0).get<std::string>(), "cuda:0");
+  EXPECT_EQ(config_json.at("draft_devices").at(1).get<std::string>(), "npu:0");
+  EXPECT_FALSE(config_json.contains("__rank_dump_seen"));
+
+  std::filesystem::remove(dump_path);
+}
+
+TEST(ConfigJsonTest, DumpStartupConfigClearsStaleSharedValuesOnRankZero) {
+  const std::filesystem::path dump_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_dump_config_json_test_clear_stale_shared.json";
+  std::filesystem::remove(dump_path);
+  write_config_file(dump_path, R"json({
+    "block_size": 256,
+    "port": [28000, 28001],
+    "devices": ["cuda:0", "cuda:1"],
+    "node_rank": [0, 1]
+  })json");
+  DumpConfigJsonFlagGuard flag_guard(dump_path.string());
+  StartupConfigGuard startup_config_guard;
+  RankBoundStartupConfigGuard rank_bound_startup_config_guard;
+  const KVCacheConfig default_kv_cache_config;
+
+  FLAGS_enable_dump_config_json = true;
+
+  KVCacheConfig::get_instance().block_size(
+      default_kv_cache_config.block_size());
+  DistributedConfig::get_instance().nnodes(2).node_rank(0);
+  ServiceConfig::get_instance().port(29000);
+  ModelConfig::get_instance().devices("cuda:0");
+  config::dump_startup_config();
+
+  DistributedConfig::get_instance().nnodes(2).node_rank(1);
+  ServiceConfig::get_instance().port(29001);
+  ModelConfig::get_instance().devices("cuda:1");
+  config::dump_startup_config();
+
+  ASSERT_TRUE(std::filesystem::exists(dump_path));
+  const nlohmann::ordered_json config_json = read_json_file(dump_path);
+  EXPECT_FALSE(config_json.contains("block_size"));
+  EXPECT_EQ(config_json.at("port").at(0).get<int32_t>(), 29000);
+  EXPECT_EQ(config_json.at("port").at(1).get<int32_t>(), 29001);
 
   std::filesystem::remove(dump_path);
 }

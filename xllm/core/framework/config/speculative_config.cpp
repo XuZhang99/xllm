@@ -91,8 +91,8 @@ void SpeculativeConfig::from_flags() {
 
 void SpeculativeConfig::from_json(const JsonReader& json) {
   draft_model(json.value_or<std::string>("draft_model", draft_model()))
-      .draft_devices(
-          json.value_or<std::string>("draft_devices", draft_devices()))
+      .draft_devices(config::rank_value_or<std::string>(
+          json, "draft_devices", draft_devices()))
       .num_speculative_tokens(json.value_or<int32_t>("num_speculative_tokens",
                                                      num_speculative_tokens()))
       .speculative_algorithm(json.value_or<std::string>(

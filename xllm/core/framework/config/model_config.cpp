@@ -123,7 +123,7 @@ void ModelConfig::from_json(const JsonReader& json) {
       .model(json.value_or<std::string>("model", model()))
       .backend(json.value_or<std::string>("backend", backend()))
       .task(json.value_or<std::string>("task", task()))
-      .devices(json.value_or<std::string>("devices", devices()))
+      .devices(config::rank_value_or<std::string>(json, "devices", devices()))
       .limit_image_per_prompt(json.value_or<int32_t>("limit_image_per_prompt",
                                                      limit_image_per_prompt()))
       .reasoning_parser(

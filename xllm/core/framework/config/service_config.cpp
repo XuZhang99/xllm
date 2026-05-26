@@ -72,7 +72,7 @@ void ServiceConfig::from_flags() {
 
 void ServiceConfig::from_json(const JsonReader& json) {
   host(json.value_or<std::string>("host", host()))
-      .port(json.value_or<int32_t>("port", port()))
+      .port(config::rank_value_or<int32_t>(json, "port", port()))
       .rpc_idle_timeout_s(
           json.value_or<int32_t>("rpc_idle_timeout_s", rpc_idle_timeout_s()))
       .rpc_channel_timeout_ms(json.value_or<int32_t>("rpc_channel_timeout_ms",
