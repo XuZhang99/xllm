@@ -1,0 +1,9 @@
+{
+  "block_size": 32,
+  "enable_prefix_cache": false,
+  "max_tokens_per_batch": 81920,
+  "max_seqs_per_batch": 2048,
+  "enable_schedule_overlap": true,
+  "enable_chunked_prefill": false,
+  "max_tokens_per_chunk_for_prefill": 81920
+}

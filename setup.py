@@ -757,12 +757,13 @@ if __name__ == "__main__":
                   "test": test_cmd,
                   'bdist_wheel': BuildDistWheel},
         options=options,
-        packages=find_namespace_packages(include=["scripts", "scripts.*"]),
+        packages=find_namespace_packages(
+            include=["scripts", "scripts.*", "xllm", "xllm.pybind"]
+        ),
+        include_package_data=True,
+        package_data={
+            "xllm": ["configs/*.json"],
+        },
         zip_safe=False,
-        py_modules=["xllm/launch_server", "xllm/__init__",
-                    "xllm/pybind/llm", "xllm/pybind/vlm",
-                    "xllm/pybind/embedding", "xllm/pybind/utils",
-                    "xllm/pybind/args", "xllm/pybind/params",
-                    "xllm/pybind/errors", "xllm/pybind/mm_utils"],
         python_requires=">=3.10",
     )
