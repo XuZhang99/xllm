@@ -40,7 +40,7 @@ class ServerProcess:
 @dataclass
 class StartupConfig:
     config_json: dict[str, object] | None
-    temporary_config_json_file: str | None = None
+    auto_config_json_file: str | None = None
 
 
 def _package_binary_path() -> str:
@@ -317,7 +317,7 @@ def _load_automatic_config_json(
     )
     return StartupConfig(
         config_json=config_json,
-        temporary_config_json_file=config_path,
+        auto_config_json_file=config_path,
     )
 
 
@@ -563,8 +563,8 @@ def launch_server(argv: Sequence[str] | None = None) -> int:
         finally:
             _close_logs(processes)
     finally:
-        if startup_config.temporary_config_json_file is not None:
-            os.remove(startup_config.temporary_config_json_file)
+        if startup_config.auto_config_json_file is not None:
+            os.remove(startup_config.auto_config_json_file)
 
 
 def main() -> None:
