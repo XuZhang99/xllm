@@ -37,7 +37,7 @@ namespace xllm {
 class WorkerClient {
  public:
   WorkerClient() = default;
-  explicit WorkerClient(Worker* w) : worker_(w) {}
+  explicit WorkerClient(Worker* w);
   virtual ~WorkerClient() = default;
 
   // initialize model, cache manager. blocking call
@@ -151,6 +151,17 @@ class WorkerClient {
 
  private:
   Worker* worker_ = nullptr;  // not owend
+
+  // Dedicated single-thread pool for dispatching the in-process worker step
+  // pipeline. The engine fans out one step per worker; without a per-worker
+  // dispatch thread, the engine thread would synchronously serialise each
+  // worker's `prepare_work_before_execute` (which can issue blocking CUDA
+  // calls like `cudaHostAlloc`). With multi-device single-process NCCL the
+  // first worker's step starts its collectives and busy-waits for the
+  // partner; if the partner is still queued behind the engine-thread
+  // prepare, the GPUs deadlock. Running prepare+dispatch on this dedicated
+  // thread per WorkerClient lets all workers begin their steps in parallel.
+  std::unique_ptr<ThreadPool> dispatch_threadpool_;
 };
 
 }  // namespace xllm

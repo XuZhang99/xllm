@@ -33,6 +33,7 @@ cc_library(
     process_group.cpp
     $<$<BOOL:${USE_NPU}>:npu_rank_table_env.cpp>
     $<$<BOOL:${USE_NPU}>:npu_process_group.cpp>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_DCU}>>:cuda_process_group.cpp>
     collective_communicator.cpp
     dit_collective_communicator.cpp
   DEPS
@@ -44,6 +45,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:hccl>
     $<$<BOOL:${USE_NPU}>:hcomm>
     $<$<BOOL:${USE_NPU}>:xllm_atb_layers>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_DCU}>>:nccl>
     gflags::gflags
     glog::glog
 )

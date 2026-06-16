@@ -19,9 +19,10 @@ limitations under the License.
 #include "core/framework/config/config_utils.h"
 
 DEFINE_string(master_node_addr,
-              "127.0.0.1:19888",
+              "",
               "The master address for multi-node distributed serving(e.g. "
-              "10.18.1.1:9999).");
+              "10.18.1.1:9999). Leave empty to run in single-node "
+              "single-process mode.");
 
 DEFINE_string(
     xtensor_master_node_addr,

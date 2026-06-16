@@ -24,6 +24,12 @@ limitations under the License.
 #include "npu_process_group.h"
 #endif
 
+#if defined(USE_CUDA) || defined(USE_DCU)
+#include <nccl.h>
+
+#include "cuda_process_group.h"
+#endif
+
 namespace xllm {
 namespace parallel_state {
 
@@ -461,17 +467,42 @@ std::vector<std::unique_ptr<ProcessGroup>> create_local_process_groups(
     process_groups.emplace_back(std::make_unique<ProcessGroupImpl>(
         /*rank=*/i, world_size, devices[i], comms[i]));
   }
-#elif defined(USE_CUDA) || defined(USE_MLU) || defined(USE_ILU) || \
-    defined(USE_DCU)
-  // For GPU: use create_process_group with localhost
-  // Parse port from options.master_node_addr() to support multiple instances
+#elif defined(USE_CUDA) || defined(USE_DCU)
+  // Single-process multi-device path: use ncclCommInitAll so every device
+  // shares one NCCL world. Two c10d::ProcessGroupNCCL instances coexisting
+  // inside the same process (the original "TCPStore + per-device PG" design)
+  // can dispatch collectives in mismatched orders and deadlock the
+  // local_tp_group under load (see commit history); ncclCommInitAll-backed
+  // groups sidestep that by sharing a single NCCL bootstrap.
+  std::vector<int> device_idxs;
+  device_idxs.reserve(devices.size());
+  for (const auto& device : devices) {
+    device_idxs.push_back(device.index());
+  }
+  std::vector<ncclComm_t> comms(devices.size());
+  ncclResult_t init_result =
+      ncclCommInitAll(comms.data(), world_size, device_idxs.data());
+  CHECK(init_result == ncclSuccess)
+      << "ncclCommInitAll failed: " << ncclGetErrorString(init_result);
+  for (int32_t i = 0; i < world_size; ++i) {
+    process_groups.emplace_back(std::make_unique<ProcessGroupImpl>(
+        /*rank=*/i, world_size, devices[i], comms[i]));
+  }
+#elif defined(USE_MLU) || defined(USE_ILU)
+  // For MLU/ILU: still use the TCPStore-bootstrapped per-device PG. These
+  // backends do not have an `ncclCommInitAll`-equivalent wired in here yet,
+  // so single-process multi-device may not be safe for them.
   std::string host;
   int port;
 
-  // Parse port from options.master_node_addr()
-  // Note: master_node_addr always has a default value (127.0.0.1:19888)
-  net::parse_host_port_from_addr(
-      options.master_node_addr().value(), host, port);
+  std::string master_addr = options.master_node_addr().value_or("");
+  if (master_addr.empty()) {
+    // Fallback for single-node single-process mode. Pick an unused TCP port
+    // dynamically so concurrent xllm instances on the same host do not
+    // collide on a fixed default port.
+    master_addr = "127.0.0.1:" + std::to_string(net::get_local_free_port());
+  }
+  net::parse_host_port_from_addr(master_addr, host, port);
 
   // Override host to localhost for local communication
   host = "127.0.0.1";

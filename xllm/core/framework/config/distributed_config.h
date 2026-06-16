@@ -52,7 +52,7 @@ class DistributedConfig final {
     return kOptionCategory;
   }
 
-  PROPERTY(std::string, master_node_addr) = "127.0.0.1:19888";
+  PROPERTY(std::string, master_node_addr) = "";
 
   PROPERTY(std::string, xtensor_master_node_addr) = "127.0.0.1:19889";
 
