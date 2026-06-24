@@ -37,7 +37,7 @@ namespace xllm {
 class WorkerClient {
  public:
   WorkerClient() = default;
-  explicit WorkerClient(Worker* w);
+  WorkerClient(Worker* w, const runtime::Options& options);
   virtual ~WorkerClient() = default;
 
   // initialize model, cache manager. blocking call
@@ -150,7 +150,22 @@ class WorkerClient {
   virtual folly::SemiFuture<int64_t> get_active_activation_memory_async();
 
  private:
+  // Build the fake-token RawForwardOutput that schedule-overlap expects in
+  // place of the real (still in-flight) forward result. Mirrors the
+  // multi-process WorkerService::step overlap branch: one output per sampled
+  // sequence carrying a single negative placeholder token (id = -(i+1)),
+  // which WorkerImpl::update_input_by_last_step_output replaces with the real
+  // token of the previous step on the next iteration.
+  void build_fake_overlap_output(const ForwardInput& input,
+                                 RawForwardOutput& raw_output) const;
+
   Worker* worker_ = nullptr;  // not owend
+
+  // Runtime options for the in-process worker. Used to read
+  // enable_schedule_overlap() from the SAME source WorkerImpl branches on
+  // (options_.enable_schedule_overlap_), so the client and worker never
+  // disagree about whether the producer-consumer overlap pipeline is active.
+  runtime::Options options_;
 
   // Dedicated single-thread pool for dispatching the in-process worker step
   // pipeline. The engine fans out one step per worker; without a per-worker

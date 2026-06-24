@@ -228,7 +228,7 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
     workers_.emplace_back(std::make_unique<Worker>(
         parallel_args, devices[i], options, worker_type));
     worker_clients_.emplace_back(
-        std::make_shared<WorkerClient>(workers_.back().get()));
+        std::make_shared<WorkerClient>(workers_.back().get(), options));
   }
 }
 
