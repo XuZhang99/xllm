@@ -75,6 +75,7 @@ AttentionMetadata build_attention_metadata(
 
   // for flashinfer
   attn_metadata.paged_kv_indptr = params.attention.device.paged_kv_indptr;
+  attn_metadata.paged_kv_indptr_vec = params.attention.host.paged_kv_indptr;
   attn_metadata.paged_kv_indices = params.attention.device.paged_kv_indices;
   attn_metadata.paged_kv_last_page_len =
       params.attention.device.paged_kv_last_page_len;

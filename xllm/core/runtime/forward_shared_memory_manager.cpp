@@ -2170,7 +2170,10 @@ inline void deserialize_forward_input_payload(
                          input_params.attention.device.kv_seq_lens,
                          input_params.attention.host.kv_seq_lens,
                          stream);
-  read_tensor(context, input_params.attention.device.paged_kv_indptr, stream);
+  read_tensor_and_vector(context,
+                         input_params.attention.device.paged_kv_indptr,
+                         input_params.attention.host.paged_kv_indptr,
+                         stream);
   read_tensor(context, input_params.attention.device.paged_kv_indices, stream);
   read_tensor(
       context, input_params.attention.device.paged_kv_last_page_len, stream);
@@ -2504,7 +2507,9 @@ inline void serialize_forward_input_sections(
   write_host_vector_or_tensor(context,
                               input_params.attention.host.kv_seq_lens,
                               input_params.attention.device.kv_seq_lens);
-  write_tensor(context, input_params.attention.device.paged_kv_indptr);
+  write_host_vector_or_tensor(context,
+                              input_params.attention.host.paged_kv_indptr,
+                              input_params.attention.device.paged_kv_indptr);
   write_tensor(context, input_params.attention.device.paged_kv_indices);
   write_tensor(context, input_params.attention.device.paged_kv_last_page_len);
   write_tensor(context, input_params.attention.device.new_cache_slot_offsets);

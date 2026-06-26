@@ -350,6 +350,11 @@ struct AttentionHostInput {
   std::vector<int32_t> kv_cache_tokens_nums;
   std::vector<int32_t> ring_cur_seqlen;
   std::vector<int32_t> ring_cache_seqlen;
+  // Host copy of the flashinfer paged-KV index pointer (cumulative, leading
+  // zero). Lets the CUDA plan-info path build its indptr on the host instead
+  // of a mid-forward .to(kCPU), which can deadlock single-process multi-device
+  // overlap on libcuda's internal driver lock.
+  std::vector<int32_t> paged_kv_indptr;
   torch::Tensor block_tables;
 };
 

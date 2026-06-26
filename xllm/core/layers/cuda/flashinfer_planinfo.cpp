@@ -60,14 +60,23 @@ static ffi::Array<int64_t> deep_copy_plan_info(const ffi::Array<int64_t>& src) {
   return ffi::Array<int64_t>(temp_vec.begin(), temp_vec.end());
 }
 
-static torch::Tensor get_kv_len_arr_host(const AttentionMetadata& attn_meta) {
-  if (attn_meta.kv_seq_lens.defined()) {
-    return attn_meta.kv_seq_lens.to(torch::kCPU);
-  }
+// Build a CPU int32 tensor from a host vector. Used to feed flashinfer's
+// plan() with indptr arrays without a device->host copy. Doing the .to(kCPU)
+// mid-forward can deadlock single-process multi-device overlap: the blocking
+// D2H holds libcuda's internal driver lock while another worker thread needs
+// it (see flashinfer_planinfo deadlock investigation).
+static torch::Tensor host_int_tensor(const std::vector<int32_t>& values) {
+  CHECK(!values.empty()) << "host indptr vector must not be empty.";
+  return torch::tensor(values, torch::kInt);
+}
 
-  CHECK(attn_meta.kv_cu_seq_lens.defined())
-      << "kv_seq_lens or kv_cu_seq_lens must be defined.";
-  torch::Tensor kv_cu_seq_lens_host = attn_meta.kv_cu_seq_lens.to(torch::kCPU);
+// Per-sequence kv lengths from the cumulative host vector (leading zero).
+// Mirrors the old get_kv_len_arr_host diff-of-kv_cu_seq_lens path, but on host.
+static torch::Tensor get_kv_len_arr_host(const AttentionMetadata& attn_meta) {
+  CHECK(!attn_meta.kv_seq_lens_vec.empty())
+      << "kv_seq_lens_vec must be populated for flashinfer plan info.";
+  torch::Tensor kv_cu_seq_lens_host =
+      host_int_tensor(attn_meta.kv_seq_lens_vec);
   return kv_cu_seq_lens_host.slice(0, 1) - kv_cu_seq_lens_host.slice(0, 0, -1);
 }
 
@@ -113,11 +122,13 @@ void update_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
                                          /*use_logits_soft_cap=*/false,
                                          /*use_fp16_qk_reduction=*/false);
 
-  torch::Tensor qo_indptr_host = attn_meta.q_cu_seq_lens.to(torch::kCPU);
-  torch::Tensor kv_cu_seq_lens_host = attn_meta.kv_cu_seq_lens.to(torch::kCPU);
+  torch::Tensor qo_indptr_host = host_int_tensor(attn_meta.q_seq_lens_vec);
+  torch::Tensor kv_cu_seq_lens_host =
+      host_int_tensor(attn_meta.kv_seq_lens_vec);
   torch::Tensor kv_len_arr_host =
       kv_cu_seq_lens_host.slice(0, 1) - kv_cu_seq_lens_host.slice(0, 0, -1);
-  const int64_t total_num_rows = qo_indptr_host[-1].item<int64_t>();
+  const int64_t total_num_rows =
+      static_cast<int64_t>(attn_meta.q_seq_lens_vec.back());
   const int64_t batch_size = qo_indptr_host.size(0) - 1;
 
   auto plan_func = get_function(plan_info->uri, "plan");
@@ -212,13 +223,13 @@ void update_chunked_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
   const int64_t batch_size = attn_meta.paged_kv_last_page_len.size(0);
   torch::Tensor qo_indptr_host;
   if (causal) {
-    qo_indptr_host = attn_meta.qo_indptr.value().to(torch::kCPU);
+    qo_indptr_host = host_int_tensor(attn_meta.q_seq_lens_vec);
   } else {
     qo_indptr_host = get_cache_buffer(batch_size + 1, torch::kCPU);
   }
 
   torch::Tensor paged_kv_indptr_host =
-      attn_meta.paged_kv_indptr.to(torch::kCPU);
+      host_int_tensor(attn_meta.paged_kv_indptr_vec);
   torch::Tensor kv_len_arr_host = get_kv_len_arr_host(attn_meta);
 
   const int64_t total_num_rows = qo_indptr_host[-1].item<int64_t>();
@@ -308,7 +319,7 @@ void update_decode_plan_info(std::shared_ptr<PlanInfo> plan_info,
                              /*use_logits_soft_cap=*/false);
 
     torch::Tensor paged_kv_indptr_host =
-        attn_meta.paged_kv_indptr.to(torch::kCPU);
+        host_int_tensor(attn_meta.paged_kv_indptr_vec);
     const int64_t batch_size = attn_meta.paged_kv_last_page_len.size(0);
     torch::Tensor empty_q_data =
         torch::empty({0}, torch::TensorOptions().dtype(query_dtype));

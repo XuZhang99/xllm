@@ -921,6 +921,7 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   // for flashinfer
   input_params.attention.device.paged_kv_indptr =
       torch::tensor(state_.paged_kv_indptr, torch::kInt);
+  input_params.attention.host.paged_kv_indptr = state_.paged_kv_indptr;
   input_params.attention.device.paged_kv_indices =
       torch::tensor(state_.paged_kv_indices, torch::kInt);
   input_params.attention.device.paged_kv_last_page_len =

@@ -77,6 +77,10 @@ struct AttentionMetadata {
   torch::Tensor q_seq_lens;
   std::vector<int32_t> kv_seq_lens_vec;
   std::vector<int32_t> q_seq_lens_vec;
+  // Host copy of paged_kv_indptr (cumulative, leading zero). Used by the CUDA
+  // flashinfer plan-info path to build the indptr on the host and avoid a
+  // mid-forward .to(kCPU) device->host copy.
+  std::vector<int32_t> paged_kv_indptr_vec;
   torch::Tensor block_table;
   torch::Tensor slot_mapping;
   int64_t max_query_len;
