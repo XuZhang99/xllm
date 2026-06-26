@@ -27,7 +27,7 @@ limitations under the License.
 #if defined(USE_CUDA) || defined(USE_DCU)
 #include <nccl.h>
 
-#include "cuda_process_group.h"
+#include "framework/parallel_state/single_process/nccl_process_group.h"
 #endif
 
 namespace xllm {
@@ -485,7 +485,7 @@ std::vector<std::unique_ptr<ProcessGroup>> create_local_process_groups(
   CHECK(init_result == ncclSuccess)
       << "ncclCommInitAll failed: " << ncclGetErrorString(init_result);
   for (int32_t i = 0; i < world_size; ++i) {
-    process_groups.emplace_back(std::make_unique<ProcessGroupImpl>(
+    process_groups.emplace_back(std::make_unique<NcclProcessGroup>(
         /*rank=*/i, world_size, devices[i], comms[i]));
   }
 #elif defined(USE_MLU) || defined(USE_ILU)

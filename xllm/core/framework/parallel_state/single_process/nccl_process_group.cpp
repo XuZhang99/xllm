@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "cuda_process_group.h"
+#include "framework/parallel_state/single_process/nccl_process_group.h"
 
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -108,35 +108,7 @@ c10::intrusive_ptr<c10d::Work> make_work(c10d::OpType op_type,
 
 }  // namespace
 
-ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
-                                   int32_t world_size,
-                                   int32_t rank_size,
-                                   int32_t port,
-                                   bool trans,
-                                   const std::string& host,
-                                   const std::string& group_name,
-                                   const torch::Device& device)
-    : ProcessGroup(global_rank, world_size, device) {
-  c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> pg_options =
-      c10d::ProcessGroupNCCL::Options::create();
-#if TORCH_VERSION_MAJOR > 2 || \
-    (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 7)
-  pg_options->group_name = group_name;
-#endif
-  int32_t rank = global_rank;
-  if (world_size != rank_size) {
-    auto [local_rank, group_ranks] =
-        get_group_rank(world_size, global_rank, rank_size, trans);
-    pg_options->global_ranks_in_group = group_ranks;
-    rank = local_rank;
-  }
-
-  auto store = create_tcp_store(host, port, rank);
-  pg_ = std::make_unique<c10d::ProcessGroupNCCL>(
-      store, rank, rank_size, pg_options);
-}
-
-ProcessGroupImpl::ProcessGroupImpl(int32_t rank,
+NcclProcessGroup::NcclProcessGroup(int32_t rank,
                                    int32_t world_size,
                                    const torch::Device& device,
                                    ncclComm_t comm)
@@ -144,33 +116,24 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t rank,
   CHECK(comm != nullptr) << "ncclComm_t must be non-null";
 }
 
-ProcessGroupImpl::~ProcessGroupImpl() {
-  if (uses_raw_nccl()) {
-    // We own the comm in the raw-NCCL path; release it before the base class
-    // destructor runs so any device state can be torn down cleanly.
-    c10::cuda::CUDAGuard guard(device());
-    ncclCommDestroy(comm_);
-    comm_ = nullptr;
-  }
+NcclProcessGroup::~NcclProcessGroup() {
+  // We own the comm; release it before the base class destructor runs so any
+  // device state can be torn down cleanly.
+  c10::cuda::CUDAGuard guard(device());
+  ncclCommDestroy(comm_);
+  comm_ = nullptr;
 }
 
-at::cuda::CUDAStream ProcessGroupImpl::nccl_stream() {
+at::cuda::CUDAStream NcclProcessGroup::nccl_stream() {
   return c10::cuda::getCurrentCUDAStream(device().index());
 }
 
-void ProcessGroupImpl::allreduce(torch::Tensor& input) {
-  if (!uses_raw_nccl()) {
-    ProcessGroup::allreduce(input);
-    return;
-  }
+void NcclProcessGroup::allreduce(torch::Tensor& input) {
   allreduce_async(input)->wait();
 }
 
-c10::intrusive_ptr<c10d::Work> ProcessGroupImpl::allreduce_async(
+c10::intrusive_ptr<c10d::Work> NcclProcessGroup::allreduce_async(
     torch::Tensor& input) {
-  if (!uses_raw_nccl()) {
-    return ProcessGroup::allreduce_async(input);
-  }
   CHECK_EQ(input.device(), device())
       << "allreduce input must live on the process group's device";
   CHECK(input.is_contiguous()) << "allreduce input must be contiguous";
@@ -187,21 +150,14 @@ c10::intrusive_ptr<c10d::Work> ProcessGroupImpl::allreduce_async(
   return make_work(c10d::OpType::ALLREDUCE, stream, device());
 }
 
-void ProcessGroupImpl::allgather(const torch::Tensor& input,
+void NcclProcessGroup::allgather(const torch::Tensor& input,
                                  std::vector<torch::Tensor>& outputs) {
-  if (!uses_raw_nccl()) {
-    ProcessGroup::allgather(input, outputs);
-    return;
-  }
   allgather_async(input, outputs)->wait();
 }
 
-c10::intrusive_ptr<c10d::Work> ProcessGroupImpl::allgather_async(
+c10::intrusive_ptr<c10d::Work> NcclProcessGroup::allgather_async(
     const torch::Tensor& input,
     std::vector<torch::Tensor>& outputs) {
-  if (!uses_raw_nccl()) {
-    return ProcessGroup::allgather_async(input, outputs);
-  }
   CHECK_EQ(static_cast<int32_t>(outputs.size()), world_size())
       << "allgather output count must equal world_size";
   CHECK_EQ(input.device(), device())
@@ -239,12 +195,9 @@ c10::intrusive_ptr<c10d::Work> ProcessGroupImpl::allgather_async(
   return make_work(c10d::OpType::ALLGATHER, stream, device());
 }
 
-c10::intrusive_ptr<c10d::Work> ProcessGroupImpl::allgather_base_async(
+c10::intrusive_ptr<c10d::Work> NcclProcessGroup::allgather_base_async(
     const torch::Tensor& input,
     torch::Tensor& output) {
-  if (!uses_raw_nccl()) {
-    return ProcessGroup::allgather_base_async(input, output);
-  }
   CHECK_EQ(input.device(), device())
       << "allgather_base input must live on the process group's device";
   CHECK(output.defined()) << "allgather_base output must be preallocated";
@@ -267,11 +220,8 @@ c10::intrusive_ptr<c10d::Work> ProcessGroupImpl::allgather_base_async(
   return make_work(c10d::OpType::_ALLGATHER_BASE, stream, device());
 }
 
-torch::Tensor ProcessGroupImpl::allgather_base_sync(
+torch::Tensor NcclProcessGroup::allgather_base_sync(
     const torch::Tensor& input) {
-  if (!uses_raw_nccl()) {
-    return ProcessGroup::allgather_base_sync(input);
-  }
   CHECK_EQ(input.device(), device())
       << "allgather_base input must live on the process group's device";
   std::vector<int64_t> out_shape;
@@ -285,12 +235,8 @@ torch::Tensor ProcessGroupImpl::allgather_base_sync(
   return output;
 }
 
-void ProcessGroupImpl::reduce_scatter(const torch::Tensor& input,
+void NcclProcessGroup::reduce_scatter(const torch::Tensor& input,
                                       torch::Tensor& output) {
-  if (!uses_raw_nccl()) {
-    ProcessGroup::reduce_scatter(input, output);
-    return;
-  }
   CHECK(input.is_contiguous()) << "reduce_scatter input must be contiguous";
   CHECK_EQ(input.device(), device())
       << "reduce_scatter input must live on the process group's device";
@@ -314,22 +260,13 @@ void ProcessGroupImpl::reduce_scatter(const torch::Tensor& input,
   make_work(c10d::OpType::REDUCE_SCATTER, stream, device())->wait();
 }
 
-void ProcessGroupImpl::all_to_all_single(
+void NcclProcessGroup::all_to_all_single(
     torch::Tensor output,
     torch::Tensor input,
     std::vector<int64_t> output_split_sizes,
     std::vector<int64_t> input_split_sizes,
     bool async_op,
     c10::intrusive_ptr<c10d::Work>* async_work) {
-  if (!uses_raw_nccl()) {
-    ProcessGroup::all_to_all_single(output,
-                                    input,
-                                    std::move(output_split_sizes),
-                                    std::move(input_split_sizes),
-                                    async_op,
-                                    async_work);
-    return;
-  }
   CHECK(output.defined()) << "all_to_all_single output must be defined";
   CHECK(input.defined()) << "all_to_all_single input must be defined";
   CHECK_EQ(input.device(), device())
