@@ -176,6 +176,20 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
 
   // initialize process groups if there are multiple devices
   if (devices.size() > 1) {
+#if defined(USE_NPU)
+    // Single-process multi-device shares one HCCL world (HcclCommInitAll) and
+    // routes tensor-parallel collectives through the C++ ProcessGroup. Only the
+    // TORCH kernel backend uses that path; the ATB backend drives its own
+    // process-global comm manager, which cannot rendezvous two ranks inside one
+    // process. Fail fast with actionable guidance instead of hanging.
+    CHECK_EQ(options.npu_kernel_backend(), "TORCH")
+        << "Single-node single-process mode with multiple NPU devices requires "
+           "--npu_kernel_backend=TORCH (got '"
+        << options.npu_kernel_backend()
+        << "'). The ATB backend does not support single-process multi-device "
+           "yet; use the multi-process launcher (set --master_node_addr) for "
+           "ATB.";
+#endif
     process_groups_ = parallel_state::create_local_process_groups(
         devices, /*options=*/options);
   }
