@@ -30,6 +30,8 @@ limitations under the License.
 #include "remote_worker.h"
 #include "runtime/forward_shared_memory_manager.h"
 #include "runtime/llm_worker_impl.h"
+#include "runtime/worker.h"
+#include "runtime/worker_client.h"
 #include "server/xllm_server_registry.h"
 #include "shm_channel.h"
 #include "util/net.h"
@@ -42,7 +44,8 @@ DistManager::DistManager(const runtime::Options& options)
     server_name_.append(std::to_string(options.server_idx()));
     setup_multi_node_workers(options, master_node_addr);
   } else {
-    LOG(FATAL) << "master_node_addr is empty.";
+    // Single-node single-process mode: run all devices inside one process.
+    setup_single_node_workers(options);
   }
 }
 
@@ -51,7 +54,7 @@ DistManager::~DistManager() {
   HealthCheckManager::instance().stop_health_check_thread();
 
   XllmServer* collective_server =
-      ServerRegistry::get_instance().get_server(server_name_);
+      ServerRegistry::get_instance().try_get_server(server_name_);
   if (collective_server != nullptr) {
     collective_server->stop();
 
@@ -141,6 +144,107 @@ void setup_numa_affinity_and_isolation(
 #endif
 
 }  // namespace
+
+void DistManager::setup_single_node_workers(const runtime::Options& options) {
+  const auto& devices = options.devices();
+  CHECK_GT(devices.size(), 0)
+      << "At least one device is required in single-node mode.";
+  CHECK_EQ((devices.size() % options.dp_size()), 0)
+      << "Device size must be divisible by dp size in single-node serving "
+         "mode.";
+  CHECK_EQ(options.nnodes(), 1)
+      << "Single-node serving requires nnodes=1 (got " << options.nnodes()
+      << "). Set --master_node_addr to run a multi-node deployment.";
+  CHECK_EQ(options.node_rank(), 0)
+      << "Single-node serving requires node_rank=0 (got " << options.node_rank()
+      << ").";
+
+  const std::string& backend = options.backend();
+  CHECK(backend.empty() || backend == "llm")
+      << "Single-node serving currently supports only the llm backend, got: "
+      << backend;
+
+  const int32_t world_size = static_cast<int32_t>(devices.size());
+  const int32_t dp_size = options.dp_size();
+  const int32_t cp_size = options.cp_size();
+  const int32_t ep_size = options.ep_size();
+  const int32_t dp_local_tp_size = world_size / dp_size;
+
+  LOG(INFO) << "Single-node serving world_size = " << world_size
+            << ", dp_size = " << dp_size << ", cp_size = " << cp_size
+            << ", ep_size = " << ep_size << ", tp_size = " << dp_local_tp_size;
+
+  // initialize process groups if there are multiple devices
+  if (devices.size() > 1) {
+#if defined(USE_NPU)
+    // Single-process multi-device shares one HCCL world (HcclCommInitAll) and
+    // routes tensor-parallel collectives through the C++ ProcessGroup. Only the
+    // TORCH kernel backend uses that path; the ATB backend drives its own
+    // process-global comm manager, which cannot rendezvous two ranks inside one
+    // process. Fail fast with actionable guidance instead of hanging.
+    CHECK_EQ(options.npu_kernel_backend(), "TORCH")
+        << "Single-node single-process mode with multiple NPU devices requires "
+           "--npu_kernel_backend=TORCH (got '"
+        << options.npu_kernel_backend()
+        << "'). The ATB backend does not support single-process multi-device "
+           "yet; use the multi-process launcher (set --master_node_addr) for "
+           "ATB.";
+#endif
+    process_groups_ = parallel_state::create_local_process_groups(
+        devices, /*options=*/options);
+  }
+
+  // For data parallelism with dp_size > 1 and dp_size < world_size, build
+  // dp-local process groups so each dp group has its own communication
+  // channel. Mirrors the old setup_single_node_workers behaviour.
+  if (dp_size > 1 && dp_size < world_size) {
+    dp_local_process_groups_.reserve(dp_size);
+    for (int32_t dp_rank = 0; dp_rank < dp_size; ++dp_rank) {
+      auto begin_it = devices.begin();
+      std::advance(begin_it, dp_rank * dp_local_tp_size);
+      auto end_it = devices.begin();
+      std::advance(end_it, (dp_rank + 1) * dp_local_tp_size);
+      std::vector<torch::Device> dp_local_devices(begin_it, end_it);
+      dp_local_process_groups_.emplace_back(
+          parallel_state::create_local_process_groups(dp_local_devices,
+                                                      options));
+    }
+  }
+
+  WorkerType worker_type =
+      (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
+
+  for (size_t i = 0; i < devices.size(); ++i) {
+    const int32_t rank = static_cast<int32_t>(i);
+    ProcessGroup* pg = (world_size > 1) ? process_groups_[i].get() : nullptr;
+    ProcessGroup* dp_local_pg =
+        (dp_size > 1 && dp_size < world_size)
+            ? dp_local_process_groups_[i / dp_local_tp_size]
+                                      [i % dp_local_tp_size]
+                                          .get()
+            : nullptr;
+
+    ParallelArgs parallel_args(rank,
+                               world_size,
+                               dp_size,
+                               cp_size,
+                               /*process_group=*/pg,
+                               ep_size);
+    parallel_args.dp_local_process_group_ = dp_local_pg;
+    // For single-node single-process mode the language-model layers expect a
+    // tensor-parallel group. With dp=ep=cp=1 the global process group also
+    // serves as the tp/sp/single-rank group.
+    parallel_args.tp_group_ = pg;
+    parallel_args.sp_group_ = pg;
+    parallel_args.single_rank_group_ = pg;
+    parallel_args.moe_tp_group_ = pg;
+
+    workers_.emplace_back(std::make_unique<Worker>(
+        parallel_args, devices[i], options, worker_type));
+    worker_clients_.emplace_back(
+        std::make_shared<WorkerClient>(workers_.back().get(), options));
+  }
+}
 
 void DistManager::setup_multi_node_workers(
     const runtime::Options& options,
