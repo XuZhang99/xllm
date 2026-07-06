@@ -77,6 +77,58 @@ void proto_to_forward_output(const proto::ForwardOutput& pb_output,
   COUNTER_ADD(proto_latency_seconds_proto2o, timer.elapsed_seconds());
 }
 
+void forward_output_to_raw(const ForwardOutput& forward_output,
+                           RawForwardOutput& raw_forward_output) {
+  // Convert in-process ForwardOutput into RawForwardOutput by routing
+  // through the existing proto conversion. This is wasteful from a serdes
+  // standpoint, but reuses the canonical token/embedding decoding logic the
+  // brpc path already implements, so single-node single-process mode behaves
+  // identically to multi-node mode.
+  const auto& sample_output = forward_output.sample_output;
+  const auto& beam_search_output = forward_output.beam_search_output;
+
+  auto to_cpu = [](const torch::Tensor& t) -> torch::Tensor {
+    if (!t.defined()) {
+      return t;
+    }
+    if (t.device().is_cpu()) {
+      return t;
+    }
+    return t.to(torch::kCPU);
+  };
+
+  torch::Tensor next_tokens = to_cpu(sample_output.next_tokens);
+  torch::Tensor logprobs = to_cpu(sample_output.logprobs);
+  torch::Tensor top_tokens = to_cpu(sample_output.top_tokens);
+  torch::Tensor top_logprobs = to_cpu(sample_output.top_logprobs);
+  torch::Tensor embeddings = to_cpu(sample_output.embeddings);
+  torch::Tensor expert_load_data = to_cpu(forward_output.expert_load_data);
+  torch::Tensor src_seq_idxes = to_cpu(beam_search_output.src_seq_idxes);
+  torch::Tensor out_tokens = to_cpu(beam_search_output.out_tokens);
+  torch::Tensor out_logprobs = to_cpu(beam_search_output.out_logprobs);
+
+  std::vector<torch::Tensor> dit_images;
+  dit_images.reserve(forward_output.dit_forward_output.tensors.size());
+  for (const auto& t : forward_output.dit_forward_output.tensors) {
+    dit_images.emplace_back(to_cpu(t));
+  }
+
+  proto::ForwardOutput pb_forward_output;
+  forward_output_to_proto(next_tokens,
+                          logprobs,
+                          top_tokens,
+                          top_logprobs,
+                          embeddings,
+                          expert_load_data,
+                          forward_output.prepared_layer_id,
+                          src_seq_idxes,
+                          out_tokens,
+                          out_logprobs,
+                          dit_images,
+                          &pb_forward_output);
+  proto_to_forward_output(pb_forward_output, raw_forward_output);
+}
+
 void forward_output_to_proto(const torch::Tensor& next_tokens,
                              const torch::Tensor& logprobs,
                              const torch::Tensor& top_tokens,

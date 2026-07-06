@@ -380,10 +380,12 @@ int run() {
     service_config.host(net::get_local_ip_addr());
   }
 
+  const bool single_node_mode = distributed_config.master_node_addr().empty();
   const bool is_local =
-      !service_config.host().empty() &&
-      net::extract_ip(distributed_config.master_node_addr()) ==
-          service_config.host();
+      single_node_mode ||
+      (!service_config.host().empty() &&
+       net::extract_ip(distributed_config.master_node_addr()) ==
+           service_config.host());
 
   LOG(INFO) << "set worker role to "
             << (is_local ? "local worker" : "remote worker");
@@ -463,7 +465,11 @@ int run() {
 
   std::unique_ptr<Master> master;
   // working node
-  if (options.node_rank() != 0) {
+  // In single-node single-process mode (master_node_addr is empty) the
+  // process always plays the master role regardless of node_rank.
+  const bool single_node_serving =
+      options.master_node_addr().value_or("").empty();
+  if (!single_node_serving && options.node_rank() != 0) {
     if (model_config.backend() == "dit") {
       master = std::make_unique<DiTAssistantMaster>(options);
     } else if (model_config.backend() == "vlm") {
