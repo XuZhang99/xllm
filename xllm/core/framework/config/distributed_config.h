@@ -44,6 +44,7 @@ class DistributedConfig final {
                                                     "xtensor_master_node_addr",
                                                     "nnodes",
                                                     "node_rank",
+                                                    "enable_single_process",
                                                     "etcd_addr",
                                                     "etcd_namespace",
                                                     "enable_service_routing",
@@ -59,6 +60,13 @@ class DistributedConfig final {
   PROPERTY(int32_t, nnodes) = 1;
 
   PROPERTY(int32_t, node_rank) = 0;
+
+  // Run all local devices inside a single OS process (one worker thread per
+  // device, sharing one HcclCommInitAll world) instead of one process per
+  // device. Independent of master_node_addr: single-node single-process needs
+  // no master_node_addr, while a future multi-node single-process deployment
+  // would still use master_node_addr for inter-node rendezvous.
+  PROPERTY(bool, enable_single_process) = false;
 
   PROPERTY(std::string, etcd_addr);
 

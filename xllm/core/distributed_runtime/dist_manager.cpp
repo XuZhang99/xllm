@@ -40,12 +40,21 @@ namespace xllm {
 DistManager::DistManager(const runtime::Options& options)
     : server_name_("CollectiveServer") {
   auto master_node_addr = options.master_node_addr().value_or("");
-  if (!master_node_addr.empty()) {
+  if (options.enable_single_process()) {
+    // Single-process mode: one OS process drives all local devices (one worker
+    // thread per device, sharing one HcclCommInitAll world). Independent of
+    // master_node_addr — single-node single-process needs none. Multi-node
+    // single-process (nnodes > 1) is not yet supported and is rejected inside
+    // setup_single_node_workers.
+    setup_single_node_workers(options);
+  } else if (!master_node_addr.empty()) {
     server_name_.append(std::to_string(options.server_idx()));
     setup_multi_node_workers(options, master_node_addr);
   } else {
-    // Single-node single-process mode: run all devices inside one process.
-    setup_single_node_workers(options);
+    LOG(FATAL) << "master_node_addr is empty and enable_single_process is "
+                  "false. Set --enable_single_process=true for single-process "
+                  "serving, or --master_node_addr for multi-process/multi-node "
+                  "serving.";
   }
 }
 
@@ -153,11 +162,14 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
       << "Device size must be divisible by dp size in single-node serving "
          "mode.";
   CHECK_EQ(options.nnodes(), 1)
-      << "Single-node serving requires nnodes=1 (got " << options.nnodes()
-      << "). Set --master_node_addr to run a multi-node deployment.";
+      << "Multi-node single-process serving (nnodes = " << options.nnodes()
+      << ") is not yet supported. Run single-node single-process "
+         "(--enable_single_process with nnodes=1), or use the multi-process "
+         "launcher (--master_node_addr, one process per device) for "
+         "multi-node.";
   CHECK_EQ(options.node_rank(), 0)
-      << "Single-node serving requires node_rank=0 (got " << options.node_rank()
-      << ").";
+      << "Single-process serving requires node_rank=0 (got "
+      << options.node_rank() << ").";
 
   const std::string& backend = options.backend();
   CHECK(backend.empty() || backend == "llm")

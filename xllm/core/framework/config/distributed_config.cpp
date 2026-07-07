@@ -21,8 +21,8 @@ limitations under the License.
 DEFINE_string(master_node_addr,
               "",
               "The master address for multi-node distributed serving(e.g. "
-              "10.18.1.1:9999). Leave empty to run in single-node "
-              "single-process mode.");
+              "10.18.1.1:9999). Required for multi-process/multi-node serving; "
+              "leave empty only when --enable_single_process is set.");
 
 DEFINE_string(
     xtensor_master_node_addr,
@@ -32,6 +32,11 @@ DEFINE_string(
 DEFINE_int32(nnodes, 1, "The number of multi-nodes.");
 
 DEFINE_int32(node_rank, 0, "The node rank.");
+
+DEFINE_bool(enable_single_process,
+            false,
+            "Run all local devices inside a single OS process (one worker "
+            "thread per device) instead of one process per device.");
 
 DEFINE_string(etcd_addr, "", "Etcd adderss for save instance meta info.");
 
@@ -54,6 +59,7 @@ void DistributedConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(xtensor_master_node_addr);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(nnodes);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(node_rank);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_single_process);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(etcd_addr);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(etcd_namespace);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_service_routing);
@@ -67,6 +73,7 @@ void DistributedConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(nnodes);
   // don't read rank-related config
   // XLLM_CONFIG_ASSIGN_FROM_JSON(node_rank);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_single_process);
   XLLM_CONFIG_ASSIGN_FROM_JSON(etcd_addr);
   XLLM_CONFIG_ASSIGN_FROM_JSON(etcd_namespace);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_service_routing);
@@ -85,6 +92,8 @@ void DistributedConfig::append_config_json(
   // don't dump rank-related config
   //   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
   //       config_json, default_config, node_rank);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_single_process);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, etcd_addr);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
