@@ -163,6 +163,7 @@ Options create_options(const std::string& instance_name, bool is_local) {
           static_cast<uint16_t>(disagg_pd_config.transfer_listen_port()))
       .nnodes(distributed_config.nnodes())
       .node_rank(distributed_config.node_rank())
+      .enable_single_process(distributed_config.enable_single_process())
       .dp_size(parallel_config.dp_size())
       .cp_size(parallel_config.cp_size())
       .ep_size(parallel_config.ep_size())
@@ -380,9 +381,9 @@ int run() {
     service_config.host(net::get_local_ip_addr());
   }
 
-  const bool single_node_mode = distributed_config.master_node_addr().empty();
+  const bool single_process_mode = distributed_config.enable_single_process();
   const bool is_local =
-      single_node_mode ||
+      single_process_mode ||
       (!service_config.host().empty() &&
        net::extract_ip(distributed_config.master_node_addr()) ==
            service_config.host());
@@ -465,11 +466,10 @@ int run() {
 
   std::unique_ptr<Master> master;
   // working node
-  // In single-node single-process mode (master_node_addr is empty) the
-  // process always plays the master role regardless of node_rank.
-  const bool single_node_serving =
-      options.master_node_addr().value_or("").empty();
-  if (!single_node_serving && options.node_rank() != 0) {
+  // Assistant masters serve non-zero node ranks in a multi-process multi-node
+  // deployment. Single-process serving always runs at node_rank 0, so it takes
+  // the master path below.
+  if (options.node_rank() != 0) {
     if (model_config.backend() == "dit") {
       master = std::make_unique<DiTAssistantMaster>(options);
     } else if (model_config.backend() == "vlm") {
