@@ -44,7 +44,6 @@ class DistributedConfig final {
                                                     "xtensor_master_node_addr",
                                                     "nnodes",
                                                     "node_rank",
-                                                    "enable_single_process",
                                                     "etcd_addr",
                                                     "etcd_namespace",
                                                     "enable_service_routing",

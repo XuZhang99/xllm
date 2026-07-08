@@ -17,12 +17,13 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_utils.h"
+#include "core/util/env_var.h"
 
 DEFINE_string(master_node_addr,
               "",
               "The master address for multi-node distributed serving(e.g. "
               "10.18.1.1:9999). Required for multi-process/multi-node serving; "
-              "leave empty only when --enable_single_process is set.");
+              "leave empty only when XLLM_ENABLE_SINGLE_PROCESS is set.");
 
 DEFINE_string(
     xtensor_master_node_addr,
@@ -32,11 +33,6 @@ DEFINE_string(
 DEFINE_int32(nnodes, 1, "The number of multi-nodes.");
 
 DEFINE_int32(node_rank, 0, "The node rank.");
-
-DEFINE_bool(enable_single_process,
-            false,
-            "Run all local devices inside a single OS process (one worker "
-            "thread per device) instead of one process per device.");
 
 DEFINE_string(etcd_addr, "", "Etcd adderss for save instance meta info.");
 
@@ -59,7 +55,11 @@ void DistributedConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(xtensor_master_node_addr);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(nnodes);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(node_rank);
-  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_single_process);
+  // Single-process mode is opt-in via environment variable rather than a
+  // gflag, so it can be set from the launch environment without threading a
+  // CLI flag through every entrypoint.
+  enable_single_process(util::get_bool_env("XLLM_ENABLE_SINGLE_PROCESS",
+                                           enable_single_process()));
   XLLM_CONFIG_ASSIGN_FROM_FLAG(etcd_addr);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(etcd_namespace);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_service_routing);
@@ -73,7 +73,7 @@ void DistributedConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(nnodes);
   // don't read rank-related config
   // XLLM_CONFIG_ASSIGN_FROM_JSON(node_rank);
-  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_single_process);
+  // enable_single_process is sourced from the environment, not JSON.
   XLLM_CONFIG_ASSIGN_FROM_JSON(etcd_addr);
   XLLM_CONFIG_ASSIGN_FROM_JSON(etcd_namespace);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_service_routing);
