@@ -51,10 +51,11 @@ DistManager::DistManager(const runtime::Options& options)
     server_name_.append(std::to_string(options.server_idx()));
     setup_multi_node_workers(options, master_node_addr);
   } else {
-    LOG(FATAL) << "master_node_addr is empty and enable_single_process is "
-                  "false. Set --enable_single_process=true for single-process "
-                  "serving, or --master_node_addr for multi-process/multi-node "
-                  "serving.";
+    LOG(FATAL)
+        << "master_node_addr is empty and single-process mode is not "
+           "enabled. Set XLLM_ENABLE_SINGLE_PROCESS=1 for single-process "
+           "serving, or --master_node_addr for multi-process/multi-node "
+           "serving.";
   }
 }
 
@@ -164,9 +165,9 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
   CHECK_EQ(options.nnodes(), 1)
       << "Multi-node single-process serving (nnodes = " << options.nnodes()
       << ") is not yet supported. Run single-node single-process "
-         "(--enable_single_process with nnodes=1), or use the multi-process "
-         "launcher (--master_node_addr, one process per device) for "
-         "multi-node.";
+         "(XLLM_ENABLE_SINGLE_PROCESS=1 with nnodes=1), or use the "
+         "multi-process launcher (--master_node_addr, one process per device) "
+         "for multi-node.";
   CHECK_EQ(options.node_rank(), 0)
       << "Single-process serving requires node_rank=0 (got "
       << options.node_rank() << ").";
