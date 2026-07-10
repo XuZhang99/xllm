@@ -34,6 +34,11 @@ class WorkerService : public proto::DistributeWorker {
 
   void set_worker(std::unique_ptr<Worker> worker);
 
+  // Returns the in-process worker owned by this service, or nullptr if it has
+  // not been set yet. Used by the single-process driver (node0) to call a
+  // co-located worker directly instead of over brpc.
+  Worker* worker() const { return worker_.get(); }
+
   void create_polling_shm_thread(
       std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
       std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager);

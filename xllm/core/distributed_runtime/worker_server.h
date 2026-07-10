@@ -65,6 +65,13 @@ class WorkerServer {
 
   void stop();
 
+  // Returns the in-process worker driven by this server, or nullptr if the
+  // worker runs in a spawned process or has not been constructed yet. Only
+  // meaningful for thread-mode workers (use_spawn_worker=false). Callers must
+  // ensure the worker is ready (e.g. wait on the server's `done` flag) before
+  // dereferencing.
+  Worker* worker() const;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(WorkerServer);
 
@@ -94,6 +101,14 @@ class WorkerServer {
 
  private:
   std::unique_ptr<std::thread> worker_thread_;
+
+  // Published by the worker thread (create_server) once the WorkerService and
+  // its Worker are constructed, and read by the single-process driver on node0.
+  // The WorkerService is owned by the brpc server registry for the process
+  // lifetime, so this non-owning pointer stays valid. Written before the
+  // server's `done` flag is set (release), so a reader that has observed `done`
+  // sees a non-null value.
+  std::atomic<WorkerService*> worker_service_{nullptr};
 
   // for offline inference spawn process worker.
   bool use_spwan_worker_ = false;

@@ -420,14 +420,36 @@ void DistManager::setup_multi_node_workers(
                    << r;
         return;
       }
-      /* TODO(CP): support smem  + CP */
-      auto channel =
-          create_channel(worker_addrs_map[r], r, dp_local_tp_size, options);
-      worker_clients_.emplace_back(
-          std::make_unique<RemoteWorker>(r,
-                                         worker_addrs_map[r],
-                                         devices[r % each_node_ranks],
-                                         std::move(channel)));
+      // Ranks co-located in this process (node_rank 0 owns global ranks
+      // [base_rank, base_rank + each_node_ranks)) are driven in-process via a
+      // WorkerClient holding the Worker* directly, avoiding a loopback brpc /
+      // shm round-trip per step. Remote-node ranks still go over brpc.
+      const bool is_local_rank =
+          (static_cast<int32_t>(r) >= base_rank &&
+           static_cast<int32_t>(r) < base_rank + each_node_ranks);
+      if (is_local_rank) {
+        const int32_t local_idx = static_cast<int32_t>(r) - base_rank;
+        // The worker is constructed on the WorkerServer thread; wait until it
+        // has published readiness before taking its Worker*.
+        while (!dones[local_idx].load()) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        Worker* local_worker = servers_[local_idx]->worker();
+        CHECK(local_worker != nullptr)
+            << "In-process worker for local rank " << local_idx
+            << " (global rank " << r << ") is null after readiness.";
+        worker_clients_.emplace_back(
+            std::make_shared<WorkerClient>(local_worker, options));
+      } else {
+        /* TODO(CP): support smem  + CP */
+        auto channel =
+            create_channel(worker_addrs_map[r], r, dp_local_tp_size, options);
+        worker_clients_.emplace_back(
+            std::make_unique<RemoteWorker>(r,
+                                           worker_addrs_map[r],
+                                           devices[r % each_node_ranks],
+                                           std::move(channel)));
+      }
     }
 
     // Register health check for each worker and start background health check

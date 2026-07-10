@@ -188,6 +188,11 @@ void WorkerServer::create_server(const runtime::Options& options,
   std::unique_ptr<Worker> worker =
       std::make_unique<Worker>(*parallel_args, device, options, worker_type);
   worker_service->set_worker(std::move(worker));
+  // Publish the service so the node0 driver can reach this co-located worker
+  // directly (in-process) instead of over brpc. Release-store pairs with the
+  // acquire-load in worker(); done.store below is the readiness signal callers
+  // wait on before calling worker().
+  worker_service_.store(worker_service.get(), std::memory_order_release);
   bool create_shm =
       options.enable_shm() && input_shm_manager && output_shm_manager;
   if (create_shm) {
@@ -199,6 +204,11 @@ void WorkerServer::create_server(const runtime::Options& options,
 
   // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
   worker_server->run();
+}
+
+Worker* WorkerServer::worker() const {
+  WorkerService* service = worker_service_.load(std::memory_order_acquire);
+  return service ? service->worker() : nullptr;
 }
 
 void WorkerServer::stop() {
