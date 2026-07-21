@@ -1179,7 +1179,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
   threadpool_.schedule([this, input, promise = std::move(promise)]() mutable {
     ForwardInput input_on_device;
     prepare_work_before_execute(input, input_on_device);
-    
+
     if (hierarchy_kv_cache_transfer_ != nullptr) {
       hierarchy_kv_cache_transfer_->set_layer_synchronizer(
           input_on_device.input_params);

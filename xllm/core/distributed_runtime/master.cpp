@@ -199,16 +199,25 @@ Master::Master(const Options& options, EngineType type)
       master_status_(options.master_status()) {
   const auto model_path =
       std::filesystem::path(options_.model_path()).lexically_normal();
+  const auto visible_devices = DeviceNameUtils::parse_devices("auto");
+  std::vector<torch::Device> devices;
+  if (options_.enable_single_process()) {
+  // Single-process serving instead drives every visible card from one process
+  // (one worker thread per device), so it takes all visible devices and its
+  // world size is the device count rather than the node count.
+    devices = visible_devices;
+  } else {
   // Multi-process serving runs one worker per process. Select one runtime
   // logical device from the process-visible devices while keeping node_rank as
   // the global distributed identity.
   const int32_t visible_device_count = Platform::device_count();
   const int32_t device_idx = DeviceNameUtils::get_device_idx(
       options_.node_rank(), options_.nnodes(), visible_device_count);
-  const auto visible_devices = DeviceNameUtils::parse_devices("auto");
-  const std::vector<torch::Device> devices = {visible_devices[device_idx]};
-  // World size is the node count (one worker per process).
-  const int32_t global_world_size = options_.nnodes();
+  devices = {visible_devices[device_idx]};
+  }
+
+  int32_t global_world_size = static_cast<int32_t>(devices.size()) * options_.nnodes();
+
   std::string cp_model_type;
   if (options_.cp_size() > 1 && Platform::uses_model_cp_partition()) {
     cp_model_type = util::get_model_type(model_path, options_.backend());

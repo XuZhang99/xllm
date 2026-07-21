@@ -246,9 +246,9 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
     parallel_args.dp_local_process_group_ = dp_local_pg;
     // For single-node single-process mode the language-model layers expect a
     // tensor-parallel group. With dp=ep=cp=1 the global process group also
-    // serves as the tp/sp/single-rank group.
+    // serves as the tp/cp/single-rank group.
     parallel_args.tp_group_ = pg;
-    parallel_args.sp_group_ = pg;
+    parallel_args.cp_group_ = pg;
     parallel_args.single_rank_group_ = pg;
     parallel_args.moe_tp_group_ = pg;
 
