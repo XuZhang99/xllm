@@ -2435,4 +2435,40 @@ TEST(BatchInputBuilderSmokeTest, PrefillBatchSizeSweepThreadingSpeedup) {
   }
 }
 
+// Smoke test: fix the batch size and grow the per-sequence prompt length
+// (512 -> 100k tokens) to check whether very long prefill sequences give the
+// multithreaded builder a decisive advantage. Both the parallelized
+// process_sequences() and the serial merge/finalize scale with total tokens,
+// so the speedup ceiling is set by per-token constants, not by prompt length.
+TEST(BatchInputBuilderSmokeTest, PrefillLongPromptThreadingSpeedup) {
+  const std::vector<int32_t> prompt_lens = {512, 2048, 10000, 100000};
+  constexpr int32_t kBatchSize = 64;
+  constexpr int32_t kIters = 5;
+  ThreadPool thread_pool(/*num_threads=*/8);
+
+  std::cout << "[ SMOKE    ] prefill long-prompt sweep (batch=" << kBatchSize
+            << ", avg of " << kIters << " iters, " << thread_pool.size()
+            << "-thread pool)\n"
+            << "[ SMOKE    ] prompt_len |  1-thread |  N-thread | speedup\n";
+  for (int32_t prompt_len : prompt_lens) {
+    const double st_ms = average_prefill_build_ms(
+        kBatchSize, prompt_len, kIters, /*thread_pool=*/nullptr);
+    const double mt_ms =
+        average_prefill_build_ms(kBatchSize, prompt_len, kIters, &thread_pool);
+
+    char line[256];
+    std::snprintf(line,
+                  sizeof(line),
+                  "[ SMOKE    ] %10d | %8.3f | %8.3f | %6.2fx",
+                  prompt_len,
+                  st_ms,
+                  mt_ms,
+                  mt_ms > 0.0 ? st_ms / mt_ms : 0.0);
+    std::cout << line << std::endl;
+
+    EXPECT_GT(st_ms, 0.0);
+    EXPECT_GT(mt_ms, 0.0);
+  }
+}
+
 }  // namespace xllm
