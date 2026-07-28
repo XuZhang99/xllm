@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ import signal
 import subprocess
 import sys
 import time
+from types import ModuleType
 from typing import NoReturn, Sequence, TextIO
 
 from scripts.logger import logger
@@ -74,6 +76,161 @@ def _ensure_python_model_path() -> None:
     )
 
 
+_VISIBLE_DEVICE_ENV_VARS = (
+    "ASCEND_RT_VISIBLE_DEVICES",
+    "CUDA_VISIBLE_DEVICES",
+    "MLU_VISIBLE_DEVICES",
+    "HIP_VISIBLE_DEVICES",
+    "MUSA_VISIBLE_DEVICES",
+)
+
+
+def _auto_tuning_config_dir() -> str:
+    # Profiles live next to this launcher (xllm/config), which resolves the same
+    # way in the source tree and in a wheel install.
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "config")
+
+
+def _extract_model_path(extra_args: Sequence[str]) -> str | None:
+    # --model is forwarded to the binary, so it is not parsed by the launcher
+    # and must be recovered from the passthrough args. Support both
+    # `--model VALUE` and `--model=VALUE`.
+    for index, arg in enumerate(extra_args):
+        if arg == "--model":
+            if index + 1 < len(extra_args):
+                return extra_args[index + 1]
+            return None
+        if arg.startswith("--model="):
+            return arg[len("--model=") :]
+    return None
+
+
+def _read_model_type(
+    parser: argparse.ArgumentParser,
+    model_path: str,
+) -> str:
+    config_path = os.path.join(
+        os.path.realpath(os.path.expanduser(model_path)), "config.json"
+    )
+    try:
+        with open(config_path, "r", encoding="utf-8") as config_file:
+            model_config = json.load(config_file)
+    except FileNotFoundError:
+        parser.error(f"auto-tuning: model config.json not found: {config_path}")
+    except json.JSONDecodeError as error:
+        parser.error(f"auto-tuning: failed to parse {config_path}: {error}")
+    except OSError as error:
+        parser.error(f"auto-tuning: failed to read {config_path}: {error}")
+
+    if not isinstance(model_config, dict):
+        parser.error(f"auto-tuning: {config_path} must contain a JSON object")
+
+    # Mirror C++ util::get_model_type: prefer model_type, fall back to
+    # model_name for configs that only carry model_name.
+    model_type = model_config.get("model_type") or model_config.get("model_name")
+    if not isinstance(model_type, str) or not model_type:
+        parser.error(
+            f"auto-tuning: {config_path} must contain a string "
+            "`model_type` or `model_name`"
+        )
+    return model_type
+
+
+def _load_tuning_module(
+    parser: argparse.ArgumentParser,
+    py_path: str,
+    model_type: str,
+) -> ModuleType:
+    # Load the profile by file path so we never trigger xllm/__init__'s lazy
+    # xllm_export .so loading. The module still resolves `from scripts.logger
+    # import logger` via the normal import path.
+    spec = importlib.util.spec_from_file_location(
+        f"xllm.config.{model_type}", py_path
+    )
+    if spec is None or spec.loader is None:
+        parser.error(f"auto-tuning: failed to load tuning module: {py_path}")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as error:
+        parser.error(f"auto-tuning: failed to import {py_path}: {error}")
+    if not callable(getattr(module, "tune", None)):
+        parser.error(
+            f"auto-tuning: {py_path} must define a callable `tune(base_config, "
+            "context)`"
+        )
+    return module
+
+
+def _count_visible_devices() -> int | None:
+    for env_var in _VISIBLE_DEVICE_ENV_VARS:
+        value = os.environ.get(env_var)
+        if value is None:
+            continue
+        entries = [entry for entry in value.split(",") if entry.strip() != ""]
+        return len(entries)
+    return None
+
+
+def _generate_tuned_config(
+    parser: argparse.ArgumentParser,
+    extra_args: Sequence[str],
+) -> str:
+    model_path = _extract_model_path(extra_args)
+    if not model_path:
+        parser.error("auto-tuning requires --model <path>")
+
+    model_type = _read_model_type(parser, model_path)
+
+    config_dir = _auto_tuning_config_dir()
+    base_json_path = os.path.join(config_dir, f"{model_type}.json")
+    tuning_py_path = os.path.join(config_dir, f"{model_type}.py")
+    if not os.path.isfile(base_json_path) or not os.path.isfile(tuning_py_path):
+        parser.error(
+            f"auto-tuning is not supported for model_type `{model_type}`: "
+            f"expected both {base_json_path} and {tuning_py_path} to exist."
+        )
+
+    try:
+        with open(base_json_path, "r", encoding="utf-8") as base_file:
+            base_config = json.load(base_file)
+    except (OSError, json.JSONDecodeError) as error:
+        parser.error(f"auto-tuning: failed to read {base_json_path}: {error}")
+    if not isinstance(base_config, dict):
+        parser.error(f"auto-tuning: {base_json_path} must contain a JSON object")
+
+    module = _load_tuning_module(parser, tuning_py_path, model_type)
+
+    detect_hardware = getattr(module, "detect_hardware", None)
+    hardware = detect_hardware() if callable(detect_hardware) else None
+    context = {
+        "model_path": model_path,
+        "model_type": model_type,
+        "visible_device_count": _count_visible_devices(),
+        "hardware": hardware,
+    }
+
+    try:
+        tuned_config = module.tune(base_config, context)
+    except Exception as error:
+        parser.error(f"auto-tuning: {tuning_py_path} tune() failed: {error}")
+    if not isinstance(tuned_config, dict):
+        parser.error(f"auto-tuning: {tuning_py_path} tune() must return a dict")
+
+    output_path = os.path.join(os.getcwd(), f"{model_type}.tuned.json")
+    try:
+        with open(output_path, "w", encoding="utf-8") as output_file:
+            json.dump(tuned_config, output_file, indent=2)
+            output_file.write("\n")
+    except OSError as error:
+        parser.error(
+            f"auto-tuning: failed to write tuned config {output_path}: {error}"
+        )
+
+    logger.info("auto-tuning: wrote tuned config for %s to %s", model_type, output_path)
+    return output_path
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=f"{os.path.basename(sys.argv[0]) or 'xllm'} serve",
@@ -101,6 +258,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "JSON config file forwarded to xllm. port and nnodes are used by "
             "this launcher."
+        ),
+    )
+    parser.add_argument(
+        "--enable-auto-tuning-gflags",
+        "--enable_auto_tuning_gflags",
+        dest="enable_auto_tuning",
+        action="store_true",
+        help=(
+            "Generate an optimal JSON config for the model's model_type and "
+            "launch with it. The tuned config is written to the current "
+            "working directory and forwarded via --config_json_file. Mutually "
+            "exclusive with --config_json_file."
         ),
     )
     parser.add_argument(
@@ -362,6 +531,14 @@ def launch_server(argv: Sequence[str] | None = None) -> int:
         print("\nxllm server options:\n")
         _print_binary_help(parser, binary_path)
         return 0
+
+    if args.enable_auto_tuning:
+        if args.config_json_file:
+            parser.error(
+                "--enable-auto-tuning-gflags and --config_json_file are "
+                "mutually exclusive"
+            )
+        args.config_json_file = _generate_tuned_config(parser, extra_args)
 
     config_json = _load_config_json(parser, args)
     _apply_config_json_overrides(parser, args, config_json)
