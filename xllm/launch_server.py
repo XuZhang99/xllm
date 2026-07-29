@@ -45,12 +45,37 @@ def _package_binary_path() -> str:
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "xllm")
 
 
+def _installed_binary_path() -> str | None:
+    # When `xllm serve` runs from the repo root, `import xllm` is shadowed by
+    # the source-tree `xllm/` package (cwd precedes site-packages on sys.path).
+    # That directory has no compiled binary -- it only exists in the installed
+    # wheel -- so _package_binary_path() misses. Scan sys.path for an installed
+    # `xllm/xllm` executable so the command still works from the source tree.
+    this_dir = os.path.dirname(os.path.realpath(__file__))
+    for entry in sys.path:
+        package_dir = os.path.realpath(os.path.join(entry or os.getcwd(), "xllm"))
+        if package_dir == this_dir:
+            continue
+        candidate = os.path.join(package_dir, "xllm")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def _resolve_binary_path(binary_path: str | None) -> str:
-    path = (
-        os.path.realpath(os.path.expanduser(binary_path))
-        if binary_path
-        else _package_binary_path()
-    )
+    if binary_path:
+        path = os.path.realpath(os.path.expanduser(binary_path))
+    else:
+        path = _package_binary_path()
+        if not os.path.isfile(path):
+            fallback = _installed_binary_path()
+            if fallback is not None:
+                logger.info(
+                    "xllm binary not found next to the source-tree package; "
+                    "using the installed binary at %s.",
+                    fallback,
+                )
+                path = fallback
     if not os.path.isfile(path):
         raise FileNotFoundError(
             f"xllm server binary was not found: {path}. "
