@@ -24,7 +24,10 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
+import urllib.error
+import urllib.request
 from types import ModuleType
 from typing import NoReturn, Sequence, TextIO
 
@@ -475,6 +478,47 @@ def _close_logs(processes: Sequence[ServerProcess]) -> None:
             server_process.log_file.close()
 
 
+def _probe_server_ready(
+    port: int,
+    stop_event: threading.Event,
+    poll_interval_s: float = 2.0,
+) -> None:
+    # Only rank 0 (the master node) serves the HTTP API and /health, so this is
+    # the readiness signal for the whole cluster: /health returns 200 once the
+    # model is loaded and all workers report healthy. Poll indefinitely; a slow
+    # model load must not be reported as a failure. The thread is a daemon and
+    # also stops as soon as the main loop signals process exit.
+    health_url = f"http://127.0.0.1:{port}/health"
+    while not stop_event.is_set():
+        try:
+            with urllib.request.urlopen(health_url, timeout=2) as response:
+                if response.status == 200:
+                    logger.info(
+                        "xllm server started successfully, serving on port %s "
+                        "(health: %s).",
+                        port,
+                        health_url,
+                    )
+                    return
+        except (urllib.error.URLError, OSError):
+            # Not accepting connections yet, or /health still reporting 503
+            # (workers connecting / model loading). Keep waiting.
+            pass
+        stop_event.wait(poll_interval_s)
+
+
+def _start_readiness_probe(port: int) -> tuple[threading.Thread, threading.Event]:
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=_probe_server_ready,
+        args=(port, stop_event),
+        name="xllm-readiness-probe",
+        daemon=True,
+    )
+    thread.start()
+    return thread, stop_event
+
+
 def _wait_for_processes(processes: Sequence[ServerProcess]) -> int:
     try:
         while True:
@@ -563,6 +607,7 @@ def launch_server(argv: Sequence[str] | None = None) -> int:
 
     _install_signal_handlers()
     processes: list[ServerProcess] = []
+    readiness_stop_event: threading.Event | None = None
     try:
         for rank, command in zip(ranks, commands):
             processes.append(_start_process(command, rank, args.log_dir))
@@ -572,11 +617,17 @@ def launch_server(argv: Sequence[str] | None = None) -> int:
                     rank,
                     os.path.join(args.log_dir, f"node_{rank}.log"),
                 )
+        # Only rank 0 serves the HTTP API, so probe its port for readiness.
+        if 0 in ranks:
+            rank_0_port = _resolve_port(args, 0, launches_all_local_ranks)
+            _, readiness_stop_event = _start_readiness_probe(rank_0_port)
         return _wait_for_processes(processes)
     except BaseException:
         _terminate_processes(processes)
         raise
     finally:
+        if readiness_stop_event is not None:
+            readiness_stop_event.set()
         _close_logs(processes)
 
 
