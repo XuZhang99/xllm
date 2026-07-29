@@ -37,12 +37,15 @@ from __future__ import annotations
 import copy
 import enum
 import functools
+import importlib.util
+import json
 import os
 import platform as platform_module
 import re
 import subprocess
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from types import ModuleType
+from typing import Any, Dict, Optional, Sequence
 
 from scripts.logger import logger
 
@@ -537,3 +540,149 @@ class BaseTuner(ABC):
     ) -> None:
         """Tune for Iluvatar GPU. Base default: no change. Override as needed."""
         pass
+
+
+class AutoTuningError(Exception):
+    """Raised when auto-tuning cannot produce a config.
+
+    The launcher catches this and surfaces the message via `parser.error`, so
+    these functions stay independent of argparse.
+    """
+
+
+def auto_tuning_config_dir() -> str:
+    """Directory holding the per-model tuning profiles (`xllm/auto_config`)."""
+    return os.path.dirname(os.path.realpath(__file__))
+
+
+def extract_model_path(extra_args: Sequence[str]) -> Optional[str]:
+    """Recover `--model` from the launcher's passthrough args.
+
+    `--model` is forwarded to the binary rather than parsed by the launcher, so
+    it must be read out of `extra_args`. Supports `--model VALUE` and
+    `--model=VALUE`.
+    """
+    for index, arg in enumerate(extra_args):
+        if arg == "--model":
+            if index + 1 < len(extra_args):
+                return extra_args[index + 1]
+            return None
+        if arg.startswith("--model="):
+            return arg[len("--model=") :]
+    return None
+
+
+def read_model_type(model_path: str) -> str:
+    """Read `model_type` (fallback `model_name`) from `<model_path>/config.json`.
+
+    Mirrors C++ `util::get_model_type`. Raises `AutoTuningError` on any problem.
+    """
+    config_path = os.path.join(
+        os.path.realpath(os.path.expanduser(model_path)), "config.json"
+    )
+    try:
+        with open(config_path, "r", encoding="utf-8") as config_file:
+            model_config = json.load(config_file)
+    except FileNotFoundError:
+        raise AutoTuningError(f"model config.json not found: {config_path}")
+    except json.JSONDecodeError as error:
+        raise AutoTuningError(f"failed to parse {config_path}: {error}")
+    except OSError as error:
+        raise AutoTuningError(f"failed to read {config_path}: {error}")
+
+    if not isinstance(model_config, dict):
+        raise AutoTuningError(f"{config_path} must contain a JSON object")
+
+    model_type = model_config.get("model_type") or model_config.get("model_name")
+    if not isinstance(model_type, str) or not model_type:
+        raise AutoTuningError(
+            f"{config_path} must contain a string `model_type` or `model_name`"
+        )
+    return model_type
+
+
+def load_tuning_module(py_path: str, model_type: str) -> ModuleType:
+    """Import a `<model_type>.py` tuning profile by file path.
+
+    Loading by path avoids triggering `xllm/__init__`'s lazy `xllm_export` .so
+    load. Raises `AutoTuningError` if the module cannot be imported or does not
+    expose a callable `tune`.
+    """
+    spec = importlib.util.spec_from_file_location(
+        f"xllm.auto_config.{model_type}", py_path
+    )
+    if spec is None or spec.loader is None:
+        raise AutoTuningError(f"failed to load tuning module: {py_path}")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as error:
+        raise AutoTuningError(f"failed to import {py_path}: {error}")
+    if not callable(getattr(module, "tune", None)):
+        raise AutoTuningError(
+            f"{py_path} must define a callable `tune(base_config, context)`"
+        )
+    return module
+
+
+def generate_tuned_config(extra_args: Sequence[str], output_dir: str) -> str:
+    """Generate a tuned JSON config for the model and write it to `output_dir`.
+
+    Resolves the model's `model_type`, loads its base config and tuning
+    profile, applies the profile's `tune()`, and writes
+    `<output_dir>/<model_type>.tuned.json`. Returns the written path. Raises
+    `AutoTuningError` on any failure.
+    """
+    model_path = extract_model_path(extra_args)
+    if not model_path:
+        raise AutoTuningError("auto-tuning requires --model <path>")
+
+    model_type = read_model_type(model_path)
+
+    config_dir = auto_tuning_config_dir()
+    base_json_path = os.path.join(config_dir, f"{model_type}.json")
+    tuning_py_path = os.path.join(config_dir, f"{model_type}.py")
+    if not os.path.isfile(base_json_path) or not os.path.isfile(tuning_py_path):
+        raise AutoTuningError(
+            f"auto-tuning is not supported for model_type `{model_type}`: "
+            f"expected both {base_json_path} and {tuning_py_path} to exist."
+        )
+
+    try:
+        with open(base_json_path, "r", encoding="utf-8") as base_file:
+            base_config = json.load(base_file)
+    except (OSError, json.JSONDecodeError) as error:
+        raise AutoTuningError(f"failed to read {base_json_path}: {error}")
+    if not isinstance(base_config, dict):
+        raise AutoTuningError(f"{base_json_path} must contain a JSON object")
+
+    module = load_tuning_module(tuning_py_path, model_type)
+
+    detect_hardware_fn = getattr(module, "detect_hardware", None)
+    hardware = detect_hardware_fn() if callable(detect_hardware_fn) else None
+    context = {
+        "model_path": model_path,
+        "model_type": model_type,
+        "visible_device_count": Platform.get_device_count(),
+        "hardware": hardware,
+    }
+
+    try:
+        tuned_config = module.tune(base_config, context)
+    except Exception as error:
+        raise AutoTuningError(f"{tuning_py_path} tune() failed: {error}")
+    if not isinstance(tuned_config, dict):
+        raise AutoTuningError(f"{tuning_py_path} tune() must return a dict")
+
+    output_path = os.path.join(output_dir, f"{model_type}.tuned.json")
+    try:
+        with open(output_path, "w", encoding="utf-8") as output_file:
+            json.dump(tuned_config, output_file, indent=2)
+            output_file.write("\n")
+    except OSError as error:
+        raise AutoTuningError(f"failed to write tuned config {output_path}: {error}")
+
+    logger.info(
+        "auto-tuning: wrote tuned config for %s to %s", model_type, output_path
+    )
+    return output_path

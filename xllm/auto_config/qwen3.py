@@ -39,10 +39,8 @@ class Qwen3Tuner(BaseTuner):
     """qwen3 auto-tuning policy.
 
     Only the two mandatory hooks are implemented: `tune_common` (topology and
-    ARM adjustments) and `tune_npu` (graph mode is only validated on the Ascend
-    A2 (910b) generation, so it is disabled on other NPU generations). Other
-    platforms fall back to `BaseTuner`'s no-op defaults until qwen3 has
-    validated tuning for them.
+    ARM adjustments) and `tune_npu`. Other platforms fall back to `BaseTuner`'s 
+    no-op defaults until qwen3 has validated tuning for them.
     """
 
     MODEL_TYPE = "qwen3"
