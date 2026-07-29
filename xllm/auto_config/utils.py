@@ -34,12 +34,14 @@ can always read a value.
 
 from __future__ import annotations
 
+import copy
 import enum
 import functools
 import os
 import platform as platform_module
 import re
 import subprocess
+from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 from scripts.logger import logger
@@ -403,3 +405,135 @@ def check_device_count(
         optimal_nnodes,
     )
     return True
+
+
+class BaseTuner(ABC):
+    """Base class for per-model auto-tuning profiles.
+
+    A profile subclasses this, sets `MODEL_TYPE`, and implements the two
+    mandatory hooks -- `tune_common` (cross-platform adjustments) and
+    `tune_npu` (the primary, validated target). The remaining platform hooks
+    (`tune_cuda`, `tune_mlu`, `tune_musa`, `tune_dcu`, `tune_ilu`) have base
+    no-op defaults, so a profile overrides one only when it has platform
+    specific tuning; otherwise the base config is used unchanged there.
+
+    `tune()` is the fixed orchestration entry point the launcher calls (via
+    each profile module's `tune()` wrapper):
+
+    1. deep-copy the base config (the input is never mutated),
+    2. log the detected hardware and check the device count,
+    3. apply cross-platform adjustments in `tune_common()`,
+    4. dispatch to the platform-specific hook selected from `Platform.enum()`.
+
+    The hooks mutate the working config in place (they return `None`); `tune()`
+    owns and returns the copy.
+    """
+
+    # Subclasses MUST override with their config.json / <type>.py base name.
+    MODEL_TYPE: str = "base"
+
+    def tune(
+        self,
+        base_config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        tuned_config = copy.deepcopy(base_config)
+
+        hardware = context.get("hardware") or detect_hardware()
+        logger.info(
+            "%s auto-tuning: detected hardware device_type=%s chip=%s arch=%s.",
+            self.MODEL_TYPE,
+            hardware.get("device_type"),
+            hardware.get("chip"),
+            hardware.get("arch"),
+        )
+
+        check_device_count(self.MODEL_TYPE, base_config, context)
+
+        self.tune_common(tuned_config, context)
+        self._dispatch_platform(tuned_config, context)
+        return tuned_config
+
+    def _dispatch_platform(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        dispatch = {
+            PlatformEnum.NPU: self.tune_npu,
+            PlatformEnum.CUDA: self.tune_cuda,
+            PlatformEnum.MLU: self.tune_mlu,
+            PlatformEnum.MUSA: self.tune_musa,
+            PlatformEnum.DCU: self.tune_dcu,
+            PlatformEnum.ILU: self.tune_ilu,
+        }
+        hook = dispatch.get(Platform.enum())
+        if hook is None:
+            logger.warning(
+                "%s auto-tuning: no tuning hook for platform %s; using base "
+                "config unchanged.",
+                self.MODEL_TYPE,
+                Platform.enum(),
+            )
+            return
+        hook(config, context)
+
+    def tune_common(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        """Cross-platform adjustments applied before the platform hook.
+
+        Mandatory: a profile with no cross-platform tuning implements this as a
+        one-line `pass`.
+        """
+        pass
+
+    def tune_npu(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        """Tune for Ascend NPU. Mutate `config` in place."""
+        pass
+
+    def tune_cuda(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        """Tune for NVIDIA CUDA. Base default: no change. Override as needed."""
+        pass
+
+    def tune_mlu(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        """Tune for Cambricon MLU. Base default: no change. Override as needed."""
+        pass
+
+    def tune_musa(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        """Tune for Moore Threads MUSA. Base default: no change. Override as needed."""
+        pass
+
+    def tune_dcu(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        """Tune for Hygon DCU. Base default: no change. Override as needed."""
+        pass
+
+    def tune_ilu(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        """Tune for Iluvatar GPU. Base default: no change. Override as needed."""
+        pass

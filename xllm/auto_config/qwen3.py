@@ -16,69 +16,62 @@
 """Auto-tuning profile for the `qwen3` model type.
 
 The launcher loads the base `qwen3.json` config, builds a `context` describing
-the current machine, and calls `tune(base_config, context)`. `tune` returns an
-adjusted copy of the base config that is then written next to the launch
-command and passed to the xllm binary via `--config_json_file`.
+the current machine, and calls the module-level `tune(base_config, context)`.
+`tune` delegates to `Qwen3Tuner`, a `BaseTuner` subclass that implements the
+two mandatory hooks (`tune_common` and `tune_npu`) and returns an adjusted copy
+of the base config, which the launcher then writes next to the launch command
+and passes to the xllm binary via `--config_json_file`.
 
-Shared helpers (`detect_hardware`, `check_device_count`) live in
-`xllm.auto_config.utils` so other model profiles can reuse them; this module
-only holds the qwen3-specific tuning policy.
+Shared machinery (`BaseTuner`, `Platform`, `detect_hardware`,
+`check_device_count`) lives in `xllm.auto_config.utils`; this module only holds
+the qwen3 tuning policy.
 """
 
 from __future__ import annotations
 
-import copy
 from typing import Any, Dict
 
 from scripts.logger import logger
-from xllm.auto_config.utils import (
-    CpuArchEnum,
-    Platform,
-    check_device_count,
-    detect_hardware,
-)
+from xllm.auto_config.utils import BaseTuner, CpuArchEnum, Platform
 
-MODEL_TYPE = "qwen3"
+
+class Qwen3Tuner(BaseTuner):
+    """qwen3 auto-tuning policy.
+
+    Only the two mandatory hooks are implemented: `tune_common` (topology and
+    ARM adjustments) and `tune_npu` (graph mode is only validated on the Ascend
+    A2 (910b) generation, so it is disabled on other NPU generations). Other
+    platforms fall back to `BaseTuner`'s no-op defaults until qwen3 has
+    validated tuning for them.
+    """
+
+    MODEL_TYPE = "qwen3"
+
+    def tune_common(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        # Align the launch topology with the devices visible on this host.
+        visible_device_count = context.get("visible_device_count")
+        if isinstance(visible_device_count, int) and visible_device_count > 0:
+            config["nnodes"] = visible_device_count
+
+        # ARM hosts get a smaller prefill batch regardless of accelerator.
+        if Platform.get_cpu_architecture() == CpuArchEnum.ARM:
+            config["max_tokens_per_batch"] = min(
+                config.get("max_tokens_per_batch", 8192), 4096
+            )
+
+    def tune_npu(
+        self,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        # TODO
+        pass
 
 
 def tune(base_config: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-    """Produce a machine-adjusted copy of the base qwen3 config.
-
-    The base config is never mutated. Adjustments here are intentionally simple
-    and serve as a template for richer per-model tuning.
-    """
-    tuned_config = copy.deepcopy(base_config)
-
-    hardware = context.get("hardware") or detect_hardware()
-    logger.info(
-        "qwen3 auto-tuning: detected hardware device_type=%s chip=%s arch=%s.",
-        hardware.get("device_type"),
-        hardware.get("chip"),
-        hardware.get("arch"),
-    )
-
-    check_device_count(MODEL_TYPE, base_config, context)
-
-    # Align the launch topology with the devices actually visible on this host.
-    visible_device_count = context.get("visible_device_count")
-    if isinstance(visible_device_count, int) and visible_device_count > 0:
-        tuned_config["nnodes"] = visible_device_count
-
-    # Hardware-specific nudges (worked example). Graph mode + ATB has only been
-    # validated on the Ascend A2 (910b) generation here; be conservative
-    # elsewhere.
-    if not (Platform.is_npu() and Platform.get_ascend_soc_generation() == "a2"):
-        tuned_config["enable_graph"] = False
-        logger.info(
-            "qwen3 auto-tuning: device_type=%s chip=%s is not Ascend A2; "
-            "disabling graph mode.",
-            hardware.get("device_type"),
-            hardware.get("chip"),
-        )
-
-    if Platform.get_cpu_architecture() == CpuArchEnum.ARM:
-        tuned_config["max_tokens_per_batch"] = min(
-            tuned_config.get("max_tokens_per_batch", 8192), 4096
-        )
-
-    return tuned_config
+    """Launcher entry point: adapt the base qwen3 config to this machine."""
+    return Qwen3Tuner().tune(base_config, context)
