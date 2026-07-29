@@ -86,9 +86,9 @@ _VISIBLE_DEVICE_ENV_VARS = (
 
 
 def _auto_tuning_config_dir() -> str:
-    # Profiles live next to this launcher (xllm/config), which resolves the same
-    # way in the source tree and in a wheel install.
-    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "config")
+    # Profiles live next to this launcher (xllm/auto_config), which resolves
+    # the same way in the source tree and in a wheel install.
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "auto_config")
 
 
 def _extract_model_path(extra_args: Sequence[str]) -> str | None:
@@ -145,7 +145,7 @@ def _load_tuning_module(
     # xllm_export .so loading. The module still resolves `from scripts.logger
     # import logger` via the normal import path.
     spec = importlib.util.spec_from_file_location(
-        f"xllm.config.{model_type}", py_path
+        f"xllm.auto_config.{model_type}", py_path
     )
     if spec is None or spec.loader is None:
         parser.error(f"auto-tuning: failed to load tuning module: {py_path}")
