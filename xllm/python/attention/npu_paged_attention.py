@@ -340,7 +340,50 @@ class NpuPagedAttentionBackend(AttentionBackend):
         if self._block_table_i32 is None:
             raise RuntimeError("MLA requires a block table")
 
-        torch.ops.xllm_ops.reshape_paged_cache(metadata.slot_mapping, k_latent_3d, k_pe_3d, nope_cache, rope_cache)
+        cp_context = (
+            get_forward_context().cp_context
+            if getattr(layer, "supports_prefill_cp", False)
+            else None
+        )
+        if cp_context is not None:
+            k_latent_3d = cp_gather_kv(k_latent_3d, cp_context)
+            k_pe_3d = cp_gather_kv(k_pe_3d, cp_context)
+        torch.ops.xllm_ops.reshape_paged_cache(
+            metadata.slot_mapping,
+            k_latent_3d,
+            k_pe_3d,
+            nope_cache,
+            rope_cache,
+        )
+        if cp_context is not None:
+            if cp_context.query_index.numel() == 0:
+                return q_latent.new_zeros(q_latent.shape)
+            query_index = cp_context.query_index
+            q_real = q_latent.index_select(0, query_index).contiguous()
+            q_pe_real = q_pe.index_select(0, query_index).contiguous()
+            topk_real = topk.index_select(0, query_index).contiguous()
+            block_table = self._block_table_i32.index_select(
+                0, cp_context.segment_batch_indices
+            )
+            actual_seq_q = torch.tensor(
+                cp_context.q_cu_seqlens,
+                dtype=torch.int32,
+                device=q_latent.device,
+            )
+            output = self._mla_sparse(
+                q_real,
+                q_pe_real,
+                nope_cache,
+                rope_cache,
+                topk_real,
+                block_table,
+                layer_id,
+                actual_seq_q=actual_seq_q,
+                actual_seq_kv=cp_context.segment_kv_lens,
+            )
+            local_output = q_latent.new_zeros(q_latent.shape)
+            local_output.index_copy_(0, query_index, output)
+            return local_output
         return self._mla_sparse(
             q_latent,
             q_pe,
@@ -367,6 +410,11 @@ class NpuPagedAttentionBackend(AttentionBackend):
             actual_seq_q=self._mla_actual_seq_q,
             actual_seq_kv=self._mla_actual_seq_kv,
             update_index_cache=lambda values: self._update_mla_index_cache(index_cache, metadata.slot_mapping, values),
+            cp_context=(
+                get_forward_context().cp_context
+                if getattr(layer, "supports_prefill_cp", False)
+                else None
+            ),
         )
 
     @staticmethod
@@ -391,6 +439,8 @@ class NpuPagedAttentionBackend(AttentionBackend):
         topk: torch.Tensor,
         block_table: torch.Tensor,
         layer_id: int,
+        actual_seq_q: torch.Tensor | None = None,
+        actual_seq_kv: torch.Tensor | None = None,
     ) -> torch.Tensor:
         out = get_execution_buffer(
             ("SFA_OUTPUT", layer_id) + tuple(q_latent.shape),
@@ -402,8 +452,8 @@ class NpuPagedAttentionBackend(AttentionBackend):
             nope_cache,
             topk,
             block_table,
-            self._mla_actual_seq_q,
-            self._mla_actual_seq_kv,
+            self._mla_actual_seq_q if actual_seq_q is None else actual_seq_q,
+            self._mla_actual_seq_kv if actual_seq_kv is None else actual_seq_kv,
             q_pe,
             rope_cache,
             self.scale,

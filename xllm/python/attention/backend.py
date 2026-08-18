@@ -27,6 +27,7 @@ from xllm.python.attention.expanded_decode_metadata import (
 
 if TYPE_CHECKING:
     from xllm.python.layers.attention import Attention
+    from xllm.python.model_executor.cp_utils import CpContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +108,7 @@ class MlaIndexContext:
     actual_seq_q: torch.Tensor
     actual_seq_kv: torch.Tensor
     update_index_cache: Callable[[torch.Tensor], None]
+    cp_context: CpContext | None = None
 
 
 class AttentionBackend(ABC):

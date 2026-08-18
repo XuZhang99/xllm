@@ -46,6 +46,12 @@ from xllm.python.layers import (
     HiddenParallelEmbedding,
     RMSNorm,
 )
+from xllm.python.model_executor.cp_utils import (
+    cp_gather_kv,
+    cp_merge_rows,
+    cp_shard_positions,
+    cp_shard_rows,
+)
 from xllm.python.model_executor.forward_context import get_forward_context
 from xllm.python.models.base import PyModelBase
 from xllm.python.models.deepseek_v32 import (
@@ -275,6 +281,7 @@ class Glm52MLAAttention(Attention):
         self.v_head_dim = v_head
         self.kv_lora_rank = kv_lora
         self.num_heads_local = num_heads
+        self.supports_prefill_cp = True
 
         self.q_a_proj = W8A8StaticLinear(cfg.hidden_size, cfg.q_lora_rank, device)
         self.kv_a_proj_with_mqa = W8A8StaticLinear(cfg.hidden_size, kv_lora + qk_rope, device)
@@ -417,10 +424,31 @@ class Glm52Indexer(nn.Module):
             k_pe = _apply_half_rope(k_pe.unsqueeze(1), cos_sin_cache, positions).squeeze(1)
         q = torch.cat([q_pe, q_nope], dim=-1)
         k = torch.cat([k_pe, k_nope], dim=-1)
+        weights = self.weights_proj(hidden.to(torch.float32)).to(torch.bfloat16)
+        cp_context = ctx.cp_context
+        if cp_context is not None:
+            k = cp_gather_kv(k.contiguous(), cp_context)
         if index_cache is not None and slot_mapping is not None:
             k_view = index_cache.view(-1, index_cache.size(-1))
             kernels.scatter_nd_update(k_view, slot_mapping.reshape(-1, 1).clamp_min(0), k)
-        weights = self.weights_proj(hidden.to(torch.float32)).to(torch.bfloat16)
+        if cp_context is not None:
+            query_index = cp_context.query_index
+            if query_index.numel() == 0:
+                key_head_num = index_cache.size(2) if index_cache.dim() >= 3 else 1
+                return torch.zeros(
+                    (cp_context.total_local, key_head_num, self.topk),
+                    dtype=torch.int32,
+                    device=q.device,
+                )
+            q = q.index_select(0, query_index).contiguous()
+            weights = weights.index_select(0, query_index).contiguous()
+            block_table = block_table.index_select(0, cp_context.segment_batch_indices)
+            actual_seq_q = torch.tensor(
+                cp_context.q_cu_seqlens,
+                dtype=torch.int32,
+                device=q.device,
+            )
+            actual_seq_kv = cp_context.segment_kv_lens
         topk = kernels.lightning_indexer(
             q,
             index_cache,
@@ -436,6 +464,10 @@ class Glm52Indexer(nn.Module):
             9223372036854775807,
             False,
         )
+        if cp_context is not None:
+            local_topk = topk.new_zeros((cp_context.total_local,) + tuple(topk.shape[1:]))
+            local_topk.index_copy_(0, cp_context.query_index, topk)
+            return local_topk
         return topk
 
 
@@ -512,12 +544,18 @@ class Glm52Model(nn.Module):
     def forward(self, input_ids: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
         hidden = self.embed_tokens(input_ids)
         positions = positions.to(torch.int64).contiguous()
+        cp_context = get_forward_context().cp_context
+        if cp_context is not None:
+            hidden = cp_shard_rows(hidden, cp_context)
+            positions = cp_shard_positions(positions, cp_context).contiguous()
         cos_sin_cache = self.rotary.cos_sin_cache
         residual: torch.Tensor | None = None
         prev_topk: torch.Tensor | None = None
         for layer in self.layers:
             hidden, residual, prev_topk = layer(hidden, residual, positions, cos_sin_cache, prev_topk)
         hidden, last_hidden = self.norm(hidden, residual)
+        if cp_context is not None:
+            hidden = cp_merge_rows(hidden, cp_context)
         return hidden
 
 

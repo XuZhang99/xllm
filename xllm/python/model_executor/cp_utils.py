@@ -93,6 +93,11 @@ class CpContext:
     # cumulative. prefix_len == segment_start + query_count, so with
     # sparse_mode=3 query row i attends KV [0, segment_start + i] exactly.
     kv_cu_seqlens: list[int]
+    # Original packed-batch row for every non-empty (sequence, half) segment.
+    segment_batch_indices: torch.Tensor
+    # Non-cumulative causal-prefix length for every segment. Paged sparse
+    # kernels expect one KV length per block-table row.
+    segment_kv_lens: torch.Tensor
 
 
 def build_cp_context(
@@ -121,6 +126,19 @@ def build_cp_context(
         total_local,
     ) = torch.ops.xllm_ops.build_cp_context([int(length) for length in seq_lens], cp_size, cp_rank, device)
 
+    segment_batch_indices: list[int] = []
+    segment_kv_lens: list[int] = []
+    num_chunks = 2 * cp_size
+    owned_chunks = (cp_rank, num_chunks - 1 - cp_rank)
+    for batch_index, length in enumerate(seq_lens):
+        chunk_len = (int(length) + num_chunks - 1) // num_chunks
+        for chunk_index in owned_chunks:
+            segment_start = chunk_index * chunk_len
+            real_count = max(min(int(length) - segment_start, chunk_len), 0)
+            if real_count > 0:
+                segment_batch_indices.append(batch_index)
+                segment_kv_lens.append(segment_start + real_count)
+
     return CpContext(
         cp_size=cp_size,
         cp_rank=cp_rank,
@@ -133,6 +151,12 @@ def build_cp_context(
         q_cu_seqlens=q_cu_seqlens,
         kv_gather_index=kv_gather_index,
         kv_cu_seqlens=kv_cu_seqlens,
+        segment_batch_indices=torch.tensor(
+            segment_batch_indices, dtype=torch.int64, device=device
+        ),
+        segment_kv_lens=torch.tensor(
+            segment_kv_lens, dtype=torch.int32, device=device
+        ),
     )
 
 
