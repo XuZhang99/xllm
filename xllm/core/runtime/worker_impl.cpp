@@ -55,6 +55,7 @@ limitations under the License.
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/config/profile_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
@@ -473,6 +474,15 @@ bool WorkerImpl::allocate_kv_cache_storage(
 
   const bool enable_indexer_cache_quant =
       ::xllm::KVCacheConfig::get_instance().indexer_cache_dtype() == "int8";
+#if defined(USE_NPU)
+  const bool supports_npu_python_glm52_cache_quant =
+      args.model_type() == "glm_moe_dsa" &&
+      ModelConfig::is_python_model_impl(context_.get_model_impl());
+  CHECK(!enable_kv_cache_quant || supports_npu_python_glm52_cache_quant)
+      << "NPU KV cache INT8 only supports PyTorch GLM-5.2.";
+  CHECK(!enable_indexer_cache_quant || supports_npu_python_glm52_cache_quant)
+      << "NPU indexer cache INT8 only supports PyTorch GLM-5.2.";
+#endif
   if (enable_lighting_indexer) {
     CHECK_EQ(kv_cache_shape.has_index_cache_scale_shape(),
              enable_indexer_cache_quant)
@@ -480,9 +490,8 @@ bool WorkerImpl::allocate_kv_cache_storage(
   }
 
   if (enable_kv_cache_quant) {
-#if !defined(USE_MLU)
-    LOG(FATAL) << "KV Cache quantization is only supported on MLU backend. "
-               << "Current backend does not support this feature.";
+#if !defined(USE_MLU) && !defined(USE_NPU)
+    LOG(FATAL) << "KV Cache quantization is unsupported on this backend.";
 #endif
     // Check for unsupported scenarios
     if (options_.backend() == "vlm") {

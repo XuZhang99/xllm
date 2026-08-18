@@ -44,10 +44,22 @@ class LayerCache:
     index: torch.Tensor | None = None
     conv: torch.Tensor | None = None
     ssm: torch.Tensor | None = None
+    key_scale: torch.Tensor | None = None
+    value_scale: torch.Tensor | None = None
+    index_scale: torch.Tensor | None = None
 
 
 #: Field order of the tuple form, which is what the C++ executor hands over.
-_LAYER_CACHE_SLOTS = ("key", "value", "index", "conv", "ssm")
+_LAYER_CACHE_SLOTS = (
+    "key",
+    "value",
+    "index",
+    "conv",
+    "ssm",
+    "key_scale",
+    "value_scale",
+    "index_scale",
+)
 
 LayerCacheInput = LayerCache | tuple[torch.Tensor | None, ...]
 
@@ -106,7 +118,8 @@ class MlaIndexContext:
     block_table: torch.Tensor | None
     actual_seq_q: torch.Tensor
     actual_seq_kv: torch.Tensor
-    update_index_cache: Callable[[torch.Tensor], None]
+    index_scale: torch.Tensor | None
+    update_index_cache: Callable[[torch.Tensor, torch.Tensor | None], None]
 
 
 class AttentionBackend(ABC):

@@ -53,6 +53,13 @@ int64_t kv_slot_size(const ModelArgs& model_args,
                      int64_t cache_dtype_size) {
   if (model_args.enable_mla()) {
 #if defined(USE_NPU)
+    if (model_args.model_type() == "glm_moe_dsa" &&
+        options.kv_cache_dtype == "int8") {
+      const int64_t model_dtype_size = static_cast<int64_t>(
+          torch::scalarTypeToTypeMeta(options.dtype).itemsize());
+      return model_args.kv_lora_rank() +
+             model_dtype_size * model_args.qk_rope_head_dim();
+    }
     if ((model_args.model_type() == "deepseek_v3" ||
          model_args.model_type() == "deepseek_v3_mtp") &&
         options.enable_prefix_cache) {
@@ -85,11 +92,16 @@ int64_t index_slot_size(const ModelArgs& model_args,
     split_factor = util::kv_split_size_effective();
   }
   if (enable_indexer_cache_quantization) {
-    // int8 index cache: one byte per element, plus an independent per-token
-    // fp32 scale (kept separate from the main-KV scale_slot_size path).
+    int64_t scale_size = static_cast<int64_t>(sizeof(float));
+#if defined(USE_NPU)
+    if (model_args.model_type() == "glm_moe_dsa") {
+      scale_size = static_cast<int64_t>(sizeof(at::Half));
+    }
+#endif
+    // The index scale is kept separate from the main-KV scale_slot_size path.
     return split_factor * (static_cast<int64_t>(sizeof(int8_t)) * index_n_head *
                                model_args.index_head_dim() +
-                           static_cast<int64_t>(sizeof(float)));
+                           scale_size);
   }
   return split_factor * dtype_size * index_n_head * model_args.index_head_dim();
 }

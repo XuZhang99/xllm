@@ -39,14 +39,16 @@ DEFINE_string(
     "auto",
     "KV cache data type for quantization. \"auto\" (default): KV "
     "cache dtype aligns with model dtype (no quantization). "
-    "\"int8\": Enables INT8 quantization. Only supported on MLU backend.");
+    "\"int8\": Enables INT8 quantization. Supported on MLU and on NPU for "
+    "the PyTorch GLM-5.2 implementation.");
 
 DEFINE_string(indexer_cache_dtype,
               "auto",
               "Indexer cache data type for quantization. \"auto\" (default): "
               "Indexer cache dtype aligns with model dtype (no "
               "quantization). \"int8\": Enables INT8 quantization when "
-              "supported. Only supported on MLU backend.");
+              "supported. Supported on MLU and on NPU for the PyTorch "
+              "GLM-5.2 implementation.");
 
 DEFINE_bool(enable_prefix_cache,
             true,

@@ -77,6 +77,7 @@ from .rotary_embedding import (
 from .sparse_attention import (
     lightning_indexer,
     lightning_indexer_out,
+    quant_lightning_indexer,
     scatter_nd_update,
     sparse_flash_attention,
     sparse_flash_attention_out,
@@ -107,6 +108,7 @@ __all__ = [
     "dynamic_quant",
     "lightning_indexer",
     "lightning_indexer_out",
+    "quant_lightning_indexer",
     "scatter_nd_update",
     "sparse_flash_attention",
     "sparse_flash_attention_out",

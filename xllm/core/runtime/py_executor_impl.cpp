@@ -45,6 +45,10 @@ py::object optional_tensor(const torch::Tensor& tensor) {
   return tensor.defined() ? py::cast(tensor) : py::none();
 }
 
+py::object optional_tensor(const std::optional<torch::Tensor>& tensor) {
+  return tensor.has_value() ? optional_tensor(tensor.value()) : py::none();
+}
+
 void clear_python_object(py::object& object) {
   if (!object) {
     return;
@@ -126,11 +130,15 @@ ModelOutput PyExecutorImpl::run(const torch::Tensor& tokens,
     py::list kv_caches_py;
     for (auto& kv : kv_caches) {
       // Slot order must match ``LayerCache`` on the Python side.
-      kv_caches_py.append(py::make_tuple(optional_tensor(kv.get_k_cache()),
-                                         optional_tensor(kv.get_v_cache()),
-                                         optional_tensor(kv.get_index_cache()),
-                                         optional_tensor(kv.get_conv_cache()),
-                                         optional_tensor(kv.get_ssm_cache())));
+      kv_caches_py.append(
+          py::make_tuple(optional_tensor(kv.get_k_cache()),
+                         optional_tensor(kv.get_v_cache()),
+                         optional_tensor(kv.get_index_cache()),
+                         optional_tensor(kv.get_conv_cache()),
+                         optional_tensor(kv.get_ssm_cache()),
+                         optional_tensor(kv.get_k_cache_scale()),
+                         optional_tensor(kv.get_v_cache_scale()),
+                         optional_tensor(kv.get_indexer_cache_scale())));
     }
     py_executor_.attr("bind_kv_caches")(kv_caches_py);
     kv_bound_ = true;

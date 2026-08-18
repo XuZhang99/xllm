@@ -248,6 +248,97 @@ def _lightning_indexer_out_fake(
     return sparse_indices_out
 
 
+def _quant_lightning_indexer_fake(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    weights: torch.Tensor,
+    query_dequant_scale: torch.Tensor,
+    key_dequant_scale: torch.Tensor,
+    query_quant_mode: int,
+    key_quant_mode: int,
+    actual_seq_lengths_query: torch.Tensor | None,
+    actual_seq_lengths_key: torch.Tensor | None,
+    block_table: torch.Tensor | None,
+    metadata: torch.Tensor | None,
+    layout_query: str,
+    layout_key: str,
+    sparse_count: int,
+    sparse_mode: int,
+    pre_tokens: int,
+    next_tokens: int,
+    cmp_ratio: int,
+    return_value: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    del (
+        weights,
+        query_dequant_scale,
+        key_dequant_scale,
+        query_quant_mode,
+        key_quant_mode,
+        actual_seq_lengths_query,
+        actual_seq_lengths_key,
+        block_table,
+        metadata,
+        sparse_mode,
+        pre_tokens,
+        next_tokens,
+        cmp_ratio,
+    )
+    key_head_num = key.size(1) if layout_key == "TND" else key.size(2)
+    if layout_query == "BSND":
+        out_shape = (query.size(0), query.size(1), key_head_num, sparse_count)
+    else:
+        out_shape = (query.size(0), key_head_num, sparse_count)
+    indices = query.new_zeros(out_shape, dtype=torch.int32)
+    values = (
+        query.new_zeros(out_shape, dtype=torch.float32) if return_value else query.new_empty(0, dtype=torch.float32)
+    )
+    return indices, values
+
+
+def _quant_lightning_indexer_metadata_fake(
+    num_heads_q: int,
+    num_heads_k: int,
+    head_dim: int,
+    query_quant_mode: int,
+    key_quant_mode: int,
+    actual_seq_lengths_query: torch.Tensor | None,
+    actual_seq_lengths_key: torch.Tensor | None,
+    batch_size: int,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    layout_query: str,
+    layout_key: str,
+    sparse_count: int,
+    sparse_mode: int,
+    pre_tokens: int,
+    next_tokens: int,
+    cmp_ratio: int,
+    device: str,
+) -> torch.Tensor:
+    del (
+        num_heads_q,
+        num_heads_k,
+        head_dim,
+        query_quant_mode,
+        key_quant_mode,
+        batch_size,
+        max_seqlen_q,
+        max_seqlen_k,
+        layout_query,
+        layout_key,
+        sparse_count,
+        sparse_mode,
+        pre_tokens,
+        next_tokens,
+        cmp_ratio,
+    )
+    source = actual_seq_lengths_query if actual_seq_lengths_query is not None else actual_seq_lengths_key
+    if source is not None:
+        return source.new_empty(1024, dtype=torch.int32)
+    return torch.empty(1024, dtype=torch.int32, device=device)
+
+
 def _scatter_nd_update_fake(
     var: torch.Tensor,
     indices: torch.Tensor,
@@ -336,6 +427,11 @@ register_fake("xllm_ops::quantize_per_tensor", _quantize_per_tensor_fake)
 register_fake("xllm_ops::dynamic_quant", _dynamic_quant_fake)
 register_fake("xllm_ops::lightning_indexer", _lightning_indexer_fake)
 register_fake("xllm_ops::lightning_indexer_out", _lightning_indexer_out_fake)
+register_fake("xllm_ops::quant_lightning_indexer", _quant_lightning_indexer_fake)
+register_fake(
+    "xllm_ops::quant_lightning_indexer_metadata",
+    _quant_lightning_indexer_metadata_fake,
+)
 register_fake("xllm_ops::scatter_nd_update", _scatter_nd_update_fake)
 register_fake("xllm_ops::sparse_flash_attention", _sparse_flash_attention_fake)
 register_fake("xllm_ops::sparse_flash_attention_out", _sparse_flash_attention_out_fake)

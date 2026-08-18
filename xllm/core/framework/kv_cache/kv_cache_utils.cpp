@@ -127,6 +127,23 @@ torch::Tensor alloc_npu_huge_page_tensor(const std::vector<int64_t>& dims,
   tensor_storage->npu_desc_.npu_format_ = format;
   return tensor;
 }
+
+namespace {
+
+torch::Tensor alloc_npu_cache_tensor(
+    const std::vector<int64_t>& shape,
+    torch::ScalarType dtype,
+    aclFormat format,
+    const KVCacheCreateOptions& create_options) {
+  if (create_options.enable_kv_cache_huge_page_allocator()) {
+    return alloc_npu_huge_page_tensor(shape, dtype, format);
+  }
+  return at_npu::native::npu_format_cast(
+      torch::empty(shape, torch::dtype(dtype).device(create_options.device())),
+      format);
+}
+
+}  // namespace
 #endif
 
 bool is_linear_attention_layer(int64_t layer_idx,
@@ -160,26 +177,16 @@ KVCacheTensors create_kv_cache_tensors(
 #elif defined(USE_NPU)
   const aclFormat npu_format_type =
       get_npu_kv_cache_format(create_options.model_type());
-  if (create_options.enable_kv_cache_huge_page_allocator()) {
-    tensors.key_cache =
-        alloc_npu_huge_page_tensor(kv_cache_shape.key_cache_shape(),
-                                   create_options.dtype(),
-                                   npu_format_type);
+  tensors.key_cache = alloc_npu_cache_tensor(kv_cache_shape.key_cache_shape(),
+                                             create_options.dtype(),
+                                             npu_format_type,
+                                             create_options);
+  if (kv_cache_shape.has_value_cache_shape()) {
     tensors.value_cache =
-        alloc_npu_huge_page_tensor(kv_cache_shape.value_cache_shape(),
-                                   create_options.dtype(),
-                                   npu_format_type);
-  } else {
-    tensors.key_cache = at_npu::native::npu_format_cast(
-        torch::empty(kv_cache_shape.key_cache_shape(),
-                     torch::dtype(create_options.dtype())
-                         .device(create_options.device())),
-        npu_format_type);
-    tensors.value_cache = at_npu::native::npu_format_cast(
-        torch::empty(kv_cache_shape.value_cache_shape(),
-                     torch::dtype(create_options.dtype())
-                         .device(create_options.device())),
-        npu_format_type);
+        alloc_npu_cache_tensor(kv_cache_shape.value_cache_shape(),
+                               create_options.dtype(),
+                               npu_format_type,
+                               create_options);
   }
 #else
   tensors.key_cache = alloc_cache_tensor(KVCacheTensorRole::KEY,
@@ -226,26 +233,25 @@ IndexedKVCacheTensors create_indexed_kv_cache_tensors(
 #elif defined(USE_NPU)
   const aclFormat npu_format_type =
       get_npu_kv_cache_format(create_options.model_type());
-  if (create_options.enable_kv_cache_huge_page_allocator()) {
-    tensors.index_cache =
-        alloc_npu_huge_page_tensor(kv_cache_shape.index_cache_shape(),
-                                   create_options.dtype(),
-                                   npu_format_type);
-  } else {
-    tensors.index_cache = at_npu::native::npu_format_cast(
-        torch::empty(kv_cache_shape.index_cache_shape(),
-                     torch::dtype(create_options.dtype())
-                         .device(create_options.device())),
-        npu_format_type);
-  }
+  const torch::ScalarType index_dtype =
+      create_options.enable_indexer_cache_quant() ? torch::kChar
+                                                  : create_options.dtype();
+  tensors.index_cache =
+      alloc_npu_cache_tensor(kv_cache_shape.index_cache_shape(),
+                             index_dtype,
+                             npu_format_type,
+                             create_options);
 #else
   tensors.index_cache = torch::zeros(
       kv_cache_shape.index_cache_shape(),
       torch::dtype(create_options.dtype()).device(create_options.device()));
 #endif
   if (create_options.enable_indexer_cache_quant()) {
-#if !defined(USE_MLU)
-    CHECK(false) << "Indexer cache INT8 is only supported on MLU backend.";
+#if !defined(USE_MLU) && !defined(USE_NPU)
+    CHECK(false) << "Indexer cache INT8 is unsupported on this backend.";
+#elif defined(USE_NPU)
+    CHECK_EQ(create_options.model_type(), "glm_moe_dsa")
+        << "NPU indexer cache INT8 only supports PyTorch GLM-5.2.";
 #endif
     if (kv_cache_shape.has_index_cache_scale_shape()) {
 #if defined(USE_MLU)
@@ -253,6 +259,12 @@ IndexedKVCacheTensors create_indexed_kv_cache_tensors(
           alloc_cache_tensor(KVCacheTensorRole::INDEX_SCALE,
                              kv_cache_shape.index_cache_scale_shape(),
                              torch::kFloat32,
+                             create_options);
+#elif defined(USE_NPU)
+      tensors.index_cache_scale =
+          alloc_cache_tensor(KVCacheTensorRole::INDEX_SCALE,
+                             kv_cache_shape.index_cache_scale_shape(),
+                             torch::kFloat16,
                              create_options);
 #else
       tensors.index_cache_scale = torch::zeros(
@@ -269,6 +281,15 @@ IndexedKVCacheTensors create_indexed_kv_cache_tensors(
                              scale_shape,
                              torch::kFloat32,
                              create_options);
+#elif defined(USE_NPU)
+      std::vector<int64_t> scale_shape(
+          kv_cache_shape.index_cache_shape().begin(),
+          kv_cache_shape.index_cache_shape().end() - 1);
+      tensors.index_cache_scale =
+          alloc_cache_tensor(KVCacheTensorRole::INDEX_SCALE,
+                             scale_shape,
+                             torch::kFloat16,
+                             create_options);
 #else
       tensors.index_cache_scale = alloc_scale(
           kv_cache_shape.index_cache_shape(), create_options.device());
@@ -281,16 +302,36 @@ IndexedKVCacheTensors create_indexed_kv_cache_tensors(
 QuantizedKVCacheTensors create_quantized_kv_cache_tensors(
     const KVCacheShape& kv_cache_shape,
     const KVCacheCreateOptions& create_options) {
-#if !defined(USE_MLU)
+#if !defined(USE_MLU) && !defined(USE_NPU)
   CHECK(!create_options.enable_kv_cache_quant())
-      << "KV cache quantization is only supported on MLU backend.";
+      << "KV cache quantization is unsupported on this backend.";
+#elif defined(USE_NPU)
+  CHECK_EQ(create_options.model_type(), "glm_moe_dsa")
+      << "NPU KV cache INT8 only supports PyTorch GLM-5.2.";
 #endif
 
   QuantizedKVCacheTensors tensors;
+#if defined(USE_NPU)
+  const aclFormat npu_format_type =
+      get_npu_kv_cache_format(create_options.model_type());
+  tensors.kv_cache_tensors.key_cache =
+      alloc_npu_cache_tensor(kv_cache_shape.key_cache_shape(),
+                             torch::kChar,
+                             npu_format_type,
+                             create_options);
+  if (kv_cache_shape.has_value_cache_shape()) {
+    tensors.kv_cache_tensors.value_cache =
+        alloc_npu_cache_tensor(kv_cache_shape.value_cache_shape(),
+                               create_options.dtype(),
+                               npu_format_type,
+                               create_options);
+  }
+#else
   KVCacheCreateOptions quantized_options = create_options;
   quantized_options.dtype(torch::kChar);
   tensors.kv_cache_tensors =
       create_kv_cache_tensors(kv_cache_shape, quantized_options);
+#endif
 
   const std::vector<int64_t>& key_cache_shape =
       kv_cache_shape.key_cache_shape();
@@ -302,6 +343,7 @@ QuantizedKVCacheTensors create_quantized_kv_cache_tensors(
                                                key_scale_shape,
                                                torch::kFloat32,
                                                create_options);
+#if !defined(USE_NPU)
   if (!kv_cache_shape.value_cache_shape().empty()) {
     const std::vector<int64_t>& value_cache_shape =
         kv_cache_shape.value_cache_shape();
@@ -313,6 +355,7 @@ QuantizedKVCacheTensors create_quantized_kv_cache_tensors(
                            torch::kFloat32,
                            create_options);
   }
+#endif
 
   return tensors;
 }

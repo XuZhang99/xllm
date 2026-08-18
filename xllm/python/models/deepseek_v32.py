@@ -669,7 +669,7 @@ class DeepseekV3Indexer(nn.Module):
         q = torch.cat([q_pe, q_nope], dim=-1)
         k = torch.cat([k_pe, k_nope], dim=-1)
         if ctx.index_cache is not None and ctx.slot_mapping is not None:
-            ctx.update_index_cache(k)
+            ctx.update_index_cache(k, None)
 
         key_head_num = ctx.index_cache.size(2) if ctx.index_cache.dim() >= 3 else 1
         output_shape = (q.size(0), key_head_num, self.topk)

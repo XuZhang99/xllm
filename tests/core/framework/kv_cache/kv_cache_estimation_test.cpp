@@ -105,6 +105,29 @@ TEST(KVCacheEstimationTest, IndexerScaleUsesLogicalCacheCapacity) {
   EXPECT_EQ(capacity.n_blocks(), 1107);
 }
 
+#if defined(USE_NPU)
+TEST(KVCacheEstimationTest, NpuGlm52Int8CacheUsesMixedMlaDtypes) {
+  ModelArgs model_args = make_standard_args();
+  model_args.model_type("glm_moe_dsa")
+      .enable_mla(true)
+      .kv_lora_rank(512)
+      .qk_rope_head_dim(64)
+      .index_n_heads(1)
+      .index_head_dim(128);
+  KVCacheEstimateOptions options = make_estimate_options();
+  options.dtype = torch::kBFloat16;
+  options.kv_cache_dtype = "int8";
+  options.indexer_cache_dtype = "int8";
+
+  const KVCacheCapacity capacity =
+      estimate_kv_cache_capacity(model_args, options);
+
+  EXPECT_EQ(capacity.slot_size(), 640);
+  EXPECT_EQ(capacity.scale_slot_size(), 4);
+  EXPECT_EQ(capacity.index_slot_size(), 130);
+}
+#endif
+
 #if defined(USE_MLU)
 TEST(KVCacheEstimationTest, SharedDsaLayersDoNotConsumeIndexerCacheBudget) {
   ModelArgs model_args = make_standard_args();

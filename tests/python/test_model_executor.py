@@ -584,6 +584,23 @@ class TestBindKvCaches:
     @patch(
         "xllm.python.model_executor.executor._create_attention_backend",
     )
+    def test_bind_preserves_quantized_cache_scales(self, mock_create):
+        backend = StubAttentionBackend()
+        mock_create.return_value = backend
+        model = _FakeModel(num_layers=1)
+        executor = ModelExecutor(model, {}, max_seqs_per_batch=4)
+        tensors = tuple(torch.full((1,), value) for value in range(1, 9))
+
+        executor.bind_kv_caches([tensors])
+
+        cache = backend._kv_caches[0]
+        assert torch.equal(cache.key_scale, tensors[5])
+        assert torch.equal(cache.value_scale, tensors[6])
+        assert torch.equal(cache.index_scale, tensors[7])
+
+    @patch(
+        "xllm.python.model_executor.executor._create_attention_backend",
+    )
     def test_bind_wrong_count_raises(self, mock_create):
         mock_create.return_value = StubAttentionBackend()
         model = _FakeModel(num_layers=2)

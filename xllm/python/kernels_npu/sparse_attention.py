@@ -108,6 +108,70 @@ def lightning_indexer_out(
     )
 
 
+def quant_lightning_indexer(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    weights: torch.Tensor,
+    query_dequant_scale: torch.Tensor,
+    key_dequant_scale: torch.Tensor,
+    actual_seq_lengths_query: torch.Tensor,
+    actual_seq_lengths_key: torch.Tensor,
+    block_table: torch.Tensor,
+    selected_count: int,
+    sparse_mode: int,
+    pre_tokens: int,
+    next_tokens: int,
+    cmp_ratio: int = 1,
+) -> torch.Tensor:
+    """Select sparse keys from INT8 query and paged index caches."""
+    query_quant_mode = 0
+    key_quant_mode = 0
+    layout_query = "TND"
+    layout_key = "PA_BSND"
+    metadata = torch.ops.xllm_ops.quant_lightning_indexer_metadata(
+        query.size(1),
+        key.size(2),
+        query.size(-1),
+        query_quant_mode,
+        key_quant_mode,
+        actual_seq_lengths_query,
+        actual_seq_lengths_key,
+        actual_seq_lengths_key.numel(),
+        query.size(0),
+        block_table.size(1) * key.size(1),
+        layout_query,
+        layout_key,
+        selected_count,
+        sparse_mode,
+        pre_tokens,
+        next_tokens,
+        cmp_ratio,
+        str(query.device),
+    )
+    indices, _ = torch.ops.xllm_ops.quant_lightning_indexer(
+        query,
+        key,
+        weights,
+        query_dequant_scale,
+        key_dequant_scale,
+        query_quant_mode,
+        key_quant_mode,
+        actual_seq_lengths_query,
+        actual_seq_lengths_key,
+        block_table,
+        metadata,
+        layout_query,
+        layout_key,
+        selected_count,
+        sparse_mode,
+        pre_tokens,
+        next_tokens,
+        cmp_ratio,
+        False,
+    )
+    return indices
+
+
 def scatter_nd_update(
     value: torch.Tensor,
     indices: torch.Tensor,
@@ -218,6 +282,7 @@ def sparse_flash_attention_out(
 __all__ = [
     "lightning_indexer",
     "lightning_indexer_out",
+    "quant_lightning_indexer",
     "scatter_nd_update",
     "sparse_flash_attention",
     "sparse_flash_attention_out",

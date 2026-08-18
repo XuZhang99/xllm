@@ -399,7 +399,6 @@ class Glm52Indexer(nn.Module):
         cos_sin_cache: torch.Tensor,
     ) -> torch.Tensor:
         index_cache = ctx.index_cache
-        slot_mapping = ctx.slot_mapping
         actual_seq_q = ctx.actual_seq_q
         actual_seq_kv = ctx.actual_seq_kv
         block_table = ctx.block_table
@@ -417,14 +416,37 @@ class Glm52Indexer(nn.Module):
             k_pe = _apply_half_rope(k_pe.unsqueeze(1), cos_sin_cache, positions).squeeze(1)
         q = torch.cat([q_pe, q_nope], dim=-1)
         k = torch.cat([k_pe, k_nope], dim=-1)
-        if index_cache is not None and slot_mapping is not None:
-            k_view = index_cache.view(-1, index_cache.size(-1))
-            kernels.scatter_nd_update(k_view, slot_mapping.reshape(-1, 1).clamp_min(0), k)
-        weights = self.weights_proj(hidden.to(torch.float32)).to(torch.bfloat16)
+        weights = self.weights_proj(hidden.to(torch.float32))
+        if index_cache.dtype == torch.int8:
+            if ctx.index_scale is None:
+                raise RuntimeError("INT8 index cache requires a scale cache")
+            q_int8, q_scale = kernels.dynamic_quant(q)
+            k_int8, k_scale = kernels.dynamic_quant(k)
+            if q_scale is None or k_scale is None:
+                raise RuntimeError("NPU dynamic quantization did not return indexer scales")
+            q_scale = q_scale.to(torch.float16)
+            k_scale = k_scale.to(torch.float16)
+            ctx.update_index_cache(k_int8, k_scale)
+            return kernels.quant_lightning_indexer(
+                q_int8,
+                index_cache,
+                weights.to(torch.float16),
+                q_scale,
+                ctx.index_scale,
+                actual_seq_q,
+                actual_seq_kv,
+                block_table,
+                self.topk,
+                3,
+                9223372036854775807,
+                9223372036854775807,
+            )
+
+        ctx.update_index_cache(k, None)
         topk = kernels.lightning_indexer(
             q,
             index_cache,
-            weights,
+            weights.to(torch.bfloat16),
             actual_seq_q,
             actual_seq_kv,
             block_table,

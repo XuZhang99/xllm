@@ -35,6 +35,7 @@ from xllm.python.attention.backend import (
 from xllm.python.attention.expanded_decode_metadata import (
     resolve_expanded_decode_metadata,
 )
+from xllm.python.attention.quantized_mla import quantized_sparse_mla_attention
 from xllm.python.model_executor.cp_utils import cp_gather_kv
 from xllm.python.model_executor.forward_context import (
     AclGraphTask,
@@ -340,12 +341,30 @@ class NpuPagedAttentionBackend(AttentionBackend):
         if self._block_table_i32 is None:
             raise RuntimeError("MLA requires a block table")
 
-        torch.ops.xllm_ops.reshape_paged_cache(metadata.slot_mapping, k_latent_3d, k_pe_3d, nope_cache, rope_cache)
+        nope_cache_scale = layer_cache.key_scale
+        if nope_cache.dtype == torch.int8:
+            if nope_cache_scale is None:
+                raise RuntimeError("INT8 MLA latent cache requires a scale cache")
+            k_latent_int8, k_latent_scale = kernels.dynamic_quant(k_latent_3d)
+            if k_latent_scale is None:
+                raise RuntimeError("NPU dynamic quantization did not return an MLA cache scale")
+            self._update_paged_cache(nope_cache, metadata.slot_mapping, k_latent_int8)
+            self._update_paged_cache(nope_cache_scale, metadata.slot_mapping, k_latent_scale)
+            self._update_paged_cache(rope_cache, metadata.slot_mapping, k_pe_3d)
+        else:
+            torch.ops.xllm_ops.reshape_paged_cache(
+                metadata.slot_mapping,
+                k_latent_3d,
+                k_pe_3d,
+                nope_cache,
+                rope_cache,
+            )
         return self._mla_sparse(
             q_latent,
             q_pe,
             nope_cache,
             rope_cache,
+            nope_cache_scale,
             topk,
             self._block_table_i32,
             layer_id,
@@ -358,6 +377,7 @@ class NpuPagedAttentionBackend(AttentionBackend):
         assert self._mla_actual_seq_q is not None
         assert self._mla_actual_seq_kv is not None
         index_cache = self._kv_caches[layer.layer_id].index
+        index_scale = self._kv_caches[layer.layer_id].index_scale
         if index_cache is None:
             raise RuntimeError(f"MLA index cache is missing for layer {layer.layer_id}")
         return MlaIndexContext(
@@ -366,21 +386,42 @@ class NpuPagedAttentionBackend(AttentionBackend):
             block_table=self._block_table_i32,
             actual_seq_q=self._mla_actual_seq_q,
             actual_seq_kv=self._mla_actual_seq_kv,
-            update_index_cache=lambda values: self._update_mla_index_cache(index_cache, metadata.slot_mapping, values),
+            index_scale=index_scale,
+            update_index_cache=lambda values, scales: self._update_mla_index_cache(
+                index_cache,
+                index_scale,
+                metadata.slot_mapping,
+                values,
+                scales,
+            ),
+        )
+
+    @staticmethod
+    def _update_paged_cache(
+        cache: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        values: torch.Tensor,
+    ) -> None:
+        cache_view = cache.view(-1, cache.size(-1))
+        kernels.scatter_nd_update(
+            cache_view,
+            slot_mapping.reshape(-1, 1).clamp_min(0),
+            values.reshape(values.size(0), -1),
         )
 
     @staticmethod
     def _update_mla_index_cache(
         index_cache: torch.Tensor,
+        index_scale: torch.Tensor | None,
         slot_mapping: torch.Tensor,
         values: torch.Tensor,
+        scales: torch.Tensor | None,
     ) -> None:
-        cache_view = index_cache.view(-1, index_cache.size(-1))
-        kernels.scatter_nd_update(
-            cache_view,
-            slot_mapping.reshape(-1, 1).clamp_min(0),
-            values,
-        )
+        NpuPagedAttentionBackend._update_paged_cache(index_cache, slot_mapping, values)
+        if index_scale is not None:
+            if scales is None:
+                raise RuntimeError("INT8 MLA index cache requires per-token scales")
+            NpuPagedAttentionBackend._update_paged_cache(index_scale, slot_mapping, scales)
 
     def _mla_sparse(
         self,
@@ -388,10 +429,28 @@ class NpuPagedAttentionBackend(AttentionBackend):
         q_pe: torch.Tensor,
         nope_cache: torch.Tensor,
         rope_cache: torch.Tensor,
+        nope_cache_scale: torch.Tensor | None,
         topk: torch.Tensor,
         block_table: torch.Tensor,
         layer_id: int,
     ) -> torch.Tensor:
+        if nope_cache.dtype == torch.int8:
+            if nope_cache_scale is None:
+                raise RuntimeError("INT8 MLA latent cache requires a scale cache")
+            if self._mla_actual_seq_q is None or self._mla_actual_seq_kv is None:
+                raise RuntimeError("quantized MLA requires prepared sequence lengths")
+            return quantized_sparse_mla_attention(
+                q_latent,
+                q_pe,
+                nope_cache,
+                rope_cache,
+                nope_cache_scale,
+                topk,
+                block_table,
+                self._mla_actual_seq_q,
+                self._mla_actual_seq_kv,
+                self.scale,
+            )
         out = get_execution_buffer(
             ("SFA_OUTPUT", layer_id) + tuple(q_latent.shape),
             lambda: torch.empty_like(q_latent),
