@@ -99,8 +99,9 @@ class ModelExecutor:
 
         execution_model = model.model
         self.eager_runner = EagerRunner(execution_model, self.attention_backend, device)
-        # Context-Parallel: shard prefill sequences across the CP group. Decode
-        # stays on the non-CP path (CP is prefill-only, eager-only in v1).
+        # Eager prefill models consume cp_size/cp_rank through CpContext. NPU
+        # MLA decode CP detects the already-initialized CP process group in its
+        # attention backend instead.
         self.eager_runner.cp_size = int(config.get("cp_size", 1))
         self.eager_runner.cp_rank = int(config.get("cp_rank", 0))
         self.decode_graph_runner = None
@@ -150,13 +151,12 @@ class ModelExecutor:
             )
         else:
             if self.eager_runner.cp_size > 1:
-                # CP is prefill-only and lives on eager_runner; a compile
-                # backend serves prefill through InductorRunner, which carries
-                # no cp_context, so CP would silently no-op. Reject rather than
-                # run without the requested sharding.
+                # InductorRunner carries neither prefill CpContext nor the NPU
+                # decode-CP graph contract. Reject rather than silently run
+                # without the requested sharding.
                 raise NotImplementedError(
                     "Context-Parallel (cp_size > 1) is not supported with the "
-                    f"'{graph_backend}' graph backend; CP is eager-only. Use "
+                    f"'{graph_backend}' graph backend. Use "
                     "graph_backend=off/aclgraph, or set cp_size=1."
                 )
             from xllm.python.model_executor.runners.inductor import InductorRunner

@@ -20,6 +20,7 @@ limitations under the License.
 #include <cstdint>
 #include <vector>
 
+#include "core/framework/config/parallel_config.h"
 #include "framework/model/model_args.h"
 
 namespace xllm {
@@ -43,7 +44,43 @@ KVCacheEstimateOptions make_estimate_options() {
   return options;
 }
 
+#if defined(USE_NPU)
+class ParallelKvSplitConfigGuard final {
+ public:
+  ParallelKvSplitConfigGuard(int32_t cp_size, int32_t kv_split_size)
+      : old_cp_size_(ParallelConfig::get_instance().cp_size()),
+        old_kv_split_size_(ParallelConfig::get_instance().kv_split_size()) {
+    ParallelConfig::get_instance().cp_size(cp_size);
+    ParallelConfig::get_instance().kv_split_size(kv_split_size);
+  }
+
+  ~ParallelKvSplitConfigGuard() {
+    ParallelConfig::get_instance().cp_size(old_cp_size_);
+    ParallelConfig::get_instance().kv_split_size(old_kv_split_size_);
+  }
+
+ private:
+  int32_t old_cp_size_;
+  int32_t old_kv_split_size_;
+};
+#endif
+
 }  // namespace
+
+#if defined(USE_NPU)
+TEST(KVCacheEstimationTest, NpuDcpBudgetsReplicatedIndexerCache) {
+  ParallelKvSplitConfigGuard config_guard(/*cp_size=*/2,
+                                          /*kv_split_size=*/2);
+  ModelArgs model_args = make_standard_args();
+  model_args.model_type("glm_moe_dsa").index_n_heads(1).index_head_dim(16);
+  KVCacheEstimateOptions options = make_estimate_options();
+
+  const KVCacheCapacity capacity =
+      estimate_kv_cache_capacity(model_args, options);
+
+  EXPECT_EQ(capacity.index_slot_size(), 64);
+}
+#endif
 
 TEST(KVCacheEstimationTest, EstimatesStandardAttentionBlocks) {
   ModelArgs model_args = make_standard_args();

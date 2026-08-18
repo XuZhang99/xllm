@@ -244,6 +244,8 @@ class Glm52Config:
 class Glm52MLAAttention(Attention):
     """Absorbed-MLA attention with per-layer full/shared DSA indexer."""
 
+    supports_decode_cp = True
+
     def __init__(
         self,
         cfg: Glm52Config,
@@ -399,7 +401,6 @@ class Glm52Indexer(nn.Module):
         cos_sin_cache: torch.Tensor,
     ) -> torch.Tensor:
         index_cache = ctx.index_cache
-        slot_mapping = ctx.slot_mapping
         actual_seq_q = ctx.actual_seq_q
         actual_seq_kv = ctx.actual_seq_kv
         block_table = ctx.block_table
@@ -417,9 +418,7 @@ class Glm52Indexer(nn.Module):
             k_pe = _apply_half_rope(k_pe.unsqueeze(1), cos_sin_cache, positions).squeeze(1)
         q = torch.cat([q_pe, q_nope], dim=-1)
         k = torch.cat([k_pe, k_nope], dim=-1)
-        if index_cache is not None and slot_mapping is not None:
-            k_view = index_cache.view(-1, index_cache.size(-1))
-            kernels.scatter_nd_update(k_view, slot_mapping.reshape(-1, 1).clamp_min(0), k)
+        ctx.update_index_cache(k)
         weights = self.weights_proj(hidden.to(torch.float32)).to(torch.bfloat16)
         topk = kernels.lightning_indexer(
             q,

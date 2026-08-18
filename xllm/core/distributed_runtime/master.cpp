@@ -150,55 +150,51 @@ std::optional<std::string> validate_model_cp(const Options& options,
              "speculative algorithms (Eagle3/DFlash); disable CP or disable "
              "the speculative algorithm. MTP and Suffix are supported.";
     }
-    // enable_graph is compatible with CP because the two are phase-disjoint:
-    // CP only engages on batch_forward_type.no_decode() (both the model-owned
-    // split in deepseek_v4 and NpuCpPlan::prepare return early on decode),
-    // while ACL graph only captures/replays pure decode -- AclGraphExecutorImpl
-    // ::run() falls back to eager for anything else, and params.enable_graph is
-    // set only by the decode capture path. Graph-mode decode therefore runs
-    // with CP inactive, which is the same non-CP decode CP already relies on.
-    //
-    // The one batch that satisfies both gates is spec-verify chunked prefill.
-    // The graph executor only takes it for hybrid-linear-attention models, and
-    // no CP-capable model is one, so it falls back to eager today; the guard in
-    // AclGraphExecutorImpl::run() keeps that true if a future model is both.
+    // enable_graph is compatible with CP. Native model-side CP engages only on
+    // non-decode batches, while Python GLM-5.2 captures its DCP
+    // sparse-attention and CP collectives directly in the ACL graph.
     if (options.instance_role() != InstanceRole::DEFAULT &&
         options.instance_role() != InstanceRole::PREFILL) {
       return "Model-side CP supports only DEFAULT or PREFILL roles";
     }
 
-    // Python model executor runs a standalone torch CP path (all-gather KV,
-    // eager prefill only) that does not go through the ATB fused-attention op,
-    // so it bypasses the ATB-backend requirement and the ATB CP capability
-    // allowlist below. The safety constraints above (LLM/generate, no graph,
-    // DEFAULT/PREFILL) still apply. Orthogonal TP x CP is supported (both may
-    // be > 1, sharing world = cp * tp); the collective communicator builds the
-    // narrowed TP group and the strided CP group as separate torch subgroups
-    // off the shared world rendezvous endpoint. DP > 1 stays unsupported: the
-    // Python executor does not implement the dp * cp * tp rank layout.
+    // Python models own their torch CP execution and do not go through the ATB
+    // fused-attention op, so they bypass the backend capability allowlist
+    // below. qwen3 implements sequence-sharded prefill CP. GLM-5.2 implements
+    // block-interleaved decode CP: its Lightning Indexer cache is replicated,
+    // while MLA KV and sparse attention are local to each CP rank. Orthogonal
+    // TP x CP is supported; DP remains unsupported by the Python executor.
     if (ModelConfig::is_python_model_impl(
             ModelConfig::get_instance().model_impl())) {
-      // Only models whose Python forward actually shards the sequence (via
-      // cp_shard_rows / cp_merge_rows) may enable CP. Other Python models keep
-      // a full-sequence forward, so a cp_context would be built but never
-      // consumed: qwen3_5 would reach _prefill_cp with unsharded rows (garbled
-      // or out-of-bounds output) and MLA models (glm_moe_dsa, deepseek_v32)
-      // would silently recompute the whole sequence on every rank. Mirror the
-      // NPU-side is_npu_model_cp_capable allowlist rather than admit any
-      // model_impl=python model_type.
       static const std::unordered_set<std::string> kPythonCpCapableModels = {
+          "glm_moe_dsa",
           "qwen3",
       };
       if (kPythonCpCapableModels.find(model_type) ==
           kPythonCpCapableModels.end()) {
         return "Python model-side CP does not support model_type=" +
-               model_type + "; only qwen3 implements the CP sequence sharding.";
+               model_type + "; supported models are qwen3 and glm_moe_dsa.";
       }
       if (options.dp_size() != 1) {
         return "Python CP requires dp_size == 1";
       }
       if (global_world_size % (options.dp_size() * options.cp_size()) != 0) {
         return "Python CP requires world_size divisible by dp_size * cp_size";
+      }
+      if (model_type == "glm_moe_dsa") {
+        if (engine_type != EngineType::LLM) {
+          return "Python GLM-5.2 decode CP supports only the LLM engine";
+        }
+        if (options.host_blocks_factor() > 1.0) {
+          return "Python GLM-5.2 decode CP does not support host KV cache "
+                 "offload";
+        }
+        const int32_t kv_split =
+            ParallelConfig::get_instance().kv_split_size_effective();
+        if (kv_split != options.cp_size()) {
+          return "Python GLM-5.2 decode CP requires effective "
+                 "kv_split_size == cp_size";
+        }
       }
       return std::nullopt;
     }

@@ -39,6 +39,21 @@ bool has_data(const torch::Tensor& tensor) {
   return tensor.defined() && tensor.numel() > 0;
 }
 
+#if defined(USE_NPU)
+torch::Tensor expand_index_block_indices(const torch::Tensor& block_indices,
+                                         int64_t replication_factor) {
+  if (replication_factor == 1) {
+    return block_indices;
+  }
+
+  torch::Tensor shard_offsets = torch::arange(
+      replication_factor, block_indices.options().dtype(torch::kLong));
+  return (block_indices.to(torch::kLong).unsqueeze(1) * replication_factor +
+          shard_offsets.unsqueeze(0))
+      .flatten();
+}
+#endif
+
 }  // namespace
 
 IndexedKVCacheImpl::IndexedKVCacheImpl(const IndexedKVCacheTensors& tensors)
@@ -206,16 +221,29 @@ void IndexedKVCacheImpl::swap_blocks(torch::Tensor& src_tensor,
     value_cache_scale_->index_copy_(0, dst_tensor, selected_value_scales);
   }
 
+  torch::Tensor index_src_tensor = src_tensor;
+  torch::Tensor index_dst_tensor = dst_tensor;
+#if defined(USE_NPU)
+  CHECK_GT(key_cache_.size(0), 0);
+  CHECK_EQ(index_cache_.size(0) % key_cache_.size(0), 0);
+  const int64_t index_replication_factor =
+      index_cache_.size(0) / key_cache_.size(0);
+  index_src_tensor =
+      expand_index_block_indices(src_tensor, index_replication_factor);
+  index_dst_tensor =
+      expand_index_block_indices(dst_tensor, index_replication_factor);
+#endif
+
   torch::Tensor selected_index =
-      torch::index_select(index_cache_, 0, src_tensor);
-  index_cache_.index_copy_(0, dst_tensor, selected_index);
+      torch::index_select(index_cache_, 0, index_src_tensor);
+  index_cache_.index_copy_(0, index_dst_tensor, selected_index);
 
   // INT8 indexer cache keeps a per-token fp32 scale that must move with the
   // int8 values, otherwise dequantization reads mismatched coefficients.
   if (index_cache_scale_.has_value() && has_data(index_cache_scale_.value())) {
     torch::Tensor selected_index_scales =
-        torch::index_select(index_cache_scale_.value(), 0, src_tensor);
-    index_cache_scale_->index_copy_(0, dst_tensor, selected_index_scales);
+        torch::index_select(index_cache_scale_.value(), 0, index_src_tensor);
+    index_cache_scale_->index_copy_(0, index_dst_tensor, selected_index_scales);
   }
 }
 

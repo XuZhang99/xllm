@@ -62,7 +62,7 @@ class Platform final {
   }
 
   static constexpr bool supports_dsa_indexer_cache_sharding() {
-    return is_mlu();
+    return is_mlu() || is_npu();
   }
 
   // MLU can reuse DSA top-k results across layers without keeping an indexer

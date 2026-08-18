@@ -41,8 +41,8 @@ def _per_seq_lens_from_metadata(metadata: AttentionMetadata) -> list[int] | None
 
 
 class EagerRunner(BaseRunner):
-    # Context-Parallel config, set by ModelExecutor when cp_size > 1. CP shards
-    # the prefill sequence across these ranks; decode is left on the non-CP path.
+    # Context-Parallel config for models that shard eager prefill rows. NPU MLA
+    # decode CP uses the process group directly and does not need a CpContext.
     cp_size: int = 1
     cp_rank: int = 0
 

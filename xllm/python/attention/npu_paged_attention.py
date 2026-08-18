@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import torch
 import torch_npu
 
-from xllm.python import kernels
+from xllm.python import distributed, kernels
 from xllm.python.attention.backend import (
     AttentionBackend,
     AttentionMetadata,
@@ -34,6 +34,14 @@ from xllm.python.attention.backend import (
 )
 from xllm.python.attention.expanded_decode_metadata import (
     resolve_expanded_decode_metadata,
+)
+from xllm.python.attention.npu_decode_cp import (
+    expand_indexer_block_table,
+    local_attention_scale,
+    local_sequence_lengths,
+    localize_cache_slots,
+    remap_sparse_indices,
+    sparse_attention_lse,
 )
 from xllm.python.model_executor.cp_utils import cp_gather_kv
 from xllm.python.model_executor.forward_context import (
@@ -96,6 +104,11 @@ class NpuPagedAttentionBackend(AttentionBackend):
         self._actual_seq_kv: list[int] | torch.Tensor = []
         self._mla_actual_seq_q: torch.Tensor | None = None
         self._mla_actual_seq_kv: torch.Tensor | None = None
+        self._dcp_size = distributed.cp_world_size(device)
+        self._dcp_rank = distributed.cp_rank(device)
+        self._dcp_local_slot_mapping: torch.Tensor | None = None
+        self._dcp_index_block_table: torch.Tensor | None = None
+        self._dcp_local_seq_lens: torch.Tensor | None = None
         self._causal_mask = (
             torch.triu(torch.ones(2048, 2048, dtype=torch.float32), 1).to(torch.int8).contiguous().to(device)
         )
@@ -278,6 +291,58 @@ class NpuPagedAttentionBackend(AttentionBackend):
             self._mla_actual_seq_q = None
             self._mla_actual_seq_kv = None
 
+        self._prepare_mla_dcp_metadata(metadata, graph_mode)
+
+    def _prepare_mla_dcp_metadata(
+        self,
+        metadata: AttentionMetadata,
+        graph_mode: bool,
+    ) -> None:
+        self._dcp_local_slot_mapping = None
+        self._dcp_index_block_table = None
+        self._dcp_local_seq_lens = None
+        if not self._is_mla or self._dcp_size == 1:
+            return
+        if self._block_table_i32 is None or self._mla_actual_seq_kv is None:
+            raise RuntimeError("NPU MLA decode CP requires block and sequence-length metadata")
+
+        local_slots = localize_cache_slots(
+            metadata.slot_mapping,
+            self.page_size,
+            self._dcp_size,
+            self._dcp_rank,
+        )
+        index_block_table = expand_indexer_block_table(
+            self._block_table_i32,
+            self._dcp_size,
+        )
+        local_seq_lens = local_sequence_lengths(
+            self._mla_actual_seq_kv,
+            self.page_size,
+            self._dcp_size,
+            self._dcp_rank,
+        ).to(torch.int32)
+        if graph_mode:
+            self._dcp_local_slot_mapping = get_execution_buffer(
+                ("DCP_LOCAL_SLOTS",) + tuple(local_slots.shape),
+                lambda: torch.empty_like(local_slots),
+            )
+            self._dcp_index_block_table = get_execution_buffer(
+                ("DCP_INDEX_BLOCK_TABLE",) + tuple(index_block_table.shape),
+                lambda: torch.empty_like(index_block_table),
+            )
+            self._dcp_local_seq_lens = get_execution_buffer(
+                ("DCP_LOCAL_SEQ_LENS",) + tuple(local_seq_lens.shape),
+                lambda: torch.empty_like(local_seq_lens),
+            )
+            self._dcp_local_slot_mapping.copy_(local_slots)
+            self._dcp_index_block_table.copy_(index_block_table)
+            self._dcp_local_seq_lens.copy_(local_seq_lens)
+        else:
+            self._dcp_local_slot_mapping = local_slots
+            self._dcp_index_block_table = index_block_table
+            self._dcp_local_seq_lens = local_seq_lens
+
     def execute(
         self,
         q: torch.Tensor,
@@ -340,7 +405,18 @@ class NpuPagedAttentionBackend(AttentionBackend):
         if self._block_table_i32 is None:
             raise RuntimeError("MLA requires a block table")
 
-        torch.ops.xllm_ops.reshape_paged_cache(metadata.slot_mapping, k_latent_3d, k_pe_3d, nope_cache, rope_cache)
+        use_dcp = self._use_mla_decode_cp(layer)
+        slot_mapping = self._dcp_local_slot_mapping if use_dcp else metadata.slot_mapping
+        assert slot_mapping is not None
+        torch.ops.xllm_ops.reshape_paged_cache(slot_mapping, k_latent_3d, k_pe_3d, nope_cache, rope_cache)
+        if use_dcp:
+            return self._mla_sparse_dcp(
+                q_latent,
+                q_pe,
+                nope_cache,
+                rope_cache,
+                topk,
+            )
         return self._mla_sparse(
             q_latent,
             q_pe,
@@ -360,14 +436,33 @@ class NpuPagedAttentionBackend(AttentionBackend):
         index_cache = self._kv_caches[layer.layer_id].index
         if index_cache is None:
             raise RuntimeError(f"MLA index cache is missing for layer {layer.layer_id}")
+        use_dcp = self._use_mla_decode_cp(layer)
+        block_table = self._dcp_index_block_table if use_dcp else self._block_table_i32
+        assert block_table is not None
         return MlaIndexContext(
             index_cache=index_cache,
             slot_mapping=metadata.slot_mapping,
-            block_table=self._block_table_i32,
+            block_table=block_table,
             actual_seq_q=self._mla_actual_seq_q,
             actual_seq_kv=self._mla_actual_seq_kv,
             update_index_cache=lambda values: self._update_mla_index_cache(index_cache, metadata.slot_mapping, values),
         )
+
+    def _use_mla_decode_cp(self, layer: Attention) -> bool:
+        if self._dcp_size == 1:
+            return False
+        if not getattr(layer, "supports_decode_cp", False):
+            raise RuntimeError(
+                f"{type(layer).__name__} does not support NPU MLA decode CP; "
+                "set cp_size=1 for this model"
+            )
+        if (
+            self._dcp_local_slot_mapping is None
+            or self._dcp_index_block_table is None
+            or self._dcp_local_seq_lens is None
+        ):
+            raise RuntimeError("NPU MLA decode CP metadata was not prepared")
+        return True
 
     @staticmethod
     def _update_mla_index_cache(
@@ -376,10 +471,20 @@ class NpuPagedAttentionBackend(AttentionBackend):
         values: torch.Tensor,
     ) -> None:
         cache_view = index_cache.view(-1, index_cache.size(-1))
+        flat_slots = slot_mapping.reshape(-1)
+        safe_slots = flat_slots.clamp_min(0)
+        # ACL decode graphs pad inactive rows with slot -1. Keep the fixed
+        # scatter shape capturable without letting those rows overwrite slot 0.
+        preserved_values = cache_view.index_select(0, safe_slots.to(torch.int64))
+        updates = torch.where(
+            (flat_slots >= 0).unsqueeze(-1),
+            values,
+            preserved_values,
+        )
         kernels.scatter_nd_update(
             cache_view,
-            slot_mapping.reshape(-1, 1).clamp_min(0),
-            values,
+            safe_slots.reshape(-1, 1),
+            updates,
         )
 
     def _mla_sparse(
@@ -413,6 +518,79 @@ class NpuPagedAttentionBackend(AttentionBackend):
             3,
             out,
         )  # [T, H, kv_lora]
+
+    def _mla_sparse_dcp(
+        self,
+        q_latent: torch.Tensor,
+        q_pe: torch.Tensor,
+        nope_cache: torch.Tensor,
+        rope_cache: torch.Tensor,
+        global_topk: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run rank-local SFA and merge partial softmax states across CP."""
+        assert self._block_table_i32 is not None
+        assert self._mla_actual_seq_q is not None
+        assert self._dcp_local_seq_lens is not None
+        local_topk = remap_sparse_indices(
+            global_topk,
+            self.page_size,
+            self._dcp_size,
+            self._dcp_rank,
+        )
+        attn_output, softmax_max, softmax_sum = torch_npu.npu_sparse_flash_attention(
+            query=q_latent,
+            key=nope_cache,
+            value=nope_cache,
+            query_rope=q_pe,
+            key_rope=rope_cache,
+            sparse_indices=local_topk,
+            scale_value=self.scale,
+            actual_seq_lengths_query=self._mla_actual_seq_q,
+            actual_seq_lengths_kv=self._dcp_local_seq_lens,
+            block_table=self._block_table_i32,
+            sparse_block_size=1,
+            layout_query="TND",
+            layout_kv="PA_BSND",
+            sparse_mode=_SPARSE_MODE_NONE,
+            attention_mode=2,
+            return_softmax_lse=True,
+        )
+
+        # TND SFA returns max/sum as
+        # [kv_heads, tokens, query_heads / kv_heads]. GLM uses one KV head;
+        # flatten the head groups into a natural-log [tokens, heads] LSE.
+        local_lse = sparse_attention_lse(
+            softmax_max,
+            softmax_sum,
+            q_latent.shape[0],
+            q_latent.shape[1],
+        )
+        metadata = self._metadata
+        assert metadata is not None
+        padding_rows = metadata.slot_mapping < 0
+        if padding_rows.numel() != q_latent.shape[0]:
+            raise RuntimeError("NPU MLA decode CP requires one slot mapping per query row")
+        attn_output = torch.where(
+            padding_rows.view(-1, 1, 1),
+            torch.zeros_like(attn_output),
+            attn_output,
+        )
+        local_lse = torch.where(
+            padding_rows.view(-1, 1),
+            torch.full_like(local_lse, float("-inf")),
+            local_lse,
+        )
+        gathered_lse = distributed.all_gather(
+            local_lse,
+            dim=0,
+            world_size=self._dcp_size,
+            group_name="cp",
+        ).view((self._dcp_size,) + tuple(local_lse.shape))
+        scale = local_attention_scale(local_lse, gathered_lse).unsqueeze(-1)
+        merged_output = torch.nan_to_num(attn_output, nan=0.0, posinf=0.0, neginf=0.0)
+        merged_output.mul_(scale.to(merged_output.dtype))
+        distributed.all_reduce_(merged_output, "cp")
+        return merged_output
 
     # ------------------------------------------------------------------
     # Prefill: packed TND with causal mask

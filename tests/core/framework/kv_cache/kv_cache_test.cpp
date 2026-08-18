@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "framework/block/block.h"
 #include "framework/kv_cache/deepseek_v4_cache_policy.h"
 #include "framework/kv_cache/deepseek_v4_kv_cache_impl.h"
@@ -68,6 +69,27 @@ class IndexerCacheDtypeConfigGuard final {
  private:
   std::string old_indexer_cache_dtype_;
 };
+
+#if defined(USE_NPU)
+class ParallelKvSplitConfigGuard final {
+ public:
+  ParallelKvSplitConfigGuard(int32_t cp_size, int32_t kv_split_size)
+      : old_cp_size_(ParallelConfig::get_instance().cp_size()),
+        old_kv_split_size_(ParallelConfig::get_instance().kv_split_size()) {
+    ParallelConfig::get_instance().cp_size(cp_size);
+    ParallelConfig::get_instance().kv_split_size(kv_split_size);
+  }
+
+  ~ParallelKvSplitConfigGuard() {
+    ParallelConfig::get_instance().cp_size(old_cp_size_);
+    ParallelConfig::get_instance().kv_split_size(old_kv_split_size_);
+  }
+
+ private:
+  int32_t old_cp_size_;
+  int32_t old_kv_split_size_;
+};
+#endif
 
 void ExpectTensorGroup(const KVCache& cache,
                        KVCacheTensorRole role,
@@ -147,6 +169,53 @@ void ExpectMluCompressedStateLayout(const std::vector<KVCache>& caches,
 #endif
 
 }  // namespace
+
+#if defined(USE_NPU)
+TEST(KVCacheTest, NpuDcpReplicatesIndexerCacheAcrossKvShards) {
+  ParallelKvSplitConfigGuard config_guard(/*cp_size=*/2,
+                                          /*kv_split_size=*/2);
+  constexpr int64_t kBlockCount = 8;
+  constexpr int64_t kBlockSize = 16;
+  constexpr int64_t kIndexHeadDim = 32;
+
+  KVCacheCapacity capacity;
+  capacity.n_blocks(kBlockCount).block_size(kBlockSize);
+
+  ModelArgs model_args;
+  model_args.model_type("glm_moe_dsa")
+      .n_heads(8)
+      .n_kv_heads(1)
+      .head_dim(64)
+      .index_n_heads(1)
+      .index_head_dim(kIndexHeadDim);
+
+  KVCacheShape shape(capacity, model_args, /*world_size=*/1);
+
+  EXPECT_EQ(
+      shape.index_cache_shape(),
+      (std::vector<int64_t>{kBlockCount * 2, kBlockSize, 1, kIndexHeadDim}));
+}
+
+TEST(KVCacheTest, NpuDcpCopiesEveryReplicatedIndexerBlock) {
+  torch::Tensor key_cache = torch::tensor({{{{1.0F}}}, {{{2.0F}}}, {{{3.0F}}}});
+  torch::Tensor index_cache = torch::tensor({{{{10.0F}}},
+                                             {{{11.0F}}},
+                                             {{{20.0F}}},
+                                             {{{21.0F}}},
+                                             {{{30.0F}}},
+                                             {{{31.0F}}}});
+  KVCache cache(IndexedKVCacheTensors{
+      KVCacheTensors{key_cache, torch::Tensor()}, index_cache});
+  torch::Tensor source_block = torch::tensor({1}, torch::kLong);
+  torch::Tensor destination_block = torch::tensor({2}, torch::kLong);
+
+  cache.swap_blocks(source_block, destination_block);
+
+  EXPECT_TRUE(torch::equal(cache.get_k_cache()[2], key_cache[1]));
+  EXPECT_TRUE(torch::equal(cache.get_index_cache()[4], index_cache[2]));
+  EXPECT_TRUE(torch::equal(cache.get_index_cache()[5], index_cache[3]));
+}
+#endif
 
 TEST(Dsv4StateCacheTest, SplitStateReturnsInputsAndSwapsBoth) {
   torch::Tensor kv = torch::tensor({{{1.0F}}, {{2.0F}}, {{3.0F}}});
