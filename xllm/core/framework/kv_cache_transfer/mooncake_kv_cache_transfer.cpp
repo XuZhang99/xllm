@@ -4,7 +4,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -680,8 +680,9 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_impl(
       dst_offsets.push_back(dst_v_off);
     }
 
-    auto* te = static_cast<MooncakeTransferEngine*>(mooncake_te_.get());
-    auto ret = te->move_memory_by_global_offsets(
+    auto* transfer_engine =
+        static_cast<MooncakeTransferEngine*>(mooncake_te_.get());
+    auto ret = transfer_engine->move_memory_by_global_offsets(
         src_addr,
         src_offsets,
         dst_offsets,

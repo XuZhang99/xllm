@@ -4,7 +4,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -421,7 +421,7 @@ void DisaggPDScheduler::dispatch_requests() {
     }
 
     // NOTE: TODO: maybe we need to support batch disatch
-    // later, this meybe decrease the communication cost.
+    // later, this maybe decrease the communication cost.
     // currently we only support one request per dispatch.
 
     // TODO: try to get a batch request.

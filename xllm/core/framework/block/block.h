@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -168,7 +168,7 @@ class Block final {
   uint8_t hash_value_[XXH3_128BITS_HASH_VALUE_LEN];
 };
 
-// equeal operator, mainly used for testing
+// equal operator, mainly used for testing
 inline constexpr bool operator==(const Block& lhs, const Block& rhs) {
   return lhs.id() == rhs.id();
 }

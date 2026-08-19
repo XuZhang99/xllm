@@ -4,7 +4,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -988,7 +988,7 @@ double ProfileManager::run_request(int32_t token_length,
   sequences_budget.reserve(batch_size);
   requests.reserve(batch_size);
 
-  // batch sequences with the same kv cahce and token length
+  // batch sequences with the same kv cache and token length
   for (int32_t i = 0; i < batch_size; i++) {
     // generate random token ids and request
     std::shared_ptr<Request> request =
@@ -1036,7 +1036,7 @@ double ProfileManager::run_request(
   sequences_budget.reserve(token_length_vec.size());
   requests.reserve(token_length_vec.size());
 
-  // batch sequences with the same kv cahce and token length
+  // batch sequences with the same kv cache and token length
   for (int32_t i = 0; i < token_length_vec.size(); i++) {
     // generate random token ids and request
     int32_t token_length = token_length_vec[i];
