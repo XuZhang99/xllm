@@ -51,6 +51,8 @@ def _config(**overrides) -> dict:
         "tp_rank": 0,
         "dp_size": 2,
         "dp_rank": 0,
+        "cp_size": 1,
+        "cp_rank": 0,
         "world_size": 4,
         "moe_tp_size": 1,
         "moe_tp_rank": 0,
@@ -82,14 +84,24 @@ def test_glm_parallel_world_size_defaults_to_tp_dp_product() -> None:
 
     cfg = Glm52Config.from_dict(values)
 
-    assert cfg.world_size == cfg.tp_size * cfg.dp_size == 4
+    assert cfg.world_size == cfg.tp_size * cfg.dp_size * cfg.cp_size == 4
+
+
+def test_glm_parallel_world_size_includes_context_parallel() -> None:
+    cfg = Glm52Config.from_dict(_config(cp_size=2, cp_rank=1, world_size=8, ep_size=8))
+
+    cfg.validate()
+
+    assert cfg.world_size == cfg.tp_size * cfg.dp_size * cfg.cp_size == 8
+    assert cfg.cp_rank == 1
 
 
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
         ({"ep_size": 2}, "ep_size must be 1 or world_size"),
-        ({"world_size": 8}, r"world_size must equal tp_size \* dp_size"),
+        ({"world_size": 8}, r"world_size must equal tp_size \* dp_size \* cp_size"),
+        ({"cp_rank": 2}, "cp_rank must be in"),
         ({"n_routed_experts": 10}, "n_routed_experts must be divisible by ep_size"),
         ({"moe_tp_size": 2}, r"moe_tp_size \* ep_size"),
         ({"ep_rank": 4}, "ep_rank must be in"),
@@ -109,6 +121,7 @@ class _RecordingLoader:
         self.tp_size = tp_size
         self.tp_rank = tp_rank
         self.loaded: list[str] = []
+        self.shared_shards: list[tuple[str, int, int]] = []
         type(self).latest = self
 
     def load_tensor(self, name: str) -> torch.Tensor:
@@ -141,14 +154,17 @@ class _RecordingLoader:
         size = tensor.size(dim) // world
         return tensor.narrow(dim, rank * size, size).contiguous()
 
-    def copy_in(self, _name: str, _tensor: torch.Tensor) -> None:
-        return
+    def copy_in(self, name: str, tensor: torch.Tensor) -> None:
+        self.loaded.append(name)
+        assert tensor.is_contiguous()
 
     def load_w8a8_a(self, prefix: str, proj: str, _shard_dims: dict | None = None) -> None:
         self.loaded.append(prefix + proj)
 
     def load_w8a8_b(self, prefix: str) -> None:
         self.loaded.append(prefix)
+        if ".shared_experts." in prefix:
+            self.shared_shards.append((prefix, self.tp_size, self.tp_rank))
 
 
 def test_glm_weight_loader_reads_only_local_ep_experts(monkeypatch) -> None:
@@ -166,3 +182,4 @@ def test_glm_weight_loader_reads_only_local_ep_experts(monkeypatch) -> None:
     assert all(".experts.4." in name or ".experts.5." in name for name in expert_names)
     assert loader.tp_size == 2
     assert loader.tp_rank == 0
+    assert loader.shared_shards == [("model.layers.0.mlp.shared_experts.", 1, 0)]

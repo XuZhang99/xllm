@@ -611,8 +611,13 @@ void CollectiveCommunicator::create_process_groups(
     parallel_args_->mapping(dispatch_and_combine_comm.mapping);
     CHECK(parallel_args_->moe_ep_group_ != nullptr)
         << "EP2 dispatch/combine requires a Torch MoE EP process group.";
+    const std::string dispatch_and_combine_comm_name =
+        parallel_args_->moe_ep_group_->hccl_comm_name(/*init_comm=*/true);
+    CHECK(!dispatch_and_combine_comm_name.empty())
+        << "EP2 dispatch/combine requires an initialized Torch MoE EP "
+           "communicator.";
     parallel_args_->dispatchAndCombinecommDomain(
-        parallel_args_->moe_ep_group_->hccl_comm_name(false));
+        dispatch_and_combine_comm_name);
   }
 #endif
 }

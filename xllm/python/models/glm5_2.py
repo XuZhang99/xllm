@@ -115,6 +115,8 @@ class Glm52Config:
     ep_rank: int = 0
     dp_size: int = 1
     dp_rank: int = 0
+    cp_size: int = 1
+    cp_rank: int = 0
     moe_tp_size: int = 1
     moe_tp_rank: int = 0
     world_size: int = 1
@@ -164,7 +166,8 @@ class Glm52Config:
         max_pe = int(pick("max_position_embeddings", default=202752))
         tp_size = int(pick("tp_size", default=1))
         dp_size = int(pick("dp_size", default=1))
-        world_size = int(pick("world_size", default=tp_size * dp_size))
+        cp_size = int(pick("cp_size", default=1))
+        world_size = int(pick("world_size", default=tp_size * dp_size * cp_size))
         rope_scaling_factor = float(rpick_nz("factor", "rope_scaling_factor", default=1.0))
         original_max = int(rpick_nz("original_max_position_embeddings", default=max_pe))
 
@@ -212,6 +215,8 @@ class Glm52Config:
             ep_rank=int(pick("ep_rank", default=0)),
             dp_size=dp_size,
             dp_rank=int(pick("dp_rank", default=0)),
+            cp_size=cp_size,
+            cp_rank=int(pick("cp_rank", default=0)),
             moe_tp_size=int(pick("moe_tp_size", default=1)),
             moe_tp_rank=int(pick("moe_tp_rank", default=0)),
             world_size=world_size,
@@ -230,10 +235,10 @@ class Glm52Config:
 
     def validate(self) -> None:
         """Validate the orthogonal attention/DP and MoE EP topology."""
-        if min(self.tp_size, self.ep_size, self.dp_size, self.moe_tp_size) <= 0:
+        if min(self.tp_size, self.ep_size, self.dp_size, self.cp_size, self.moe_tp_size) <= 0:
             raise ValueError("parallel sizes must be positive")
-        if self.tp_size * self.dp_size != self.world_size:
-            raise ValueError("world_size must equal tp_size * dp_size")
+        if self.tp_size * self.dp_size * self.cp_size != self.world_size:
+            raise ValueError("world_size must equal tp_size * dp_size * cp_size")
         if self.ep_size not in (1, self.world_size):
             raise ValueError(f"ep_size must be 1 or world_size ({self.world_size})")
         if self.ep_size > 1:
@@ -248,6 +253,8 @@ class Glm52Config:
             raise ValueError("tp_rank must be in [0, tp_size)")
         if not 0 <= self.dp_rank < self.dp_size:
             raise ValueError("dp_rank must be in [0, dp_size)")
+        if not 0 <= self.cp_rank < self.cp_size:
+            raise ValueError("cp_rank must be in [0, cp_size)")
         if not 0 <= self.ep_rank < self.ep_size:
             raise ValueError("ep_rank must be in [0, ep_size)")
         if not 0 <= self.moe_tp_rank < self.moe_tp_size:
@@ -575,9 +582,11 @@ class Glm52ForCausalLM(PyModelBase):
         self.cfg.ep_rank = int(config.get("ep_rank", 0))
         self.cfg.dp_size = int(config.get("dp_size", 1))
         self.cfg.dp_rank = int(config.get("dp_rank", 0))
+        self.cfg.cp_size = int(config.get("cp_size", 1))
+        self.cfg.cp_rank = int(config.get("cp_rank", 0))
         self.cfg.moe_tp_size = int(config.get("moe_tp_size", 1))
         self.cfg.moe_tp_rank = int(config.get("moe_tp_rank", 0))
-        self.cfg.world_size = int(config.get("world_size", self.cfg.tp_size * self.cfg.dp_size))
+        self.cfg.world_size = int(config.get("world_size", self.cfg.tp_size * self.cfg.dp_size * self.cfg.cp_size))
         self.cfg.validate()
         dtype = self.resolve_dtype(config.get("dtype") or config.get("torch_dtype"))
         device = torch.device(config.get("device", "cuda"))
