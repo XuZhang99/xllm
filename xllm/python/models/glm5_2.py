@@ -111,6 +111,13 @@ class Glm52Config:
     moe_intermediate_size: int = 2048
     tp_size: int = 1
     tp_rank: int = 0
+    ep_size: int = 1
+    ep_rank: int = 0
+    dp_size: int = 1
+    dp_rank: int = 0
+    moe_tp_size: int = 1
+    moe_tp_rank: int = 0
+    world_size: int = 1
     indexer_types: list | None = None
     mlp_layer_types: list | None = None
     index_skip_topk_offset: int = 2
@@ -198,6 +205,13 @@ class Glm52Config:
             moe_intermediate_size=int(pick("moe_intermediate_size", default=2048)),
             tp_size=int(pick("tp_size", default=1)),
             tp_rank=int(pick("tp_rank", default=0)),
+            ep_size=int(pick("ep_size", default=1)),
+            ep_rank=int(pick("ep_rank", default=0)),
+            dp_size=int(pick("dp_size", default=1)),
+            dp_rank=int(pick("dp_rank", default=0)),
+            moe_tp_size=int(pick("moe_tp_size", default=1)),
+            moe_tp_rank=int(pick("moe_tp_rank", default=0)),
+            world_size=int(pick("world_size", default=1)),
             indexer_types=pick("indexer_types", default=None) or None,
             mlp_layer_types=pick("mlp_layer_types", default=None) or None,
             index_skip_topk_offset=int(pick("index_skip_topk_offset", default=2)),
@@ -551,6 +565,13 @@ class Glm52ForCausalLM(PyModelBase):
         self.cfg = Glm52Config.from_dict(config)
         self.cfg.tp_size = int(config.get("tp_size", 1))
         self.cfg.tp_rank = int(config.get("tp_rank", _tp_rank_from_device(config.get("device", "npu:0"))))
+        self.cfg.ep_size = int(config.get("ep_size", 1))
+        self.cfg.ep_rank = int(config.get("ep_rank", 0))
+        self.cfg.dp_size = int(config.get("dp_size", 1))
+        self.cfg.dp_rank = int(config.get("dp_rank", 0))
+        self.cfg.moe_tp_size = int(config.get("moe_tp_size", 1))
+        self.cfg.moe_tp_rank = int(config.get("moe_tp_rank", 0))
+        self.cfg.world_size = int(config.get("world_size", self.cfg.tp_size))
         dtype = self.resolve_dtype(config.get("dtype") or config.get("torch_dtype"))
         device = torch.device(config.get("device", "cuda"))
         self.dtype = dtype
