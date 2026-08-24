@@ -4,7 +4,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -87,8 +87,6 @@ PyCausalLM::PyCausalLM(const ModelContext& context)
   dp_size_ = (dp_group != nullptr) ? dp_group->world_size() : 1;
   dp_rank_ = (dp_group != nullptr) ? dp_group->rank() : 0;
   ep_size_ = parallel_args.ep_size();
-  CHECK(ep_size_ == 1 || ep_size_ == parallel_args.world_size())
-      << "Python models support only ep_size=1 or ep_size=world_size.";
 
   CHECK(parallel_args.moe_tp_group_ != nullptr);
   ProcessGroup* moe_tp_group = parallel_args.moe_tp_group_;

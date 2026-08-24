@@ -4,7 +4,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -76,6 +76,7 @@ class PyAttentionMetadataView final {
   pybind11::object linear_state_indices() const;
   pybind11::object has_initial_state() const;
   const std::vector<int32_t>& dp_token_counts() const;
+  const std::vector<int32_t>& dp_is_decode() const;
   pybind11::object q_seq_lens() const;
   PyExpandedDecodeMetadataView expanded_decode_metadata() const;
   bool is_prefill() const;
@@ -92,6 +93,7 @@ class PyAttentionMetadataView final {
   torch::Tensor q_seq_lens_host_;
   torch::Tensor linear_state_indices_;
   std::vector<int32_t> dp_token_counts_;
+  std::vector<int32_t> dp_is_decode_;
 };
 
 }  // namespace xllm

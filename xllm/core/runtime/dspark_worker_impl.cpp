@@ -4,7 +4,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -242,7 +242,7 @@ DSparkWorkerImpl::BlockSampleOutput DSparkWorkerImpl::sample_block(
          token_ids.slice(/*dim=*/1, /*start=*/0, num_speculative_tokens - 1)},
         /*dim=*/1);  // [num_reqs, num_spec]
     confidence_probs =
-        draft_impl_->dspark_confidence_probs_batched(last_hidden, prev_matrix);
+        draft_impl_->dspark_confidence_probs(last_hidden, prev_matrix);
     CHECK_EQ(confidence_probs.dim(), 2)
         << "batched confidence probs must be [num_reqs, num_spec]";
     CHECK_EQ(confidence_probs.size(0), num_reqs)

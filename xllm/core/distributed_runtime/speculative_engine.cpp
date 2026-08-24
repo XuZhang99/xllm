@@ -4,7 +4,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,6 +22,8 @@ limitations under the License.
 #include <memory>
 
 #include "common/metrics.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/kv_cache/kv_cache_estimation.h"
 #include "llm_engine.h"
 #include "runtime/forward_params.h"
 #include "util/timer.h"
@@ -243,6 +245,18 @@ int64_t SpeculativeEngine::calculate_kv_cache(
                               draft_kv_cache_cap.index_slot_size())
           : block_size * draft_full_attention_layers *
                 draft_allocated_full_attention_slot_size;
+  const int32_t layerwise_split_size =
+      options_.is_draft_engine()
+          ? 1
+          : ParallelConfig::get_instance().layerwise_split_size();
+  if (layerwise_split_size > 1) {
+    return estimate_layerwise_split_block_count(
+        model_args_,
+        layerwise_split_size,
+        target_kv_cache_cap,
+        cache_size_in_bytes - linear_cache_size_in_bytes,
+        draft_full_attention_block_size_in_bytes);
+  }
   const int64_t full_attention_block_size_in_bytes =
       target_full_attention_block_size_in_bytes +
       draft_full_attention_block_size_in_bytes;
@@ -275,21 +289,6 @@ bool SpeculativeEngine::pull_kv_blocks(
                                  dst_dp_rank,
                                  mappings);
 };
-
-bool SpeculativeEngine::pull_hetero_kv_blocks(
-    const int32_t src_dp_size,
-    const int32_t src_dp_rank,
-    const std::vector<uint64_t>& src_cluster_ids,
-    const std::vector<std::string>& src_addrs,
-    const int32_t dst_dp_rank,
-    const std::vector<KVTransferMapping>& mappings) {
-  return engine_->pull_hetero_kv_blocks(src_dp_size,
-                                        src_dp_rank,
-                                        src_cluster_ids,
-                                        src_addrs,
-                                        dst_dp_rank,
-                                        mappings);
-}
 
 void SpeculativeEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
                                        std::vector<std::string>& addrs,

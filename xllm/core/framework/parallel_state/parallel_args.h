@@ -4,7 +4,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -151,6 +151,8 @@ struct ParallelArgs {
 
   // cp size
   PROPERTY(int32_t, cp_size) = 1;
+
+  PROPERTY(int32_t, layerwise_split_size) = 1;
 
   // Derived: CP rank of the current process within its DP group.
   // rank layout: dp_rank * (cp_size * tp_size) + cp_rank * tp_size + tp_rank
