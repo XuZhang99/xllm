@@ -42,7 +42,8 @@ class SuffixWorkerImpl : public SpeculativeWorkerImpl {
 
  private:
   SampleOutput validate(const SamplingParameters& sampling_params,
-                        const DraftProposal& draft_proposal,
+                        const torch::Tensor& draft_token_ids,
+                        const torch::Tensor& draft_probs,
                         const ForwardOutput& target_output);
 
  private:

@@ -49,17 +49,21 @@ class DSparkWorkerImpl final : public DFlashWorkerImpl {
                               ForwardInput& validate_input) override;
 
  private:
-  // sample_block's two outputs: the sampled draft proposal and, when a
-  // confidence head is active, its per-step confidence probs (empty otherwise).
-  struct BlockSample {
-    DraftProposal proposal;
+  struct BlockSampleOutput {
+    torch::Tensor token_ids;
+    torch::Tensor probs;
+    // [num_reqs, num_speculative_tokens], fp32 in [0, 1]. Only defined when the
+    // draft model carries a trained ConfidenceHead; consumed by the adaptive
+    // pruning controller in place of `probs` (which is only a sampler-gathered
+    // softmax score, not a true acceptance probability).
     torch::Tensor confidence_probs;
   };
 
-  BlockSample sample_block(const torch::Tensor& base_logits,
-                           const torch::Tensor& last_hidden,
-                           const torch::Tensor& anchor_token_ids,
-                           const SamplingParameters& sampling_params) const;
+  BlockSampleOutput sample_block(
+      const torch::Tensor& base_logits,
+      const torch::Tensor& last_hidden,
+      const torch::Tensor& anchor_token_ids,
+      const SamplingParameters& sampling_params) const;
 
   void synchronize_sampled_token_ids(
       torch::Tensor& sampled_token_ids,

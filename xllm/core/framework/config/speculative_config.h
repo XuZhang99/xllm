@@ -15,7 +15,6 @@ limitations under the License.
 
 #pragma once
 
-#include <boost/algorithm/string/predicate.hpp>
 #include <cstdint>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
@@ -23,7 +22,6 @@ limitations under the License.
 
 #include "core/common/macros.h"
 #include "core/framework/config/option_category.h"
-#include "core/framework/sampling/draft_sampling_mode.h"
 
 namespace xllm {
 
@@ -50,7 +48,10 @@ class SpeculativeConfig final {
   }
 
   static bool is_mtp_algorithm(std::string_view algorithm) {
-    return boost::iequals(algorithm, "MTP");
+    return algorithm.size() == 3 &&
+           (algorithm[0] == 'M' || algorithm[0] == 'm') &&
+           (algorithm[1] == 'T' || algorithm[1] == 't') &&
+           (algorithm[2] == 'P' || algorithm[2] == 'p');
   }
 
   // True for the block-diffusion draft algorithms (DFlash, DSpark) that record
@@ -59,24 +60,13 @@ class SpeculativeConfig final {
   // classified separately via is_mtp_algorithm; callers that also accept MTP
   // must OR the two.
   static bool is_block_diffusion_algorithm(std::string_view algorithm) {
-    return boost::iequals(algorithm, "dflash") ||
-           boost::iequals(algorithm, "dspark");
-  }
-
-  // True for the algorithms whose draft path can emit dense per-token
-  // probabilities for probabilistic rejection sampling; greedy acceptance is
-  // always available, so DFlash/Suffix are gated out here.
-  static bool is_probabilistic_draft_sampling_supported(
-      std::string_view algorithm) {
-    return is_mtp_algorithm(algorithm) || boost::iequals(algorithm, "DSpark") ||
-           boost::iequals(algorithm, "Eagle3");
+    return iequals(algorithm, "dflash") || iequals(algorithm, "dspark");
   }
 
   void from_flags();
   void from_json(const JsonReader& json);
   void append_config_json(nlohmann::ordered_json& config_json) const;
   void initialize();
-  void validate() const;
 
   [[nodiscard]] static const OptionCategory& option_category() {
     static const OptionCategory kOptionCategory = {
@@ -90,7 +80,7 @@ class SpeculativeConfig final {
          "speculative_suffix_min_token_prob",
          "speculative_suffix_max_cached_requests",
          "speculative_suffix_use_tree_spec",
-         "draft_sampling_mode",
+         "enable_opt_validate_probs",
          "enable_mtp_draft_body_tp1",
          "enable_atb_spec_kernel",
          "enable_adaptive_speculative_decode",
@@ -116,7 +106,7 @@ class SpeculativeConfig final {
 
   PROPERTY(bool, speculative_suffix_use_tree_spec) = false;
 
-  PROPERTY(std::string, draft_sampling_mode) = "greedy";
+  PROPERTY(bool, enable_opt_validate_probs) = false;
 
   PROPERTY(bool, enable_mtp_draft_body_tp1) = false;
 
@@ -125,6 +115,29 @@ class SpeculativeConfig final {
   PROPERTY(bool, enable_adaptive_speculative_decode) = false;
 
   PROPERTY(double, adaptive_speculative_min_gain) = 0.0;
+
+ private:
+  // ASCII case-insensitive equality. Mirrors the manual case handling in
+  // is_mtp_algorithm rather than pulling <algorithm>/<cctype> into this header.
+  static bool iequals(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+      char ca = a[i];
+      char cb = b[i];
+      if (ca >= 'A' && ca <= 'Z') {
+        ca = static_cast<char>(ca - 'A' + 'a');
+      }
+      if (cb >= 'A' && cb <= 'Z') {
+        cb = static_cast<char>(cb - 'A' + 'a');
+      }
+      if (ca != cb) {
+        return false;
+      }
+    }
+    return true;
+  }
 };
 
 }  // namespace xllm

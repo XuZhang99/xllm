@@ -20,8 +20,6 @@ cc_library(
   NAME 
     sampler
   HDRS
-    draft_proposal.h
-    draft_sampling_mode.h
     sampling_params.h
     logits_utils.h
     rejection_sampler.h

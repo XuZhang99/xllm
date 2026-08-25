@@ -333,10 +333,6 @@ bool DFlashWorkerImpl::init_model(const std::string& model_weights_path,
   CHECK(::xllm::SchedulerConfig::get_instance().enable_chunked_prefill())
       << "Block-diffusion speculative decoding requires "
          "--enable_chunked_prefill=true.";
-  CHECK(SpeculativeConfig::is_probabilistic_draft_sampling_supported(
-            options_.speculative_algorithm()) ||
-        draft_sampling_mode_ == DraftSamplingMode::GREEDY)
-      << "This drafter only supports draft_sampling_mode=greedy.";
   bool result = true;
   const bool loading_target =
       impl_->get_status() == WorkerImpl::Status::UNINITIALIZED;
@@ -392,17 +388,21 @@ bool DFlashWorkerImpl::init_model(const std::string& model_weights_path,
       // the draft backbone/Markov head project through the wrong vocabulary
       // basis and reduces acceptance to near-random levels.
     } else {
+      const bool python_weights_shared =
+          draft_impl_->share_weights_from(*impl_);
+      if (!python_weights_shared) {
 #if defined(USE_NPU)
-      auto head = impl_->get_npu_lm_head();
-      draft_impl_->set_npu_lm_head(head);
-      auto word_embedding = impl_->get_npu_word_embedding();
-      draft_impl_->set_npu_word_embedding(word_embedding);
+        auto head = impl_->get_npu_lm_head();
+        draft_impl_->set_npu_lm_head(head);
+        auto word_embedding = impl_->get_npu_word_embedding();
+        draft_impl_->set_npu_word_embedding(word_embedding);
 #else
-      auto head = impl_->get_lm_head();
-      draft_impl_->set_lm_head(head);
-      auto word_embedding = impl_->get_word_embedding();
-      draft_impl_->set_word_embedding(word_embedding);
+        auto head = impl_->get_lm_head();
+        draft_impl_->set_lm_head(head);
+        auto word_embedding = impl_->get_word_embedding();
+        draft_impl_->set_word_embedding(word_embedding);
 #endif
+      }
     }
 
     JsonReader reader;
@@ -428,15 +428,6 @@ bool DFlashWorkerImpl::init_model(const std::string& model_weights_path,
         << ") must be < draft vocab_size (" << draft_vocab_size << ").";
     // Context hidden comes from the target.
     const ModelArgs& target_args = impl_->context_.get_model_args();
-
-    // Probabilistic rejection requires aligned vocabularies.
-    if (draft_sampling_mode_ == DraftSamplingMode::PROBABILISTIC) {
-      const int64_t target_vocab_size = target_args.vocab_size();
-      CHECK_EQ(draft_vocab_size, target_vocab_size)
-          << "draft_sampling_mode=probabilistic requires the draft vocab ("
-          << draft_vocab_size << ") to equal the target vocab ("
-          << target_vocab_size << ").";
-    }
     const int64_t num_target_layers =
         static_cast<int64_t>(target_args.layers_to_capture().size());
     CHECK_GT(num_target_layers, 0)
@@ -738,7 +729,10 @@ DFlashWorkerImpl::DraftBlock DFlashWorkerImpl::run_decode_draft(
   // fill_validate_input_from_draft_outputs) runs on the host while the draft
   // computes on device, instead of delaying the draft launch.
   prepare_validate_inputs(input, validate_input);
-  // Keep draft tokens consistent across tensor-parallel ranks.
+  // Unify the draft next_tokens across the tensor-parallel group before
+  // process_draft_sample_output() compresses the probs into the cache, so every
+  // rank caches the same selected draft prob under schedule-overlap. No-op for
+  // a single rank.
   maybe_broadcast_spec_tokens(draft_output.sample_output.next_tokens);
   process_draft_sample_output(draft_output.sample_output);
   COUNTER_ADD(speculative_execution_latency_seconds_draft,
@@ -752,10 +746,14 @@ DFlashWorkerImpl::DraftBlock DFlashWorkerImpl::run_decode_draft(
   CHECK_EQ(num_draft_tokens % num_speculative_tokens, 0)
       << "DFlash draft token count mismatch.";
   const int32_t batch_size = num_draft_tokens / num_speculative_tokens;
+  CHECK_EQ(draft_output.sample_output.probs.numel(), num_draft_tokens)
+      << "DFlash draft output requires selected draft probs.";
+
   DraftBlock draft_block;
-  draft_block.proposal =
-      DraftProposal(draft_output.sample_output.next_tokens.view(
-          {batch_size, num_speculative_tokens}));
+  draft_block.token_ids = draft_output.sample_output.next_tokens.view(
+      {batch_size, num_speculative_tokens});
+  draft_block.probs = draft_output.sample_output.probs.view(
+      {batch_size, num_speculative_tokens});
   draft_block.retained_inputs = take_retained_inputs(draft_output);
   return draft_block;
 }
@@ -770,12 +768,11 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs(
   const int32_t effective_speculative_tokens = effective_val_tokens - 1;
   CHECK_GE(effective_speculative_tokens, 0);
   CHECK_LE(effective_speculative_tokens, num_speculative_tokens);
-  const torch::Tensor& draft_token_ids = draft_block.proposal.token_ids();
-  CHECK(draft_token_ids.defined())
+  CHECK(draft_block.token_ids.defined())
       << "DFlash draft token_ids must be defined for validate token fill";
-  CHECK_EQ(draft_token_ids.dim(), 2)
+  CHECK_EQ(draft_block.token_ids.dim(), 2)
       << "DFlash draft token_ids must be [batch, num_speculative_tokens]";
-  CHECK_EQ(draft_token_ids.size(1), num_speculative_tokens)
+  CHECK_EQ(draft_block.token_ids.size(1), num_speculative_tokens)
       << "DFlash draft token_ids width mismatch";
   CHECK(validate_input.token_ids.defined())
       << "DFlash validate token_ids must be prepared before draft token fill";
@@ -786,6 +783,8 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs(
 
   const int64_t total_num_val_tokens = validate_input.token_ids.numel();
   const int64_t num_sequences = total_num_val_tokens / num_val_tokens;
+  CHECK_EQ(draft_block.token_ids.size(0), num_sequences)
+      << "DFlash draft batch must match validate sequence count";
   const torch::TensorOptions token_options = validate_input.token_ids.options();
   c10::StreamGuard stream_guard = compute_stream.set_stream_guard();
   wait_metadata_ready_event(validate_input, compute_stream);
@@ -801,7 +800,7 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs(
   } else {
     using ISlice = torch::indexing::Slice;
     torch::Tensor draft_slice =
-        draft_token_ids
+        draft_block.token_ids
             .index({ISlice(),
                     ISlice(/*start=*/0, /*end=*/effective_speculative_tokens)})
             .contiguous();
@@ -825,12 +824,11 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs_varlen(
     const std::vector<int32_t>& per_seq_val_tokens) {
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
   const int64_t num_sequences = static_cast<int64_t>(per_seq_val_tokens.size());
-  const torch::Tensor& draft_token_ids = draft_block.proposal.token_ids();
-  CHECK(draft_token_ids.defined())
+  CHECK(draft_block.token_ids.defined())
       << "DFlash draft token_ids must be defined for varlen validate fill";
-  CHECK_EQ(draft_token_ids.dim(), 2);
-  CHECK_EQ(draft_token_ids.size(0), num_sequences);
-  CHECK_EQ(draft_token_ids.size(1), num_speculative_tokens);
+  CHECK_EQ(draft_block.token_ids.dim(), 2);
+  CHECK_EQ(draft_block.token_ids.size(0), num_sequences);
+  CHECK_EQ(draft_block.token_ids.size(1), num_speculative_tokens);
   CHECK(validate_input.token_ids.defined());
   CHECK_EQ(validate_input.token_ids.dim(), 1);
 
@@ -875,7 +873,7 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs_varlen(
         long_dev_opts,
         /*non_blocking=*/true);
     // Flatten [B, N] -> [B*N] and gather via src_idx.
-    torch::Tensor draft_flat = draft_token_ids.view({-1});
+    torch::Tensor draft_flat = draft_block.token_ids.view({-1});
     torch::Tensor draft_selected = draft_flat.index_select(/*dim=*/0, src_idx);
     torch::Tensor draft_tokens =
         safe_to(draft_selected, token_options, /*non_blocking=*/true);
@@ -914,7 +912,12 @@ std::optional<ForwardOutput> DFlashWorkerImpl::run_validate(
   bool did_prune = false;
   int32_t max_val_tokens = default_val_tokens;
   if (!prefix_lengths.empty()) {
-    // Pruned outputs are overwritten later, so draft_probs stay untouched.
+    // Note: we intentionally do NOT mask draft_block.probs beyond each seq's
+    // prefix_len. The varlen validate path only sends prefix_lengths[i] draft
+    // tokens per seq to target; and apply_pruned_prefix_lengths downstream
+    // overwrites all pruned rejection-sampler outputs (via cut_mask + drop
+    // mask). So the sampler's decision on pruned draft slots is irrelevant
+    // to the emitted tokens — no need to touch draft_probs on the hot path.
     per_seq_val_tokens.resize(batch_size);
     max_val_tokens = 0;
     for (int32_t i = 0; i < batch_size; ++i) {
@@ -1051,11 +1054,37 @@ SampleOutput DFlashWorkerImpl::validate(
     const ForwardOutput& target_output,
     int32_t effective_val_tokens,
     const std::vector<int32_t>& per_seq_val_tokens) {
+  // Draft already emits the whole block [batch, num_speculative_tokens]; feed
+  // it straight to the verifier without the per-step select/view/cat round
+  // trip. The shared rejection sampler uses MTP's dense contract, so
+  // reconstruct dense draft probs unless the selected-only optimization is on.
+  const int32_t vocab_size =
+      static_cast<int32_t>(target_output.logits.size(/*dim=*/-1));
+  const bool enable_opt_validate_probs =
+      ::xllm::SpeculativeConfig::get_instance().enable_opt_validate_probs();
+  // Slice draft block down to the effective validate width; the rejection
+  // sampler only sees the tokens the target actually validated.
   const int32_t effective_speculative_tokens = effective_val_tokens - 1;
-  DraftProposal pruned =
-      draft_block.proposal.slice_speculative(0, effective_speculative_tokens);
+  using ISlice = torch::indexing::Slice;
+  torch::Tensor pruned_token_ids =
+      draft_block.token_ids
+          .index({ISlice(),
+                  ISlice(/*start=*/0, /*end=*/effective_speculative_tokens)})
+          .contiguous();
+  torch::Tensor pruned_probs =
+      draft_block.probs
+          .index({ISlice(),
+                  ISlice(/*start=*/0, /*end=*/effective_speculative_tokens)})
+          .contiguous();
+  auto [draft_token_ids, draft_probs] =
+      specBuilder::draftProbs::build_validate_tensors_from_block(
+          pruned_token_ids,
+          pruned_probs,
+          vocab_size,
+          enable_opt_validate_probs);
   return validate(sampling_params,
-                  pruned,
+                  draft_token_ids,
+                  draft_probs,
                   target_output,
                   effective_val_tokens,
                   per_seq_val_tokens);
@@ -1063,7 +1092,8 @@ SampleOutput DFlashWorkerImpl::validate(
 
 SampleOutput DFlashWorkerImpl::validate(
     const SamplingParameters& sampling_params,
-    const DraftProposal& draft_proposal,
+    const torch::Tensor& draft_token_ids,
+    const torch::Tensor& draft_probs,
     const ForwardOutput& target_output,
     int32_t effective_val_tokens,
     const std::vector<int32_t>& per_seq_val_tokens) {
@@ -1115,7 +1145,8 @@ SampleOutput DFlashWorkerImpl::validate(
       {.do_sample = sampling_params.do_sample,
        .all_random_sample = sampling_params.all_random_sample,
        .all_greedy_sample = sampling_params.all_greedy_sample},
-      draft_proposal,
+      draft_token_ids,
+      draft_probs,
       target_logits,
       target_output,
       bonus_token_ids,
@@ -1124,7 +1155,7 @@ SampleOutput DFlashWorkerImpl::validate(
 
 void DFlashWorkerImpl::process_draft_sample_output(
     SampleOutput& sample_output) {
-  sample_output.probs = torch::Tensor();
+  specBuilder::draftProbs::compress_sample_output_for_cache(sample_output);
 }
 
 void DFlashWorkerImpl::maybe_broadcast_spec_tokens(torch::Tensor& tokens) {
@@ -1273,7 +1304,10 @@ void DFlashWorkerImpl::prepare_query_inputs(const ForwardInput& input,
               /*non_blocking=*/true);
   query_input.sampling_params.sample_idxes =
       torch::arange(static_cast<int64_t>(selected_idxes.size()), idx_options);
-  force_greedy_draft_sampling(query_input.sampling_params);
+  // Force the draft sampler to emit selected-token probabilities even on the
+  // greedy path (temperature=0); the rejection sampler needs them to verify
+  // the block. Without this the greedy sampler skips probs entirely.
+  query_input.sampling_params.return_probs = true;
   repeat_sampling_params(query_input.sampling_params,
                          options_.num_speculative_tokens());
   query_input.device_tensors_ready = true;
@@ -1456,10 +1490,9 @@ std::vector<int32_t> DFlashWorkerImpl::compute_adaptive_prefix_lengths(
   // DSPARK_CONFIDENCE_TEMPERATURE (see qwen3_dspark.h) offers a single
   // temperature knob to approximate STS until we ship a proper offline
   // per-position calibration table.
-  torch::Tensor probs_for_controller =
-      draft_block.confidence_probs.defined()
-          ? draft_block.confidence_probs
-          : draft_block.proposal.draft_probs().value_or(torch::Tensor());
+  torch::Tensor probs_for_controller = draft_block.confidence_probs.defined()
+                                           ? draft_block.confidence_probs
+                                           : draft_block.probs;
   if (!probs_for_controller.defined()) {
     return {};
   }
