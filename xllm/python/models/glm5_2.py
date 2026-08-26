@@ -47,6 +47,7 @@ from xllm.python.layers import (
     RMSNorm,
 )
 from xllm.python.model_executor.forward_context import get_forward_context
+from xllm.python.models.aux_hidden_capture import AuxHiddenCapture
 from xllm.python.models.base import PyModelBase
 from xllm.python.models.deepseek_v32 import (
     DeepseekV3MLP as Glm52MLP,
@@ -128,6 +129,7 @@ class Glm52Config:
     indexer_rope_interleave: bool = True
     num_nextn_predict_layers: int = 0
     index_share_for_mtp_iteration: bool = False
+    layers_to_capture: tuple[int, ...] = ()
 
     @classmethod
     def from_dict(cls, d: dict) -> Glm52Config:
@@ -228,6 +230,7 @@ class Glm52Config:
             indexer_rope_interleave=bool(pick("indexer_rope_interleave", default=True)),
             num_nextn_predict_layers=int(pick("num_nextn_predict_layers", default=0)),
             index_share_for_mtp_iteration=bool(pick("index_share_for_mtp_iteration", default=False)),
+            layers_to_capture=tuple(int(layer_id) for layer_id in pick("layers_to_capture", default=[])),
         )
         cfg._resolve_indexer_types()
         cfg._resolve_mlp_layer_types()
@@ -556,6 +559,12 @@ class Glm52Model(nn.Module):
             dtype=dtype,
             device=device,
         )
+        invalid_capture_layers = [layer_id for layer_id in cfg.layers_to_capture if layer_id >= cfg.n_layers]
+        if invalid_capture_layers:
+            raise ValueError(
+                f"layers_to_capture must be smaller than n_layers ({cfg.n_layers}): {invalid_capture_layers}"
+            )
+        self.aux_hidden_capture = AuxHiddenCapture(cfg.layers_to_capture)
 
     def forward(self, input_ids: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
         hidden = self.embed_tokens(input_ids)
@@ -563,10 +572,12 @@ class Glm52Model(nn.Module):
         cos_sin_cache = self.rotary.cos_sin_cache
         residual: torch.Tensor | None = None
         prev_topk: torch.Tensor | None = None
-        for layer in self.layers:
+        captured_hidden: dict[int, torch.Tensor] = {}
+        for i, layer in enumerate(self.layers):
+            self.aux_hidden_capture.capture_layer(i, hidden, residual, captured_hidden)
             hidden, residual, prev_topk = layer(hidden, residual, positions, cos_sin_cache, prev_topk)
         hidden, last_hidden = self.norm(hidden, residual)
-        return hidden
+        return self.aux_hidden_capture.finalize(hidden, captured_hidden)
 
 
 class Glm52ForCausalLM(PyModelBase):

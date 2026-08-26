@@ -68,6 +68,14 @@ class __attribute__((visibility("hidden"))) PyCausalLM : public CausalVLM {
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) override;
 
+  // Confidence-head / adaptive-speculative path: the Python model exposes only
+  // compute_logits, so produce logits the same way and leave out_hidden
+  // undefined — the worker fills it by gathering hidden_states at
+  // seleted_idxes.
+  torch::Tensor logits(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes,
+                       torch::Tensor& out_hidden) override;
+
   ModelOutput write_context_kv(const torch::Tensor& target_hidden,
                                const torch::Tensor& positions,
                                const torch::Tensor& device_cache_slots,

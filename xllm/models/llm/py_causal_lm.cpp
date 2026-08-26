@@ -290,6 +290,16 @@ torch::Tensor PyCausalLM::logits(const torch::Tensor& hidden_states,
   return out.cast<torch::Tensor>();
 }
 
+torch::Tensor PyCausalLM::logits(const torch::Tensor& hidden_states,
+                                 const torch::Tensor& seleted_idxes,
+                                 torch::Tensor& out_hidden) {
+  // Python models expose only compute_logits (logits, no second hidden output),
+  // so leave out_hidden undefined; LLMWorkerImpl gathers hidden_states at
+  // seleted_idxes to align the selected hidden with these logits row-for-row.
+  out_hidden = torch::Tensor();
+  return logits(hidden_states, seleted_idxes);
+}
+
 ModelOutput PyCausalLM::write_context_kv(
     const torch::Tensor& target_hidden,
     const torch::Tensor& positions,

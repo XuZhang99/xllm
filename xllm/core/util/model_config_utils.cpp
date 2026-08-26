@@ -36,6 +36,16 @@ std::string get_model_type(const JsonReader& reader,
   if (!model_type.has_value()) {
     model_type = reader.value<std::string>("model_name");
   }
+  // vLLM "speculators" DSpark/DFlash draft configs carry no top-level
+  // model_type; the backbone architecture sits under transformer_layer_config.
+  // Detect them via speculators_model_type and read the nested model_type so
+  // the draft resolves to its backbone loader (e.g. qwen3), which the worker
+  // then overrides to the {DSpark,DFlash}DraftModel factory.
+  if (!model_type.has_value() &&
+      reader.value<std::string>("speculators_model_type").has_value()) {
+    model_type =
+        reader.value<std::string>("transformer_layer_config.model_type");
+  }
   if (!model_type.has_value()) {
     LOG(FATAL) << "Please check config.json file in model path: " << model_path
                << ", it should contain model_type or model_name key.";

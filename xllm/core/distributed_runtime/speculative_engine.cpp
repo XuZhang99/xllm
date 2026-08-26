@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "core/framework/config/parallel_config.h"
+#include "core/framework/config/speculative_config.h"
 #include "core/framework/kv_cache/kv_cache_estimation.h"
 #include "llm_engine.h"
 #include "runtime/forward_params.h"
@@ -211,16 +212,25 @@ int64_t SpeculativeEngine::calculate_kv_cache(
   const int64_t draft_full_attention_slot_size =
       draft_kv_cache_cap.slot_size() + draft_kv_cache_cap.index_slot_size() +
       draft_kv_cache_cap.scale_slot_size();
-  const bool draft_body_uses_tp1 = options_.enable_mtp_draft_body_tp1();
-  if (!draft_body_uses_tp1) {
+  // The block-diffusion (DFlash/DSpark) and tp1 draft bodies both allocate the
+  // draft KV cache from the draft's own KVCacheShape, so the draft's per-slot
+  // size is independently valid and may differ from (even exceed) the target's
+  // — e.g. an MLA target (small latent slot) paired with a dense draft, or a
+  // draft head_dim larger than the target's. Only the legacy path that reused
+  // the target KVCacheShape for the draft required draft_slot <= target_slot.
+  const bool draft_uses_own_shape =
+      options_.enable_mtp_draft_body_tp1() ||
+      SpeculativeConfig::is_block_diffusion_algorithm(
+          options_.speculative_algorithm());
+  if (!draft_uses_own_shape) {
     CHECK_LE(draft_full_attention_slot_size, target_full_attention_slot_size)
         << "draft full-attention kv cache slot size must not exceed target "
            "slot size because the current speculative worker allocates draft "
            "KV tensors with the target KVCacheShape";
   }
   const int64_t draft_allocated_full_attention_slot_size =
-      draft_body_uses_tp1 ? draft_full_attention_slot_size
-                          : target_full_attention_slot_size;
+      draft_uses_own_shape ? draft_full_attention_slot_size
+                           : target_full_attention_slot_size;
   CHECK_GT(target_full_attention_slot_size, 0)
       << "target full-attention kv cache slot size must be greater than 0";
   CHECK_GT(draft_allocated_full_attention_slot_size, 0)
@@ -237,7 +247,7 @@ int64_t SpeculativeEngine::calculate_kv_cache(
        target_kv_cache_cap.num_indexer_layers() *
            target_kv_cache_cap.index_slot_size());
   const int64_t draft_full_attention_block_size_in_bytes =
-      draft_body_uses_tp1
+      draft_uses_own_shape
           ? block_size * (draft_full_attention_layers *
                               (draft_kv_cache_cap.slot_size() +
                                draft_kv_cache_cap.scale_slot_size()) +

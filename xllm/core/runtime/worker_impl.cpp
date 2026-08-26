@@ -161,13 +161,15 @@ std::vector<int32_t> read_capture_layer_ids(
   for (int32_t layer_id : reader.value_or<std::vector<int32_t>>(
            std::vector<std::string>{"dspark_target_layer_ids",
                                     "target_layer_ids",
+                                    "aux_hidden_state_layer_ids",
                                     "dflash_config.target_layer_ids"},
            std::vector<int32_t>{})) {
     capture_layer_ids.emplace_back(layer_id + 1);
   }
   CHECK(!capture_layer_ids.empty())
       << "Block-diffusion draft config requires dspark_target_layer_ids, "
-         "target_layer_ids, or dflash_config.target_layer_ids: "
+         "target_layer_ids, aux_hidden_state_layer_ids, or "
+         "dflash_config.target_layer_ids: "
       << config_path;
   return capture_layer_ids;
 }

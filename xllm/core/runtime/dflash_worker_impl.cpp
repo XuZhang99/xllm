@@ -28,6 +28,8 @@ limitations under the License.
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
+#include "core/framework/kv_cache/kv_cache_capacity.h"
+#include "core/framework/kv_cache/kv_cache_shape.h"
 #include "core/framework/speculative/adaptive_pruning_helpers.h"
 #include "core/framework/speculative/speculative_profile_registry.h"
 #include "framework/model/model_args.h"
@@ -292,6 +294,28 @@ std::vector<int64_t> build_accepted_context_rows(
   return accepted_idxes;
 }
 
+// The block-diffusion draft is an independent model whose attention geometry
+// (head count, head_dim, MLA-vs-dense) can differ from the target's — e.g. a
+// dense MHA draft paired with an MLA target. Reusing the target-derived
+// KVCacheShape for the draft then allocates the draft's paged cache with the
+// wrong per-layer head/dim layout, and the KV-scatter kernel rejects it. Build
+// a draft-specific shape from the draft's own model args, keeping the target's
+// block count/size, and sharding heads by the draft's own tp world size.
+KVCacheShape build_draft_kv_cache_shape(const KVCacheShape& target_shape,
+                                        const ParallelArgs& draft_parallel_args,
+                                        const ModelArgs& draft_model_args,
+                                        int64_t block_size) {
+  KVCacheCapacity draft_capacity;
+  draft_capacity.n_blocks(target_shape.key_cache_shape()[0])
+      .block_size(block_size);
+  const int64_t draft_tp_world_size =
+      std::max<int64_t>(1,
+                        draft_parallel_args.world_size() /
+                            std::max(draft_parallel_args.dp_size(), 1) /
+                            std::max(draft_parallel_args.cp_size(), 1));
+  return KVCacheShape(draft_capacity, draft_model_args, draft_tp_world_size);
+}
+
 }  // namespace
 
 DFlashWorkerImpl::DFlashWorkerImpl(const ParallelArgs& parallel_args,
@@ -463,7 +487,12 @@ bool DFlashWorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   bool draft_allocated = true;
   const WorkerImpl::Status draft_status = draft_impl_->get_status();
   if (draft_status == WorkerImpl::Status::LOADED) {
-    draft_allocated = draft_impl_->allocate_kv_cache(kv_cache_shape);
+    const KVCacheShape draft_shape =
+        build_draft_kv_cache_shape(kv_cache_shape,
+                                   draft_impl_->context_.get_parallel_args(),
+                                   draft_impl_->context_.get_model_args(),
+                                   options_.block_size());
+    draft_allocated = draft_impl_->allocate_kv_cache(draft_shape);
   } else {
     CHECK_EQ(draft_status, WorkerImpl::Status::READY);
   }
@@ -499,8 +528,13 @@ bool DFlashWorkerImpl::allocate_kv_cache_with_transfer(
   bool draft_allocated = true;
   const WorkerImpl::Status draft_status = draft_impl_->get_status();
   if (draft_status == WorkerImpl::Status::LOADED) {
+    const KVCacheShape draft_shape =
+        build_draft_kv_cache_shape(kv_cache_shape,
+                                   draft_impl_->context_.get_parallel_args(),
+                                   draft_impl_->context_.get_model_args(),
+                                   options_.block_size());
     draft_allocated = draft_impl_->allocate_kv_cache_with_transfer(
-        kv_cache_transfer_, kv_cache_shape);
+        kv_cache_transfer_, draft_shape);
   } else {
     CHECK_EQ(draft_status, WorkerImpl::Status::READY);
   }

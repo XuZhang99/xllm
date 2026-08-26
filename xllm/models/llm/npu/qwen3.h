@@ -266,41 +266,68 @@ TORCH_MODULE(QWen3ForCausalLM);
 // register the causal model
 REGISTER_CAUSAL_MODEL_WITH_VARNAME(qwen3_atb, qwen3_atb, QWen3ForCausalLM);
 
-// register the model args
-REGISTER_MODEL_ARGS_WITH_VARNAME(qwen3_atb, qwen3_atb, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "qwen3");
-  LOAD_ARG_OR(dtype, "torch_dtype", "");
-  LOAD_ARG_OR(vocab_size, "vocab_size", 152064);
-  LOAD_ARG_OR(hidden_size, "hidden_size", 3584);
-  LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
-  LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
-  LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
-  LOAD_ARG(n_kv_heads, "num_key_value_heads");
-  // LOAD_ARG_OR(no_bias, "no_bias", true);
-  LOAD_ARG_OR(intermediate_size, "intermediate_size", 18944);
-  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 32768);
-  LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-6);
-  LOAD_ARG_OR(eos_token_id, "eos_token_id", 151643);
-  LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
+// Loads the Qwen3 backbone args, transparently handling the vLLM "speculators"
+// DSpark/DFlash draft config where the backbone architecture is nested under
+// transformer_layer_config (flat plain-Qwen3 configs still work via fallback).
+// Kept as a free function so the comma-heavy key lists do not confuse the
+// REGISTER_MODEL_ARGS macro's argument parsing.
+inline void load_qwen3_atb_args(const JsonReader& json, ModelArgs* args) {
+  auto tlc = [](const char* key) {
+    return std::vector<std::string>{
+        std::string("transformer_layer_config.") + key, std::string(key)};
+  };
+  args->model_type() = json.value_or<std::string>(tlc("model_type"), "qwen3");
+  args->dtype() = json.value_or<std::string>(tlc("torch_dtype"), "");
+  args->vocab_size() = json.value_or<int64_t>(tlc("vocab_size"), 152064);
+  args->hidden_size() = json.value_or<int64_t>(tlc("hidden_size"), 3584);
+  args->hidden_act() = json.value_or<std::string>(tlc("hidden_act"), "silu");
+  args->n_layers() = json.value_or<int64_t>(tlc("num_hidden_layers"), 28);
+  args->n_heads() = json.value_or<int64_t>(tlc("num_attention_heads"), 28);
+  args->n_kv_heads() =
+      json.value_or<int64_t>(tlc("num_key_value_heads"), args->n_heads());
+  args->intermediate_size() =
+      json.value_or<int64_t>(tlc("intermediate_size"), 18944);
+  args->max_position_embeddings() =
+      json.value_or<int64_t>(tlc("max_position_embeddings"), 32768);
+  args->rms_norm_eps() = json.value_or<float>(tlc("rms_norm_eps"), 1e-6f);
+  args->eos_token_id() = json.value_or<int32_t>(tlc("eos_token_id"), 151643);
+  // rope_theta may sit under
+  // transformer_layer_config.rope_parameters.rope_theta (speculators),
+  // transformer_layer_config.rope_theta, or the flat rope_theta.
+  const std::vector<std::string> rope_theta_keys{
+      "transformer_layer_config.rope_parameters.rope_theta",
+      "transformer_layer_config.rope_theta",
+      "rope_parameters.rope_theta",
+      "rope_theta"};
+  args->rope_theta() = json.value_or<float>(rope_theta_keys, 1000000.0f);
 
   // For qwen3/2.5 model < 7B,  tie_word_embeddings = true
-  LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
+  args->tie_word_embeddings() =
+      json.value_or<bool>(tlc("tie_word_embeddings"), false);
 
-  LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
-  LOAD_ARG_OR(max_window_layers, "max_window_layers", 28);
+  args->use_sliding_window() =
+      json.value_or<bool>(tlc("use_sliding_window"), false);
+  args->max_window_layers() =
+      json.value_or<int64_t>(tlc("max_window_layers"), 28);
 
-  // DSpark: low-rank dim of the Markov head (top-level config key, like vLLM's
-  // config.markov_rank). 0 = disabled (plain DFlash / non-DSpark models).
-  LOAD_ARG_OR(markov_rank, "markov_rank", 0);
-  LOAD_ARG_OR(enable_confidence_head, "enable_confidence_head", false);
-  LOAD_ARG_OR(
-      confidence_head_with_markov, "confidence_head_with_markov", false);
+  // DSpark head knobs live at the top level of the speculators config (like
+  // vLLM's config.markov_rank). 0 = disabled (plain DFlash / non-DSpark).
+  args->markov_rank() = json.value_or<int64_t>("markov_rank", 0);
+  args->enable_confidence_head() =
+      json.value_or<bool>("enable_confidence_head", false);
+  args->confidence_head_with_markov() =
+      json.value_or<bool>("confidence_head_with_markov", false);
 
-  LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return args->hidden_size() / args->n_heads();
-  });
+  const int64_t default_head_dim =
+      args->n_heads() > 0 ? args->hidden_size() / args->n_heads() : 0;
+  args->head_dim() = json.value_or<int64_t>(tlc("head_dim"), default_head_dim);
 
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
+  args->stop_token_ids() = std::unordered_set<int32_t>({args->eos_token_id()});
+}
+
+// register the model args
+REGISTER_MODEL_ARGS_WITH_VARNAME(qwen3_atb, qwen3_atb, [&] {
+  load_qwen3_atb_args(json, args);
 });
 
 }  // namespace xllm::npu::model
