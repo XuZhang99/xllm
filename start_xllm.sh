@@ -26,10 +26,10 @@ do
   PORT=$((START_PORT + i))
   DEVICE=$((START_DEVICE + i))
   LOG_FILE="$LOG_DIR/node_$i.log"
-  home/zhangxu/xllm/build/xllm/core/server/xllm \
+  /home/zhangxu/xllm/build/lib.linux-aarch64-cpython-311/xllm/xllm \
     --model $MODEL_PATH \
     --model_impl="python" \
-    --python_model_path="/export/home/zhangxu/xllm" \
+    --python_model_path="/home/zhangxu/xllm" \
     --port $PORT \
     --master_node_addr=$MASTER_NODE_ADDR \
     --nnodes=$NNODES \
