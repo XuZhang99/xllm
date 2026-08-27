@@ -666,6 +666,11 @@ class Glm52ForCausalLM(PyModelBase):
                 moe_layer = self.model.layers[i].mlp
                 expert_start = moe_layer.local_expert_start
                 expert_end = moe_layer.local_expert_end
+                # experts_w13 / experts_w2 are created empty and materialized
+                # lazily to cap loading peak memory; allocate them before the
+                # per-expert copy below writes into w13_param.data[local_idx].
+                moe_layer.allocate_experts_w13_for_loading()
+                moe_layer.allocate_experts_w2_for_loading()
                 shard_world = cfg.moe_tp_size if cfg.ep_size > 1 else cfg.tp_size
                 shard_rank = cfg.moe_tp_rank if cfg.ep_size > 1 else cfg.tp_rank
                 for j in range(expert_start, expert_end):
