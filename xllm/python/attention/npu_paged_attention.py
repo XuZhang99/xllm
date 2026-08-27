@@ -35,6 +35,7 @@ from xllm.python.attention.backend import (
 from xllm.python.attention.expanded_decode_metadata import (
     resolve_expanded_decode_metadata,
 )
+from xllm.python.attention.fp8_cache import quantize_e4m3
 from xllm.python.attention.quantized_mla import quantized_sparse_mla_attention
 from xllm.python.model_executor.cp_utils import cp_gather_kv
 from xllm.python.model_executor.forward_context import (
@@ -342,7 +343,12 @@ class NpuPagedAttentionBackend(AttentionBackend):
             raise RuntimeError("MLA requires a block table")
 
         nope_cache_scale = layer_cache.key_scale
-        if nope_cache.dtype == torch.int8:
+        if nope_cache.dtype == torch.uint8:
+            k_latent_fp8 = quantize_e4m3(k_latent_3d)
+            k_pe_fp8 = quantize_e4m3(k_pe_3d)
+            self._update_paged_cache(nope_cache, metadata.slot_mapping, k_latent_fp8)
+            self._update_paged_cache(rope_cache, metadata.slot_mapping, k_pe_fp8)
+        elif nope_cache.dtype == torch.int8:
             if nope_cache_scale is None:
                 raise RuntimeError("INT8 MLA latent cache requires a scale cache")
             k_latent_int8, k_latent_scale = kernels.dynamic_quant(k_latent_3d)
@@ -403,9 +409,20 @@ class NpuPagedAttentionBackend(AttentionBackend):
         values: torch.Tensor,
     ) -> None:
         cache_view = cache.view(-1, cache.size(-1))
+        indices = slot_mapping.reshape(-1).clamp_min(0)
+        if cache.dtype == torch.uint8:
+            # ScatterNdUpdateV2 has no uint8 specialization, and routing E4M3
+            # bytes through its int8 kernel is unsafe on NPU. index_copy_
+            # supports uint8 directly and preserves every encoded bit.
+            cache_view.index_copy_(
+                0,
+                indices.to(torch.int64),
+                values.reshape(values.size(0), -1),
+            )
+            return
         kernels.scatter_nd_update(
             cache_view,
-            slot_mapping.reshape(-1, 1).clamp_min(0),
+            indices.reshape(-1, 1),
             values.reshape(values.size(0), -1),
         )
 
@@ -434,8 +451,8 @@ class NpuPagedAttentionBackend(AttentionBackend):
         block_table: torch.Tensor,
         layer_id: int,
     ) -> torch.Tensor:
-        if nope_cache.dtype == torch.int8:
-            if nope_cache_scale is None:
+        if nope_cache.dtype in (torch.int8, torch.uint8):
+            if nope_cache.dtype == torch.int8 and nope_cache_scale is None:
                 raise RuntimeError("INT8 MLA latent cache requires a scale cache")
             if self._mla_actual_seq_q is None or self._mla_actual_seq_kv is None:
                 raise RuntimeError("quantized MLA requires prepared sequence lengths")

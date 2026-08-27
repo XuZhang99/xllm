@@ -79,7 +79,7 @@ int64_t kv_slot_size(const ModelArgs& model_args,
 }
 
 int64_t index_slot_size(const ModelArgs& model_args,
-                        bool enable_indexer_cache_quantization,
+                        const std::string& indexer_cache_dtype,
                         int64_t dtype_size) {
   if (model_args.index_n_heads() <= 0) {
     return 0;
@@ -91,7 +91,12 @@ int64_t index_slot_size(const ModelArgs& model_args,
       util::kv_split_size_effective() > 1) {
     split_factor = util::kv_split_size_effective();
   }
-  if (enable_indexer_cache_quantization) {
+#if defined(USE_NPU)
+  if (indexer_cache_dtype == "fp8_e4m3") {
+    return split_factor * index_n_head * model_args.index_head_dim();
+  }
+#endif
+  if (indexer_cache_dtype == "int8") {
     int64_t scale_size = static_cast<int64_t>(sizeof(float));
 #if defined(USE_NPU)
     if (model_args.model_type() == "glm_moe_dsa") {
@@ -111,6 +116,12 @@ int64_t scale_slot_size(const ModelArgs& model_args,
   if (options.kv_cache_dtype == "auto") {
     return 0;
   }
+#if defined(USE_NPU)
+  if (model_args.model_type() == "glm_moe_dsa" &&
+      options.kv_cache_dtype == "fp8_e4m3") {
+    return 0;
+  }
+#endif
   if (model_args.enable_mla()) {
     return sizeof(float);
   }
@@ -522,13 +533,22 @@ KVCacheCapacity estimate_kv_cache_capacity(
       torch::scalarTypeToTypeMeta(options.dtype).itemsize());
   const int64_t cache_dtype_size =
       kv_cache_dtype_size(options.kv_cache_dtype, dtype_size);
+#if defined(USE_NPU)
   const bool enable_indexer_cache_quantization =
+      options.indexer_cache_dtype == "int8" ||
+      options.indexer_cache_dtype == "fp8_e4m3";
+#else
+  const bool enable_indexer_cache_quantization =
+      options.indexer_cache_dtype == "int8";
+#endif
+  const bool enable_indexer_cache_scale =
       options.indexer_cache_dtype == "int8";
 
   kv_cache_cap.slot_size(kv_slot_size(model_args, options, cache_dtype_size))
       .index_slot_size(index_slot_size(
-          model_args, enable_indexer_cache_quantization, dtype_size))
+          model_args, options.indexer_cache_dtype, dtype_size))
       .enable_indexer_cache_quant(enable_indexer_cache_quantization)
+      .enable_indexer_cache_scale(enable_indexer_cache_scale)
       .scale_slot_size(scale_slot_size(model_args, options))
       .linear_slot_size(linear_slot_size(model_args, options, dtype_size))
       .n_layers(model_args.n_layers())

@@ -59,7 +59,7 @@ std::unique_ptr<KVCacheImpl> create_kv_cache_impl(
 #elif defined(USE_NPU)
   CHECK(!create_options.enable_kv_cache_quant() ||
         create_options.model_type() == "glm_moe_dsa")
-      << "NPU KV cache INT8 only supports PyTorch GLM-5.2.";
+      << "NPU quantized KV cache only supports PyTorch GLM-5.2.";
 #endif
 
   const bool is_linear_layer =

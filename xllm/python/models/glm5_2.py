@@ -40,6 +40,7 @@ import torch.nn as nn
 
 from xllm.python import distributed, kernels
 from xllm.python.attention.backend import MlaIndexContext
+from xllm.python.attention.fp8_cache import dequantize_e4m3, quantize_e4m3
 from xllm.python.layers import (
     Attention,
     ColumnParallelLinear,
@@ -431,6 +432,24 @@ class Glm52Indexer(nn.Module):
         q = torch.cat([q_pe, q_nope], dim=-1)
         k = torch.cat([k_pe, k_nope], dim=-1)
         weights = self.weights_proj(hidden.to(torch.float32))
+        if index_cache.dtype == torch.uint8:
+            ctx.update_index_cache(quantize_e4m3(k), None)
+            index_cache_bf16 = dequantize_e4m3(index_cache, torch.bfloat16)
+            return kernels.lightning_indexer(
+                q.to(torch.bfloat16),
+                index_cache_bf16,
+                weights.to(torch.bfloat16),
+                actual_seq_q,
+                actual_seq_kv,
+                block_table,
+                "TND",
+                "PA_BSND",
+                self.topk,
+                3,
+                9223372036854775807,
+                9223372036854775807,
+                False,
+            )
         if index_cache.dtype == torch.int8:
             if ctx.index_scale is None:
                 raise RuntimeError("INT8 index cache requires a scale cache")

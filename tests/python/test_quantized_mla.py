@@ -17,7 +17,63 @@ from __future__ import annotations
 import pytest
 import torch
 
+from xllm.python.attention import npu_paged_attention
+from xllm.python.attention.fp8_cache import dequantize_e4m3, quantize_e4m3
 from xllm.python.attention.quantized_mla import quantized_sparse_mla_attention
+
+
+def test_e4m3_cache_encoding_matches_pytorch_float8_bits() -> None:
+    values = torch.tensor(
+        [
+            -448.0,
+            -16.0,
+            -1.5,
+            -(2.0**-6),
+            -(2.0**-9),
+            0.0,
+            2.0**-9,
+            2.0**-6,
+            1.5,
+            16.0,
+            448.0,
+        ],
+        dtype=torch.bfloat16,
+    )
+
+    encoded = quantize_e4m3(values)
+    expected = values.to(torch.float8_e4m3fn).view(torch.uint8)
+
+    assert torch.equal(encoded, expected)
+    assert torch.equal(dequantize_e4m3(encoded), expected.view(torch.float8_e4m3fn).to(torch.bfloat16))
+
+
+def test_e4m3_cache_encoding_saturates_out_of_range_values() -> None:
+    values = torch.tensor([-float("inf"), -500.0, 500.0, float("inf"), float("nan")])
+
+    decoded = dequantize_e4m3(quantize_e4m3(values), torch.float32)
+
+    torch.testing.assert_close(decoded[:4], torch.tensor([-448.0, -448.0, 448.0, 448.0]))
+    assert decoded[4].item() == 0.0
+
+
+def test_e4m3_paged_cache_update_preserves_raw_high_bits(monkeypatch: pytest.MonkeyPatch) -> None:
+    cache = torch.zeros(1, 2, 1, 3, dtype=torch.uint8)
+    slot_mapping = torch.tensor([0, 1], dtype=torch.int64)
+    values = torch.tensor([[[254, 216, 188]], [[129, 1, 126]]], dtype=torch.uint8)
+
+    def scatter_nd_update(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("uint8 cache updates must not use ScatterNdUpdateV2")
+
+    monkeypatch.setattr(
+        npu_paged_attention.kernels,
+        "scatter_nd_update",
+        scatter_nd_update,
+        raising=False,
+    )
+
+    npu_paged_attention.NpuPagedAttentionBackend._update_paged_cache(cache, slot_mapping, values)
+
+    assert torch.equal(cache.view(2, 3), values.view(2, 3))
 
 
 def test_quantized_sparse_mla_dequantizes_selected_cache_rows() -> None:
@@ -49,6 +105,37 @@ def test_quantized_sparse_mla_dequantizes_selected_cache_rows() -> None:
 
     expected = torch.tensor([[[0.75, 0.25]], [[-1.0 / 6.0, 7.0 / 6.0]]])
     torch.testing.assert_close(output, expected)
+
+
+def test_quantized_sparse_mla_dequantizes_e4m3_caches_to_bfloat16() -> None:
+    q_latent = torch.zeros(2, 1, 2, dtype=torch.float32)
+    q_pe = torch.zeros(2, 1, 1, dtype=torch.float32)
+    nope_values = torch.tensor(
+        [[[[1.0, 0.0]], [[0.0, 2.0]], [[0.5, 0.5]], [[-1.0, 1.0]]]],
+        dtype=torch.bfloat16,
+    )
+    rope_values = torch.zeros(1, 4, 1, 1, dtype=torch.bfloat16)
+    topk = torch.tensor([[[0, 2, 3]], [[1, 2, 3]]], dtype=torch.int32)
+    block_table = torch.tensor([[0]], dtype=torch.int32)
+    actual_seq_q = torch.tensor([2], dtype=torch.int32)
+    actual_seq_kv = torch.tensor([4], dtype=torch.int32)
+
+    output = quantized_sparse_mla_attention(
+        q_latent,
+        q_pe,
+        quantize_e4m3(nope_values),
+        quantize_e4m3(rope_values),
+        None,
+        topk,
+        block_table,
+        actual_seq_q,
+        actual_seq_kv,
+        1.0,
+    )
+
+    expected = torch.tensor([[[0.75, 0.25]], [[-1.0 / 6.0, 7.0 / 6.0]]], dtype=torch.bfloat16)
+    assert output.dtype == torch.bfloat16
+    torch.testing.assert_close(output, expected, rtol=0.02, atol=0.02)
 
 
 def test_quantized_sparse_mla_rejects_multiple_kv_heads() -> None:

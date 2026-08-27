@@ -261,7 +261,8 @@ TEST(HierarchyKVCacheTransferTest,
   KVCacheCapacity capacity;
   capacity.n_blocks(kBlockCount)
       .block_size(kBlockSize)
-      .enable_indexer_cache_quant(true);
+      .enable_indexer_cache_quant(true)
+      .enable_indexer_cache_scale(true);
 
   ModelArgs model_args;
   model_args.model_type("deepseek_v32")

@@ -209,6 +209,27 @@ TEST_F(NpuXllmOpsTest, EmbeddedInterpreterSeesOps) {
              .item<float>();
 }
 
+TEST_F(NpuXllmOpsTest, E4m3RawBytesUseUint8IndexCopy) {
+  py::gil_scoped_acquire gil;
+
+  py::exec(R"PY(
+import torch
+from xllm.python.attention.npu_paged_attention import NpuPagedAttentionBackend
+
+device = "privateuseone"
+cache = torch.zeros((2, 2, 1, 128), dtype=torch.uint8, device=device)
+updates = torch.arange(256, dtype=torch.int64).reshape(2, 128).to(torch.uint8).to(device)
+slot_mapping = torch.tensor([1, 3], dtype=torch.int64, device=device)
+NpuPagedAttentionBackend._update_paged_cache(cache, slot_mapping, updates)
+torch.npu.synchronize()
+
+expected = torch.zeros((4, 128), dtype=torch.uint8)
+expected[1] = torch.arange(128, dtype=torch.int64).to(torch.uint8)
+expected[3] = torch.arange(128, 256, dtype=torch.int64).to(torch.uint8)
+assert torch.equal(cache.view(4, 128).cpu(), expected)
+)PY");
+}
+
 TEST_F(NpuXllmOpsTest, Qwen35_27B_TP4_FullAttentionMatchesReference) {
   py::gil_scoped_acquire gil;
   if (!is_ascend950_device()) {

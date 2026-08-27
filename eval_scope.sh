@@ -2,8 +2,8 @@
 # pip install evalscope
 set -euo pipefail
 
-MODEL="Qwen3-8B"
-PORT=8010
+MODEL="GLM-5.2-w8a8"
+PORT=29000
 HOST="127.0.0.1"
 echo "Using API host: ${HOST}"
 echo "Using API port: ${PORT}"
