@@ -107,9 +107,11 @@ def test_quantized_sparse_mla_dequantizes_selected_cache_rows() -> None:
     torch.testing.assert_close(output, expected)
 
 
-def test_quantized_sparse_mla_dequantizes_e4m3_caches_to_bfloat16() -> None:
-    q_latent = torch.zeros(2, 1, 2, dtype=torch.float32)
-    q_pe = torch.zeros(2, 1, 1, dtype=torch.float32)
+def test_fp8_mla_dequantizes_caches_before_sparse_attention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    q_latent = torch.zeros(2, 1, 2, dtype=torch.bfloat16)
+    q_pe = torch.zeros(2, 1, 1, dtype=torch.bfloat16)
     nope_values = torch.tensor(
         [[[[1.0, 0.0]], [[0.0, 2.0]], [[0.5, 0.5]], [[-1.0, 1.0]]]],
         dtype=torch.bfloat16,
@@ -119,8 +121,37 @@ def test_quantized_sparse_mla_dequantizes_e4m3_caches_to_bfloat16() -> None:
     block_table = torch.tensor([[0]], dtype=torch.int32)
     actual_seq_q = torch.tensor([2], dtype=torch.int32)
     actual_seq_kv = torch.tensor([4], dtype=torch.int32)
+    backend = object.__new__(npu_paged_attention.NpuPagedAttentionBackend)
+    backend._mla_actual_seq_q = actual_seq_q
+    backend._mla_actual_seq_kv = actual_seq_kv
+    backend.scale = 1.0
+    captured: dict[str, torch.Tensor] = {}
 
-    output = quantized_sparse_mla_attention(
+    def sparse_flash_attention_out(
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        *_args: object,
+    ) -> torch.Tensor:
+        captured["query"] = query
+        captured["key"] = key
+        captured["value"] = value
+        captured["rope"] = _args[5]
+        return _args[-1]
+
+    monkeypatch.setattr(
+        npu_paged_attention,
+        "get_execution_buffer",
+        lambda _key, factory: factory(),
+    )
+    monkeypatch.setattr(
+        npu_paged_attention.kernels,
+        "sparse_flash_attention_out",
+        sparse_flash_attention_out,
+        raising=False,
+    )
+
+    output = backend._mla_sparse(
         q_latent,
         q_pe,
         quantize_e4m3(nope_values),
@@ -128,14 +159,14 @@ def test_quantized_sparse_mla_dequantizes_e4m3_caches_to_bfloat16() -> None:
         None,
         topk,
         block_table,
-        actual_seq_q,
-        actual_seq_kv,
-        1.0,
+        0,
     )
 
-    expected = torch.tensor([[[0.75, 0.25]], [[-1.0 / 6.0, 7.0 / 6.0]]], dtype=torch.bfloat16)
     assert output.dtype == torch.bfloat16
-    torch.testing.assert_close(output, expected, rtol=0.02, atol=0.02)
+    assert captured["query"] is q_latent
+    torch.testing.assert_close(captured["key"], nope_values)
+    torch.testing.assert_close(captured["value"], nope_values)
+    torch.testing.assert_close(captured["rope"], rope_values)
 
 
 def test_quantized_sparse_mla_rejects_multiple_kv_heads() -> None:

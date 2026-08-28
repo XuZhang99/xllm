@@ -35,7 +35,7 @@ from xllm.python.attention.backend import (
 from xllm.python.attention.expanded_decode_metadata import (
     resolve_expanded_decode_metadata,
 )
-from xllm.python.attention.fp8_cache import quantize_e4m3
+from xllm.python.attention.fp8_cache import dequantize_e4m3, quantize_e4m3
 from xllm.python.attention.quantized_mla import quantized_sparse_mla_attention
 from xllm.python.model_executor.cp_utils import cp_gather_kv
 from xllm.python.model_executor.forward_context import (
@@ -451,8 +451,8 @@ class NpuPagedAttentionBackend(AttentionBackend):
         block_table: torch.Tensor,
         layer_id: int,
     ) -> torch.Tensor:
-        if nope_cache.dtype in (torch.int8, torch.uint8):
-            if nope_cache.dtype == torch.int8 and nope_cache_scale is None:
+        if nope_cache.dtype == torch.int8:
+            if nope_cache_scale is None:
                 raise RuntimeError("INT8 MLA latent cache requires a scale cache")
             if self._mla_actual_seq_q is None or self._mla_actual_seq_kv is None:
                 raise RuntimeError("quantized MLA requires prepared sequence lengths")
@@ -468,6 +468,9 @@ class NpuPagedAttentionBackend(AttentionBackend):
                 self._mla_actual_seq_kv,
                 self.scale,
             )
+        if nope_cache.dtype == torch.uint8:
+            nope_cache = dequantize_e4m3(nope_cache, torch.bfloat16)
+            rope_cache = dequantize_e4m3(rope_cache, torch.bfloat16)
         out = get_execution_buffer(
             ("SFA_OUTPUT", layer_id) + tuple(q_latent.shape),
             lambda: torch.empty_like(q_latent),

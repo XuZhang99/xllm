@@ -12,13 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""PyTorch fallback for sparse MLA over quantized latent caches."""
+"""PyTorch fallback for sparse MLA over INT8 latent caches."""
 
 from __future__ import annotations
 
 import torch
-
-from xllm.python.attention.fp8_cache import dequantize_e4m3
 
 _QUERY_CHUNK_SIZE = 64
 
@@ -64,8 +62,6 @@ def _dequantize_nope_cache(
     block_table: torch.Tensor,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    if selected_cache.dtype == torch.uint8:
-        return dequantize_e4m3(selected_cache, torch.bfloat16)
     if selected_cache.dtype != torch.int8:
         return selected_cache.to(dtype)
     if cache_scale is None:
@@ -86,13 +82,13 @@ def quantized_sparse_mla_attention(
     actual_seq_kv: torch.Tensor,
     softmax_scale: float,
 ) -> torch.Tensor:
-    """Run sparse absorbed MLA over persistent INT8 or E4M3 caches.
+    """Run sparse absorbed MLA over persistent INT8 caches.
 
     The current NPU SparseFlashAttention custom operator accepts only floating
-    point caches. This fallback gathers only the selected paged-cache rows,
-    dequantizes FP8 rows to BF16, and computes attention with regular PyTorch
-    operators. Query chunking bounds the temporary gather and score buffers
-    independently of the prompt length.
+    point caches. This fallback gathers only the selected paged-cache rows and
+    dequantizes them with their per-token scales before computing attention
+    with regular PyTorch operators. Query chunking bounds the temporary gather
+    and score buffers independently of the prompt length.
     """
     if topk.dim() == 3:
         if topk.size(1) != 1:
@@ -137,10 +133,7 @@ def quantized_sparse_mla_attention(
             block_table,
         )
         valid_blocks = valid_blocks & valid_rope_blocks
-        if selected_rope.dtype == torch.uint8:
-            selected_rope = dequantize_e4m3(selected_rope, torch.bfloat16)
-        else:
-            selected_rope = selected_rope.to(q_pe.dtype)
+        selected_rope = selected_rope.to(q_pe.dtype)
 
         chunk_query_positions = torch.arange(
             start,
