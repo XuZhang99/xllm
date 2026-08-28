@@ -68,6 +68,17 @@ from xllm.python.models.deepseek_v32 import (
     _yarn_get_mscale,
 )
 
+_DSA_INDEXER_STREAMS: dict[tuple[str, int | None], torch.npu.Stream] = {}
+
+
+def _dsa_indexer_stream(device: torch.device) -> torch.npu.Stream:
+    key = (device.type, device.index)
+    stream = _DSA_INDEXER_STREAMS.get(key)
+    if stream is None:
+        stream = torch.npu.Stream(device=device)
+        _DSA_INDEXER_STREAMS[key] = stream
+    return stream
+
 
 @dataclass
 class Glm52Config:
@@ -127,6 +138,7 @@ class Glm52Config:
     index_topk_freq: int = 1
     index_topk_pattern: list | None = None
     indexer_rope_interleave: bool = True
+    enable_dsa_multi_stream: bool = False
     num_nextn_predict_layers: int = 0
     index_share_for_mtp_iteration: bool = False
     layers_to_capture: tuple[int, ...] = ()
@@ -228,6 +240,7 @@ class Glm52Config:
             index_topk_freq=int(pick("index_topk_freq", default=1)),
             index_topk_pattern=pick("index_topk_pattern", default=None),
             indexer_rope_interleave=bool(pick("indexer_rope_interleave", default=True)),
+            enable_dsa_multi_stream=bool(pick("enable_dsa_multi_stream", default=False)),
             num_nextn_predict_layers=int(pick("num_nextn_predict_layers", default=0)),
             index_share_for_mtp_iteration=bool(pick("index_share_for_mtp_iteration", default=False)),
             layers_to_capture=tuple(int(layer_id) for layer_id in pick("layers_to_capture", default=[])),
@@ -359,6 +372,14 @@ class Glm52MLAAttention(Attention):
         self.indexer = None
         if not self.is_shared:
             self.indexer = Glm52Indexer(cfg, dtype, device)
+        self._indexer_stream = None
+        if (
+            self.indexer is not None
+            and cfg.enable_dsa_multi_stream
+            and hasattr(torch, "npu")
+            and device.type in ("npu", "privateuseone")
+        ):
+            self._indexer_stream = _dsa_indexer_stream(device)
 
     def process_weights_after_loading(self) -> None:
         self.q_a_proj.process_weights_after_loading()
@@ -390,7 +411,13 @@ class Glm52MLAAttention(Attention):
         backend = get_forward_context().attention_backend
         if self.indexer is not None:
             ctx = backend.mla_index_context(self)
-            topk = self.indexer.select_qli(hidden, q_c, positions, ctx, cos_sin_cache)
+            if self._indexer_stream is None:
+                topk = self.indexer.select_qli(hidden, q_c, positions, ctx, cos_sin_cache)
+            else:
+                current_stream = torch.npu.current_stream()
+                self._indexer_stream.wait_stream(current_stream)
+                with torch.npu.stream(self._indexer_stream):
+                    topk = self.indexer.select_qli(hidden, q_c, positions, ctx, cos_sin_cache)
         else:
             if prev_topk_indices is None:
                 raise ValueError(
@@ -415,6 +442,8 @@ class Glm52MLAAttention(Attention):
         k_latent_3d = k_latent.view(num_tokens, 1, self.kv_lora_rank)
         k_pe_3d = k_pe.view(num_tokens, 1, self.qk_rope_head_dim)
 
+        if self._indexer_stream is not None:
+            torch.npu.current_stream().wait_stream(self._indexer_stream)
         attn_out = backend.execute_mla(q_latent, q_pe, k_latent_3d, k_pe_3d, self, topk=topk)
         v_full = torch.bmm(attn_out.transpose(0, 1), self.W_UV).transpose(0, 1)
         v_full = v_full.reshape(num_tokens, self.num_heads_local * self.v_head_dim)
