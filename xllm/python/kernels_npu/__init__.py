@@ -75,6 +75,7 @@ from .rotary_embedding import (
     vision_rotary_mul,
 )
 from .sparse_attention import (
+    glm52_fp8_sparse_mla_attention_out,
     lightning_indexer,
     lightning_indexer_out,
     quant_lightning_indexer,
@@ -106,6 +107,7 @@ __all__ = [
     "quant_matmul",
     "quantize_per_tensor",
     "dynamic_quant",
+    "glm52_fp8_sparse_mla_attention_out",
     "lightning_indexer",
     "lightning_indexer_out",
     "quant_lightning_indexer",

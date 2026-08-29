@@ -25,6 +25,7 @@ limitations under the License.
 #include <torch/library.h>
 #include <torch/torch.h>
 
+#include "kernels/npu/tilelang/tilelang_ops_api.h"
 #include "kernels/npu/xllm_ops/xllm_ops_api.h"
 #include "npu_ops_api.h"
 
@@ -68,6 +69,45 @@ void apply_rotary_embedding_npu(torch::Tensor& q,
                                 const torch::Tensor& cos_sin_cache,
                                 const torch::Tensor& positions) {
   xllm::kernel::npu::apply_rotary(q, k, cos_sin_cache, positions);
+}
+
+torch::Tensor glm52_fp8_sparse_mla_attention_out_npu(
+    const torch::Tensor& q_latent,
+    const torch::Tensor& q_rope,
+    const torch::Tensor& nope_cache,
+    const torch::Tensor& rope_cache,
+    const torch::Tensor& topk_indices,
+    const torch::Tensor& block_table,
+    const torch::Tensor& actual_seq_lengths_kv,
+    const torch::Tensor& e4m3_decode_table,
+    torch::Tensor& output,
+    torch::Tensor& workspace_k,
+    torch::Tensor& workspace_k_rope,
+    torch::Tensor& workspace_scores,
+    torch::Tensor& workspace_probs,
+    torch::Tensor& workspace_output,
+    torch::Tensor& workspace_q,
+    torch::Tensor& workspace_q_rope,
+    double softmax_scale) {
+  xllm::kernel::npu::tilelang::glm52_fp8_sparse_mla_attention(
+      q_latent,
+      q_rope,
+      nope_cache,
+      rope_cache,
+      topk_indices,
+      block_table,
+      actual_seq_lengths_kv,
+      e4m3_decode_table,
+      output,
+      workspace_k,
+      workspace_k_rope,
+      workspace_scores,
+      workspace_probs,
+      workspace_output,
+      workspace_q,
+      workspace_q_rope,
+      static_cast<float>(softmax_scale));
+  return output;
 }
 
 // Graph-mode decode metadata update. Copies real data into the head of
@@ -359,6 +399,14 @@ TORCH_LIBRARY(xllm_ops, m) {
       "sparse_block_size, str layout_query, str layout_kv, int sparse_mode, "
       "Tensor(a!) output) -> Tensor(a!)");
   m.def(
+      "glm52_fp8_sparse_mla_attention_out(Tensor q_latent, Tensor q_rope, "
+      "Tensor nope_cache, Tensor rope_cache, Tensor topk_indices, Tensor "
+      "block_table, Tensor actual_seq_lengths_kv, Tensor e4m3_decode_table, "
+      "Tensor(a!) output, Tensor(b!) workspace_k, Tensor(c!) "
+      "workspace_k_rope, Tensor(d!) workspace_scores, Tensor(e!) "
+      "workspace_probs, Tensor(f!) workspace_output, Tensor(g!) workspace_q, "
+      "Tensor(h!) workspace_q_rope, float softmax_scale) -> Tensor(a!)");
+  m.def(
       "build_cp_context(int[] seq_lens, int cp_size, int cp_rank, Device "
       "device) -> (Tensor shard_index, Tensor shard_gather_index, Tensor "
       "shard_valid_mask, Tensor restore_index, Tensor query_index, Tensor "
@@ -390,6 +438,8 @@ TORCH_LIBRARY_IMPL(xllm_ops, PrivateUse1, m) {
          TORCH_FN(xllm::kernel::npu::sparse_flash_attention));
   m.impl("sparse_flash_attention_out",
          TORCH_FN(xllm::kernel::npu::sparse_flash_attention_out));
+  m.impl("glm52_fp8_sparse_mla_attention_out",
+         TORCH_FN(xllm::glm52_fp8_sparse_mla_attention_out_npu));
 }
 
 // build_cp_context is pure host index math with no Tensor input, so the

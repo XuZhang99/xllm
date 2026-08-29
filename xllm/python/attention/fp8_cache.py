@@ -75,4 +75,10 @@ def dequantize_e4m3(value: torch.Tensor, dtype: torch.dtype = torch.bfloat16) ->
     return decoded.to(dtype)
 
 
-__all__ = ["dequantize_e4m3", "quantize_e4m3"]
+def create_e4m3_decode_table(device: torch.device) -> torch.Tensor:
+    """Create the 256-entry FP32 lookup table consumed by fused NPU kernels."""
+    encoded = torch.arange(256, dtype=torch.int32).to(torch.uint8)
+    return dequantize_e4m3(encoded, torch.float32).to(device)
+
+
+__all__ = ["create_e4m3_decode_table", "dequantize_e4m3", "quantize_e4m3"]

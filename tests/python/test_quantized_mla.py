@@ -14,11 +14,17 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
 from xllm.python.attention import npu_paged_attention
-from xllm.python.attention.fp8_cache import dequantize_e4m3, quantize_e4m3
+from xllm.python.attention.fp8_cache import (
+    create_e4m3_decode_table,
+    dequantize_e4m3,
+    quantize_e4m3,
+)
 from xllm.python.attention.quantized_mla import quantized_sparse_mla_attention
 
 
@@ -54,6 +60,15 @@ def test_e4m3_cache_encoding_saturates_out_of_range_values() -> None:
 
     torch.testing.assert_close(decoded[:4], torch.tensor([-448.0, -448.0, 448.0, 448.0]))
     assert decoded[4].item() == 0.0
+
+
+def test_e4m3_decode_table_covers_every_raw_byte() -> None:
+    raw = torch.arange(256, dtype=torch.int32).to(torch.uint8)
+
+    table = create_e4m3_decode_table(torch.device("cpu"))
+
+    assert table.dtype == torch.float32
+    torch.testing.assert_close(table, dequantize_e4m3(raw, torch.float32))
 
 
 def test_e4m3_paged_cache_update_preserves_raw_high_bits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,6 +182,76 @@ def test_fp8_mla_dequantizes_caches_before_sparse_attention(
     torch.testing.assert_close(captured["key"], nope_values)
     torch.testing.assert_close(captured["value"], nope_values)
     torch.testing.assert_close(captured["rope"], rope_values)
+
+
+def test_fp8_mla_decode_uses_tilelang_sparse_attention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    num_queries = 2
+    num_heads = 4
+    q_latent = torch.zeros(num_heads, num_queries, 512, dtype=torch.bfloat16).transpose(0, 1)
+    q_pe = torch.zeros(num_heads, num_queries, 64, dtype=torch.bfloat16).transpose(0, 1)
+    nope_cache = torch.zeros(1, 128, 1, 512, dtype=torch.uint8)
+    rope_cache = torch.zeros(1, 128, 1, 64, dtype=torch.uint8)
+    topk = torch.zeros(num_queries, 1, 2048, dtype=torch.int32)
+    block_table = torch.zeros(num_queries, 1, dtype=torch.int32)
+    actual_seq_kv = torch.full((num_queries,), 128, dtype=torch.int32)
+    backend = object.__new__(npu_paged_attention.NpuPagedAttentionBackend)
+    backend._metadata = SimpleNamespace(is_prefill=False, is_chunked_prefill=False)
+    backend._mla_actual_seq_q = torch.arange(1, num_queries + 1, dtype=torch.int32)
+    backend._mla_actual_seq_kv = actual_seq_kv
+    backend._fp8_e4m3_decode_table = None
+    backend._fp8_mla_workspaces = None
+    backend.scale = 0.0625
+    captured: dict[str, object] = {}
+
+    def glm52_fp8_sparse_mla_attention_out(*args: object) -> torch.Tensor:
+        captured["args"] = args
+        return args[8]  # type: ignore[return-value]
+
+    def sparse_flash_attention_out(*_args: object) -> torch.Tensor:
+        raise AssertionError("eligible FP8 decode must use the fused TileLang kernel")
+
+    monkeypatch.setattr(
+        npu_paged_attention,
+        "get_execution_buffer",
+        lambda _key, factory: factory(),
+    )
+    monkeypatch.setattr(
+        npu_paged_attention.kernels,
+        "glm52_fp8_sparse_mla_attention_out",
+        glm52_fp8_sparse_mla_attention_out,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        npu_paged_attention.kernels,
+        "sparse_flash_attention_out",
+        sparse_flash_attention_out,
+        raising=False,
+    )
+
+    output = backend._mla_sparse(
+        q_latent,
+        q_pe,
+        nope_cache,
+        rope_cache,
+        None,
+        topk,
+        block_table,
+        0,
+    )
+
+    assert output.shape == q_latent.shape
+    assert output.is_contiguous()
+    args = captured["args"]
+    assert isinstance(args, tuple)
+    assert args[0] is q_latent
+    assert args[1] is q_pe
+    assert args[2] is nope_cache
+    assert args[3] is rope_cache
+    assert args[6] is actual_seq_kv
+    assert args[7].shape == (256,)
+    assert args[-1] == backend.scale
 
 
 def test_quantized_sparse_mla_rejects_multiple_kv_heads() -> None:
