@@ -87,6 +87,8 @@ _EXPORTS = {
         "vision_rotary_mul",
     ),
     "sparse_attention": (
+        "fp8_cache_write",
+        "glm52_fp8_sparse_mla_attention_out",
         "lightning_indexer",
         "lightning_indexer_out",
         "quant_lightning_indexer",
@@ -106,6 +108,8 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "fp8_cache_write",
+    "glm52_fp8_sparse_mla_attention_out",
     "rms_norm",
     "gemma_rms_norm",
     "fused_add_rms_norm",
