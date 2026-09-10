@@ -1,4 +1,5 @@
 include(cc_library)
+include(cc_binary)
 
 cc_library(
   NAME
@@ -68,3 +69,27 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
 )
+
+# Request-path hop 1: JSON -> proto -> RequestParams, response proto -> JSON.
+cc_binary(
+  NAME
+    api_service_benchmark
+  SRCS
+    api_service_benchmark.cpp
+  DEPS
+    :api_service
+    proto::xllm_proto
+    torch
+    benchmark::benchmark
+    benchmark::benchmark_main
+)
+target_link_libraries(api_service_benchmark
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>
+                      $<$<BOOL:${USE_NPU}>:nnopbase>)
+target_link_options(api_service_benchmark
+                    PRIVATE
+                    $<$<BOOL:${USE_MLU}>:-Wl,--no-as-needed>)

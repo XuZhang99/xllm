@@ -1,5 +1,5 @@
 include(cc_library)
-
+include(cc_binary)
 
 add_subdirectory(profile)
 
@@ -45,3 +45,31 @@ cc_library(
     absl::time
     absl::synchronization
 )
+
+# Request-path hop 3: add_request, prepare_batch, process_batch_output.
+cc_binary(
+  NAME
+    continuous_scheduler_benchmark
+  SRCS
+    continuous_scheduler_benchmark.cpp
+  DEPS
+    :config
+    :scheduler
+    :xllm_server
+    :block
+    torch
+    benchmark::benchmark
+    benchmark::benchmark_main
+    $<$<BOOL:${USE_NPU}>:nnopbase>
+)
+target_link_libraries(continuous_scheduler_benchmark
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>)
+target_link_libraries(continuous_scheduler_benchmark PRIVATE
+  "$<LINK_GROUP:RESCAN,xtensor,xllm_server>")
+target_link_options(continuous_scheduler_benchmark
+                    PRIVATE
+                    $<$<BOOL:${USE_MLU}>:-Wl,--no-as-needed>)

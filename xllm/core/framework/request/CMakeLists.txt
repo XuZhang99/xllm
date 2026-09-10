@@ -95,3 +95,51 @@ target_link_libraries(request_state_benchmark
 target_link_options(request_state_benchmark
                     PRIVATE
                     $<$<BOOL:${USE_MLU}>:-Wl,--no-as-needed>)
+
+# Request-path hop 2: LLMMaster thread-pool hand-off + LLMRequestFactory.
+cc_binary(
+  NAME
+    llm_request_factory_benchmark
+  SRCS
+    llm_request_factory_benchmark.cpp
+  DEPS
+    :common
+    :config
+    :request
+    torch
+    benchmark::benchmark
+    benchmark::benchmark_main
+)
+target_link_libraries(llm_request_factory_benchmark
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>
+                      $<$<BOOL:${USE_NPU}>:nnopbase>)
+target_link_options(llm_request_factory_benchmark
+                    PRIVATE
+                    $<$<BOOL:${USE_MLU}>:-Wl,--no-as-needed>)
+
+# Request-path hop 5: sampled tokens -> streaming / final RequestOutput.
+cc_binary(
+  NAME
+    request_output_benchmark
+  SRCS
+    request_output_benchmark.cpp
+  DEPS
+    :request
+    torch
+    benchmark::benchmark
+    benchmark::benchmark_main
+)
+target_link_libraries(request_output_benchmark
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>
+                      $<$<BOOL:${USE_NPU}>:nnopbase>)
+target_link_options(request_output_benchmark
+                    PRIVATE
+                    $<$<BOOL:${USE_MLU}>:-Wl,--no-as-needed>)
