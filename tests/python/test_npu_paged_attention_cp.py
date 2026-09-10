@@ -78,13 +78,20 @@ def test_mla_index_context_accepts_decode_graph_static_metadata() -> None:
     assert context.slot_mapping.data_ptr() == slot_mapping.data_ptr()
 
 
-def test_owner_local_index_write_ignores_non_owned_slots() -> None:
-    cache = torch.full((2, 2, 1, 1), -1.0)
-    slots = torch.tensor([0, -1, 1, -1, 2], dtype=torch.int64)
-    values = torch.arange(5, dtype=torch.float32).view(-1, 1)
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.int8])
+@pytest.mark.parametrize("slot_values", [[0, -1, 1, -2, 2], [-1] * 5, []])
+def test_owner_local_index_write_ignores_non_owned_slots(dtype: torch.dtype, slot_values: list[int]) -> None:
+    cache = torch.full((2, 2, 1, 1), -1, dtype=dtype)
+    slots = torch.tensor(slot_values, dtype=torch.int64)
+    values = torch.arange(len(slot_values)).to(dtype).view(-1, 1)
+    scale_cache = torch.full((2, 2, 1, 1), -1, dtype=torch.float16) if dtype == torch.int8 else None
+    scales = values.to(torch.float16) + 1 if scale_cache is not None else None
 
     def scatter(var: torch.Tensor, indices: torch.Tensor, updates: torch.Tensor) -> None:
-        var.index_copy_(0, indices.flatten(), updates)
+        # Model the native operator's device-side negative-index handling.
+        indices = indices.flatten()
+        valid = indices >= 0
+        var.index_copy_(0, indices[valid], updates[valid])
 
     with patch(
         "xllm.python.attention.npu_paged_attention.kernels.scatter_nd_update",
@@ -93,13 +100,21 @@ def test_owner_local_index_write_ignores_non_owned_slots() -> None:
     ):
         NpuPagedAttentionBackend._update_mla_index_cache(
             cache,
-            None,
+            scale_cache,
             slots,
             values,
-            None,
+            scales,
         )
 
-    torch.testing.assert_close(cache.view(-1), torch.tensor([0.0, 2.0, 4.0, -1.0]))
+    expected = torch.full((4,), -1, dtype=dtype)
+    expected_scale = torch.full((4,), -1, dtype=torch.float16)
+    for row, slot in enumerate(slot_values):
+        if slot >= 0:
+            expected[slot] = row
+            expected_scale[slot] = row + 1
+    torch.testing.assert_close(cache.view(-1), expected)
+    if scale_cache is not None:
+        torch.testing.assert_close(scale_cache.view(-1), expected_scale)
 
 
 def test_proper_divisor_materialization_selects_one_replica_per_owner() -> None:
