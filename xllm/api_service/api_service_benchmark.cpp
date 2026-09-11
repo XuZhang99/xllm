@@ -27,6 +27,18 @@ limitations under the License.
 //   * BM_ApiService_RequestParamsFromCompletion - proto -> RequestParams
 //   * BM_ApiService_RequestParamsFromChat       - proto -> RequestParams
 //
+//   Ingress cost attribution: the two *JsonToProto benchmarks above run the
+//   preprocess pass and the proto parse back to back, which hides how the cost
+//   splits between them. These break the two hops apart so that
+//   *PreprocessOnly + *<parser>Only ~= *JsonToProto:
+//   * BM_ApiService_CompletionPreprocessOnly    - preprocess pass alone
+//   * BM_ApiService_CompletionJson2PbOnly       - json2pb parse alone
+//   * BM_ApiService_ChatPreprocessOnly          - preprocess pass alone
+//   * BM_ApiService_ChatJsonToMessageOnly       - protobuf util parse alone
+//   * BM_ApiService_ChatJson2PbOnly             - json2pb parse of the same
+//                                                 body, for comparison with
+//                                                 the protobuf util one
+//
 //   Egress (send_delta_to_client_brpc / send_result_to_client_brpc):
 //   * BM_ApiService_StreamChunkToJson - one SSE delta: build the
 //                                       CompletionResponse chunk and serialize
@@ -225,6 +237,122 @@ void BM_ApiService_ChatJsonToProto(benchmark::State& state) {
                           static_cast<int64_t>(body.size()));
 }
 
+// --------------------------------------------------------------------------
+// Ingress cost attribution
+//
+// The *PreprocessOnly benchmarks pass `body` as an lvalue, exactly like the
+// combined benchmarks above, so the by-value parameter copy of the request body
+// is charged to both and the subtraction against *JsonToProto holds. (The HTTP
+// handlers hand over a freshly materialised string and therefore move it, so
+// that copy is an artefact of reusing one body across iterations.)
+//
+// The parse-only benchmarks hoist the preprocess pass out of the loop and time
+// the proto parse of its result on its own.
+// --------------------------------------------------------------------------
+
+void BM_ApiService_CompletionPreprocessOnly(benchmark::State& state) {
+  const std::string body =
+      make_completion_json(static_cast<size_t>(state.range(0)));
+
+  for (auto _ : state) {
+    auto [status, processed_json] = preprocess_completion_prompt(body);
+    do_not_optimize(status.ok());
+    do_not_optimize(processed_json.data());
+  }
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
+                          static_cast<int64_t>(body.size()));
+}
+
+void BM_ApiService_CompletionJson2PbOnly(benchmark::State& state) {
+  const std::string body =
+      make_completion_json(static_cast<size_t>(state.range(0)));
+  auto [status, processed_json] = preprocess_completion_prompt(body);
+  if (!status.ok()) {
+    state.SkipWithError("failed to preprocess the benchmark body");
+    return;
+  }
+  proto::CompletionRequest request;
+
+  for (auto _ : state) {
+    request.Clear();
+    std::string error;
+    json2pb::Json2PbOptions options;
+    const bool ok =
+        json2pb::JsonToProtoMessage(processed_json, &request, options, &error);
+    do_not_optimize(ok);
+    do_not_optimize(request.prompt().data());
+  }
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
+                          static_cast<int64_t>(processed_json.size()));
+}
+
+void BM_ApiService_ChatPreprocessOnly(benchmark::State& state) {
+  const std::string body = make_chat_json(static_cast<size_t>(state.range(0)));
+  const ChatJsonParser& parser = ChatJsonParser::get(ServingMode::LLM);
+
+  for (auto _ : state) {
+    auto [status, processed_json] = parser.preprocess(body);
+    do_not_optimize(status.ok());
+    do_not_optimize(processed_json.data());
+  }
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
+                          static_cast<int64_t>(body.size()));
+}
+
+void BM_ApiService_ChatJsonToMessageOnly(benchmark::State& state) {
+  const std::string body = make_chat_json(static_cast<size_t>(state.range(0)));
+  const ChatJsonParser& parser = ChatJsonParser::get(ServingMode::LLM);
+  auto [status, processed_json] = parser.preprocess(body);
+  if (!status.ok()) {
+    state.SkipWithError("failed to preprocess the benchmark body");
+    return;
+  }
+  proto::ChatRequest request;
+
+  for (auto _ : state) {
+    request.Clear();
+    google::protobuf::util::JsonParseOptions options;
+    options.ignore_unknown_fields = true;
+    const auto parse_status = google::protobuf::util::JsonStringToMessage(
+        processed_json, &request, options);
+    do_not_optimize(parse_status.ok());
+    do_not_optimize(request.messages_size());
+  }
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
+                          static_cast<int64_t>(processed_json.size()));
+}
+
+// Same input as BM_ApiService_ChatJsonToMessageOnly, parsed with json2pb -- the
+// parser every other endpoint in api_service.cpp already uses -- so the two are
+// directly comparable. ChatRequest.chat_template_kwargs is a
+// google.protobuf.Struct, a well-known type json2pb does not map canonically;
+// the bodies here carry no such field, so this measures the fast path only.
+void BM_ApiService_ChatJson2PbOnly(benchmark::State& state) {
+  const std::string body = make_chat_json(static_cast<size_t>(state.range(0)));
+  const ChatJsonParser& parser = ChatJsonParser::get(ServingMode::LLM);
+  auto [status, processed_json] = parser.preprocess(body);
+  if (!status.ok()) {
+    state.SkipWithError("failed to preprocess the benchmark body");
+    return;
+  }
+  proto::ChatRequest request;
+
+  for (auto _ : state) {
+    request.Clear();
+    std::string error;
+    json2pb::Json2PbOptions options;
+    if (!json2pb::JsonToProtoMessage(
+            processed_json, &request, options, &error)) {
+      // A failed parse would make the comparison meaningless.
+      state.SkipWithError("json2pb failed to parse the chat body");
+      break;
+    }
+    do_not_optimize(request.messages_size());
+  }
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
+                          static_cast<int64_t>(processed_json.size()));
+}
+
 void BM_ApiService_RequestParamsFromCompletion(benchmark::State& state) {
   const proto::CompletionRequest request =
       make_completion_request(static_cast<size_t>(state.range(0)));
@@ -342,6 +470,27 @@ BENCHMARK(BM_ApiService_CompletionJsonToProto)
     ->Unit(benchmark::kMicrosecond);
 // Conversation length in messages.
 BENCHMARK(BM_ApiService_ChatJsonToProto)
+    ->RangeMultiplier(4)
+    ->Range(1, 64)
+    ->Unit(benchmark::kMicrosecond);
+// Same ranges as the combined benchmarks above so the numbers line up.
+BENCHMARK(BM_ApiService_CompletionPreprocessOnly)
+    ->RangeMultiplier(8)
+    ->Range(64, 64 << 10)
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_ApiService_CompletionJson2PbOnly)
+    ->RangeMultiplier(8)
+    ->Range(64, 64 << 10)
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_ApiService_ChatPreprocessOnly)
+    ->RangeMultiplier(4)
+    ->Range(1, 64)
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_ApiService_ChatJsonToMessageOnly)
+    ->RangeMultiplier(4)
+    ->Range(1, 64)
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_ApiService_ChatJson2PbOnly)
     ->RangeMultiplier(4)
     ->Range(1, 64)
     ->Unit(benchmark::kMicrosecond);
