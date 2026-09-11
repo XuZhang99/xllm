@@ -244,6 +244,73 @@ TEST_F(NpuXllmOpsTest, EmbeddedInterpreterSeesOps) {
              .item<float>();
 }
 
+TEST_F(NpuXllmOpsTest, MlaIndexCacheWriteReplaysWithChangingPadding) {
+  py::gil_scoped_acquire gil;
+  py::exec(R"PY(
+import torch
+from xllm.python.attention.npu_paged_attention import NpuPagedAttentionBackend
+
+device = torch.device("npu:0")
+for cache_dtype in (torch.bfloat16, torch.float16, torch.int8):
+    for slot_dtype in (torch.int32, torch.int64):
+        cache = torch.full((2, 4, 1, 128), -3, dtype=cache_dtype, device=device)
+        values = (torch.arange(6 * 128).reshape(6, 128) % 97).to(
+            device=device, dtype=cache_dtype
+        )
+        slots = torch.tensor([0, -1, 3, -2, 7, -1], dtype=slot_dtype, device=device)
+        scale_cache = None
+        scales = None
+        if cache_dtype == torch.int8:
+            scale_cache = torch.full((2, 4, 1, 1), -3, dtype=torch.float16, device=device)
+            scales = torch.arange(1, 7, dtype=torch.float16, device=device).view(6, 1)
+
+        def _write() -> None:
+            NpuPagedAttentionBackend._update_mla_index_cache(
+                cache, scale_cache, slots, values, scales
+            )
+
+        def _check() -> None:
+            expected = torch.full((8, 128), -3, dtype=cache_dtype)
+            expected_scale = torch.full((8, 1), -3, dtype=torch.float16)
+            for row, slot in enumerate(slots.cpu().tolist()):
+                if slot >= 0:
+                    expected[slot] = values[row].cpu()
+                    if scales is not None:
+                        expected_scale[slot] = scales[row].cpu()
+            torch.testing.assert_close(cache.cpu().view(8, 128), expected, rtol=0, atol=0)
+            if scale_cache is not None:
+                torch.testing.assert_close(
+                    scale_cache.cpu().view(8, 1), expected_scale, rtol=0, atol=0
+                )
+
+        _write()
+        _check()
+        stream = torch.npu.Stream()
+        stream.wait_stream(torch.npu.current_stream())
+        with torch.npu.stream(stream):
+            _write()
+        stream.synchronize()
+        graph = torch.npu.NPUGraph()
+        with torch.npu.graph(graph, stream=stream):
+            _write()
+        for replay_slots in ([7, -1, 0, -1, 3, -1], [-1] * 6):
+            cache.fill_(-3)
+            values.add_(1)
+            slots.copy_(torch.tensor(replay_slots, dtype=slot_dtype, device=device))
+            if scale_cache is not None:
+                scale_cache.fill_(-3)
+                scales.add_(1)
+            graph.replay()
+            torch.npu.synchronize()
+            _check()
+        NpuPagedAttentionBackend._update_mla_index_cache(
+            cache, scale_cache, slots[:0], values[:0],
+            None if scales is None else scales[:0]
+        )
+        _check()
+)PY");
+}
+
 TEST_F(NpuXllmOpsTest, Dsv4OpsUseNpuDispatchKeys) {
   py::gil_scoped_acquire gil;
 
