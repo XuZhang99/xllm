@@ -31,6 +31,7 @@ GLM-5.2 structural deltas live here:
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -200,6 +201,16 @@ def _load_w8a8_attention_projection(
         shard_dims,
         dynamic_activation=dynamic_activation,
     )
+_DSA_INDEXER_STREAMS: dict[tuple[str, int | None], torch.npu.Stream] = {}
+
+
+def _dsa_indexer_stream(device: torch.device) -> torch.npu.Stream:
+    key = (device.type, device.index)
+    stream = _DSA_INDEXER_STREAMS.get(key)
+    if stream is None:
+        stream = torch.npu.Stream(device=device)
+        _DSA_INDEXER_STREAMS[key] = stream
+    return stream
 
 
 @dataclass
@@ -262,6 +273,7 @@ class Glm52Config:
     index_topk_freq: int = 1
     index_topk_pattern: list | None = None
     indexer_rope_interleave: bool = True
+    enable_dsa_multi_stream: bool = False
     num_nextn_predict_layers: int = 0
     index_share_for_mtp_iteration: bool = False
     enable_mlapo: bool = True
@@ -366,6 +378,7 @@ class Glm52Config:
             index_topk_freq=int(pick("index_topk_freq", default=1)),
             index_topk_pattern=pick("index_topk_pattern", default=None),
             indexer_rope_interleave=bool(pick("indexer_rope_interleave", default=True)),
+            enable_dsa_multi_stream=bool(pick("enable_dsa_multi_stream", default=False)),
             num_nextn_predict_layers=int(pick("num_nextn_predict_layers", default=0)),
             index_share_for_mtp_iteration=bool(pick("index_share_for_mtp_iteration", default=False)),
             enable_mlapo=bool(pick("enable_mlapo", default=True)),
@@ -577,6 +590,14 @@ class Glm52MLAAttention(Attention):
         self.indexer = None
         if not self.is_shared:
             self.indexer = Glm52Indexer(cfg, dtype, device)
+        self._indexer_stream = None
+        if (
+            self.indexer is not None
+            and cfg.enable_dsa_multi_stream
+            and hasattr(torch, "npu")
+            and device.type in ("npu", "privateuseone")
+        ):
+            self._indexer_stream = _dsa_indexer_stream(device)
 
     def _forward_fused_mla_decode(
         self,
@@ -831,32 +852,37 @@ class Glm52MLAAttention(Attention):
             topk = prev_topk_indices
         elif self.indexer is not None:
             ctx = backend.mla_index_context(self)
-            if layerwise:
-                if owns_layer_cache:
+            if self._indexer_stream is not None:
+                self._indexer_stream.wait_stream(torch.npu.current_stream())
+            # Keep CP cache gathers and layerwise top-k broadcasts on the
+            # indexer stream so their results are ready at the same join.
+            with torch.npu.stream(self._indexer_stream) if self._indexer_stream is not None else nullcontext():
+                if layerwise:
+                    if owns_layer_cache:
+                        topk = self.indexer.select_qli(hidden, q_c, positions, ctx, cos_sin_cache)
+                    else:
+                        topk = torch.empty(
+                            (num_tokens, ctx.index_cache.size(2), self.cfg.index_topk),
+                            dtype=torch.int32,
+                            device=hidden.device,
+                        )
+                    distributed.broadcast_(topk, layer_owner, "layerwise")
+                elif cp_context is None:
                     topk = self.indexer.select_qli(hidden, q_c, positions, ctx, cos_sin_cache)
                 else:
-                    topk = torch.empty(
-                        (num_tokens, ctx.index_cache.size(2), self.cfg.index_topk),
-                        dtype=torch.int32,
-                        device=hidden.device,
+                    # Indexer queries are packed to real CP-owned rows.  The key
+                    # side is all-gathered inside the indexer so the paged index
+                    # cache remains globally addressable.
+                    query_index = cp_context.query_index
+                    topk = self.indexer.select_qli(
+                        hidden.index_select(0, query_index),
+                        q_c.index_select(0, query_index),
+                        positions.index_select(0, query_index),
+                        ctx,
+                        cos_sin_cache,
+                        cache_hidden=hidden,
+                        cache_positions=positions,
                     )
-                distributed.broadcast_(topk, layer_owner, "layerwise")
-            elif cp_context is None:
-                topk = self.indexer.select_qli(hidden, q_c, positions, ctx, cos_sin_cache)
-            else:
-                # Indexer queries are packed to real CP-owned rows.  The key
-                # side is all-gathered inside the indexer so the paged index
-                # cache remains globally addressable.
-                query_index = cp_context.query_index
-                topk = self.indexer.select_qli(
-                    hidden.index_select(0, query_index),
-                    q_c.index_select(0, query_index),
-                    positions.index_select(0, query_index),
-                    ctx,
-                    cos_sin_cache,
-                    cache_hidden=hidden,
-                    cache_positions=positions,
-                )
         else:
             if prev_topk_indices is None:
                 raise ValueError(
@@ -879,6 +905,9 @@ class Glm52MLAAttention(Attention):
         k_pe = _interleave_rope_with(k_rope_raw.unsqueeze(1), cos, sin)
         k_latent_3d = k_latent.view(num_tokens, 1, self.kv_lora_rank)
         k_pe_3d = k_pe.view(num_tokens, 1, self.qk_rope_head_dim)
+
+        if self._indexer_stream is not None:
+            torch.npu.current_stream().wait_stream(self._indexer_stream)
 
         if layerwise:
             local_query = torch.cat((q_latent, q_pe), dim=-1)
@@ -1268,6 +1297,21 @@ class Glm52ForCausalLM(PyModelBase):
             device=self.device,
         )
 
+    def _configure_projection_quantization(self, state_dicts: list) -> None:
+        """Select dynamic attention projections for W8A8 checkpoints."""
+        for name, module in list(self.named_modules()):
+            if not isinstance(module, W8A8StaticLinear):
+                continue
+            if W8A8WeightLoader.state_dict_has(state_dicts, name + ".deq_scale"):
+                continue
+            if W8A8WeightLoader.state_dict_has(state_dicts, name + ".weight_scale"):
+                parent, _, attribute = name.rpartition(".")
+                setattr(
+                    self.get_submodule(parent),
+                    attribute,
+                    W8A8DynamicLinear(module.in_features, module.out_features, module.weight.device),
+                )
+
     def load_weights(
         self,
         state_dicts: list,
@@ -1278,6 +1322,7 @@ class Glm52ForCausalLM(PyModelBase):
         loader: W8A8WeightLoader | None = None,
     ) -> None:
         cfg = self.cfg
+        self._configure_projection_quantization(state_dicts)
         if loader is None:
             loader = W8A8WeightLoader(self, state_dicts, cfg.tp_size, cfg.tp_rank)
         if self.model is None:
