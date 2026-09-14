@@ -56,7 +56,8 @@ class ExecutionConfig final {
          "output_shm_size",
          "random_seed",
          "python_graph_backend",
-         "enable_fia_decode"}};
+         "enable_fia_decode",
+         "enable_dsa_multi_stream"}};
     return kOptionCategory;
   }
 
@@ -92,6 +93,8 @@ class ExecutionConfig final {
   PROPERTY(std::string, python_graph_backend) = "off";
 
   PROPERTY(bool, enable_fia_decode) = false;
+
+  PROPERTY(bool, enable_dsa_multi_stream) = false;
 };
 
 }  // namespace xllm

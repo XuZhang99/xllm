@@ -344,6 +344,8 @@ DECLARE_int32(flashinfer_workspace_buffer_size);
 
 DECLARE_int32(random_seed);
 
+DECLARE_bool(enable_dsa_multi_stream);
+
 DECLARE_string(dit_cache_policy);
 
 DECLARE_int64(dit_cache_warmup_steps);

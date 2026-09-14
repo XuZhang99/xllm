@@ -223,6 +223,7 @@ xLLM uses gflags to manage service startup parameters. `--model <PATH>` is the o
 | `input_shm_size` | `uint64` | `1024` | Input shared-memory size. Default is 1GB. |
 | `output_shm_size` | `uint64` | `128` | Output shared-memory size. Default is 128MB. |
 | `random_seed` | `int32` | `-1` | Random seed for the random number generator. `-1` means no fixed seed. |
+| `enable_dsa_multi_stream` | `bool` | `false` | Local overlap in the Python GLM indexer: K/weights projections run on a side stream and stay fused when query/cache rows match; the main stream joins before updating the index cache. Non-interleaved RoPE additionally overlaps Q projection/RoPE with cache preparation. Main attention preparation finishes before the indexer. Requires a supported model backend and stream-capable device. |
 
 ## KernelConfig
 

@@ -31,6 +31,7 @@ GLM-5.2 structural deltas live here:
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,6 +41,7 @@ import torch.nn.functional as F
 
 from xllm.python import distributed, kernels
 from xllm.python.attention.backend import AttentionBackend, MlaIndexContext, MlaPreprocessContext
+from xllm.python.device_stream import get_device_stream
 
 # The AICPU tiling of ``aclnnQuantLightningIndexer`` requires
 # ``num_heads_q / num_heads_k == 64``. GLM-5.2 uses ``index_n_heads=32`` and
@@ -267,6 +269,7 @@ class Glm52Config:
     index_topk_freq: int = 1
     index_topk_pattern: list | None = None
     indexer_rope_interleave: bool = True
+    enable_dsa_multi_stream: bool = False
     num_nextn_predict_layers: int = 0
     index_share_for_mtp_iteration: bool = False
     enable_mlapo: bool = True
@@ -371,6 +374,7 @@ class Glm52Config:
             index_topk_freq=int(pick("index_topk_freq", default=1)),
             index_topk_pattern=pick("index_topk_pattern", default=None),
             indexer_rope_interleave=bool(pick("indexer_rope_interleave", default=True)),
+            enable_dsa_multi_stream=bool(pick("enable_dsa_multi_stream", default=False)),
             num_nextn_predict_layers=int(pick("num_nextn_predict_layers", default=0)),
             index_share_for_mtp_iteration=bool(pick("index_share_for_mtp_iteration", default=False)),
             enable_mlapo=bool(pick("enable_mlapo", default=True)),
@@ -881,6 +885,22 @@ class Glm52MLAAttention(Attention):
             q_a = q_a_proj(hidden)
             kv = kv_a_proj(hidden)
         q_c = self.q_a_layernorm(q_a)
+        q = self.q_b_proj(q_c)
+        q = q.view(
+            num_tokens,
+            self.num_heads_local,
+            self.qk_nope_head_dim + self.qk_rope_head_dim,
+        )
+        q_nope, q_rope = q.split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
+        q_latent = kernels.atb_matmul_ein_sum(q_nope, self.W_UK)
+        cos, sin = _gather_interleave_cos_sin(cos_sin_cache, positions)
+        q_pe = _interleave_rope_with(q_rope, cos, sin)
+        k_latent_raw, k_rope_raw = kv.split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+        k_latent = self.kv_a_layernorm(k_latent_raw)
+        k_pe = _interleave_rope_with(k_rope_raw.unsqueeze(1), cos, sin)
+        k_latent_3d = k_latent.view(num_tokens, 1, self.kv_lora_rank)
+        k_pe_3d = k_pe.view(num_tokens, 1, self.qk_rope_head_dim)
+
         if reuse_topk_indices:
             if prev_topk_indices is None:
                 raise ValueError("MTP DSA top-k reuse requires indices from the previous draft step")
@@ -924,21 +944,6 @@ class Glm52MLAAttention(Attention):
                     "full indexer layer (prev_topk_indices is None)."
                 )
             topk = prev_topk_indices
-        q = self.q_b_proj(q_c)
-        q = q.view(
-            num_tokens,
-            self.num_heads_local,
-            self.qk_nope_head_dim + self.qk_rope_head_dim,
-        )
-        q_nope, q_rope = q.split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
-        q_latent = kernels.atb_matmul_ein_sum(q_nope, self.W_UK)
-        cos, sin = _gather_interleave_cos_sin(cos_sin_cache, positions)
-        q_pe = _interleave_rope_with(q_rope, cos, sin)
-        k_latent_raw, k_rope_raw = kv.split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
-        k_latent = self.kv_a_layernorm(k_latent_raw)
-        k_pe = _interleave_rope_with(k_rope_raw.unsqueeze(1), cos, sin)
-        k_latent_3d = k_latent.view(num_tokens, 1, self.kv_lora_rank)
-        k_pe_3d = k_pe.view(num_tokens, 1, self.qk_rope_head_dim)
 
         if layerwise:
             local_query = torch.cat((q_latent, q_pe), dim=-1)
@@ -995,6 +1000,12 @@ class Glm52Indexer(nn.Module):
         self.rope_dim = cfg.qk_rope_head_dim
         self.topk = cfg.index_topk
         self.indexer_rope_interleave = cfg.indexer_rope_interleave
+        self._q_stream = None
+        self._weights_stream = None
+        if cfg.enable_dsa_multi_stream:
+            self._weights_stream = get_device_stream(device, "dsa_indexer_weights")
+            if not self.indexer_rope_interleave:
+                self._q_stream = get_device_stream(device, "dsa_indexer_q")
         self.wq_b = _W8A8AttentionLinear(cfg.q_lora_rank, self.n_head * self.head_dim, device)
         self.wk = nn.Linear(cfg.hidden_size, self.head_dim, bias=False, dtype=dtype, device=device)
         self.weights_proj = nn.Linear(cfg.hidden_size, self.n_head, bias=False, dtype=dtype, device=device)
@@ -1139,6 +1150,20 @@ class Glm52Indexer(nn.Module):
             k_scale = k_scale.unsqueeze(-1).to(torch.float16)
         ctx.update_index_cache(k, k_scale)
 
+    def _project_query(
+        self,
+        qr: torch.Tensor,
+        positions: torch.Tensor,
+        cos_sin_cache: torch.Tensor,
+        rope_angles: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        q = self.wq_b(qr).view(-1, self.n_head, self.head_dim)
+        if self.indexer_rope_interleave:
+            return self._apply_interleaved_rope(q, positions, cos_sin_cache, rope_angles)
+        q_pe, q_nope = torch.split(q, [self.rope_dim, self.head_dim - self.rope_dim], dim=-1)
+        q_pe = _apply_half_rope(cos_sin_cache, q_pe, positions)
+        return torch.cat([q_pe, q_nope], dim=-1)
+
     def select_qli(
         self,
         hidden: torch.Tensor,
@@ -1154,11 +1179,31 @@ class Glm52Indexer(nn.Module):
         cache_positions_are_query_positions = cache_positions is None or cache_positions is positions
         cache_hidden = hidden if cache_hidden is None else cache_hidden
         cache_positions = positions if cache_positions is None else cache_positions
-        k, weights = self._project_index_inputs(hidden, cache_hidden)
-        query_is_empty = ctx.cp_context is not None and ctx.cp_context.query_index.numel() == 0
+        # Empty CP ranks still update/gather K without launching empty Q or
+        # weights projections.
+        has_queries = ctx.cp_context is None or ctx.cp_context.query_index.numel() != 0
         shared_rope_angles = None
-        if self.indexer_rope_interleave and cache_positions_are_query_positions and not query_is_empty:
+        if self.indexer_rope_interleave and cache_positions_are_query_positions and has_queries:
             shared_rope_angles = _gather_interleave_cos_sin(cos_sin_cache, positions)
+        if has_queries:
+            if self._weights_stream is not None:
+                self._weights_stream.wait_for_current()
+            with self._weights_stream.activate() if self._weights_stream is not None else nullcontext():
+                k, weights = self._project_index_inputs(hidden, cache_hidden)
+            if self._q_stream is not None:
+                self._q_stream.wait_for_current()
+                with self._q_stream.activate():
+                    q = self._project_query(qr, positions, cos_sin_cache, shared_rope_angles)
+            elif self._weights_stream is not None:
+                q = self._project_query(qr, positions, cos_sin_cache, shared_rope_angles)
+            if self._weights_stream is not None:
+                # The fused projection also produces K; join before cache
+                # preparation consumes it, keeping the main-path fusion.
+                self._weights_stream.join()
+                self._weights_stream.record_on_current(k)
+                self._weights_stream.record_on_current(weights)
+        else:
+            k = self.wk(cache_hidden)
         self._update_index_cache(
             cache_hidden,
             cache_positions,
@@ -1181,13 +1226,11 @@ class Glm52Indexer(nn.Module):
                 device=hidden.device,
             )
 
-        q = self.wq_b(qr).view(-1, self.n_head, self.head_dim)
-        if self.indexer_rope_interleave:
-            q = self._apply_interleaved_rope(q, positions, cos_sin_cache, shared_rope_angles)
-        else:
-            q_pe, q_nope = torch.split(q, [self.rope_dim, self.head_dim - self.rope_dim], dim=-1)
-            q_pe = _apply_half_rope(cos_sin_cache, q_pe, positions)
-            q = torch.cat([q_pe, q_nope], dim=-1)
+        if self._q_stream is not None:
+            self._q_stream.join()
+            self._q_stream.record_on_current(q)
+        elif self._weights_stream is None:
+            q = self._project_query(qr, positions, cos_sin_cache, shared_rope_angles)
         if use_quant_indexer:
             rotation_scale = self.head_dim**-0.5
             q = torch.matmul(q, self.hadamard) * rotation_scale

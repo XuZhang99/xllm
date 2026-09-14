@@ -56,6 +56,44 @@ inline constexpr std::string_view kMalformedConfig = R"json({
   "block_size":
 })json";
 
+TEST(ExecutionConfigTest, EnablesDsaMultiStreamFromJson) {
+  google::FlagSaver flag_saver;
+  JsonReader json_config =
+      config::parse_json_string(R"json({"enable_dsa_multi_stream":true})json");
+  ExecutionConfig execution_config;
+
+  execution_config.from_json(json_config);
+
+  EXPECT_TRUE(execution_config.enable_dsa_multi_stream());
+}
+
+TEST(ExecutionConfigTest, DsaMultiStreamCommandLineFlagOverridesJson) {
+  google::FlagSaver flag_saver;
+  google::SetCommandLineOption("enable_dsa_multi_stream", "true");
+  const JsonReader json_config =
+      config::parse_json_string(R"json({"enable_dsa_multi_stream":false})json");
+  ExecutionConfig execution_config;
+
+  execution_config.from_flags();
+  EXPECT_TRUE(execution_config.enable_dsa_multi_stream());
+  execution_config.from_json(json_config);
+
+  EXPECT_TRUE(execution_config.enable_dsa_multi_stream());
+  EXPECT_TRUE(FLAGS_enable_dsa_multi_stream);
+}
+
+TEST(ExecutionConfigTest, SerializesDsaMultiStreamOnlyWhenEnabled) {
+  ExecutionConfig execution_config;
+  EXPECT_FALSE(execution_config.enable_dsa_multi_stream());
+  nlohmann::ordered_json serialized = nlohmann::ordered_json::object();
+  execution_config.append_config_json(serialized);
+  EXPECT_FALSE(serialized.contains("enable_dsa_multi_stream"));
+
+  execution_config.enable_dsa_multi_stream(true);
+  execution_config.append_config_json(serialized);
+  EXPECT_EQ(serialized.at("enable_dsa_multi_stream"), true);
+}
+
 #if !defined(USE_NPU)
 TEST(KernelConfigTest, RejectsNpuOnlyDsparkNativeSas) {
   JsonReader json_config =
