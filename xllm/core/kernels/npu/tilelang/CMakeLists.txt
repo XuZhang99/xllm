@@ -173,6 +173,16 @@ tilelang_register_runtime_kernel(
 )
 
 tilelang_register_runtime_kernel(
+  NAME hisparse_store
+  WRAPPER_SRCS hisparse_store_wrapper.cpp
+)
+
+tilelang_register_runtime_kernel(
+  NAME hisparse_gather
+  WRAPPER_SRCS hisparse_gather_wrapper.cpp
+)
+
+tilelang_register_runtime_kernel(
   NAME sfa_dcp_remap
   WRAPPER_SRCS sfa_dcp_remap_wrapper.cpp
 )

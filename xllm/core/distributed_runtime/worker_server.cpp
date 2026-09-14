@@ -431,6 +431,8 @@ WorkerServer::WorkerServer(int32_t local_worker_idx,
                            WorkerType worker_type,
                            bool use_spawn_worker)
     : server_name_("DistributeWorkerServer") {
+  CHECK(!(use_spawn_worker && KVCacheConfig::get_instance().enable_hisparse()))
+      << "HiSparse currently requires online workers";
   server_name_.append(std::to_string(options.server_idx()));
   // Eagle3/DFlash targets capture aux hidden states and don't support spawned
   // workers yet.

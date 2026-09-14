@@ -190,6 +190,18 @@ torch::Tensor causal_conv1d(torch::Tensor& conv_state,
                             const torch::Tensor& initial_state_mode,
                             bool has_silu);
 
+// Gather selected Host KV, reading hot HBM slots on tag-validated hits.
+void hisparse_store(const torch::Tensor& values,
+                    const torch::Tensor& slots,
+                    torch::Tensor& host);
+
+void hisparse_gather_out(const torch::Tensor& host,
+                         const torch::Tensor& hot,
+                         const torch::Tensor& slots,
+                         const torch::Tensor& slot_map,
+                         const torch::Tensor& tags,
+                         torch::Tensor& out);
+
 // Remap logical DCP sparse indices onto this rank's local KV slots and
 // compact owned entries to the front. ``out`` and ``idx_scratch`` must be
 // caller-owned, contiguous NPU storage so ACL graph replay can reuse them.

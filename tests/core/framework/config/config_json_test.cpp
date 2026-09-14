@@ -338,6 +338,29 @@ TEST(ExecutionConfigTest, GraphWarmupIsEnabledByDefault) {
   EXPECT_FALSE(execution_config.disable_graph_warmup());
 }
 
+TEST(KVCacheConfigValidationTest, HiSparseOptionsAreExportedAndDiscoverable) {
+  KVCacheConfig config;
+  EXPECT_FALSE(config.enable_hisparse());
+  EXPECT_EQ(config.hisparse_device_buffer_size(), 8192);
+  config.enable_hisparse(true)
+      .hisparse_device_buffer_size(4096)
+      .hisparse_host_cache_size(1024 * 1024)
+      .enable_prefix_cache(false);
+  nlohmann::ordered_json json;
+  config.append_config_json(json);
+  EXPECT_EQ(json["enable_hisparse"], true);
+  EXPECT_EQ(json["hisparse_device_buffer_size"], 4096);
+  EXPECT_EQ(json["hisparse_host_cache_size"], 1024 * 1024);
+  const auto& names = KVCacheConfig::option_category().option_names;
+  EXPECT_NE(std::find(names.begin(), names.end(), "enable_hisparse"),
+            names.end());
+  EXPECT_NE(
+      std::find(names.begin(), names.end(), "hisparse_device_buffer_size"),
+      names.end());
+  EXPECT_NE(std::find(names.begin(), names.end(), "hisparse_host_cache_size"),
+            names.end());
+}
+
 TEST(KVCacheConfigValidationTest, AcceptsSupportedIndexerCacheDtypes) {
   KVCacheConfig config;
 

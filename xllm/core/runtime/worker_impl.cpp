@@ -55,6 +55,7 @@ limitations under the License.
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/config/profile_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
@@ -492,6 +493,21 @@ bool WorkerImpl::allocate_kv_cache_storage(
         << "Grouped KV cache layout does not support XTensor cache.";
   }
   const auto& args = context_.get_model_args();
+  const bool enable_hisparse = KVCacheConfig::get_instance().enable_hisparse();
+  if (enable_hisparse) {
+    CHECK_EQ(args.model_type(), "glm_moe_dsa");
+    CHECK(ModelConfig::is_python_model_impl(
+        ModelConfig::get_instance().model_impl()));
+    CHECK(dtype_ == torch::kBFloat16);
+    CHECK_EQ(parallel_args_.cp_size(), 1);
+    CHECK_EQ(parallel_args_.kv_split_size_effective(), 1);
+    CHECK_EQ(parallel_args_.layerwise_split_size(), 1);
+    CHECK(!options_.enable_disagg_pd() && !options_.enable_kvcache_store());
+    CHECK_LE(options_.host_blocks_factor(), 1.0);
+    CHECK_EQ(options_.num_speculative_tokens(), 0);
+    CHECK(!options_.enable_sleep_mode());
+    CHECK(!options_.enable_schedule_overlap());
+  }
   const bool enable_linear_attention = has_linear_attention_layers(args);
   const bool enable_lighting_indexer = args.index_n_heads() > 0;
   CHECK(!(enable_linear_attention && enable_lighting_indexer))
@@ -560,6 +576,7 @@ bool WorkerImpl::allocate_kv_cache_storage(
       .enable_lighting_indexer(enable_lighting_indexer)
       .layer_cache_owned(std::move(layer_cache_owned))
       .indexer_cache_enabled_layers(std::move(indexer_cache_enabled_layers))
+      .enable_hisparse(enable_hisparse)
       .enable_kv_cache_quant(enable_kv_cache_quant)
       .enable_indexer_cache_quant(enable_indexer_cache_quant)
       .tensor_allocator(std::move(tensor_allocator))

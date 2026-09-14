@@ -33,6 +33,7 @@ limitations under the License.
 #endif
 #if defined(USE_NPU)
 #include "acl/acl_rt.h"
+#include "core/platform/npu/mapped_host_memory.h"
 
 extern "C" aclError aclrtHostRegister(void* ptr,
                                       uint64_t size,
@@ -160,7 +161,16 @@ KVCacheTensors create_kv_cache_tensors(
 #elif defined(USE_NPU)
   const aclFormat npu_format_type =
       get_npu_kv_cache_format(create_options.model_type());
-  if (create_options.enable_kv_cache_huge_page_allocator()) {
+  if (create_options.enable_hisparse()) {
+    tensors.key_cache =
+        allocate_mapped_host_tensor(kv_cache_shape.key_cache_shape(),
+                                    create_options.dtype(),
+                                    create_options.device());
+    tensors.value_cache =
+        allocate_mapped_host_tensor(kv_cache_shape.value_cache_shape(),
+                                    create_options.dtype(),
+                                    create_options.device());
+  } else if (create_options.enable_kv_cache_huge_page_allocator()) {
     tensors.key_cache =
         alloc_npu_huge_page_tensor(kv_cache_shape.key_cache_shape(),
                                    create_options.dtype(),

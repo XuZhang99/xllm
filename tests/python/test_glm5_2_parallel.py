@@ -204,3 +204,45 @@ def test_glm_weight_loader_reads_only_local_ep_experts(monkeypatch) -> None:
     assert loader.tp_size == 2
     assert loader.tp_rank == 0
     assert loader.shared_shards == [("model.layers.0.mlp.shared_experts.", 1, 0)]
+
+
+@pytest.mark.parametrize("dynamic", [False, True])
+@pytest.mark.parametrize("projection", ["q_a_proj", "q_b_proj", "o_proj", "indexer.wq_b"])
+def test_glm_attention_quantization_loads_checkpoint_format(dynamic: bool, projection: str) -> None:
+    model = Glm52ForCausalLM(_config(tp_rank=1))
+    prefix = "model.layers.0.self_attn."
+    name = prefix + projection
+    original = model.get_submodule(name)
+    out_features = original.out_features * (2 if projection == "q_b_proj" else 1)
+    in_features = original.in_features * (2 if projection == "o_proj" else 1)
+    tensors = {
+        name + ".weight": torch.arange(out_features * in_features).to(torch.int8).view(out_features, in_features)
+    }
+    if dynamic:
+        tensors[name + ".weight_scale"] = torch.arange(out_features, dtype=torch.float32).view(-1, 1) + 1
+        tensors[name + ".weight_offset"] = torch.zeros(out_features, 1)
+    else:
+        tensors[name + ".deq_scale"] = torch.arange(out_features, dtype=torch.float32) + 1
+        tensors[name + ".quant_bias"] = torch.arange(out_features, dtype=torch.int32)
+        tensors[name + ".input_scale"] = torch.ones(1, dtype=torch.bfloat16)
+        tensors[name + ".input_offset"] = torch.zeros(1, dtype=torch.bfloat16)
+    state = MagicMock()
+    state.has.side_effect = tensors.__contains__
+    state.get_tensor.side_effect = tensors.__getitem__
+    model._configure_projection_quantization([state])
+    module = model.get_submodule(name)
+    assert isinstance(module, glm5_2.W8A8DynamicLinear if dynamic else glm5_2.W8A8StaticLinear)
+    # Checkpoint format selection is per projection, including the indexer.
+    assert isinstance(model.model.layers[0].self_attn.kv_a_proj_with_mqa, glm5_2.W8A8StaticLinear)
+    loader = W8A8WeightLoader(model, [state], tp_size=2, tp_rank=1)
+    if projection == "q_b_proj":
+        shard_dims = {suffix: 0 for suffix in ("weight", "weight_scale", "weight_offset", "deq_scale", "quant_bias")}
+    elif projection == "o_proj":
+        shard_dims = {"weight": 1}
+    else:
+        shard_dims = {}
+    loader.load_w8a8_projection(prefix, projection, shard_dims)
+    for source_name, source in tensors.items():
+        suffix = source_name.rsplit(".", 1)[1]
+        expected = source.chunk(2, dim=shard_dims[suffix])[1] if suffix in shard_dims else source
+        torch.testing.assert_close(getattr(module, suffix), expected)

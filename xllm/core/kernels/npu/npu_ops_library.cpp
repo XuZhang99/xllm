@@ -456,6 +456,24 @@ build_cp_context_npu(const std::vector<int64_t>& q_seq_lens,
 
 }  // namespace
 
+torch::Tensor hisparse_store_npu(const torch::Tensor& values,
+                                 const torch::Tensor& slots,
+                                 torch::Tensor& host) {
+  kernel::npu::tilelang::hisparse_store(values, slots, host);
+  return host;
+}
+
+torch::Tensor hisparse_gather_out_npu(const torch::Tensor& host,
+                                      const torch::Tensor& hot,
+                                      const torch::Tensor& slots,
+                                      const torch::Tensor& slot_map,
+                                      const torch::Tensor& tags,
+                                      torch::Tensor& out) {
+  kernel::npu::tilelang::hisparse_gather_out(
+      host, hot, slots, slot_map, tags, out);
+  return out;
+}
+
 torch::Tensor sfa_dcp_remap_out_npu(const torch::Tensor& topk_indices,
                                     int64_t physical_block_size,
                                     int64_t shard_size,
@@ -682,6 +700,13 @@ TORCH_LIBRARY(xllm_ops, m) {
       "ori_win_left, int ori_win_right, str layout_q, str layout_kv, bool "
       "has_ori_kv, bool has_cmp_kv) -> Tensor");
   m.def(
+      "hisparse_store(Tensor values, Tensor slots, Tensor(a!) host) -> "
+      "Tensor(a!)");
+  m.def(
+      "hisparse_gather_out(Tensor host, Tensor hot, Tensor slots, Tensor "
+      "slot_map, "
+      "Tensor tags, Tensor(a!) out) -> Tensor(a!)");
+  m.def(
       "sfa_dcp_remap_out(Tensor topk_indices, int physical_block_size, int "
       "shard_size, int shard_rank, Tensor(a!) out, Tensor(b!) idx_scratch) -> "
       "Tensor(a!)");
@@ -737,6 +762,8 @@ TORCH_LIBRARY_IMPL(xllm_ops, PrivateUse1, m) {
          TORCH_FN(xllm::kernel::npu::sparse_attn_sharedkv));
   m.impl("sparse_flash_attention_lse",
          TORCH_FN(xllm::kernel::npu::sparse_flash_attention_lse));
+  m.impl("hisparse_store", TORCH_FN(xllm::hisparse_store_npu));
+  m.impl("hisparse_gather_out", TORCH_FN(xllm::hisparse_gather_out_npu));
   m.impl("sfa_dcp_remap_out", TORCH_FN(xllm::sfa_dcp_remap_out_npu));
 }
 

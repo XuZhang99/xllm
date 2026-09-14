@@ -47,6 +47,9 @@ class KVCacheConfig final {
          "max_memory_utilization",
          "kv_cache_dtype",
          "indexer_cache_dtype",
+         "enable_hisparse",
+         "hisparse_device_buffer_size",
+         "hisparse_host_cache_size",
          "enable_prefix_cache",
          "enable_in_batch_prefix_cache",
          "max_linear_state_cache_slots",
@@ -65,6 +68,14 @@ class KVCacheConfig final {
   PROPERTY(std::string, kv_cache_dtype) = "auto";
 
   PROPERTY(std::string, indexer_cache_dtype) = "auto";
+
+  PROPERTY(bool, enable_hisparse) = false;
+
+  // Total hot KV token slots per layer and worker, shared across requests.
+  PROPERTY(int64_t, hisparse_device_buffer_size) = 8192;
+
+  // Maximum full MLA Host KV bytes per worker across all layers.
+  PROPERTY(int64_t, hisparse_host_cache_size) = 8LL * 1024 * 1024 * 1024;
 
   PROPERTY(bool, enable_prefix_cache) = true;
 

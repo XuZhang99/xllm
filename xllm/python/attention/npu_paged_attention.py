@@ -141,6 +141,8 @@ class NpuPagedAttentionBackend(AttentionBackend):
         is_mla: bool,
         device: torch.device,
         dtype: torch.dtype,
+        hisparse_device_buffer_size: int = 0,
+        hisparse_max_selected_tokens: int = 0,
     ) -> None:
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
@@ -150,6 +152,9 @@ class NpuPagedAttentionBackend(AttentionBackend):
         self.dtype = dtype
         self.device = device
         self._use_fia_v2 = _HAS_FIA_V2
+        self._hisparse_device_buffer_size = hisparse_device_buffer_size
+        self._hisparse_max_selected_tokens = hisparse_max_selected_tokens
+        self._hisparse_caches = []
         self._is_mla = is_mla
         self._uses_sparse_mla = False
 
@@ -179,7 +184,7 @@ class NpuPagedAttentionBackend(AttentionBackend):
         # reuses the same contiguous tensor instead of launching another
         # index_select and allocation.
         self._mla_cp_block_tables: dict[tuple[int, int], torch.Tensor] = {}
-        self._mla_quant_indexer_metadata: dict[tuple[int, int, int, int], torch.Tensor] = {}
+        self._mla_quant_indexer_metadata: dict[tuple[int, int, int, int, int, bool], torch.Tensor] = {}
         self._mla_max_seqlen_q = 0
         self._mla_max_seqlen_k = 0
         self._kv_owner_representatives: torch.Tensor | None = None
@@ -225,6 +230,15 @@ class NpuPagedAttentionBackend(AttentionBackend):
         if len(num_kv_blocks) != 1:
             raise RuntimeError("full-attention layers use inconsistent KV block counts")
 
+        if self._hisparse_device_buffer_size:
+            if not self._is_mla:
+                raise ValueError("HiSparse only supports MLA attention")
+            from xllm.python.attention.hisparse import HiSparseCache, HiSparseWorkspace
+
+            workspace = HiSparseWorkspace(self._hisparse_max_selected_tokens, self.device)
+            self._hisparse_caches = [
+                HiSparseCache(cache, self._hisparse_device_buffer_size, workspace) for cache in kv_caches
+            ]
         self._kv_caches = kv_caches
         self._page_size = page_sizes.pop()
         self._num_kv_blocks = num_kv_blocks.pop()
@@ -566,13 +580,40 @@ class NpuPagedAttentionBackend(AttentionBackend):
             if not cache_is_preprocessed:
                 if k_latent_3d is None or k_pe_3d is None:
                     raise RuntimeError("MLA cache inputs are required")
-                torch.ops.xllm_ops.reshape_paged_cache(
-                    metadata.slot_mapping,
-                    k_latent_3d,
-                    k_pe_3d,
-                    nope_cache,
-                    rope_cache,
-                )
+                if self._hisparse_caches:
+                    self._hisparse_caches[layer_id].store(k_latent_3d, k_pe_3d, metadata.slot_mapping)
+                else:
+                    torch.ops.xllm_ops.reshape_paged_cache(
+                        metadata.slot_mapping,
+                        k_latent_3d,
+                        k_pe_3d,
+                        nope_cache,
+                        rope_cache,
+                    )
+            if self._hisparse_caches:
+                sparse_cache = self._hisparse_caches[layer_id]
+                sparse_cache.invalidate(metadata.slot_mapping)
+                if topk is None:
+                    raise ValueError("HiSparse requires DSA Top-K")
+                if not (metadata.is_prefill or metadata.is_chunked_prefill):
+                    nope_cache, rope_cache, selected, pages, lengths = sparse_cache.materialize(
+                        topk,
+                        self._block_table_i32,
+                        self._mla_actual_seq_kv,
+                        metadata.slot_mapping,
+                        self._page_size,
+                    )
+                    return self._mla_sparse(
+                        q_latent,
+                        q_pe,
+                        nope_cache,
+                        rope_cache,
+                        selected,
+                        pages,
+                        self._mla_actual_seq_q,
+                        lengths,
+                        layer_id,
+                    )
             if topk is None:
                 return self._mla_dense_fia_v2(
                     q_latent,
@@ -742,7 +783,8 @@ class NpuPagedAttentionBackend(AttentionBackend):
     ) -> torch.Tensor:
         assert self._mla_actual_seq_q is not None
         assert self._mla_actual_seq_kv is not None
-        cache_key = (num_heads_q, head_dim, sparse_count, cmp_ratio)
+        capturing = get_forward_context().acl_graph is not None
+        cache_key = (num_heads_q, num_heads_k, head_dim, sparse_count, cmp_ratio, capturing)
         metadata = self._mla_quant_indexer_metadata.get(cache_key)
         if metadata is None:
             actual_seq_q = self._mla_actual_seq_q
@@ -758,16 +800,28 @@ class NpuPagedAttentionBackend(AttentionBackend):
                     default=0,
                 )
                 max_seqlen_k = max(cp_context.segment_kv_seq_lens, default=0)
-            metadata = kernels.quant_lightning_indexer_metadata(
-                num_heads_q,
-                num_heads_k,
-                head_dim,
-                actual_seq_q,
-                actual_seq_kv,
-                max_seqlen_q,
-                max_seqlen_k,
-                sparse_count,
-                cmp_ratio,
+
+            def create_metadata() -> torch.Tensor:
+                return kernels.quant_lightning_indexer_metadata(
+                    num_heads_q,
+                    num_heads_k,
+                    head_dim,
+                    actual_seq_q,
+                    actual_seq_kv,
+                    max_seqlen_q,
+                    max_seqlen_k,
+                    sparse_count,
+                    cmp_ratio,
+                )
+
+            # Warmup runs before capture. Its metadata must not suppress the
+            # captured producer: scheduling depends on replay-time KV lengths.
+            # Keep the captured tensor alive when prepare() clears this cache
+            # or another graph bucket replaces the backend's current metadata.
+            metadata = (
+                get_execution_buffer(("MLA_QUANT_INDEXER_METADATA", *cache_key), create_metadata)
+                if capturing
+                else create_metadata()
             )
             self._mla_quant_indexer_metadata[cache_key] = metadata
         return metadata

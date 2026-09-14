@@ -497,6 +497,12 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   KVCacheEstimateOptions estimate_options;
   estimate_options.dtype = dtype_;
   estimate_options.kv_cache_dtype = options_.kv_cache_dtype();
+  estimate_options.enable_hisparse =
+      KVCacheConfig::get_instance().enable_hisparse();
+  estimate_options.hisparse_device_buffer_size =
+      KVCacheConfig::get_instance().hisparse_device_buffer_size();
+  estimate_options.hisparse_host_cache_size =
+      KVCacheConfig::get_instance().hisparse_host_cache_size();
   estimate_options.indexer_cache_dtype =
       ::xllm::KVCacheConfig::get_instance().indexer_cache_dtype();
   estimate_options.cache_size_in_bytes = cache_size_in_bytes;

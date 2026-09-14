@@ -69,6 +69,9 @@ xLLM uses gflags to manage service startup parameters. `--model <PATH>` is the o
 | `max_memory_utilization` | `double` | `0.8` | Fraction of GPU memory used for model inference, including model weights and KV Cache. |
 | `kv_cache_dtype` | `string` | `"auto"` | KV Cache dtype for quantization. `auto` aligns with model dtype and disables quantization. `int8` enables INT8 quantization and is only supported on the MLU backend. |
 | `indexer_cache_dtype` | `string` | `"auto"` | Indexer cache dtype for models with an indexer cache. Supported values are `auto` and `int8`. `auto` aligns with model dtype and disables indexer cache quantization. `int8` enables INT8 indexer cache quantization. |
+| `enable_hisparse` | `bool` | `false` | Enable Host-backed BF16 sparse MLA KV for GLM PyTorch/NPU execution; requires prefix caching and scheduler overlap disabled. |
+| `hisparse_device_buffer_size` | `int64` | `8192` | Total HiSparse hot KV token slots per layer per worker, shared by all requests. |
+| `hisparse_host_cache_size` | `int64` | `8589934592` | Maximum full HiSparse Host KV bytes per worker across all layers. |
 | `enable_prefix_cache` | `bool` | `true` | Whether to enable prefix cache in the block manager. See [Prefix Cache](/en/features/prefix_cache/). |
 | `enable_in_batch_prefix_cache` | `bool` | `false` | Whether to cache admitted prefill full blocks into the prefix cache so that later requests in the same batch can share them. |
 | `max_linear_state_cache_slots` | `int64` | `0` | Maximum number of active linear-attention state cache slots. `0` derives an automatic capacity from the available KV Cache budget. |

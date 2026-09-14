@@ -718,4 +718,48 @@ TEST(KVCacheEstimationTest,
   EXPECT_LT(capacity.n_blocks(), target_only_capacity.n_blocks());
 }
 
+TEST(KVCacheEstimationTest, HiSparseBoundsHostCapacityAndPreservesIndexCache) {
+  ModelArgs args = make_standard_args();
+  args.model_type("glm_moe_dsa")
+      .enable_mla(true)
+      .kv_lora_rank(512)
+      .qk_rope_head_dim(64)
+      .index_n_heads(1)
+      .index_head_dim(128)
+      .index_topk(2048);
+  KVCacheEstimateOptions options = make_estimate_options();
+  options.dtype = torch::kBFloat16;
+  options.cache_size_in_bytes = 128LL * 1024 * 1024;
+  options.hisparse_host_cache_size = 64LL * 1024 * 1024;
+  options.hisparse_device_buffer_size = 2048;
+  options.max_seqs_per_batch = 1;
+  options.enable_hisparse = true;
+  const KVCacheCapacity capacity = estimate_kv_cache_capacity(args, options);
+  const int64_t host_bytes_per_block = 4 * 1152 * options.block_size;
+  EXPECT_EQ(capacity.n_blocks(),
+            options.hisparse_host_cache_size / host_bytes_per_block);
+  EXPECT_EQ(capacity.slot_size(), 1152);
+  EXPECT_EQ(capacity.index_slot_size(), 256);
+  options.indexer_cache_dtype = "int8";
+  const KVCacheCapacity quantized = estimate_kv_cache_capacity(args, options);
+  EXPECT_TRUE(quantized.enable_indexer_cache_quant());
+  EXPECT_EQ(quantized.n_blocks(), capacity.n_blocks());
+  EXPECT_LT(quantized.index_slot_size(), capacity.index_slot_size());
+}
+
+TEST(KVCacheEstimationTest, HiSparseRejectsInsufficientHotBufferBudget) {
+  ModelArgs args = make_standard_args();
+  args.model_type("glm_moe_dsa")
+      .enable_mla(true)
+      .kv_lora_rank(512)
+      .qk_rope_head_dim(64)
+      .index_n_heads(1)
+      .index_head_dim(128)
+      .index_topk(2048);
+  KVCacheEstimateOptions options = make_estimate_options();
+  options.enable_hisparse = true;
+  EXPECT_DEATH(estimate_kv_cache_capacity(args, options),
+               "HiSparse HBM budget");
+}
+
 }  // namespace xllm

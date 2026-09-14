@@ -63,6 +63,7 @@ from xllm.python.models.base import PyModelBase
 from xllm.python.models.deepseek_v32 import (
     DeepseekV3MLP,
     DeepseekV3MoE,
+    W8A8DynamicLinear,
     W8A8StaticLinear,
     _apply_half_rope,
     _create_hadamard_matrix,
@@ -874,6 +875,21 @@ class Glm52ForCausalLM(PyModelBase):
             device=device,
         )
 
+    def _configure_projection_quantization(self, state_dicts: list) -> None:
+        """Select dynamic attention projections for GLM-5.3 W8A8 checkpoints."""
+        for name, module in list(self.named_modules()):
+            if not isinstance(module, W8A8StaticLinear):
+                continue
+            if W8A8WeightLoader.state_dict_has(state_dicts, name + ".deq_scale"):
+                continue
+            if W8A8WeightLoader.state_dict_has(state_dicts, name + ".weight_scale"):
+                parent, _, attribute = name.rpartition(".")
+                setattr(
+                    self.get_submodule(parent),
+                    attribute,
+                    W8A8DynamicLinear(module.in_features, module.out_features, module.weight.device),
+                )
+
     def load_weights(
         self,
         state_dicts: list,
@@ -881,6 +897,7 @@ class Glm52ForCausalLM(PyModelBase):
         tp_size: int,
     ) -> None:
         cfg = self.cfg
+        self._configure_projection_quantization(state_dicts)
         loader = W8A8WeightLoader(self, state_dicts, cfg.tp_size, cfg.tp_rank)
 
         loader.copy_shard("model.embed_tokens.weight", dim=1)
@@ -892,7 +909,9 @@ class Glm52ForCausalLM(PyModelBase):
             attn = p + "self_attn."
             loader.load_w8a8_projection(attn, "q_a_proj")
             loader.copy_replicated(attn + "q_a_layernorm.weight")
-            loader.load_w8a8_projection(attn, "q_b_proj", {"weight": 0, "deq_scale": 0, "quant_bias": 0})
+            loader.load_w8a8_projection(
+                attn, "q_b_proj", {"weight": 0, "deq_scale": 0, "quant_bias": 0, "weight_scale": 0, "weight_offset": 0}
+            )
             loader.load_w8a8_projection(attn, "kv_a_proj_with_mqa")
             loader.copy_replicated(attn + "kv_a_layernorm.weight")
             loader.copy_shard(attn + "kv_b_proj.weight", dim=0)

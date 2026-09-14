@@ -48,6 +48,16 @@ DEFINE_string(indexer_cache_dtype,
               "quantization). \"int8\": Enables INT8 quantization when "
               "supported. Supported on NPU and MLU backends.");
 
+DEFINE_bool(enable_hisparse,
+            false,
+            "Enable Host-backed sparse MLA KV for GLM Python/NPU execution.");
+DEFINE_int64(hisparse_device_buffer_size,
+             8192,
+             "Total hot KV token slots per layer per worker for HiSparse.");
+DEFINE_int64(hisparse_host_cache_size,
+             8LL * 1024 * 1024 * 1024,
+             "Maximum full MLA Host KV bytes per worker for HiSparse.");
+
 DEFINE_bool(enable_prefix_cache,
             true,
             "Whether to enable the prefix cache for the block manager.");
@@ -82,6 +92,9 @@ void KVCacheConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_cache_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_memory_utilization);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_cache_dtype);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_hisparse);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(hisparse_device_buffer_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(hisparse_host_cache_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(indexer_cache_dtype);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_prefix_cache);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_in_batch_prefix_cache);
@@ -96,6 +109,9 @@ void KVCacheConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_cache_size);
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_memory_utilization);
   XLLM_CONFIG_ASSIGN_FROM_JSON(kv_cache_dtype);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_hisparse);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(hisparse_device_buffer_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(hisparse_host_cache_size);
   XLLM_CONFIG_ASSIGN_FROM_JSON(indexer_cache_dtype);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_prefix_cache);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_in_batch_prefix_cache);
@@ -118,6 +134,12 @@ void KVCacheConfig::append_config_json(
       config_json, default_config, kv_cache_dtype);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, indexer_cache_dtype);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, hisparse_host_cache_size);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, hisparse_device_buffer_size);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_hisparse);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_prefix_cache);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
@@ -146,6 +168,18 @@ void KVCacheConfig::initialize() {
 }
 
 void KVCacheConfig::validate() const {
+  CHECK_GT(hisparse_device_buffer_size_, 0);
+  CHECK_LE(hisparse_device_buffer_size_, 2147483647);
+  CHECK_GT(hisparse_host_cache_size_, 0);
+  if (enable_hisparse_) {
+#if !defined(USE_NPU)
+    LOG(FATAL) << "HiSparse requires an NPU build";
+#endif
+    CHECK_EQ(kv_cache_dtype_, "auto") << "HiSparse MLA KV requires BF16";
+    CHECK(!enable_prefix_cache_ && !enable_in_batch_prefix_cache_ &&
+          !enable_xtensor_)
+        << "HiSparse does not support prefix caching or XTensor";
+  }
   if (indexer_cache_dtype_ != "auto" && indexer_cache_dtype_ != "int8") {
     LOG(FATAL) << "Invalid indexer_cache_dtype=\"" << indexer_cache_dtype_
                << "\". Supported values are exactly \"auto\" and \"int8\".";

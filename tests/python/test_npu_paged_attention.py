@@ -54,3 +54,48 @@ def test_uses_first_nonempty_key_cache() -> None:
 
     assert backend.num_kv_blocks == 17
     assert backend.page_size == 128
+
+
+def test_indexer_metadata_is_generated_inside_capture_and_retained(monkeypatch) -> None:
+    from xllm.python.attention import npu_paged_attention
+    from xllm.python.model_executor.forward_context import (
+        AclGraphCaptureContext,
+        AclGraphExecutionState,
+        ForwardContext,
+        forward_context,
+    )
+
+    backend = NpuPagedAttentionBackend.__new__(NpuPagedAttentionBackend)
+    backend._mla_actual_seq_q = torch.arange(1, 5, dtype=torch.int32)
+    backend._mla_actual_seq_kv = torch.full((4,), 16, dtype=torch.int32)
+    backend._mla_max_seqlen_q = 1
+    backend._mla_max_seqlen_k = 16384
+    backend._mla_quant_indexer_metadata = {}
+    generated = []
+
+    def generate(*args):
+        metadata = torch.full((1024,), len(generated), dtype=torch.int32)
+        generated.append(metadata)
+        return metadata
+
+    monkeypatch.setattr(npu_paged_attention.kernels, "quant_lightning_indexer_metadata", generate, raising=False)
+    state = AclGraphExecutionState({})
+    context = ForwardContext(backend, torch.device("cpu"), None, [], execution_state=state)
+    with forward_context(context):
+        warmup = backend._get_quant_indexer_metadata(64, 1, 128, 2048, 1)
+        assert backend._get_quant_indexer_metadata(64, 1, 128, 2048, 1) is warmup
+    context = ForwardContext(
+        backend,
+        torch.device("cpu"),
+        None,
+        [],
+        acl_graph=AclGraphCaptureContext(None, []),
+        execution_state=state,
+    )
+    with forward_context(context):
+        captured = backend._get_quant_indexer_metadata(64, 1, 128, 2048, 1)
+        assert backend._get_quant_indexer_metadata(64, 1, 128, 2048, 1) is captured
+    assert len(generated) == 2
+    assert captured is not warmup
+    backend._mla_quant_indexer_metadata.clear()
+    assert any(value is captured for value in state.persistent_buffers.values())

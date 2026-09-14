@@ -23,6 +23,7 @@ limitations under the License.
 #include <string>
 
 #include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_loader.h"
 #include "core/framework/state_dict/state_dict.h"
@@ -249,6 +250,9 @@ py::dict PyCausalLM::build_config_dict(
   d["moe_tp_rank"] = moe_tp_rank_;
   d["ep_size"] = ep_size_;
   d["ep_rank"] = ep_rank_;
+  d["enable_hisparse"] = KVCacheConfig::get_instance().enable_hisparse();
+  d["hisparse_device_buffer_size"] =
+      KVCacheConfig::get_instance().hisparse_device_buffer_size();
   // cp_size is a reflected ParallelArgs PROPERTY (already in d), but cp_rank is
   // a derived member function, so pass it explicitly for the Python executor.
   d["cp_rank"] = cp_rank_;

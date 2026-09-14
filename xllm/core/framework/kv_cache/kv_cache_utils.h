@@ -81,6 +81,7 @@ struct KVCacheCreateOptions {
   // Empty keeps the legacy all-layer behavior. Otherwise each entry controls
   // whether that layer owns indexer cache tensors.
   PROPERTY(std::vector<bool>, indexer_cache_enabled_layers);
+  PROPERTY(bool, enable_hisparse) = false;
   PROPERTY(bool, enable_kv_cache_quant) = false;
   PROPERTY(std::shared_ptr<KVCacheTensorAllocator>, tensor_allocator);
 #if defined(USE_NPU)

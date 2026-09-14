@@ -53,6 +53,9 @@ DECLARE_int64(max_cache_size);
 DECLARE_double(max_memory_utilization);
 DECLARE_string(kv_cache_dtype);
 DECLARE_string(indexer_cache_dtype);
+DECLARE_bool(enable_hisparse);
+DECLARE_int64(hisparse_device_buffer_size);
+DECLARE_int64(hisparse_host_cache_size);
 DECLARE_int64(max_linear_state_cache_slots);
 
 DECLARE_bool(enable_prefix_cache);

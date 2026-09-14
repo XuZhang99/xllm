@@ -45,6 +45,9 @@ struct KVCacheEstimateOptions {
   int64_t max_tokens_per_batch = 0;
   int64_t max_tokens_per_chunk_for_prefill = 0;
   int64_t max_linear_state_cache_slots = 0;
+  bool enable_hisparse = false;
+  int64_t hisparse_device_buffer_size = 8192;
+  int64_t hisparse_host_cache_size = 8LL * 1024 * 1024 * 1024;
   bool is_draft_engine = false;
   bool enable_prefix_cache = false;
   int32_t layerwise_split_size = 1;

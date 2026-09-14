@@ -49,6 +49,22 @@ def _create_attention_backend(
 ) -> AttentionBackend:
     config = config or {}
     model_type = config.get("model_type", "")
+    enable_hisparse = bool(config.get("enable_hisparse", False))
+    if enable_hisparse:
+        if _resolve_graph_backend(config) not in ("", "off", "none", "0", "aclgraph"):
+            raise ValueError("HiSparse supports eager execution and ACLGraph only")
+        if not current_platform.is_npu() or model_type != "glm_moe_dsa" or not config.get("enable_mla", False):
+            raise ValueError("HiSparse requires the GLM DSA Python/NPU MLA backend")
+        if any(int(config.get(name, 1)) > 1 for name in ("cp_size", "kv_split_size", "layerwise_split_size")):
+            raise ValueError("HiSparse does not support CP, KV splitting, or layer splitting")
+        topk = int(config.get("index_topk", 2048))
+        hot_tokens = int(config.get("hisparse_device_buffer_size", 8192))
+        if topk <= 0 or hot_tokens <= 0:
+            raise ValueError("HiSparse Top-K and hot buffer capacity must be positive")
+        if max_num_reqs * topk > 1048576:
+            raise ValueError("HiSparse requires max_seqs_per_batch * index_topk <= 1048576")
+        if dtype != torch.bfloat16:
+            raise ValueError("HiSparse requires BF16 MLA KV")
     if model_type == "deepseek_v4" and current_platform.is_npu():
         from xllm.python.attention.dsa_attention import DsaAttentionBackend
 
@@ -99,6 +115,8 @@ def _create_attention_backend(
             is_mla=bool(config.get("enable_mla", False)),
             device=device,
             dtype=dtype,
+            hisparse_device_buffer_size=int(config.get("hisparse_device_buffer_size", 8192)) if enable_hisparse else 0,
+            hisparse_max_selected_tokens=max_num_reqs * int(config.get("index_topk", 2048)) if enable_hisparse else 0,
         )
     if current_platform.is_cuda():
         from xllm.python.attention.flashinfer import FlashInferBackend
@@ -124,6 +142,8 @@ class ModelExecutor:
         num_decoding_tokens: int = 1,
         acl_graph_decode_batch_size_limit: int | None = None,
     ) -> None:
+        if config.get("enable_hisparse", False) and num_decoding_tokens != 1:
+            raise ValueError("HiSparse does not support speculative decoding")
         self.model = model
         self._kv_bound = False
 

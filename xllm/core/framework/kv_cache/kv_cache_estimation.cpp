@@ -564,6 +564,11 @@ void init_standard_counts(const ModelArgs& model_args,
     kv_cache_cap->num_indexer_layers(num_indexer_layers);
   }
 
+  if (options.enable_hisparse) {
+    // HiSparse sizes Host KV and HBM index storage separately below.
+    return;
+  }
+
   const int64_t full_cache_block_size_in_bytes =
       standard_full_cache_block_size_in_bytes(*kv_cache_cap);
   kv_cache_cap->num_linear_state_blocks(
@@ -696,6 +701,43 @@ KVCacheCapacity estimate_kv_cache_capacity(
     init_dsv4_counts(model_args, options, &kv_cache_cap);
   } else {
     init_standard_counts(model_args, options, &kv_cache_cap);
+  }
+  if (options.enable_hisparse) {
+    CHECK_EQ(model_args.model_type(), "glm_moe_dsa");
+    CHECK_EQ(options.kv_cache_dtype, "auto");
+    CHECK_EQ(options.layerwise_split_size, 1);
+    CHECK(!options.enable_disagg_pd && !options.enable_prefix_cache);
+    CHECK_EQ(options.num_speculative_tokens, 0);
+    CHECK_GT(options.hisparse_device_buffer_size, 0);
+    CHECK_GT(options.hisparse_host_cache_size, 0);
+    const int64_t layers = kv_cache_cap.num_full_attention_layers();
+    // Full KV is Host-backed. HBM holds index values/scales, a physical-slot
+    // lookup table per layer, and bounded hot KV/tags shared across requests.
+    const int64_t host_block_bytes =
+        options.block_size * layers * kv_cache_cap.slot_size();
+    const int64_t device_block_bytes =
+        options.block_size *
+        (kv_cache_cap.num_indexer_layers() * kv_cache_cap.index_slot_size() +
+         layers * sizeof(int32_t));
+    const int64_t hot_bytes = options.hisparse_device_buffer_size * layers *
+                              (kv_cache_cap.slot_size() + sizeof(int32_t));
+    // Selected KV storage is shared across layers and graph buckets. Reserve
+    // additional room for graph metadata and temporary slot translations.
+    const int64_t selected_bytes =
+        (2 * options.max_seqs_per_batch + 32) * model_args.index_topk() *
+        (kv_cache_cap.slot_size() + 4 * sizeof(int32_t));
+    CHECK_GT(host_block_bytes, 0);
+    CHECK_GT(device_block_bytes, 0);
+    CHECK_GT(options.cache_size_in_bytes, hot_bytes + selected_bytes)
+        << "HiSparse HBM budget is too small for hot KV and decode scratch";
+    const int64_t host_blocks =
+        options.hisparse_host_cache_size / host_block_bytes;
+    const int64_t device_blocks =
+        (options.cache_size_in_bytes - hot_bytes - selected_bytes) /
+        device_block_bytes;
+    kv_cache_cap.n_blocks(
+        std::min({host_blocks, device_blocks, 1048576 / options.block_size}));
+    CHECK_GT(kv_cache_cap.n_blocks(), 0);
   }
   return kv_cache_cap;
 }
