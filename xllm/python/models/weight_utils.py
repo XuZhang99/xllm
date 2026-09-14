@@ -230,9 +230,13 @@ class W8A8WeightLoader(WeightLoader):
         return dynamic_activation
 
     def load_w8a8_projection(self, prefix: str, proj: str, shard_dims: Optional[dict[str, int]] = None) -> None:
-        """Load one W8A8 projection (weight + 4 quant tensors), sharding suffixes named in ``shard_dims``."""
+        """Load static or dynamic W8A8 tensors, sharding the specified suffixes."""
         dims = shard_dims or {}
-        for suffix in ("weight", "deq_scale", "quant_bias", "input_scale", "input_offset"):
+        if prefix + proj + ".weight_scale" in self._tensors_by_name:
+            suffixes = ("weight", "weight_scale", "weight_offset")
+        else:
+            suffixes = ("weight", "deq_scale", "quant_bias", "input_scale", "input_offset")
+        for suffix in suffixes:
             t = self.load_tensor(prefix + proj + "." + suffix)
             dim = dims.get(suffix)
             if dim is not None:
