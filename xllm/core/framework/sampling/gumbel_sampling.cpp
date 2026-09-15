@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <limits>
+
 namespace xllm {
 
 torch::Tensor sample_gumbel_noise(int64_t batch_size,
@@ -38,11 +40,14 @@ torch::Tensor sample_gumbel_noise(int64_t batch_size,
   // Gumbel(0, 1) = -log(-log(U)), U ~ Uniform(0, 1).
   torch::Tensor uniform =
       torch::rand({batch_size, num_steps, num_classes}, float_options);
+  uniform.clamp_min_(std::numeric_limits<float>::min());
   torch::Tensor gumbel = uniform.log().neg().log().neg();
   if (!sampling_params.all_random_sample) {
-    torch::Tensor sample_mask =
-        sampling_params.do_sample.to(float_options).view({batch_size, 1, 1});
-    gumbel = gumbel * sample_mask;
+    torch::Tensor greedy_mask =
+        sampling_params.do_sample.to(device, torch::kBool)
+            .logical_not()
+            .view({batch_size, 1, 1});
+    gumbel.masked_fill_(greedy_mask, 0.0);
   }
   return gumbel;
 }

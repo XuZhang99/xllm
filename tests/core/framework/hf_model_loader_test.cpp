@@ -266,6 +266,39 @@ TEST(HFModelLoaderTest, Qwen3DSparkFieldsFromTorchConfig) {
   EXPECT_TRUE(args.confidence_head_with_markov());
 }
 
+TEST(HFModelLoaderTest, Qwen3DFlash2AcceptsArrayEosTokenIds) {
+  for (const char* model_name : {"qwen3", "qwen3_atb"}) {
+    auto loader = ModelRegistry::get_model_args_loader(model_name);
+    ASSERT_NE(loader, nullptr);
+
+    JsonReader reader;
+    ASSERT_TRUE(reader.parse_text(R"json(
+      {
+        "model_type": "qwen3",
+        "eos_token_id": [154820, 154827, 154829],
+        "dflash_config": {
+          "block_size": 8,
+          "conv_group_size": 16,
+          "conv_kernel_size": 2,
+          "selector_rank": 256,
+          "selector_top_k": 16
+        }
+      }
+    )json"));
+
+    ModelArgs args;
+    ASSERT_TRUE(loader(reader, &args));
+    EXPECT_EQ(args.eos_token_id(), 154820);
+    EXPECT_EQ(args.eos_token_id_vec(),
+              std::vector<int32_t>({154820, 154827, 154829}));
+    EXPECT_EQ(args.stop_token_ids(),
+              std::unordered_set<int32_t>({154820, 154827, 154829}));
+    if (std::string(model_name) == "qwen3") {
+      EXPECT_EQ(args.dflash2_block_size(), 8);
+      EXPECT_EQ(args.dflash2_selector_top_k(), 16);
+    }
+  }
+}
 TEST(HFModelLoaderTest, DeepseekV4DSparkModelArgsFrom0731Config) {
   auto loader = ModelRegistry::get_model_args_loader("deepseek_v4");
   ASSERT_NE(loader, nullptr);

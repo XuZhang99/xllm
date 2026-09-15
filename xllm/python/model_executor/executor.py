@@ -243,13 +243,20 @@ class ModelExecutor:
             self.inductor_runner = InductorRunner(execution_model, self.attention_backend, device, graph_backend)
 
     @staticmethod
-    def _attention_config(layer: Attention) -> tuple[int, int, int, float, int]:
+    def _attention_config(
+        layer: Attention,
+    ) -> tuple[int, int, int, float, int, bool, int | None, int, int, bool]:
         return (
             layer.num_heads,
             layer.num_kv_heads,
             layer.head_dim,
             layer.scale,
             layer.sliding_window,
+            layer.causal,
+            layer.fia_sparse_mode,
+            layer.fia_pre_tokens,
+            layer.fia_next_tokens,
+            layer.fia_use_attention_mask,
         )
 
     def bind_kv_caches(self, kv_caches: list[LayerCacheInput]) -> None:

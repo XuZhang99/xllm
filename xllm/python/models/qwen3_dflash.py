@@ -27,8 +27,14 @@ from xllm.python import distributed, kernels
 from xllm.python.layers import HiddenParallelEmbedding, RMSNorm
 from xllm.python.model_executor.forward_context import LayerSynchronizer
 from xllm.python.models.base import PyModelBase
-from xllm.python.models.qwen3 import Qwen3Config, Qwen3Model, load_qwen3_backbone
+from xllm.python.models.qwen3 import (
+    Qwen3Config,
+    Qwen3DecoderLayer,
+    Qwen3Model,
+    load_qwen3_backbone,
+)
 from xllm.python.models.weight_utils import (
+    WeightLoader,
     kv_replica_shard,
     load_own_weight,
     maybe_load_own_lm_head,
@@ -151,13 +157,21 @@ class DFlashContextProjection(nn.Module):
 
 
 class DFlashQwen3Model(Qwen3Model):
-    def __init__(self, cfg: DFlashQwen3Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(
+        self,
+        cfg: DFlashQwen3Config,
+        dtype: torch.dtype,
+        device: torch.device,
+        *,
+        decoder_layer_type: type[Qwen3DecoderLayer] = Qwen3DecoderLayer,
+    ) -> None:
         super().__init__(
             cfg,
             dtype,
             device,
             causal=False,
             create_embedding=False,
+            decoder_layer_type=decoder_layer_type,
         )
         self.cfg = cfg
         self.dtype = dtype
@@ -269,26 +283,42 @@ class DFlashQwen3Model(Qwen3Model):
                     return None
         return projected_hidden
 
-    def load_weights(self, state_dicts: list, tp_rank: int, tp_size: int) -> None:
+    def load_weights(
+        self,
+        state_dicts: list,
+        tp_rank: int,
+        tp_size: int,
+        *,
+        load_own_embedding: bool = True,
+    ) -> WeightLoader:
         cfg = self.cfg
         # Load the draft's own embed_tokens (trained mask-token row) when the
         # checkpoint ships one; else None -> C++ bridge shares the target's.
-        loader = load_own_weight(
-            self,
-            state_dicts,
-            tp_rank,
-            tp_size,
-            "embed_tokens.weight",
-            "embed_tokens",
-            lambda: HiddenParallelEmbedding(
-                cfg.vocab_size,
-                cfg.hidden_size // tp_size,
+        if load_own_embedding:
+            loader = load_own_weight(
+                self,
+                state_dicts,
+                tp_rank,
                 tp_size,
-                dtype=self.dtype,
-                device=self.device,
-            ),
-            shard_dim=1,
-        )
+                "embed_tokens.weight",
+                "embed_tokens",
+                lambda: HiddenParallelEmbedding(
+                    cfg.vocab_size,
+                    cfg.hidden_size // tp_size,
+                    tp_size,
+                    dtype=self.dtype,
+                    device=self.device,
+                ),
+                shard_dim=1,
+            )
+        else:
+            loader = WeightLoader(
+                self,
+                state_dicts,
+                tp_size,
+                tp_rank,
+                src_prefixes=("", "model."),
+            )
         kv_world, kv_rank = kv_replica_shard(cfg.n_kv_heads, tp_rank, tp_size)
 
         self.fc.load_weight(loader.load_tensor("fc.weight"), tp_rank)
@@ -305,6 +335,7 @@ class DFlashQwen3Model(Qwen3Model):
 
         loader.copy_replicated("norm.weight")
         self._build_context_kv_buffers()
+        return loader
 
     def adapt_weights_for_reference_model(
         self,

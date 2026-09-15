@@ -266,6 +266,7 @@ class Qwen3Model(nn.Module):
         *,
         causal: bool = True,
         create_embedding: bool = True,
+        decoder_layer_type: type[Qwen3DecoderLayer] = Qwen3DecoderLayer,
     ) -> None:
         super().__init__()
         tp = cfg.tp_size
@@ -287,7 +288,7 @@ class Qwen3Model(nn.Module):
             device=device,
         )
         self.layers = nn.ModuleList(
-            Qwen3DecoderLayer(cfg, i, dtype, device, causal=causal) for i in range(cfg.n_layers)
+            decoder_layer_type(cfg, i, dtype, device, causal=causal) for i in range(cfg.n_layers)
         )
         self.norm = RMSNorm(cfg.hidden_size, cfg.rms_norm_eps, dtype=dtype, device=device)
         self.aux_hidden_capture = AuxHiddenCapture(cfg.layers_to_capture)

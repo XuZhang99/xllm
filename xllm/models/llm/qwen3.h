@@ -287,7 +287,23 @@ REGISTER_MODEL_ARGS(qwen3, [&] {
   LOAD_ARG_OR(intermediate_size, "intermediate_size", 18944);
   LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 32768);
   LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-6);
-  LOAD_ARG_OR(eos_token_id, "eos_token_id", 151643);
+  [&] {
+    const nlohmann::json data = json.data();
+    std::vector<int32_t> eos_token_ids;
+    if (data.contains("eos_token_id")) {
+      const auto& eos_token_id = data.at("eos_token_id");
+      if (eos_token_id.is_array()) {
+        eos_token_ids = eos_token_id.get<std::vector<int32_t>>();
+      } else if (eos_token_id.is_number_integer()) {
+        eos_token_ids.push_back(eos_token_id.get<int32_t>());
+      }
+    }
+    if (eos_token_ids.empty()) {
+      eos_token_ids.push_back(151643);
+    }
+    args->eos_token_id_vec() = eos_token_ids;
+    args->eos_token_id() = eos_token_ids.front();
+  }();
   LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
   LOAD_ARG_OR(rope_theta, "rope_parameters.rope_theta", args->rope_theta());
 
@@ -312,7 +328,9 @@ REGISTER_MODEL_ARGS(qwen3, [&] {
     return args->hidden_size() / args->n_heads();
   });
 
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
+  SET_ARG(stop_token_ids,
+          std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
+                                      args->eos_token_id_vec().end()));
 });
 
 }  // namespace xllm

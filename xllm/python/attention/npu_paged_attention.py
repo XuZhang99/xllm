@@ -533,7 +533,7 @@ class NpuPagedAttentionBackend(AttentionBackend):
                 v_cache,
                 metadata,
                 num_tokens,
-                layer.causal,
+                layer,
             )
         return self._decode(q_3d, k_cache, v_cache, metadata, num_tokens)
 
@@ -1062,11 +1062,14 @@ class NpuPagedAttentionBackend(AttentionBackend):
         v_cache: torch.Tensor,
         metadata: AttentionMetadata,
         num_tokens: int,
-        causal: bool,
+        layer: Attention,
     ) -> torch.Tensor:
         actual_seq = self._cumulative_seq_lens(metadata, num_tokens)
-        atten_mask = self._causal_mask if causal else None
-        sparse_mode = _SPARSE_MODE_RIGHT_DOWN_CAUSAL if causal else _SPARSE_MODE_NONE
+        use_attention_mask = layer.causal or layer.fia_use_attention_mask
+        atten_mask = self._causal_mask if use_attention_mask else None
+        sparse_mode = layer.fia_sparse_mode
+        if sparse_mode is None:
+            sparse_mode = _SPARSE_MODE_RIGHT_DOWN_CAUSAL if layer.causal else _SPARSE_MODE_NONE
 
         # Prefix-cache hit (or chunked prefill with prior context): part of the
         # KV already lives in the paged cache, so this forward only carries the
@@ -1093,6 +1096,8 @@ class NpuPagedAttentionBackend(AttentionBackend):
                 num_key_value_heads=self.num_kv_heads,
                 block_size=block_size,
                 sparse_mode=sparse_mode,
+                pre_tokens=layer.fia_pre_tokens,
+                next_tokens=layer.fia_next_tokens,
                 softmax_lse_flag=False,
             )
             return output.reshape(num_tokens, self.num_heads * self.head_dim)
@@ -1110,6 +1115,8 @@ class NpuPagedAttentionBackend(AttentionBackend):
             input_layout="TND",
             num_key_value_heads=self.num_kv_heads,
             sparse_mode=sparse_mode,
+            pre_tokens=layer.fia_pre_tokens,
+            next_tokens=layer.fia_next_tokens,
             softmax_lse_flag=False,
         )
         return output.reshape(num_tokens, self.num_heads * self.head_dim)

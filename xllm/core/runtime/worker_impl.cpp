@@ -1234,6 +1234,15 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
           context_.get_parallel_args().ep_size() > 1 ||
           !context_.get_parallel_args().mapping_data().empty()));
     if (need_fake_input_for_empty_shard) {
+      int64_t num_fake_tokens = 1;
+      const ModelArgs& model_args = context_.get_model_args();
+      if (is_dflash2_draft_model_type(model_args.model_type())) {
+        // DFlash2 grouped convolution resets on fixed-width block boundaries
+        // and rejects partial blocks, including the generic one-row dummy.
+        num_fake_tokens = model_args.dflash2_block_size();
+        CHECK_GT(num_fake_tokens, 0)
+            << "DFlash2 empty-shard input requires a positive block size";
+      }
       auto token_options = processed_input.token_ids.defined()
                                ? processed_input.token_ids.options()
                                : torch::TensorOptions().dtype(torch::kInt32);
@@ -1241,11 +1250,12 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
                                   ? processed_input.positions.options()
                                   : torch::TensorOptions().dtype(torch::kInt32);
       processed_input.token_ids =
-          torch::ones({1}, token_options.device(device_));
+          torch::ones({num_fake_tokens}, token_options.device(device_));
       processed_input.positions =
-          torch::zeros({1}, position_options.device(device_));
+          torch::arange(num_fake_tokens, position_options.device(device_));
       processed_input.input_params.embedding.linear_state_indices =
-          torch::zeros({1}, token_options.dtype(torch::kInt32).device(device_));
+          torch::zeros({num_fake_tokens},
+                       token_options.dtype(torch::kInt32).device(device_));
       empty_shard = false;
     }
     if (empty_shard) {

@@ -20,6 +20,7 @@ models whose native fusion boundaries differ by device keep their lowering in
 """
 
 from xllm.python.layers.attention import Attention
+from xllm.python.layers.dflash2_grouped_conv import DFlash2GroupedConv
 from xllm.python.layers.embedding import HiddenParallelEmbedding
 from xllm.python.layers.fused_moe import FusedMoE
 from xllm.python.layers.gated_mlp import GatedMLP
@@ -29,6 +30,7 @@ from xllm.python.layers.rotary_embedding import RotaryEmbedding
 
 __all__ = [
     "Attention",
+    "DFlash2GroupedConv",
     "FusedMoE",
     "GatedMLP",
     "RMSNorm",

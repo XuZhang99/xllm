@@ -168,7 +168,7 @@ void SpeculativeConfig::validate() const {
     CHECK(is_probabilistic_draft_sampling_supported(algorithm))
         << algorithm << " does not support draft_sampling_mode="
         << kDraftSamplingModeProbabilistic
-        << ". Supported: MTP, DSpark, Eagle3.";
+        << ". Supported: MTP, DSpark, DFlash2, Eagle3.";
   }
 }
 

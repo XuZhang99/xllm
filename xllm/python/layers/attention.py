@@ -38,6 +38,10 @@ class Attention(nn.Module):
         sliding_window: int,
         layer_id: int,
         causal: bool = True,
+        fia_sparse_mode: int | None = None,
+        fia_pre_tokens: int = 2147483647,
+        fia_next_tokens: int = 2147483647,
+        fia_use_attention_mask: bool = False,
     ) -> None:
         super().__init__()
         self.num_heads = num_heads
@@ -47,6 +51,10 @@ class Attention(nn.Module):
         self.sliding_window = sliding_window
         self.layer_id = layer_id
         self.causal = causal
+        self.fia_sparse_mode = fia_sparse_mode
+        self.fia_pre_tokens = fia_pre_tokens
+        self.fia_next_tokens = fia_next_tokens
+        self.fia_use_attention_mask = fia_use_attention_mask
 
     def forward(
         self,

@@ -256,7 +256,8 @@ py::dict PyCausalLM::build_config_dict(
   const bool requires_eager_execution =
       !model_args_.layers_to_capture().empty() ||
       model_args_.model_type() == "DFlashDraftModel" ||
-      model_args_.model_type() == "DSparkDraftModel";
+      model_args_.model_type() == "DSparkDraftModel" ||
+      is_dflash2_draft_model_type(model_args_.model_type());
   d["enable_graph"] = requires_eager_execution
                           ? false
                           : ExecutionConfig::get_instance().enable_graph();
@@ -309,6 +310,23 @@ torch::Tensor PyCausalLM::logits(const torch::Tensor& hidden_states,
   return out.cast<torch::Tensor>();
 }
 
+torch::Tensor PyCausalLM::logits(const torch::Tensor& hidden_states,
+                                 const torch::Tensor& seleted_idxes,
+                                 torch::Tensor& out_hidden) {
+  torch::NoGradGuard no_grad;
+  py::gil_scoped_acquire gil;
+
+  py::object selected = optional_tensor(seleted_idxes);
+  if (seleted_idxes.defined() && seleted_idxes.numel() > 0) {
+    out_hidden = hidden_states.index_select(
+        /*dim=*/0, seleted_idxes.to(torch::kLong));
+  } else {
+    out_hidden = hidden_states;
+  }
+  py::object out = py_model_.attr("compute_logits")(hidden_states, selected);
+  return out.cast<torch::Tensor>();
+}
+
 ModelOutput PyCausalLM::write_context_kv(
     const torch::Tensor& target_hidden,
     const torch::Tensor& positions,
@@ -333,6 +351,26 @@ ModelOutput PyCausalLM::write_context_kv(
     return ModelOutput();
   }
   return ModelOutput(output.cast<torch::Tensor>());
+}
+
+DFlash2CandidateOutput PyCausalLM::dflash2_candidates(
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& unary_logits,
+    const torch::Tensor& anchor_token_ids) {
+  torch::NoGradGuard no_grad;
+  py::gil_scoped_acquire gil;
+  py::object output = py_model_.attr("dflash2_candidates")(
+      hidden_states, unary_logits, anchor_token_ids);
+  CHECK(py::isinstance<py::tuple>(output))
+      << "Python DFlash2 candidate output must be a tuple";
+  py::tuple tensors = output.cast<py::tuple>();
+  CHECK_EQ(tensors.size(), 2)
+      << "Python DFlash2 candidate output must contain ids and edge logits";
+
+  DFlash2CandidateOutput candidates;
+  candidates.candidate_ids = tensors[0].cast<torch::Tensor>();
+  candidates.edge_logits = tensors[1].cast<torch::Tensor>();
+  return candidates;
 }
 
 torch::Tensor PyCausalLM::dspark_markov_bias(

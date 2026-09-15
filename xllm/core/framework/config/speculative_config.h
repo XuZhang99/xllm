@@ -79,8 +79,8 @@ class SpeculativeConfig final {
   // True for the algorithms whose draft path can emit dense per-token
   // probabilities for probabilistic rejection sampling; greedy acceptance is
   // always available, so DFlash/Suffix are gated out here. DFlash2 samples
-  // selector paths from a temperature-softmax distribution and always carries
-  // the dense proposal, so it is probabilistic-capable.
+  // selector paths from a temperature-softmax distribution and carries the
+  // dense proposal only when probabilistic rejection requires it.
   static bool is_probabilistic_draft_sampling_supported(
       std::string_view algorithm) {
     return is_mtp_algorithm(algorithm) || boost::iequals(algorithm, "DSpark") ||

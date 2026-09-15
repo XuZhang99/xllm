@@ -59,10 +59,17 @@ DFlashWorkerImpl::DraftBlock DFlash2WorkerImpl::run_decode_draft(
   const ModelArgs& draft_args = draft_impl_->context_.get_model_args();
   const int64_t selector_top_k = draft_args.dflash2_selector_top_k();
   c10::StreamGuard noise_guard = compute_stream_->set_stream_guard();
+  SamplingParameters draft_sampling_params =
+      input.sampling_params.to(draft_impl_->device(), torch::kFloat32);
+  if (draft_sampling_mode_ == DraftSamplingMode::GREEDY) {
+    force_greedy_draft_sampling(draft_sampling_params);
+  }
+  const bool need_dense_probs = draft_probs_required(
+      draft_sampling_mode_, draft_sampling_params.all_greedy_sample);
   torch::Tensor gumbel_noise = sample_gumbel_noise(batch_size,
                                                    num_speculative_tokens,
                                                    selector_top_k,
-                                                   input.sampling_params,
+                                                   draft_sampling_params,
                                                    draft_impl_->device());
   // Cross-rank RNG divergence must not fork the sampled path: unify the noise
   // once from rank 0.  The edge logits are TP-replicated, so identical noise
@@ -106,21 +113,23 @@ DFlashWorkerImpl::DraftBlock DFlash2WorkerImpl::run_decode_draft(
     c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
     DFlash2CandidateOutput candidates = draft_impl_->dflash2_candidates(
         hidden_states, unary_logits, anchor_token_ids);
-    SamplingParameters sampling_params = input.sampling_params.to(
-        unary_logits.device(), unary_logits.scalar_type());
     sampled = sample_path(candidates,
-                          sampling_params,
+                          draft_sampling_params,
                           gumbel_noise,
-                          unary_logits.size(/*dim=*/-1));
+                          unary_logits.size(/*dim=*/-1),
+                          need_dense_probs);
   }
 
   DraftBlock draft_block;
-  // DFlash2 samples selector paths from a sparse top-k distribution; the
-  // dense per-token proposal must be retained so rejection recovery stays
-  // exact. The selected-only probs carry no extra information for the
-  // verifier, so only token_ids and the dense proposal feed the DraftProposal.
-  draft_block.proposal = DraftProposal(std::move(sampled.token_ids),
-                                       std::move(sampled.dense_probs));
+  if (sampled.dense_probs.defined()) {
+    // Probabilistic DFlash2 paths retain the dense proposal distribution so
+    // rejection recovery stays exact.
+    draft_block.proposal = DraftProposal(std::move(sampled.token_ids),
+                                         std::move(sampled.dense_probs));
+  } else {
+    // Greedy proposals are delta distributions and need no [B, N, V] tensor.
+    draft_block.proposal = DraftProposal(std::move(sampled.token_ids));
+  }
   draft_block.retained_inputs = take_retained_inputs(*draft_output);
   COUNTER_ADD(speculative_execution_latency_seconds_draft,
               timer.elapsed_seconds());
@@ -131,7 +140,8 @@ DFlash2WorkerImpl::BlockSampleOutput DFlash2WorkerImpl::sample_path(
     const DFlash2CandidateOutput& candidates,
     const SamplingParameters& sampling_params,
     const torch::Tensor& gumbel_noise,
-    int64_t vocab_size) const {
+    int64_t vocab_size,
+    bool need_dense_probs) const {
   CHECK_EQ(candidates.candidate_ids.dim(), 3);
   CHECK_EQ(candidates.edge_logits.dim(), 4);
   const int64_t batch_size = candidates.candidate_ids.size(0);
@@ -165,8 +175,11 @@ DFlash2WorkerImpl::BlockSampleOutput DFlash2WorkerImpl::sample_path(
 
   torch::Tensor token_ids =
       torch::empty({batch_size, num_steps}, candidates.candidate_ids.options());
-  torch::Tensor candidate_probs =
-      torch::empty({batch_size, num_steps, top_k}, float_options);
+  torch::Tensor candidate_probs;
+  if (need_dense_probs) {
+    candidate_probs =
+        torch::empty({batch_size, num_steps, top_k}, float_options);
+  }
   torch::Tensor previous_indices =
       torch::zeros({batch_size}, candidates.candidate_ids.options());
 
@@ -185,34 +198,32 @@ DFlash2WorkerImpl::BlockSampleOutput DFlash2WorkerImpl::sample_path(
     torch::Tensor sampled_tokens =
         step_candidates.gather(/*dim=*/1, sampled_indices.view({-1, 1}))
             .view({-1});
-    // Keep the per-step proposal distribution semantics identical to the
-    // previous sampler path: random rows expose the full softmax over the
-    // top-k candidates, deterministic rows expose a one-hot at the argmax,
-    // and mixed batches select per row via do_sample. The exp() lives inside
-    // the consuming branches so greedy-only batches skip it.
-    torch::Tensor step_probs;
-    if (sampling_params.all_random_sample) {
-      step_probs = row_log_probs.exp();
-    } else {
-      torch::Tensor greedy_probs =
-          torch::zeros({batch_size, top_k}, float_options);
-      greedy_probs.scatter_(/*dim=*/1,
-                            sampled_indices.view({-1, 1}),
-                            /*value=*/1.0);
-      if (sampling_params.all_greedy_sample) {
-        step_probs = greedy_probs;
+    if (need_dense_probs) {
+      // Random rows expose the full softmax over the top-k candidates;
+      // deterministic rows expose a one-hot at the selected candidate.
+      torch::Tensor step_probs;
+      if (sampling_params.all_random_sample) {
+        step_probs = row_log_probs.exp();
       } else {
+        torch::Tensor greedy_probs =
+            torch::zeros({batch_size, top_k}, float_options);
+        greedy_probs.scatter_(/*dim=*/1,
+                              sampled_indices.view({-1, 1}),
+                              /*value=*/1.0);
         step_probs =
             torch::where(sampling_params.do_sample.view({batch_size, 1}),
                          row_log_probs.exp(),
                          greedy_probs);
       }
+      candidate_probs.index_put_({ISlice(), step, ISlice()}, step_probs);
     }
     token_ids.index_put_({ISlice(), step}, sampled_tokens);
-    candidate_probs.index_put_({ISlice(), step, ISlice()}, step_probs);
     previous_indices = sampled_indices;
   }
 
+  if (!need_dense_probs) {
+    return {.token_ids = std::move(token_ids), .dense_probs = torch::Tensor()};
+  }
   torch::Tensor dense_probs =
       torch::zeros({batch_size, num_steps, vocab_size}, float_options);
   dense_probs.scatter_(

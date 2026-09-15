@@ -42,7 +42,8 @@ class DFlash2WorkerImpl final : public DFlashWorkerImpl {
   BlockSampleOutput sample_path(const DFlash2CandidateOutput& candidates,
                                 const SamplingParameters& sampling_params,
                                 const torch::Tensor& gumbel_noise,
-                                int64_t vocab_size) const;
+                                int64_t vocab_size,
+                                bool need_dense_probs) const;
 
   ProcessGroup* sampling_process_group_ = nullptr;
 };
