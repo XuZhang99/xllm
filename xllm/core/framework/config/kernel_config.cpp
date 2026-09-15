@@ -21,6 +21,11 @@ limitations under the License.
 #include "core/framework/config/config_utils.h"
 #include "core/framework/config/eplb_config.h"
 
+DEFINE_bool(enable_dsa_multi_stream,
+            false,
+            "Overlap the DSA indexer and attention projections for the Python "
+            "GLM model on backends with stream support.");
+
 #if defined(USE_NPU)
 DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
 
@@ -57,11 +62,6 @@ DEFINE_bool(enable_aclnn_swiglu,
 DEFINE_bool(enable_mega_moe,
             false,
             "enable mega_moe fused operator for MoE expert parallel.");
-
-DEFINE_bool(enable_dsa_multi_stream,
-            false,
-            "Enable NPU dual-stream overlap between the DSA lightning indexer "
-            "and attention projections for the Python GLM-5.2 model.");
 
 DEFINE_bool(enable_dspark_native_sas,
             false,
@@ -111,6 +111,7 @@ int32_t resolve_fused_mc2_mode(int32_t mode) {
 }  // namespace
 
 void KernelConfig::from_flags() {
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_dsa_multi_stream);
 #if defined(USE_NPU)
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_customize_mla_kernel);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(npu_kernel_backend);
@@ -121,7 +122,6 @@ void KernelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_aclnn_matmul);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_aclnn_swiglu);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_mega_moe);
-  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_dsa_multi_stream);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_dspark_native_sas);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_flashcomm1);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(flashcomm1_min_prefill_tokens);
@@ -131,6 +131,7 @@ void KernelConfig::from_flags() {
 }
 
 void KernelConfig::from_json(const JsonReader& json) {
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_dsa_multi_stream);
 #if defined(USE_NPU)
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_customize_mla_kernel);
   XLLM_CONFIG_ASSIGN_FROM_JSON(npu_kernel_backend);
@@ -141,15 +142,12 @@ void KernelConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_aclnn_matmul);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_aclnn_swiglu);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_mega_moe);
-  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_dsa_multi_stream);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_dspark_native_sas);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_flashcomm1);
   XLLM_CONFIG_ASSIGN_FROM_JSON(flashcomm1_min_prefill_tokens);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_mmrs_fusion);
   XLLM_CONFIG_ASSIGN_FROM_JSON(mmrs_comm_mode);
 #else
-  CHECK(!json.value_or<bool>("enable_dsa_multi_stream", false))
-      << "enable_dsa_multi_stream is only supported on NPU.";
   CHECK(!json.value_or<bool>("enable_dspark_native_sas", false))
       << "enable_dspark_native_sas is only supported on NPU.";
 #endif
@@ -157,8 +155,10 @@ void KernelConfig::from_json(const JsonReader& json) {
 
 void KernelConfig::append_config_json(
     nlohmann::ordered_json& config_json) const {
-#if defined(USE_NPU)
   const KernelConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_dsa_multi_stream);
+#if defined(USE_NPU)
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_customize_mla_kernel);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
@@ -177,8 +177,6 @@ void KernelConfig::append_config_json(
       config_json, default_config, enable_aclnn_swiglu);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_mega_moe);
-  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
-      config_json, default_config, enable_dsa_multi_stream);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_dspark_native_sas);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

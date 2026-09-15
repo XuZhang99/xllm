@@ -58,6 +58,8 @@ class KernelConfig final {
     return kOptionCategory;
   }
 
+  PROPERTY(bool, enable_dsa_multi_stream) = false;
+
 #if defined(USE_NPU)
   PROPERTY(bool, enable_customize_mla_kernel) = false;
 
@@ -76,8 +78,6 @@ class KernelConfig final {
   PROPERTY(bool, enable_aclnn_swiglu) = false;
 
   PROPERTY(bool, enable_mega_moe) = false;
-
-  PROPERTY(bool, enable_dsa_multi_stream) = false;
 
   PROPERTY(bool, enable_dspark_native_sas) = false;
 
