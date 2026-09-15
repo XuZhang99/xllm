@@ -995,21 +995,6 @@ class Glm52ForCausalLM(PyModelBase):
             device=device,
         )
 
-    def _configure_projection_quantization(self, state_dicts: list) -> None:
-        """Select dynamic attention projections for W8A8 checkpoints."""
-        for name, module in list(self.named_modules()):
-            if not isinstance(module, W8A8StaticLinear):
-                continue
-            if W8A8WeightLoader.state_dict_has(state_dicts, name + ".deq_scale"):
-                continue
-            if W8A8WeightLoader.state_dict_has(state_dicts, name + ".weight_scale"):
-                parent, _, attribute = name.rpartition(".")
-                setattr(
-                    self.get_submodule(parent),
-                    attribute,
-                    W8A8DynamicLinear(module.in_features, module.out_features, module.weight.device),
-                )
-
     def load_weights(
         self,
         state_dicts: list,
@@ -1017,7 +1002,6 @@ class Glm52ForCausalLM(PyModelBase):
         tp_size: int,
     ) -> None:
         cfg = self.cfg
-        self._configure_projection_quantization(state_dicts)
         loader = W8A8WeightLoader(self, state_dicts, cfg.tp_size, cfg.tp_rank)
 
         loader.copy_shard("model.embed_tokens.weight", dim=1)

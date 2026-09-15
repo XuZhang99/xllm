@@ -155,7 +155,7 @@ def test_glm_projection_quantization_loads_tp_shards(dynamic: bool, rank: int) -
     original = model.get_submodule(name)
     rows = original.out_features * 2
     tensors = {
-        name + ".weight": torch.arange(rows * original.in_features, dtype=torch.int8).reshape(rows, -1),
+        name + ".weight": torch.arange(rows * original.weight.shape[1], dtype=torch.int8).reshape(rows, -1),
     }
     if dynamic:
         tensors[name + ".weight_scale"] = torch.arange(rows, dtype=torch.float32).reshape(rows, 1) + 1
@@ -164,16 +164,16 @@ def test_glm_projection_quantization_loads_tp_shards(dynamic: bool, rank: int) -
     else:
         tensors[name + ".deq_scale"] = torch.arange(rows, dtype=torch.float32) + 1
         tensors[name + ".quant_bias"] = torch.arange(rows, dtype=torch.int32)
-        tensors[name + ".input_scale"] = torch.ones_like(original.input_scale)
-        tensors[name + ".input_offset"] = torch.zeros_like(original.input_offset)
+        tensors[name + ".input_scale"] = torch.ones(1, dtype=original.input_scale.dtype)
+        tensors[name + ".input_offset"] = torch.zeros(1, dtype=original.input_offset.dtype)
         sharded = ("weight", "deq_scale", "quant_bias")
     state_dict = SimpleNamespace(has=tensors.__contains__, get_tensor=tensors.__getitem__)
-    model._configure_projection_quantization([state_dict])
     projection = model.get_submodule(name)
-    expected_type = glm5_2.W8A8DynamicLinear if dynamic else glm5_2.W8A8StaticLinear
-    assert isinstance(projection, expected_type)
     loader = W8A8WeightLoader(model, [state_dict], 2, rank)
-    loader.load_w8a8_projection("model.layers.0.self_attn.", "q_b_proj", dict.fromkeys(sharded, 0))
+    glm5_2._load_w8a8_attention_projection(
+        loader, projection, "model.layers.0.self_attn.", "q_b_proj", dict.fromkeys(sharded, 0)
+    )
+    assert projection._dynamic_activation is dynamic
     for suffix in sharded:
         expected = tensors[name + "." + suffix].chunk(2, dim=0)[rank]
         torch.testing.assert_close(getattr(projection, suffix), expected)
