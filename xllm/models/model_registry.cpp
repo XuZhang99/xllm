@@ -149,10 +149,12 @@ bool resolve_model_registration(const std::string& model_type,
 #endif
   } else if (model_type == "qwen3" || model_type == "qwen3_moe" ||
              model_type == "deepseek_v32" || model_type == "glm_moe_dsa" ||
-             model_type == "qwen3_vl" || model_type == "deepseek_v32_mtp") {
-    // qwen3/qwen3_moe/deepseek_v32/glm_moe_dsa/qwen3_vl/deepseek_v32_mtp
-    // support both backends. qwen3_vl on TORCH is used by the Python model
-    // executor (--model_impl=python implements its own ViT + deepstack).
+             model_type == "glm_moe_dsa_mtp" || model_type == "qwen3_vl" ||
+             model_type == "deepseek_v32_mtp") {
+    // qwen3/qwen3_moe/deepseek_v32/glm_moe_dsa/glm_moe_dsa_mtp/qwen3_vl/
+    // deepseek_v32_mtp support both backends. qwen3_vl on TORCH is used by
+    // the Python model executor (--model_impl=python implements its own ViT
+    // + deepstack).
   } else if (is_torch_only_model_type(model_type)) {
     if (backend != kTorchBackend) {
       if (error_message != nullptr) {

@@ -58,6 +58,7 @@ class EagerRunner(BaseRunner):
         metadata: AttentionMetadata,
         input_embedding: torch.Tensor | None = None,
         layer_synchronizer: LayerSynchronizer | None = None,
+        mtp_topk_indices: torch.Tensor | None = None,
     ) -> ModelExecutionOutput:
         cp_context = None
         is_mla = self.attention_backend.is_mla
@@ -100,6 +101,8 @@ class EagerRunner(BaseRunner):
                 cp_context=cp_context,
             )
         ):
+            if mtp_topk_indices is not None:
+                return self.model(input_ids, positions, input_embedding, mtp_topk_indices)
             if input_embedding is None:
                 return self.model(input_ids, positions)
             return self.model(input_ids, positions, input_embedding)

@@ -140,6 +140,9 @@ REGISTER_MODEL_ARGS(
       LOAD_ARG_OR(index_topk_freq, "index_topk_freq", 1);
       LOAD_ARG_OR(index_topk_pattern, "index_topk_pattern", "");
       LOAD_ARG_OR(index_skip_topk_offset, "index_skip_topk_offset", 0);
+      LOAD_ARG_OR(indexer_types, "indexer_types", std::vector<std::string>());
+      LOAD_ARG_OR(
+          mlp_layer_types, "mlp_layer_types", std::vector<std::string>());
       LOAD_ARG_OR(index_share_for_mtp_iteration,
                   "index_share_for_mtp_iteration",
                   false);

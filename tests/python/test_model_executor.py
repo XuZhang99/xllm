@@ -192,6 +192,15 @@ class TestNpuGraphBackendResolution:
         config = {"enable_graph": True, "python_graph_backend": "off"}
         assert _resolve_graph_backend(config) == "aclgraph"
 
+    def test_glm_mtp_forces_eager_for_cross_draft_topk_state(self):
+        config = {
+            "model_type": "glm_moe_dsa_mtp",
+            "enable_graph": True,
+            "python_graph_backend": "aclgraph",
+        }
+
+        assert _resolve_graph_backend(config) == "off"
+
 
 # ---------------------------------------------------------------------------
 # Tests: _create_attention_backend dispatch
@@ -1228,6 +1237,34 @@ class TestExecuteRouting:
         result = executor.execute(torch.zeros(1), torch.zeros(1), metadata)
         executor.inductor_runner.execute.assert_called_once()
         assert torch.equal(result, torch.ones(3))
+
+    @patch(
+        "xllm.python.model_executor.executor._create_attention_backend",
+    )
+    def test_mtp_topk_state_routes_to_eager(self, mock_create):
+        mock_create.return_value = StubAttentionBackend()
+        model = _FakeModel(num_layers=1)
+        executor = ModelExecutor(model, {}, max_seqs_per_batch=4)
+        executor.bind_kv_caches([(torch.zeros(1), torch.zeros(1))])
+        executor.inductor_runner = MagicMock()
+        executor.eager_runner = MagicMock()
+        executor.eager_runner.execute.return_value = torch.ones(2)
+        metadata = MagicMock(spec=AttentionMetadata)
+        mtp_topk = torch.zeros((1, 1, 2), dtype=torch.int32)
+        input_ids = torch.zeros(1)
+        positions = torch.zeros(1)
+
+        result = executor.execute(
+            input_ids,
+            positions,
+            metadata,
+            mtp_topk_indices=mtp_topk,
+        )
+
+        executor.inductor_runner.execute.assert_not_called()
+        args = executor.eager_runner.execute.call_args.args
+        assert args == (input_ids, positions, metadata, None, None, mtp_topk)
+        assert torch.equal(result, torch.ones(2))
 
     @patch(
         "xllm.python.model_executor.executor._create_attention_backend",

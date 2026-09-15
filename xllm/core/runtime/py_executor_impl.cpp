@@ -36,6 +36,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUStream.h>
 
+#include "models/llm/npu/mtp_topk_state.h"
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
 
@@ -200,6 +201,20 @@ ModelOutput PyExecutorImpl::run(const torch::Tensor& tokens,
       py::cast(PyAttentionMetadataView(attn_metadata, params));
   py::object input_embedding =
       optional_tensor(params.embedding.input_embedding);
+  py::object mtp_topk_indices = py::none();
+#if defined(USE_NPU)
+  if (params.mtp_topk_state != nullptr) {
+    const auto state =
+        std::dynamic_pointer_cast<const npu::model::NpuMtpTopkState>(
+            params.mtp_topk_state);
+    CHECK(state != nullptr)
+        << "Python NPU model received an incompatible MTP top-k state";
+    mtp_topk_indices = py::cast(state->topk_indices());
+  }
+#else
+  CHECK(params.mtp_topk_state == nullptr)
+      << "Python MTP top-k state is supported only on NPU";
+#endif
 
   // --- VLM: vision encode + embedding merge on image/video prefill steps ---
   // On steps carrying multimodal input, ``params.multimodal.mm_data`` holds the
@@ -283,15 +298,32 @@ ModelOutput PyExecutorImpl::run(const torch::Tensor& tokens,
   // get_input_embeddings above), so the runner takes the 2-arg model() branch
   // and Qwen3VLModel.forward reads _inputs_embeds. positions_arg carries the
   // mRoPE [3,N]->1-D decode collapse.
-  py::object hidden_obj = py_executor_.attr("execute")(
-      tokens, positions_arg, py_metadata, input_embedding, py_sync);
+  py::object hidden_obj = py_executor_.attr("execute")(tokens,
+                                                       positions_arg,
+                                                       py_metadata,
+                                                       input_embedding,
+                                                       py_sync,
+                                                       mtp_topk_indices);
   if (py::isinstance<py::tuple>(hidden_obj)) {
     py::tuple output = hidden_obj.cast<py::tuple>();
-    CHECK_EQ(output.size(), 2) << "Python model tuple output must be "
-                                  "(hidden_states, aux_hidden_states)";
-    return ModelOutput(output[0].cast<torch::Tensor>(),
-                       torch::Tensor(),
-                       output[1].cast<torch::Tensor>());
+    CHECK(output.size() == 2 || output.size() == 3)
+        << "Python model tuple output must be (hidden_states, "
+           "aux_hidden_states) or (hidden_states, aux_hidden_states, "
+           "mtp_topk_indices)";
+    ModelOutput model_output(output[0].cast<torch::Tensor>());
+    if (!output[1].is_none()) {
+      model_output.aux_hidden_states = output[1].cast<torch::Tensor>();
+    }
+    if (output.size() == 3 && !output[2].is_none()) {
+#if defined(USE_NPU)
+      model_output.mtp_topk_state =
+          std::make_shared<npu::model::NpuMtpTopkState>(
+              output[2].cast<torch::Tensor>());
+#else
+      LOG(FATAL) << "Python MTP top-k output is supported only on NPU";
+#endif
+    }
+    return model_output;
   }
   return ModelOutput(hidden_obj.cast<torch::Tensor>());
 }

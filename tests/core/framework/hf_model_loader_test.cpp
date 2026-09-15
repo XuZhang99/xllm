@@ -299,6 +299,29 @@ TEST(HFModelLoaderTest, Qwen3DFlash2AcceptsArrayEosTokenIds) {
     }
   }
 }
+
+TEST(HFModelLoaderTest, GlmMoeDsaMtpPreservesLayerTypeMetadata) {
+  auto loader = ModelRegistry::get_model_args_loader("glm_moe_dsa_mtp");
+  ASSERT_NE(loader, nullptr);
+
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+    {
+      "model_type": "glm_moe_dsa_mtp",
+      "num_hidden_layers": 1,
+      "indexer_types": ["full"],
+      "mlp_layer_types": ["dense"],
+      "index_topk_pattern": "S",
+      "index_share_for_mtp_iteration": true
+    }
+  )json"));
+
+  ModelArgs args;
+  ASSERT_TRUE(loader(reader, &args));
+  EXPECT_EQ(args.indexer_types(), std::vector<std::string>({"full"}));
+  EXPECT_EQ(args.mlp_layer_types(), std::vector<std::string>({"dense"}));
+  EXPECT_EQ(args.index_topk_pattern(), "S");
+}
 TEST(HFModelLoaderTest, DeepseekV4DSparkModelArgsFrom0731Config) {
   auto loader = ModelRegistry::get_model_args_loader("deepseek_v4");
   ASSERT_NE(loader, nullptr);

@@ -32,6 +32,11 @@ from xllm.python.platform import current_platform
 
 
 def _resolve_graph_backend(config: dict) -> str:
+    if config.get("model_type") == "glm_moe_dsa_mtp":
+        # Cross-draft DSA top-k state is row-selected by the C++ scheduler and
+        # changes between MTP steps. Keep this model eager until ACL Graph owns
+        # that additional dynamic input/output contract.
+        return "off"
     graph_backend = str(config.get("python_graph_backend", "off")).lower()
     graph_disabled = graph_backend in ("", "off", "none", "0")
     if graph_disabled and config.get("enable_graph", False):
@@ -282,6 +287,7 @@ class ModelExecutor:
         metadata: AttentionMetadata,
         input_embedding: torch.Tensor | None = None,
         layer_synchronizer: LayerSynchronizer | None = None,
+        mtp_topk_indices: torch.Tensor | None = None,
     ) -> ModelExecutionOutput:
         if not self._kv_bound:
             raise RuntimeError("KV caches are not bound")
@@ -289,7 +295,11 @@ class ModelExecutor:
             raise NotImplementedError("Python GLM5.2 layerwise split is decode-only")
 
         graph_runner = self.decode_graph_runner
-        if graph_runner is not None and graph_runner.can_execute(input_ids, metadata, input_embedding):
+        if (
+            mtp_topk_indices is None
+            and graph_runner is not None
+            and graph_runner.can_execute(input_ids, metadata, input_embedding)
+        ):
             graph_runner.warmup(
                 input_ids,
                 positions,
@@ -297,7 +307,7 @@ class ModelExecutor:
                 input_embedding,
             )
             return graph_runner.execute(input_ids, positions, metadata, input_embedding)
-        if self.inductor_runner is not None:
+        if mtp_topk_indices is None and self.inductor_runner is not None:
             return self.inductor_runner.execute(
                 input_ids,
                 positions,
@@ -311,4 +321,5 @@ class ModelExecutor:
             metadata,
             input_embedding,
             layer_synchronizer,
+            mtp_topk_indices,
         )

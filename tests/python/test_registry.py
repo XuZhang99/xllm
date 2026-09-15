@@ -28,3 +28,10 @@ def test_unsupported_model_fails_before_import(monkeypatch: pytest.MonkeyPatch) 
         registry.get_model_class("qwen3_vl")
 
     import_model.assert_not_called()
+
+
+def test_glm_mtp_checkpoint_names_are_registered() -> None:
+    expected = ("xllm.python.models.glm5_2_mtp", "Glm52MtpForCausalLM")
+
+    assert registry._REGISTRY["GlmMoeDsaMtpForCausalLM"] == expected
+    assert registry._REGISTRY["glm_moe_dsa_mtp"] == expected

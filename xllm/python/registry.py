@@ -122,7 +122,14 @@ def _register_builtin_models() -> None:
     _register_model_path(
         "xllm.python.models.glm5_2",
         "Glm52ForCausalLM",
+        "GlmMoeDsaForCausalLM",
         "glm_moe_dsa",
+    )
+    _register_model_path(
+        "xllm.python.models.glm5_2_mtp",
+        "Glm52MtpForCausalLM",
+        "GlmMoeDsaMtpForCausalLM",
+        "glm_moe_dsa_mtp",
     )
     _register_model_path(
         "xllm.python.models.deepseek_v4",

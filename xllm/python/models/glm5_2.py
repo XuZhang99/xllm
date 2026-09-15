@@ -306,7 +306,7 @@ class Glm52Config:
             intermediate_size=int(pick("intermediate_size", default=12288)),
             vocab_size=int(pick("vocab_size", default=154880)),
             rms_norm_eps=float(pick("rms_norm_eps", default=1e-5)),
-            rope_theta=float(pick("rope_theta", default=1.0e6)),
+            rope_theta=float(rpick("rope_theta", default=1.0e6)),
             max_position_embeddings=max_pe,
             original_max_position_embeddings=original_max,
             rope_scaling_factor=rope_scaling_factor,
@@ -397,7 +397,9 @@ class Glm52Config:
     def _resolve_indexer_types(self) -> None:
         """Derive per-layer indexer mode (full/shared)."""
         if self.indexer_types is not None:
-            return
+            if len(self.indexer_types) == self.n_layers:
+                return
+            self.indexer_types = None
         pattern = self.index_topk_pattern
         if pattern:
             if isinstance(pattern, str):
@@ -414,7 +416,9 @@ class Glm52Config:
     def _resolve_mlp_layer_types(self) -> None:
         """Derive per-layer MLP mode (dense/sparse)."""
         if self.mlp_layer_types is not None:
-            return
+            if len(self.mlp_layer_types) == self.n_layers:
+                return
+            self.mlp_layer_types = None
         n_dense = min(self.first_k_dense_replace, self.n_layers)
         self.mlp_layer_types = ["dense"] * n_dense + ["sparse"] * (self.n_layers - n_dense)
 
@@ -522,8 +526,13 @@ class Glm52MLAAttention(Attention):
             torch.empty(num_heads, kv_lora, v_head, dtype=dtype, device=device),
             persistent=False,
         )
+        # MTP shared layers need a real indexer for the first draft step. The
+        # native executor disables top-k reuse for that step, then reuses the
+        # produced indices on later steps.
+        is_mtp_topk_fallback = cfg.model_type.endswith("_mtp") and cfg.index_share_for_mtp_iteration
         self.is_shared = (
-            cfg.indexer_types is not None
+            not is_mtp_topk_fallback
+            and cfg.indexer_types is not None
             and layer_id < len(cfg.indexer_types)
             and cfg.indexer_types[layer_id] == "shared"
         )
@@ -554,6 +563,7 @@ class Glm52MLAAttention(Attention):
         positions: torch.Tensor,
         cos_sin_cache: torch.Tensor,
         prev_topk_indices: torch.Tensor | None = None,
+        reuse_topk_indices: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         num_tokens = hidden.shape[0]
         q_a = self.q_a_proj(hidden)
@@ -566,7 +576,15 @@ class Glm52MLAAttention(Attention):
         )
         layer_owner = self.layer_id % self.cfg.layerwise_split_size
         owns_layer_cache = self.cfg.layerwise_split_rank == layer_owner
-        if self.indexer is not None:
+        if reuse_topk_indices:
+            if prev_topk_indices is None:
+                raise ValueError("MTP DSA top-k reuse requires indices from the previous draft step")
+            if self.indexer is not None:
+                ctx = backend.mla_index_context(self)
+                if not layerwise or owns_layer_cache:
+                    self.indexer._update_index_cache(hidden, positions, ctx, cos_sin_cache)
+            topk = prev_topk_indices
+        elif self.indexer is not None:
             ctx = backend.mla_index_context(self)
             if layerwise:
                 if owns_layer_cache:
@@ -715,6 +733,38 @@ class Glm52Indexer(nn.Module):
         )
         return q, q_scale, weights
 
+    def _update_index_cache(
+        self,
+        cache_hidden: torch.Tensor,
+        cache_positions: torch.Tensor,
+        ctx: MlaIndexContext,
+        cos_sin_cache: torch.Tensor,
+    ) -> None:
+        k = self.wk(cache_hidden)
+        k = self.k_norm(k)
+        k_pe, k_nope = torch.split(k, [self.rope_dim, self.head_dim - self.rope_dim], dim=-1)
+        if self.indexer_rope_interleave:
+            k_cos, k_sin = _gather_interleave_cos_sin(cos_sin_cache, cache_positions)
+            k_pe = _interleave_rope_with(k_pe.unsqueeze(1), k_cos, k_sin).squeeze(1)
+        else:
+            k_pe = _apply_half_rope(cos_sin_cache, k_pe.unsqueeze(1), cache_positions).squeeze(1)
+        k = torch.cat([k_pe, k_nope], dim=-1)
+        if ctx.cp_context is not None:
+            # Only the padded K rows obey the equal-size CP gather contract.
+            k = cp_gather_kv(k, ctx.cp_context).contiguous()
+
+        index_cache = ctx.index_cache
+        index_cache_scale = ctx.index_cache_scale
+        k_scale = None
+        use_quant_indexer = index_cache.dtype == torch.int8 and index_cache_scale is not None
+        if use_quant_indexer:
+            rotation_scale = self.head_dim**-0.5
+            k = torch.matmul(k, self.hadamard) * rotation_scale
+            k, k_scale = kernels.dynamic_quant(k)
+            assert k_scale is not None
+            k_scale = k_scale.unsqueeze(-1).to(torch.float16)
+        ctx.update_index_cache(k, k_scale)
+
     def select_qli(
         self,
         hidden: torch.Tensor,
@@ -729,31 +779,10 @@ class Glm52Indexer(nn.Module):
         actual_seq_kv = ctx.actual_seq_kv
         cache_hidden = hidden if cache_hidden is None else cache_hidden
         cache_positions = positions if cache_positions is None else cache_positions
-        k = self.wk(cache_hidden)
-        k = self.k_norm(k)
-        k_pe, k_nope = torch.split(k, [self.rope_dim, self.head_dim - self.rope_dim], dim=-1)
-        if self.indexer_rope_interleave:
-            k_cos, k_sin = _gather_interleave_cos_sin(cos_sin_cache, cache_positions)
-            k_pe = _interleave_rope_with(k_pe.unsqueeze(1), k_cos, k_sin).squeeze(1)
-        else:
-            k_pe = _apply_half_rope(cos_sin_cache, k_pe.unsqueeze(1), cache_positions).squeeze(1)
-        k = torch.cat([k_pe, k_nope], dim=-1)
-        if ctx.cp_context is not None:
-            # Q/weights already contain only this rank's real query rows;
-            # only the padded K rows obey the equal-size CP gather contract.
-            k = cp_gather_kv(k, ctx.cp_context).contiguous()
-
+        self._update_index_cache(cache_hidden, cache_positions, ctx, cos_sin_cache)
         index_cache = ctx.index_cache
         index_cache_scale = ctx.index_cache_scale
         use_quant_indexer = index_cache.dtype == torch.int8 and index_cache_scale is not None
-        k_scale = None
-        if use_quant_indexer:
-            rotation_scale = self.head_dim**-0.5
-            k = torch.matmul(k, self.hadamard) * rotation_scale
-            k, k_scale = kernels.dynamic_quant(k)
-            assert k_scale is not None
-            k_scale = k_scale.unsqueeze(-1).to(torch.float16)
-        ctx.update_index_cache(k, k_scale)
         index_cache, index_cache_scale, block_table = ctx.materialize_index_cache()
         if ctx.cp_context is not None and ctx.cp_context.query_index.numel() == 0:
             # Other ranks still need this rank's keys/cache materialization.
@@ -775,6 +804,7 @@ class Glm52Indexer(nn.Module):
         q = torch.cat([q_pe, q_nope], dim=-1)
         weights = self.weights_proj(hidden)
         if use_quant_indexer:
+            rotation_scale = self.head_dim**-0.5
             q = torch.matmul(q, self.hadamard) * rotation_scale
             q, q_scale = kernels.dynamic_quant(q)
             assert q_scale is not None
@@ -880,13 +910,20 @@ class Glm52DecoderLayer(nn.Module):
         positions: torch.Tensor,
         cos_sin_cache: torch.Tensor,
         prev_topk_indices: torch.Tensor | None = None,
+        reuse_topk_indices: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if residual is None:
             residual = hidden
             hidden = self.input_layernorm(hidden)
         else:
             hidden, residual = self.input_layernorm(hidden, residual)
-        hidden, topk_indices = self.self_attn(hidden, positions, cos_sin_cache, prev_topk_indices)
+        hidden, topk_indices = self.self_attn(
+            hidden,
+            positions,
+            cos_sin_cache,
+            prev_topk_indices,
+            reuse_topk_indices,
+        )
         hidden, residual = self.post_attention_layernorm(hidden, residual)
         hidden = self.mlp(hidden)
         return hidden, residual, topk_indices
@@ -947,7 +984,7 @@ class Glm52Model(nn.Module):
 class Glm52ForCausalLM(PyModelBase):
     """GLM-5.2 causal LM. Registered under ``model_type='glm_moe_dsa'``."""
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict, build_model: bool = True) -> None:
         super().__init__()
         self.cfg = Glm52Config.from_dict(config)
         self.cfg.tp_size = int(config.get("tp_size", 1))
@@ -970,14 +1007,21 @@ class Glm52ForCausalLM(PyModelBase):
         self.device = device
         tp = self.cfg.tp_size
         assert self.cfg.vocab_size % tp == 0
-        self.model = Glm52Model(self.cfg, dtype, device)
+        self.model: nn.Module | None = None
+        self.lm_head: nn.Module | None = None
+        if build_model:
+            self._build_model()
+
+    def _build_model(self) -> None:
+        tp = self.cfg.tp_size
+        self.model = Glm52Model(self.cfg, self.dtype, self.device)
         self.lm_head = ColumnParallelLinear(
             self.cfg.hidden_size,
             self.cfg.vocab_size // tp,
             tp,
             gather_output=True,
-            dtype=dtype,
-            device=device,
+            dtype=self.dtype,
+            device=self.device,
         )
 
     def load_weights(
@@ -985,11 +1029,18 @@ class Glm52ForCausalLM(PyModelBase):
         state_dicts: list,
         tp_rank: int,
         tp_size: int,
+        load_lm_head: bool = True,
+        load_embedding: bool = True,
+        loader: W8A8WeightLoader | None = None,
     ) -> None:
         cfg = self.cfg
-        loader = W8A8WeightLoader(self, state_dicts, cfg.tp_size, cfg.tp_rank)
+        if loader is None:
+            loader = W8A8WeightLoader(self, state_dicts, cfg.tp_size, cfg.tp_rank)
+        if self.model is None:
+            raise RuntimeError("GLM model body must be built before loading weights")
 
-        loader.copy_shard("model.embed_tokens.weight", dim=1)
+        if load_embedding:
+            loader.copy_shard("model.embed_tokens.weight", dim=1)
 
         for i in range(cfg.n_layers):
             p = f"model.layers.{i}."
@@ -1034,4 +1085,5 @@ class Glm52ForCausalLM(PyModelBase):
             self.model.layers[i].mlp.load_from_checkpoint(loader, p + "mlp.")
 
         loader.copy_replicated("model.norm.weight")
-        loader.copy_shard("lm_head.weight", dim=0)
+        if load_lm_head:
+            loader.copy_shard("lm_head.weight", dim=0)

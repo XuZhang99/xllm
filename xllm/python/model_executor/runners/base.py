@@ -26,7 +26,9 @@ from xllm.python.attention.backend import (
 )
 from xllm.python.model_executor.forward_context import LayerSynchronizer
 
-ModelExecutionOutput = torch.Tensor | tuple[torch.Tensor, torch.Tensor]
+ModelExecutionOutput = (
+    torch.Tensor | tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]
+)
 
 
 class BaseRunner(ABC):

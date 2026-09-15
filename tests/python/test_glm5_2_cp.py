@@ -442,3 +442,70 @@ def test_glm_attention_reduces_o_projection_in_fp32_for_tensor_parallel() -> Non
         (projected.reshape(2, 2).float() + reduction_delta).to(projected.dtype),
     )
     assert topk is previous_topk
+
+
+def test_glm_attention_reuse_updates_index_cache() -> None:
+    attention = glm5_2.Glm52MLAAttention.__new__(glm5_2.Glm52MLAAttention)
+    nn.Module.__init__(attention)
+    attention.q_a_proj = nn.Identity()
+    attention.q_a_layernorm = nn.Identity()
+    attention.q_b_proj = nn.Identity()
+    attention.kv_a_proj_with_mqa = nn.Identity()
+    attention.kv_a_layernorm = nn.Identity()
+    attention.o_proj = nn.Identity()
+    attention.num_heads_local = 1
+    attention.qk_nope_head_dim = 1
+    attention.qk_rope_head_dim = 1
+    attention.kv_lora_rank = 1
+    attention.v_head_dim = 2
+    attention.layer_id = 0
+    attention.cfg = SimpleNamespace(
+        tp_size=1,
+        layerwise_split_size=1,
+        layerwise_split_rank=0,
+    )
+    attention.W_UK = torch.ones(1, 1, 1)
+    attention.W_UV = torch.ones(1, 1, 2)
+    attention.indexer = MagicMock()
+    hidden = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    positions = torch.tensor([0, 1])
+    cos_sin_cache = torch.empty(0)
+    previous_topk = torch.tensor([[0], [1]])
+    projected = torch.tensor([[[5.0, 6.0]], [[7.0, 8.0]]])
+    backend = MagicMock()
+    backend.mla_index_context.return_value = MagicMock()
+    backend.execute_mla.return_value = projected
+
+    with (
+        patch.object(
+            glm5_2,
+            "get_forward_context",
+            return_value=SimpleNamespace(
+                attention_backend=backend,
+                cp_context=None,
+                metadata=SimpleNamespace(is_prefill=False, is_chunked_prefill=False),
+            ),
+        ),
+        patch.object(
+            glm5_2,
+            "_gather_interleave_cos_sin",
+            return_value=(torch.empty(0), torch.empty(0)),
+        ),
+        patch.object(glm5_2, "_interleave_rope_with", side_effect=lambda value, *_args: value),
+        patch.object(glm5_2.kernels, "batch_matmul_transpose", return_value=projected, create=True),
+    ):
+        _, topk = attention(
+            hidden,
+            positions,
+            cos_sin_cache,
+            previous_topk,
+            reuse_topk_indices=True,
+        )
+
+    attention.indexer._update_index_cache.assert_called_once()
+    cache_args = attention.indexer._update_index_cache.call_args.args
+    assert cache_args[0] is hidden
+    assert cache_args[1] is positions
+    assert cache_args[2] is backend.mla_index_context.return_value
+    assert cache_args[3] is cos_sin_cache
+    assert topk is previous_topk
