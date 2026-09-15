@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
 #include <minja/chat-template.hpp>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -42,12 +43,14 @@ class JinjaChatTemplate : public ChatTemplate {
       const nlohmann::ordered_json& chat_template_kwargs) const override;
 
  protected:
-  // apply the template to the values in the json object
-  std::optional<std::string> apply(nlohmann::ordered_json& messages) const;
+  // Renders already-converted JSON documents. `messages` and `tools` are sinks:
+  // they are handed to the template engine by move, so callers that own them
+  // should std::move them in to avoid a deep copy of the conversation.
+  std::optional<std::string> apply(nlohmann::ordered_json messages) const;
 
   std::optional<std::string> apply(
-      nlohmann::ordered_json& messages,
-      const nlohmann::ordered_json& tools,
+      nlohmann::ordered_json messages,
+      nlohmann::ordered_json tools,
       const nlohmann::ordered_json& chat_template_kwargs) const;
 
   std::optional<std::string> apply(
@@ -56,9 +59,27 @@ class JinjaChatTemplate : public ChatTemplate {
 
   nlohmann::ordered_json get_mm_content(const MMContentVec& vec) const;
 
+  // Whether minja::chat_template::apply would rewrite these inputs before
+  // rendering (system-role, tools, tool-call, tool-response, object-argument
+  // or typed-content polyfills), given what the template natively supports.
+  bool needs_polyfills(const nlohmann::ordered_json& messages,
+                       const nlohmann::ordered_json& tools) const;
+
  private:
+  // Renders inputs the template supports natively. Builds the same context
+  // minja::chat_template::apply does, but on top of the builtin globals
+  // constructed once in the constructor instead of on every render.
+  std::string render_native(
+      const nlohmann::ordered_json& messages,
+      const nlohmann::ordered_json& tools,
+      const nlohmann::ordered_json& chat_template_kwargs) const;
+
   TokenizerArgs args_;
   std::unique_ptr<minja::chat_template> template_;
+  // The parsed template and the builtin globals it renders against; both are
+  // read-only after construction and shared by every render.
+  std::shared_ptr<minja::TemplateNode> template_root_;
+  std::shared_ptr<minja::Context> builtins_;
 };
 
 }  // namespace xllm

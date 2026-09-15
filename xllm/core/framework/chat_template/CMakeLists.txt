@@ -1,3 +1,4 @@
+include(cc_binary)
 include(cc_library)
 
 # Base class (header-only, no circular deps)
@@ -70,4 +71,18 @@ cc_library (
     nlohmann_json::nlohmann_json
     glog::glog
     gflags
+)
+
+# Request-path hop 2: the chat-template render LLMRequestFactory performs on a
+# real-world (Qwen2.5) template.
+cc_binary(
+  NAME
+    chat_template_benchmark
+  SRCS
+    chat_template_benchmark.cpp
+  DEPS
+    :chat_template
+    nlohmann_json::nlohmann_json
+    benchmark::benchmark
+    benchmark::benchmark_main
 )

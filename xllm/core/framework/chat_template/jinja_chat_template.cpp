@@ -19,12 +19,34 @@ limitations under the License.
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <utility>
 
 namespace xllm {
 
 namespace {
+
+// The `strftime_now(format)` global minja::chat_template::apply defines for
+// every render, bound to the render's wall-clock time.
+minja::Value make_strftime_now() {
+  const auto now = std::chrono::system_clock::now();
+  return minja::Value::callable(
+      [now](const std::shared_ptr<minja::Context>& /*context*/,
+            minja::ArgumentsValue& args) -> minja::Value {
+        args.expectArgs("strftime_now", {1, 1}, {0, 0});
+        const auto format = args.args[0].get<std::string>();
+        const std::time_t time = std::chrono::system_clock::to_time_t(now);
+        const std::tm local_time = *std::localtime(&time);
+        std::ostringstream out;
+        out << std::put_time(&local_time, format.c_str());
+        return minja::Value(out.str());
+      });
+}
 const std::unordered_map<std::string, std::string> type_to_modality = {
     {"video_url", "video"},
     {"image_url", "image"},
@@ -99,6 +121,14 @@ JinjaChatTemplate::JinjaChatTemplate(const TokenizerArgs& args) : args_(args) {
         normalize_minja_tests(args_.chat_template()),
         args_.bos_token(),
         args_.eos_token());
+    // Same parse options minja::chat_template uses for its own root.
+    template_root_ = minja::Parser::parse(template_->source(),
+                                          {/*trim_blocks=*/true,
+                                           /*lstrip_blocks=*/true,
+                                           /*keep_trailing_newline=*/false});
+    // minja rebuilds its ~30 builtin callables for every render; they are
+    // immutable, so build them once and share them across renders.
+    builtins_ = minja::Context::builtins();
     LOG(INFO) << "Jinja chat template init succeed.";
 
   } catch (const std::exception& e) {
@@ -123,11 +153,12 @@ std::optional<std::string> JinjaChatTemplate::apply(
 }
 
 std::optional<std::string> JinjaChatTemplate::apply(
-    nlohmann::ordered_json& messages) const {
+    nlohmann::ordered_json messages) const {
   // Call the overloaded method with empty tools
-  nlohmann::ordered_json empty_tools = nlohmann::json::array();
   const nlohmann::ordered_json chat_template_kwargs = nlohmann::json::object();
-  return apply(messages, empty_tools, chat_template_kwargs);
+  return apply(std::move(messages),
+               nlohmann::ordered_json::array(),
+               chat_template_kwargs);
 }
 
 std::optional<std::string> JinjaChatTemplate::apply(
@@ -186,17 +217,26 @@ std::optional<std::string> JinjaChatTemplate::apply(
              {"parameters", json_tool.function.parameters}}}});
   }
   // apply the template
-  return apply(messages_json, tools_json, chat_template_kwargs);
+  return apply(
+      std::move(messages_json), std::move(tools_json), chat_template_kwargs);
 }
 
 std::optional<std::string> JinjaChatTemplate::apply(
-    nlohmann::ordered_json& messages,
-    const nlohmann::ordered_json& tools,
+    nlohmann::ordered_json messages,
+    nlohmann::ordered_json tools,
     const nlohmann::ordered_json& chat_template_kwargs) const {
   try {
+    if (!needs_polyfills(messages, tools)) {
+      return render_native(messages, tools, chat_template_kwargs);
+    }
+
+    // The template cannot take these inputs as they are; let minja rewrite
+    // them into a shape it does support.
     minja::chat_template_inputs input;
-    input.messages = messages;
-    input.tools = tools;
+    // The documents were built for this call alone; moving them in spares a
+    // deep copy of every message body on the request path.
+    input.messages = std::move(messages);
+    input.tools = std::move(tools);
     input.add_generation_prompt = true;
     input.extra_context = chat_template_kwargs;
     minja::chat_template_options options;
@@ -206,6 +246,61 @@ std::optional<std::string> JinjaChatTemplate::apply(
     LOG(ERROR) << "Failed to apply chat template: " << e.what();
     return std::nullopt;
   }
+}
+
+bool JinjaChatTemplate::needs_polyfills(
+    const nlohmann::ordered_json& messages,
+    const nlohmann::ordered_json& tools) const {
+  // Mirrors the decision in minja::chat_template::apply with its default
+  // chat_template_options (every polyfill enabled).
+  const minja::chat_template_caps& caps = template_->original_caps();
+  const bool has_tools = tools.is_array() && !tools.empty();
+  bool has_tool_calls = false;
+  bool has_tool_responses = false;
+  bool has_string_content = false;
+  for (const auto& message : messages) {
+    if (const auto it = message.find("tool_calls");
+        it != message.end() && !it->is_null()) {
+      has_tool_calls = true;
+    }
+    if (const auto it = message.find("role");
+        it != message.end() && *it == "tool") {
+      has_tool_responses = true;
+    }
+    if (const auto it = message.find("content");
+        it != message.end() && it->is_string()) {
+      has_string_content = true;
+    }
+  }
+  return !caps.supports_system_role || (has_tools && !caps.supports_tools) ||
+         (has_tool_calls && !caps.supports_tool_calls) ||
+         (has_tool_responses && !caps.supports_tool_responses) ||
+         (has_tool_calls && caps.requires_object_arguments) ||
+         (has_string_content && caps.requires_typed_content);
+}
+
+std::string JinjaChatTemplate::render_native(
+    const nlohmann::ordered_json& messages,
+    const nlohmann::ordered_json& tools,
+    const nlohmann::ordered_json& chat_template_kwargs) const {
+  // The context minja::chat_template::apply assembles on its no-polyfill path,
+  // minus its copies of the message list, on the shared builtin globals.
+  minja::Value root = minja::Value::object();
+  root.set("messages", minja::Value(messages));
+  root.set("add_generation_prompt", minja::Value(true));
+  auto context = minja::Context::make(std::move(root), builtins_);
+  context->set("bos_token", minja::Value(template_->bos_token()));
+  context->set("eos_token", minja::Value(template_->eos_token()));
+  context->set("strftime_now", make_strftime_now());
+  if (!tools.is_null()) {
+    context->set("tools", minja::Value(tools));
+  }
+  if (!chat_template_kwargs.is_null()) {
+    for (const auto& [key, value] : chat_template_kwargs.items()) {
+      context->set(key, minja::Value(value));
+    }
+  }
+  return template_root_->render(context);
 }
 
 nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
@@ -226,7 +321,7 @@ nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
       item_json[item.type] = "mm place holder";
     }
 
-    content_json.emplace_back(item_json);
+    content_json.emplace_back(std::move(item_json));
   }
 
   return content_json;
