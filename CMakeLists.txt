@@ -338,6 +338,16 @@ else()
   project("xllm" LANGUAGES C CXX)
 endif()
 
+# CMake's Ninja generator uses the built-in ELF RPATH editor when it needs to
+# update a target's RPATH during installation. Some ARM toolchains identify the
+# compiler ABI as ELF without initializing CMAKE_EXECUTABLE_FORMAT, which
+# otherwise makes Ninja reject every installed executable target.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
+   AND CMAKE_CXX_COMPILER_ABI STREQUAL "ELF"
+   AND NOT CMAKE_EXECUTABLE_FORMAT)
+  set(CMAKE_EXECUTABLE_FORMAT "ELF")
+endif()
+
 # ---------------------------------------------------------------------------
 # ARM architecture optimization (must be after project() so CXX is enabled).
 # -march=native lets the compiler use NEON, SVE, LSE atomics, crypto, etc.
