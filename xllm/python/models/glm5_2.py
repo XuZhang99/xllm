@@ -40,6 +40,7 @@ import torch.nn as nn
 
 from xllm.python import distributed, kernels
 from xllm.python.attention.backend import MlaIndexContext
+from xllm.python.device_stream import get_device_stream
 
 # The AICPU tiling of ``aclnnQuantLightningIndexer`` requires
 # ``num_heads_q / num_heads_k == 64``. GLM-5.2 uses ``index_n_heads=32`` and
@@ -190,16 +191,6 @@ def _load_w8a8_attention_projection(
         shard_dims,
         dynamic_activation=dynamic_activation,
     )
-_DSA_INDEXER_STREAMS: dict[tuple[str, int | None], torch.npu.Stream] = {}
-
-
-def _dsa_indexer_stream(device: torch.device) -> torch.npu.Stream:
-    key = (device.type, device.index)
-    stream = _DSA_INDEXER_STREAMS.get(key)
-    if stream is None:
-        stream = torch.npu.Stream(device=device)
-        _DSA_INDEXER_STREAMS[key] = stream
-    return stream
 
 
 @dataclass
@@ -544,13 +535,8 @@ class Glm52MLAAttention(Attention):
         if not self.is_shared:
             self.indexer = Glm52Indexer(cfg, dtype, device)
         self._indexer_stream = None
-        if (
-            self.indexer is not None
-            and cfg.enable_dsa_multi_stream
-            and hasattr(torch, "npu")
-            and device.type in ("npu", "privateuseone")
-        ):
-            self._indexer_stream = _dsa_indexer_stream(device)
+        if self.indexer is not None and cfg.enable_dsa_multi_stream:
+            self._indexer_stream = get_device_stream(device, "dsa_indexer")
 
     def process_weights_after_loading(self) -> None:
         self.q_a_proj.process_weights_after_loading()
@@ -590,10 +576,10 @@ class Glm52MLAAttention(Attention):
         if self.indexer is not None:
             ctx = backend.mla_index_context(self)
             if self._indexer_stream is not None:
-                self._indexer_stream.wait_stream(torch.npu.current_stream())
+                self._indexer_stream.wait_for_current()
             # Keep CP cache gathers and layerwise top-k broadcasts on the
             # indexer stream so their results are ready at the same join.
-            with torch.npu.stream(self._indexer_stream) if self._indexer_stream is not None else nullcontext():
+            with self._indexer_stream.activate() if self._indexer_stream is not None else nullcontext():
                 if layerwise:
                     if owns_layer_cache:
                         topk = self.indexer.select_qli(hidden, q_c, positions, ctx, cos_sin_cache)
@@ -645,7 +631,7 @@ class Glm52MLAAttention(Attention):
         k_pe_3d = k_pe.view(num_tokens, 1, self.qk_rope_head_dim)
 
         if self._indexer_stream is not None:
-            torch.npu.current_stream().wait_stream(self._indexer_stream)
+            self._indexer_stream.join()
 
         if layerwise:
             local_query = torch.cat((q_latent, q_pe), dim=-1)

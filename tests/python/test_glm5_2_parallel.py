@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+from xllm.python.device_stream import DeviceStream, get_device_stream
 from xllm.python.models import glm5_2
 from xllm.python.models.glm5_2 import Glm52Config, Glm52ForCausalLM
 from xllm.python.models.weight_utils import W8A8WeightLoader
@@ -231,11 +232,13 @@ def test_glm_dsa_indexer_stream_forks_and_joins_before_attention(monkeypatch: py
     indexer_stream = MagicMock()
     main_stream = MagicMock()
     main_stream.wait_stream.side_effect = lambda _stream: call_order.append("join")
-    attention._indexer_stream = indexer_stream
     fake_npu = SimpleNamespace(
         current_stream=MagicMock(return_value=main_stream),
         stream=MagicMock(return_value=nullcontext()),
     )
+
+    fake_npu.Stream = MagicMock(return_value=indexer_stream)
+    attention._indexer_stream = DeviceStream(torch.device("cpu"), fake_npu)
 
     backend = MagicMock()
     backend.mla_index_context.return_value = object()
@@ -260,7 +263,6 @@ def test_glm_dsa_indexer_stream_forks_and_joins_before_attention(monkeypatch: py
         return torch.zeros(2, cfg_values["num_attention_heads"], cfg_values["kv_lora_rank"])
 
     backend.execute_mla.side_effect = _execute_mla
-    monkeypatch.setattr(torch, "npu", fake_npu, raising=False)
     monkeypatch.setattr(
         glm5_2,
         "get_forward_context",
@@ -410,7 +412,7 @@ def test_glm_dsa_multi_stream_matches_single_stream_on_npu(
     expected_output, expected_topk = attention(hidden, positions, cos_sin_cache)
     torch.npu.synchronize()
 
-    attention._indexer_stream = torch.npu.Stream(device=device)
+    attention._indexer_stream = get_device_stream(device, "test_glm_dsa")
     actual_output, actual_topk = attention(hidden, positions, cos_sin_cache)
     torch.npu.synchronize()
 
