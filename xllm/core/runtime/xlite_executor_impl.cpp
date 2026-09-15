@@ -52,13 +52,13 @@ ModelOutput XliteExecutorImpl::run(const torch::Tensor& tokens,
         max_tokens = static_cast<int64_t>(v);
       }
     }
-    // dp_rank = global_rank / attn_tp, attn_tp = world / dp_size.
+    // dp_rank = global_rank / attn_tp, complementing XliteTpRank (rank %
+    // attn_tp).
+    const ParallelArgs& pa = holder->parallel();
     const int32_t dp_size = static_cast<int32_t>(dp_nums.size());
-    const int32_t world =
-        options_.world_size() > 0 ? options_.world_size() : dp_size;
-    const int32_t attn_tp = dp_size > 0 ? world / dp_size : 1;
+    const int32_t attn_tp = static_cast<int32_t>(xlite::XliteTpSize(pa));
     const int32_t dp_rank =
-        attn_tp > 0 ? static_cast<int32_t>(options_.server_idx()) / attn_tp : 0;
+        attn_tp > 0 ? static_cast<int32_t>(pa.rank()) / attn_tp : 0;
     if (dp_rank >= 0 && dp_rank < dp_size) {
       real_tokens = static_cast<int64_t>(dp_nums[dp_rank]);
     }
@@ -121,7 +121,12 @@ ModelOutput XliteExecutorImpl::run(const torch::Tensor& tokens,
     xlite::InitXTensor(kv_buf_[i][0], kv_caches[i].get_k_cache());
     xlite::InitXTensor(kv_buf_[i][1], kv_caches[i].get_v_cache());
     if (is_dsa) {
-      xlite::InitXTensor(kv_buf_[i][2], kv_caches[i].get_index_cache());
+      // Shared DSA layers elide index-cache pages (reuse prev full layer's
+      // top-k); GVirt reads [2] only on full indexer layers.
+      torch::Tensor index_cache = kv_caches[i].get_index_cache();
+      if (index_cache.defined()) {
+        xlite::InitXTensor(kv_buf_[i][2], index_cache);
+      }
     }
   }
 
