@@ -65,6 +65,7 @@ def _indexer() -> glm5_2.Glm52Indexer:
         indexer_rope_interleave=False,
     )
     indexer = glm5_2.Glm52Indexer(cfg, torch.float32, torch.device("cpu"))
+    indexer.wq_b._set_dynamic_activation(False)
     with torch.no_grad():
         indexer.wq_b.weight.copy_(torch.eye(2, dtype=torch.int8))
         indexer.wq_b.deq_scale.fill_(1)

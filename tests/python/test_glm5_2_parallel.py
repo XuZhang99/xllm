@@ -184,6 +184,7 @@ def test_invalid_glm_parallel_topology_is_rejected(overrides: dict, message: str
 
 class _RecordingLoader(W8A8WeightLoader):
     latest: _RecordingLoader | None = None
+    dynamic_activation = False
 
     def __init__(self, model, state_dicts, tp_size: int, tp_rank: int) -> None:
         super().__init__(model, state_dicts, tp_size, tp_rank)
@@ -211,8 +212,19 @@ class _RecordingLoader(W8A8WeightLoader):
         self.loaded.append(name)
         assert tensor.is_contiguous()
 
-    def load_w8a8_projection(self, prefix: str, proj: str, _shard_dims: dict | None = None) -> None:
+    def load_compatible_w8a8_projection(
+        self,
+        prefix: str,
+        proj: str,
+        _shard_dims: dict | None = None,
+        dynamic_activation: bool | None = None,
+    ) -> bool:
         self.loaded.append(prefix + proj)
+        assert dynamic_activation is self.dynamic_activation
+        return self.dynamic_activation
+
+    def w8a8_projection_uses_dynamic_activation(self, prefix: str, proj: str) -> bool:
+        return self.dynamic_activation
 
     def load_w8a8_mlp(
         self,
@@ -223,6 +235,63 @@ class _RecordingLoader(W8A8WeightLoader):
         self.loaded.append(prefix)
         if ".shared_experts." in prefix:
             self.shared_shards.append((prefix, world, rank))
+
+
+class _TensorStateDict:
+    def __init__(self, tensors: dict[str, torch.Tensor]) -> None:
+        self._tensors = tensors
+
+    def has(self, name: str) -> bool:
+        return name in self._tensors
+
+    def get_tensor(self, name: str) -> torch.Tensor:
+        return self._tensors[name]
+
+
+@pytest.mark.parametrize("dynamic_activation", [False, True])
+def test_compatible_attention_loader_allocates_only_selected_quantization(dynamic_activation: bool) -> None:
+    projection = glm5_2._W8A8AttentionLinear(4, 6, torch.device("cpu"))
+    model = torch.nn.Module()
+    model.proj = projection
+    tensors = {"proj.weight": torch.zeros(6, 4, dtype=torch.int8)}
+    if dynamic_activation:
+        tensors.update(
+            {
+                "proj.weight_scale": torch.ones(6, 1),
+                "proj.weight_offset": torch.zeros(6, 1),
+            }
+        )
+    else:
+        tensors.update(
+            {
+                "proj.deq_scale": torch.ones(6),
+                "proj.quant_bias": torch.zeros(6, dtype=torch.int32),
+                "proj.input_scale": torch.ones(1, dtype=torch.bfloat16),
+                "proj.input_offset": torch.zeros(1, dtype=torch.bfloat16),
+            }
+        )
+    loader = W8A8WeightLoader(model, [_TensorStateDict(tensors)], tp_size=1, tp_rank=0)
+
+    selected_dynamic = loader.w8a8_projection_uses_dynamic_activation("", "proj")
+    projection._set_dynamic_activation(selected_dynamic)
+    loader.load_compatible_w8a8_projection("", "proj", dynamic_activation=selected_dynamic)
+
+    assert selected_dynamic is dynamic_activation
+    assert torch.equal(projection.weight, tensors["proj.weight"])
+    if dynamic_activation:
+        assert projection.weight_scale.numel() == projection.out_features
+        assert projection.weight_offset.numel() == projection.out_features
+        assert projection.deq_scale.numel() == 0
+        assert projection.quant_bias.numel() == 0
+        assert projection.input_scale.numel() == 0
+        assert projection.input_offset.numel() == 0
+    else:
+        assert projection.weight_scale.numel() == 0
+        assert projection.weight_offset.numel() == 0
+        assert projection.deq_scale.numel() == projection.out_features
+        assert projection.quant_bias.numel() == projection.out_features
+        assert projection.input_scale.numel() == 1
+        assert projection.input_offset.numel() == 1
 
 
 def test_glm_weight_loader_reads_only_local_ep_experts(monkeypatch) -> None:
@@ -262,3 +331,48 @@ def test_glm_weight_loader_shards_proper_divisor_ep_with_moe_tp(monkeypatch) -> 
     assert expert_names
     assert all(any(f".experts.{expert}." in name for expert in range(4, 8)) for name in expert_names)
     assert loader.shared_shards == [("model.layers.0.mlp.shared_experts.", 2, 1)]
+
+
+@pytest.mark.parametrize("dynamic_activation", [False, True])
+def test_glm_attention_selects_checkpoint_quantization(
+    dynamic_activation: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = Glm52ForCausalLM(_config(ep_rank=2))
+    attention = model.model.layers[0].self_attn
+    attention.process_weights_after_loading = MagicMock()
+    model.model.layers[0].mlp.process_experts_w13_after_loading = MagicMock()
+    model.model.layers[0].mlp.process_experts_w2_after_loading = MagicMock()
+    model.model.layers[0].mlp.shared_experts.process_weights_after_loading = MagicMock()
+    monkeypatch.setattr(_RecordingLoader, "dynamic_activation", dynamic_activation)
+    monkeypatch.setattr(glm5_2, "W8A8WeightLoader", _RecordingLoader)
+
+    model.load_weights([], tp_rank=0, tp_size=2)
+
+    assert attention.q_a_proj._dynamic_activation is dynamic_activation
+    assert attention.q_b_proj._dynamic_activation is dynamic_activation
+    assert attention.kv_a_proj_with_mqa._dynamic_activation is dynamic_activation
+    assert attention.o_proj._dynamic_activation is dynamic_activation
+    assert attention.indexer is not None
+    assert attention.indexer.wq_b._dynamic_activation is dynamic_activation
+    projections = (
+        attention.q_a_proj,
+        attention.q_b_proj,
+        attention.kv_a_proj_with_mqa,
+        attention.o_proj,
+        attention.indexer.wq_b,
+    )
+    for projection in projections:
+        if dynamic_activation:
+            assert projection.weight_scale.numel() == projection.out_features
+            assert projection.weight_offset.numel() == projection.out_features
+            assert projection.deq_scale.numel() == 0
+            assert projection.quant_bias.numel() == 0
+            assert projection.input_scale.numel() == 0
+            assert projection.input_offset.numel() == 0
+        else:
+            assert projection.weight_scale.numel() == 0
+            assert projection.weight_offset.numel() == 0
+            assert projection.deq_scale.numel() == projection.out_features
+            assert projection.quant_bias.numel() == projection.out_features
+            assert projection.input_scale.numel() == 1
+            assert projection.input_offset.numel() == 1

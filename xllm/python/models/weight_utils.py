@@ -189,6 +189,46 @@ class WeightLoader:
 class W8A8WeightLoader(WeightLoader):
     """W8A8 projection/MLP weight packing on top of the generic WeightLoader."""
 
+    def w8a8_projection_uses_dynamic_activation(self, prefix: str, proj: str) -> bool:
+        """Identify the activation quantization format from checkpoint keys."""
+        has_dynamic = self.has(prefix + proj + ".weight_scale")
+        has_static = self.has(prefix + proj + ".deq_scale")
+        if has_dynamic == has_static:
+            formats = "both" if has_dynamic else "neither"
+            raise ValueError(f"{prefix}{proj} checkpoint contains {formats} static/dynamic W8A8 formats")
+        return has_dynamic
+
+    def load_compatible_w8a8_projection(
+        self,
+        prefix: str,
+        proj: str,
+        shard_dims: Optional[dict[str, int]] = None,
+        dynamic_activation: Optional[bool] = None,
+    ) -> bool:
+        """Load a static- or dynamic-activation W8A8 projection.
+
+        Returns ``True`` for a dynamic-activation checkpoint and ``False`` for
+        a static-activation checkpoint. The destination module must expose the
+        buffers for both formats so the caller can select the matching forward
+        path after loading.
+        """
+        if dynamic_activation is None:
+            dynamic_activation = self.w8a8_projection_uses_dynamic_activation(prefix, proj)
+
+        dims = shard_dims or {}
+        suffixes = (
+            ("weight", "weight_scale", "weight_offset")
+            if dynamic_activation
+            else ("weight", "deq_scale", "quant_bias", "input_scale", "input_offset")
+        )
+        for suffix in suffixes:
+            tensor = self.load_tensor(prefix + proj + "." + suffix)
+            dim = dims.get(suffix)
+            if dim is not None:
+                tensor = self.shard(tensor, dim=dim)
+            self.copy_in(prefix + proj + "." + suffix, tensor)
+        return dynamic_activation
+
     def load_w8a8_projection(self, prefix: str, proj: str, shard_dims: Optional[dict[str, int]] = None) -> None:
         """Load one W8A8 projection (weight + 4 quant tensors), sharding suffixes named in ``shard_dims``."""
         dims = shard_dims or {}
