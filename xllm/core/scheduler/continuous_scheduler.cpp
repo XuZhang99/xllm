@@ -28,6 +28,7 @@ limitations under the License.
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <sstream>
 #include <vector>
 
@@ -123,6 +124,17 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
 
   last_batch_.resize(options_.dp_size());
 
+  const auto& scheduler_config = SchedulerConfig::get_instance();
+  if (scheduler_config.enable_dynamic_chunking()) {
+    scheduler_config.validate_dynamic_chunking();
+    CHECK(batch_mode_.enable_chunked_prefill)
+        << "Dynamic chunking requires chunked prefill";
+    CHECK(!scheduler_config.use_zero_evict() && !options_.enable_pd_ooc())
+        << "Dynamic chunking requires ContinuousScheduler or DisaggPDScheduler";
+    CHECK(!(has_linear_attention_layers_ && enable_prefix_cache_))
+        << "Dynamic chunking cannot change linear-attention prefix checkpoints";
+  }
+
   ProfileManager::Options profile_manager_options;
   profile_manager_options.dp_size(options.dp_size())
       .enable_schedule_overlap(options.enable_schedule_overlap())
@@ -137,6 +149,25 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       .enable_profile_token_budget(options.enable_profile_token_budget());
   profile_manager_ =
       std::make_unique<ProfileManager>(engine, profile_manager_options);
+
+  if (scheduler_config.enable_dynamic_chunking()) {
+    if (options_.instance_role().value_or(InstanceRole::DEFAULT) !=
+        InstanceRole::DECODE) {
+      constexpr int32_t kMinAlignment = 64;
+      const int32_t kv_split =
+          ParallelConfig::get_instance().kv_split_size_effective();
+      const int32_t alignment =
+          std::lcm(kMinAlignment,
+                   kv_cache_manager_->block_size() * std::max(1, kv_split));
+      dynamic_chunk_predictor_ = profile_manager_->profile_dynamic_chunking(
+          std::min(options_.max_tokens_per_chunk_for_prefill(),
+                   options_.max_tokens_per_batch()),
+          scheduler_config.dynamic_chunk_min_tokens(),
+          scheduler_config.dynamic_chunk_smooth_factor(),
+          alignment,
+          scheduler_config.dynamic_chunk_profile_samples());
+    }
+  }
 
   // Construct the scheduling policy from the resolved BatchMode.
   policy_ = create_scheduler_policy(batch_mode_, options_);
@@ -434,6 +465,7 @@ SchedulerState ContinuousScheduler::make_state() {
       .min_speculative_tokens_required = min_speculative_tokens_required_,
       .enable_prefix_cache = enable_prefix_cache_,
       .has_linear_attention_layers = has_linear_attention_layers_,
+      .dynamic_chunk_predictor = dynamic_chunk_predictor_.get(),
   };
 }
 

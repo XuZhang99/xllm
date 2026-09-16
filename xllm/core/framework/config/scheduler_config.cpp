@@ -15,6 +15,10 @@ limitations under the License.
 
 #include "core/framework/config/scheduler_config.h"
 
+#include <glog/logging.h>
+
+#include <cmath>
+
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_utils.h"
 
@@ -35,6 +39,21 @@ DEFINE_bool(enable_chunked_prefill, true, "Whether to enable chunked prefill.");
 DEFINE_int32(max_tokens_per_chunk_for_prefill,
              -1,
              "Max number of token per chunk in prefill stage.");
+
+DEFINE_bool(
+    enable_dynamic_chunking,
+    false,
+    "Profile prefill at startup and adapt chunk size to cached history.");
+DEFINE_int32(
+    dynamic_chunk_min_tokens,
+    256,
+    "Minimum predicted chunk tokens before alignment and budget caps.");
+DEFINE_double(dynamic_chunk_smooth_factor,
+              1.0,
+              "Dynamic chunk interpolation weight in (0, 1].");
+DEFINE_int32(dynamic_chunk_profile_samples,
+             16,
+             "Number of startup profiling lengths, between 8 and 64.");
 
 DEFINE_int32(chunked_match_frequency,
              2,
@@ -89,6 +108,10 @@ void SchedulerConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(prefill_scheduling_memory_usage_threshold);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_chunked_prefill);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_tokens_per_chunk_for_prefill);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_dynamic_chunking);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dynamic_chunk_min_tokens);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dynamic_chunk_smooth_factor);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dynamic_chunk_profile_samples);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(chunked_match_frequency);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(use_zero_evict);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_decode_token_per_sequence);
@@ -108,6 +131,10 @@ void SchedulerConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(prefill_scheduling_memory_usage_threshold);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_chunked_prefill);
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_tokens_per_chunk_for_prefill);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_dynamic_chunking);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dynamic_chunk_min_tokens);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dynamic_chunk_smooth_factor);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dynamic_chunk_profile_samples);
   XLLM_CONFIG_ASSIGN_FROM_JSON(chunked_match_frequency);
   XLLM_CONFIG_ASSIGN_FROM_JSON(use_zero_evict);
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_decode_token_per_sequence);
@@ -136,6 +163,14 @@ void SchedulerConfig::append_config_json(
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, max_tokens_per_chunk_for_prefill);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_dynamic_chunking);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, dynamic_chunk_min_tokens);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, dynamic_chunk_smooth_factor);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, dynamic_chunk_profile_samples);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, chunked_match_frequency);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, use_zero_evict);
@@ -162,11 +197,27 @@ SchedulerConfig& SchedulerConfig::get_instance() {
   return config;
 }
 
+void SchedulerConfig::validate_dynamic_chunking() const {
+  if (!enable_dynamic_chunking_) {
+    return;
+  }
+  CHECK(enable_chunked_prefill_) << "Dynamic chunking requires chunked prefill";
+  CHECK(!use_zero_evict_)
+      << "Dynamic chunking does not support ZeroEvictionScheduler";
+  CHECK_GT(dynamic_chunk_min_tokens_, 0);
+  CHECK(std::isfinite(dynamic_chunk_smooth_factor_));
+  CHECK_GT(dynamic_chunk_smooth_factor_, 0.0);
+  CHECK_LE(dynamic_chunk_smooth_factor_, 1.0);
+  CHECK_GE(dynamic_chunk_profile_samples_, 8);
+  CHECK_LE(dynamic_chunk_profile_samples_, 64);
+}
+
 void SchedulerConfig::initialize() {
   from_flags();
   if (const auto& json_config = config::get_parsed_json_config()) {
     from_json(*json_config);
   }
+  validate_dynamic_chunking();
 }
 
 }  // namespace xllm

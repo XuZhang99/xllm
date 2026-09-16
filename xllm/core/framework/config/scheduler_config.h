@@ -37,6 +37,7 @@ class SchedulerConfig final {
   void from_json(const JsonReader& json);
   void append_config_json(nlohmann::ordered_json& config_json) const;
   void initialize();
+  void validate_dynamic_chunking() const;
 
   [[nodiscard]] static const OptionCategory& option_category() {
     static const OptionCategory kOptionCategory = {
@@ -47,6 +48,10 @@ class SchedulerConfig final {
          "prefill_scheduling_memory_usage_threshold",
          "enable_chunked_prefill",
          "max_tokens_per_chunk_for_prefill",
+         "enable_dynamic_chunking",
+         "dynamic_chunk_min_tokens",
+         "dynamic_chunk_smooth_factor",
+         "dynamic_chunk_profile_samples",
          "chunked_match_frequency",
          "use_zero_evict",
          "max_decode_token_per_sequence",
@@ -71,6 +76,12 @@ class SchedulerConfig final {
   PROPERTY(bool, enable_chunked_prefill) = true;
 
   PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = -1;
+
+  // Startup-profiled dynamic prefill chunks; no pipeline parallelism implied.
+  PROPERTY(bool, enable_dynamic_chunking) = false;
+  PROPERTY(int32_t, dynamic_chunk_min_tokens) = 256;
+  PROPERTY(double, dynamic_chunk_smooth_factor) = 1.0;
+  PROPERTY(int32_t, dynamic_chunk_profile_samples) = 16;
 
   PROPERTY(int32_t, chunked_match_frequency) = 2;
 

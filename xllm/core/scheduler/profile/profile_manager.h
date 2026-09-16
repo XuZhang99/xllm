@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "common/types.h"
+#include "core/scheduler/profile/dynamic_chunk_predictor.h"
 #include "distributed_runtime/engine.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/request/request.h"
@@ -67,6 +68,13 @@ class ProfileManager {
     std::string note;
   };
   ProfileManager(Engine* engine, const Options& options);
+
+  std::unique_ptr<DynamicChunkPredictor> profile_dynamic_chunking(
+      int32_t base_chunk,
+      int32_t min_chunk,
+      double smooth_factor,
+      int32_t alignment,
+      int32_t sample_count);
 
   int32_t get_token_budget();
 

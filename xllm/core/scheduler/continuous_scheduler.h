@@ -350,6 +350,7 @@ class ContinuousScheduler : public Scheduler {
   std::unique_ptr<AsyncResponseProcessor> response_processor_;
 
   std::unique_ptr<ProfileManager> profile_manager_;
+  std::unique_ptr<DynamicChunkPredictor> dynamic_chunk_predictor_;
 
   bool enable_prefix_cache_ = false;
   bool has_linear_attention_layers_ = false;
