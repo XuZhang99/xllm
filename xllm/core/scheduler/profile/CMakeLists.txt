@@ -8,11 +8,13 @@ cc_library(
     decode_graph_warmup_plan.h
     graph_warmup.h
     profile_manager.h
+    dynamic_chunk_predictor.h
     time_predictor.h
   SRCS
     decode_graph_warmup_plan.cpp
     graph_warmup.cpp
     profile_manager.cpp
+    dynamic_chunk_predictor.cpp
     time_predictor.cpp
   DEPS
     :batch

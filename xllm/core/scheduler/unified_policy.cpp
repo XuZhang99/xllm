@@ -226,6 +226,19 @@ void UnifiedPolicy::schedule_from_unified_queue(
         }
       }
 
+      if (sequence->is_prefill_stage() &&
+          state.dynamic_chunk_predictor != nullptr) {
+        assume_max_tokens = state.dynamic_chunk_predictor->predict(
+            kv_cache_tokens_num,
+            num_tokens - kv_cache_tokens_num,
+            std::min(assume_max_tokens,
+                     budget.remaining_token_budget - allocated_tokens));
+        if (assume_max_tokens == 0) {
+          // A later batch can provide a full aligned block. Keep the request.
+          return;
+        }
+      }
+
       // Allocate blocks after committing the scheduler-selected Host restore
       // boundary. The allocator only executes the resulting restore plan.
       size_t max_handle_num_tokens =

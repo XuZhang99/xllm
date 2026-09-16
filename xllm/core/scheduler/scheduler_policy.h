@@ -70,6 +70,7 @@ struct SchedulerState {
   int32_t min_speculative_tokens_required;
   bool enable_prefix_cache;
   bool has_linear_attention_layers;
+  const DynamicChunkPredictor* dynamic_chunk_predictor = nullptr;
 };
 
 // ScheduleBudget tracks the remaining resources for the current scheduling
@@ -165,7 +166,7 @@ class SchedulerPolicy {
   bool should_limit_prefill_requests(const SchedulerState& state) const;
   size_t compute_prefill_tokens(Sequence* seq,
                                 size_t remaining_budget,
-                                const SchedulerState& state);
+                                SchedulerState& state);
   bool allocate_for_prefill(Sequence* seq,
                             size_t token_budget,
                             size_t* actual_tokens,
