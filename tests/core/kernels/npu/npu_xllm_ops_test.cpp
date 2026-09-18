@@ -857,11 +857,11 @@ indices = torch.full((2, 1, 2048), -1, dtype=torch.int32)
 indices[:, 0, :130] = torch.arange(130, dtype=torch.int32)
 topk = indices.to(device)
 workspaces = (
-    torch.empty((24, 64, 512), dtype=torch.bfloat16, device=device),
-    torch.empty((24, 64, 64), dtype=torch.bfloat16, device=device),
-    torch.empty((24, 16, 64), dtype=torch.float32, device=device),
-    torch.empty((24, 16, 64), dtype=torch.bfloat16, device=device),
-    torch.empty((24, 16, 512), dtype=torch.float32, device=device),
+    torch.empty((48, 64, 512), dtype=torch.bfloat16, device=device),
+    torch.empty((48, 64, 64), dtype=torch.bfloat16, device=device),
+    torch.empty((48, 16, 64), dtype=torch.float32, device=device),
+    torch.empty((48, 16, 64), dtype=torch.bfloat16, device=device),
+    torch.empty((48, 16, 512), dtype=torch.float32, device=device),
     torch.empty((24, 16, 512), dtype=torch.bfloat16, device=device),
     torch.empty((24, 16, 64), dtype=torch.bfloat16, device=device),
 )

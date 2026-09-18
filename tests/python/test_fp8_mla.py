@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 
 from xllm.python.attention import npu_paged_attention
-from xllm.python.attention.backend import MlaIndexContext
+from xllm.python.attention.backend import LayerCache, MlaIndexContext
 from xllm.python.attention.fp8_cache import (
     create_e4m3_decode_table,
     dequantize_e4m3,
@@ -122,8 +122,10 @@ def test_e4m3_mla_cache_writer_quantizes_latent_and_rope() -> None:
     assert torch.count_nonzero(nope_cache[0, 1]) == 0
 
 
+@pytest.mark.parametrize("cache_only", [False, True])
 def test_fp8_indexer_uses_materialized_cache_and_matching_block_table(
     monkeypatch: pytest.MonkeyPatch,
+    cache_only: bool,
 ) -> None:
     indexer = glm5_2.Glm52Indexer.__new__(glm5_2.Glm52Indexer)
     nn.Module.__init__(indexer)
@@ -143,7 +145,10 @@ def test_fp8_indexer_uses_materialized_cache_and_matching_block_table(
     lengths = torch.tensor([2], dtype=torch.int32)
     hidden = torch.tensor([[1.1, -2.2, 3.3, -4.4], [0.1, 0.2, 0.3, 0.4]], dtype=torch.bfloat16)
 
+    updates = []
+
     def update(values: torch.Tensor, scales: torch.Tensor | None) -> None:
+        updates.append(values)
         assert values.dtype == torch.uint8
         assert scales is None
         npu_paged_attention.NpuPagedAttentionBackend._update_mla_index_cache(cache, None, slots, values, scales)
@@ -155,6 +160,7 @@ def test_fp8_indexer_uses_materialized_cache_and_matching_block_table(
         return torch.zeros((query.size(0), 1, 2), dtype=torch.int32)
 
     monkeypatch.setattr(glm5_2.kernels, "lightning_indexer", lightning_indexer, raising=False)
+    monkeypatch.setattr(glm5_2, "get_forward_context", lambda: SimpleNamespace(execution_state=None))
     ctx = MlaIndexContext(
         index_cache=cache,
         slot_mapping=slots,
@@ -167,8 +173,36 @@ def test_fp8_indexer_uses_materialized_cache_and_matching_block_table(
         materialize_index_cache=lambda: (cache.flip(0), None, materialized_table),
     )
 
-    result = indexer.select_qli(hidden, hidden, torch.tensor([0, 1]), ctx, torch.tensor([[1.0, 0.0], [1.0, 0.0]]))
-    assert result.shape == (2, 1, 2)
+    positions = torch.tensor([0, 1])
+    rope = torch.tensor([[1.0, 0.0], [1.0, 0.0]])
+    if cache_only:
+        # MTP top-k reuse updates the cache without running the indexer.
+        indexer._update_index_cache(hidden, positions, ctx, rope)
+    else:
+        result = indexer.select_qli(hidden, hidden, positions, ctx, rope)
+        assert result.shape == (2, 1, 2)
+    assert len(updates) == 1
+    assert torch.equal(cache[:, 0, 0], quantize_e4m3(hidden).flip(0))
+
+
+@pytest.mark.parametrize("cache_dtype", [torch.uint8, torch.bfloat16])
+def test_mla_preprocess_context_requires_unquantized_cache(cache_dtype: torch.dtype) -> None:
+    backend = object.__new__(npu_paged_attention.NpuPagedAttentionBackend)
+    slots = torch.tensor([0])
+    backend._metadata = SimpleNamespace(is_prefill=False, is_chunked_prefill=False, slot_mapping=slots)
+    key = torch.zeros((1, 128, 1, 512), dtype=cache_dtype)
+    value = torch.zeros((1, 128, 1, 64), dtype=cache_dtype)
+    backend._kv_caches = [LayerCache(key=key, value=value)]
+
+    context = backend.mla_preprocess_context(SimpleNamespace(layer_id=0))
+
+    if cache_dtype == torch.uint8:
+        assert context is None
+    else:
+        assert context is not None
+        assert context.kv_cache is key
+        assert context.rope_cache is value
+        assert context.slot_mapping is slots
 
 
 def test_fp8_mla_dequantizes_caches_before_sparse_attention(
@@ -305,3 +339,5 @@ def test_fp8_mla_decode_uses_tilelang_sparse_attention(
     assert args[6] is actual_seq_kv
     assert args[7].shape == (256,)
     assert args[-1] == backend.scale
+    # Pipeline lowering adds a second GM slot for these five intermediates.
+    assert [workspace.size(0) for workspace in args[9:16]] == [48, 48, 48, 48, 48, 24, 24]

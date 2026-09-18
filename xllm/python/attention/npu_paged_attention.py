@@ -64,6 +64,7 @@ _SPARSE_MODE_NONE = 0
 _SPARSE_MODE_RIGHT_DOWN_CAUSAL = 3
 
 _GLM52_FP8_ATTN_CORE_NUM = 24
+_GLM52_FP8_ATTN_PIPELINE_STAGES = 2
 _GLM52_FP8_ATTN_HEAD_TILE = 16
 _GLM52_FP8_ATTN_KV_TILE = 64
 _GLM52_FP8_ATTN_LATENT_DIM = 512
@@ -1270,37 +1271,39 @@ class NpuPagedAttentionBackend(AttentionBackend):
             bf16 = torch.bfloat16
             fp32 = torch.float32
             device = q_latent.device
+            # TileLang's two-stage CV pipeline expands K, RoPE, scores,
+            # probabilities and partial output in GM. Q is outside the loop.
             workspaces = (
                 torch.empty(
-                    _GLM52_FP8_ATTN_CORE_NUM,
+                    _GLM52_FP8_ATTN_CORE_NUM * _GLM52_FP8_ATTN_PIPELINE_STAGES,
                     _GLM52_FP8_ATTN_KV_TILE,
                     _GLM52_FP8_ATTN_LATENT_DIM,
                     dtype=bf16,
                     device=device,
                 ),
                 torch.empty(
-                    _GLM52_FP8_ATTN_CORE_NUM,
+                    _GLM52_FP8_ATTN_CORE_NUM * _GLM52_FP8_ATTN_PIPELINE_STAGES,
                     _GLM52_FP8_ATTN_KV_TILE,
                     _GLM52_FP8_ATTN_ROPE_DIM,
                     dtype=bf16,
                     device=device,
                 ),
                 torch.empty(
-                    _GLM52_FP8_ATTN_CORE_NUM,
+                    _GLM52_FP8_ATTN_CORE_NUM * _GLM52_FP8_ATTN_PIPELINE_STAGES,
                     _GLM52_FP8_ATTN_HEAD_TILE,
                     _GLM52_FP8_ATTN_KV_TILE,
                     dtype=fp32,
                     device=device,
                 ),
                 torch.empty(
-                    _GLM52_FP8_ATTN_CORE_NUM,
+                    _GLM52_FP8_ATTN_CORE_NUM * _GLM52_FP8_ATTN_PIPELINE_STAGES,
                     _GLM52_FP8_ATTN_HEAD_TILE,
                     _GLM52_FP8_ATTN_KV_TILE,
                     dtype=bf16,
                     device=device,
                 ),
                 torch.empty(
-                    _GLM52_FP8_ATTN_CORE_NUM,
+                    _GLM52_FP8_ATTN_CORE_NUM * _GLM52_FP8_ATTN_PIPELINE_STAGES,
                     _GLM52_FP8_ATTN_HEAD_TILE,
                     _GLM52_FP8_ATTN_LATENT_DIM,
                     dtype=fp32,
