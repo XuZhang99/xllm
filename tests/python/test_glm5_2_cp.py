@@ -17,6 +17,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 import torch
 import torch.nn as nn
 
@@ -367,6 +368,7 @@ def test_glm_attention_reduces_o_projection_in_fp32_for_tensor_parallel() -> Non
     attention.kv_a_layernorm = nn.Identity()
     attention.o_proj = nn.Identity()
     attention.indexer = None
+    attention._use_fused_mla_decode = False
     attention.num_heads_local = 1
     attention.qk_nope_head_dim = 1
     attention.qk_rope_head_dim = 1
