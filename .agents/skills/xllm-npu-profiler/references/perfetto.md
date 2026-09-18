@@ -1,45 +1,51 @@
 <!-- Copyright 2026 The xLLM Authors. SPDX-License-Identifier: Apache-2.0 -->
 
-# 在 Perfetto 中查看与分析
+# Viewing and analyzing traces in Perfetto
 
-## 打开真实文件
+## Load the actual file
 
-1. 用浏览器控制工具打开 `https://ui.perfetto.dev`，通过 **Open trace file**
-   选择拉回本地的 timeline，或使用工具支持的文件拖放。
-2. 等待解析完成，确认存在非空时间轴、进程/线程或 device stream 轨道以及
-   可点击的事件。记录加载告警；只出现网站欢迎页不算已打开 trace。
-3. 先看总览，再定位稳定请求/step；搜索实际出现的 kernel、HCCL、runtime API
-   或 MSTX 标记。固定所需 tracks、放大区间，点击 slice 检查 start/duration/args。
-   保存总览和关键区间截图，文件名包含 rank、阶段和区间。
-4. 保留本地原始 trace，不使用 Share/公开上传作为打开文件的必要步骤。
-   网站 URL 本身不包含本地 trace，交付时需附真实本地文件路径。
+1. Open `https://ui.perfetto.dev` with browser controls and use **Open trace file**
+   to select the downloaded timeline, or use supported file drag-and-drop.
+2. Wait for parsing and confirm a nonempty timeline, process/thread or device
+   stream tracks, and selectable events. Record import warnings. The welcome
+   page alone does not mean the trace was loaded.
+3. Start with an overview, then locate steady requests/steps. Search for kernel,
+   HCCL, runtime API, or MSTX names that actually appear. Pin relevant tracks,
+   zoom into a window, and inspect slice start times, durations, and arguments.
+   Save overview and interval screenshots with rank, phase, and window in filenames.
+4. Retain the original local trace. Sharing or public uploading is not required
+   to open it. The website URL does not contain the local trace; deliver its
+   actual local path as well.
 
-优先查看一个代表性 rank；需要解释通信拖尾或负载不均时再查看其他 rank。
-不能靠手工拼接 JSON 制造多 rank 全局时间轴。
+Start with a representative rank. Inspect other ranks when investigating
+communication tails or load imbalance. Do not manually concatenate JSON files
+to construct a global timeline across ranks.
 
-## 大文件或文件选择工具不可用
+## Large files or unavailable file selection
 
-Perfetto 支持本地 native Trace Processor 供网页连接。查当前工具的帮助和
-[大 trace 官方说明](https://perfetto.dev/docs/visualization/large-traces)，在
-**运行浏览器的本地机器**启动，例如：
+Perfetto can connect to a local native Trace Processor. Check the installed tool's
+help and the [official large-trace guide](https://perfetto.dev/docs/visualization/large-traces).
+Run it on the **same local machine as the browser**, for example:
 
 ```bash
-# 在独立工具目录下载；先检查已有安装，避免覆盖现有文件
+# Use a separate tools directory; check for an existing installation first.
 curl -fL https://get.perfetto.dev/trace_processor -o trace_processor
 chmod +x trace_processor
 ./trace_processor --httpd /absolute/path/to/msprof_timestamp.json
 ```
 
-官方当前也提供 `trace_processor server http <trace>` 写法；以安装版本帮助为准。
-打开 Perfetto 并选择检测到的本地 accelerator，确认它加载的正是目标 trace。
-默认连接本机 `127.0.0.1:9001`，不要把服务绑定到公网来绕过文件选择。
-浏览器工具如果在另一机器执行，先确认其 localhost 与文件所在机器是否一致；
-没有可达连接时明确报告限制。任务结束后停止本次创建的 trace processor。
+Some versions also offer `trace_processor server http <trace>`; follow the installed
+version's help. Open Perfetto, select the detected local accelerator, and confirm
+it loaded the intended trace. The default endpoint is `127.0.0.1:9001`; do not bind
+the service publicly to work around file selection. If browser controls run on
+another machine, verify whether their localhost is the machine holding the trace.
+Report the limitation if no connection is possible. Stop the trace processor
+started for this task when finished.
 
-## 用 SQL 辅助复核
+## Cross-check with SQL
 
-在 Perfetto Query/SQL 面板先检查 `slice` 与 `track` 的实际内容。下例仅列出
-按 track/name 聚合的热点，不能直接把结果当作 kernel-only 占比：
+Inspect `slice` and `track` in the Perfetto Query/SQL panel first. This query lists
+hotspots grouped by track and name; it does not directly give kernel-only shares:
 
 ```sql
 SELECT s.track_id, t.name AS track, s.name,
@@ -54,34 +60,38 @@ ORDER BY total_ms DESC
 LIMIT 40;
 ```
 
-Perfetto SQL 的 `ts/dur` 单位为 ns；源 Chrome JSON 常用 us，不能混用。
-选择具体 rank/device/stream 和阶段后再过滤 `track_id`、`ts` 范围。
-跨区间边界 slice 的统计需裁剪到选定窗口；嵌套 scope 与并发 stream 不能直接
-求和推导 busy time。看不到 slice 时检查导入告警和原始事件，不能输出空表结论。
+Perfetto SQL uses nanoseconds for `ts/dur`; source Chrome JSON commonly uses
+microseconds. Do not mix units. Select the rank/device/stream and phase before
+filtering `track_id` and `ts`. Clip slices crossing window boundaries to the
+selected interval. Nested scopes and concurrent streams cannot simply be summed
+to obtain busy time. If no slices appear, inspect import warnings and raw events
+instead of drawing conclusions from an empty table.
 
-Ascend JSON 可能触发 `slice_spill_overlapping_complete_event`：同一 thread 的
-完整事件存在不能嵌套的重叠，Perfetto 会将其放入 overflow tracks。记录实际
-导入器说明和计数，核对源事件与导入 slice 数；不要通过删事件消除告警，也不要
-将显示层的 overflow 直接解释为实际新增 stream 或额外并行度。
+Ascend JSON may trigger `slice_spill_overlapping_complete_event`: complete events
+on one thread overlap without proper nesting, so Perfetto places them on overflow
+tracks. Record importer explanations and counts, and compare source events with
+imported slices. Do not delete events to suppress warnings or interpret display
+overflow as additional physical streams or parallelism.
 
-## 记录可复查的证据
+## Record reproducible evidence
 
-每个瓶颈使用以下结构记录到 `timeline_notes.md`：
+For each bottleneck, record the following in `timeline_notes.md`:
 
 ```text
 Trace / SHA-256 / rank / device:
-阶段与判定依据:
-选定 tracks:
-窗口 [start, end] 与单位、时间原点:
-观察: 事件名、调用次数、duration、gap 或 overlap
-截图路径 / SQL 与过滤条件:
-解释: 已证实的事实、候选原因、尚缺证据
-下一步: 涉及源码位置、可验证改动、无 profiling 对照方案
+Phase and identification evidence:
+Selected tracks:
+Window [start, end], units, and time origin:
+Observation: event names, call counts, durations, gaps, or overlap
+Screenshot paths / SQL and filters:
+Interpretation: confirmed facts, candidate causes, missing evidence
+Next steps: source locations, testable changes, comparison without profiling
 ```
 
-对 decode gap，要列出前后 device task、这段时间其他 streams 是否忙、host
-在做什么以及是否存在同步等待。对 HCCL，区分总通信时间与未被计算覆盖的
-通信时间；对 graph replay，区分首次 capture/编译与稳定 replay。
-无法测量的字段写未覆盖，不用固定百分比阈值代替因果判断。
+For decode gaps, identify adjacent device tasks, activity on other streams, host
+activity, and synchronization waits. For HCCL, distinguish total communication
+time from communication time not overlapped by compute. For graph replay,
+distinguish initial capture/compilation from steady replay. Mark unmeasurable
+fields as not covered; fixed percentage thresholds do not establish causality.
 
-界面操作参考：[Perfetto UI 官方文档](https://perfetto.dev/docs/visualization/perfetto-ui)。
+UI reference: [Official Perfetto UI documentation](https://perfetto.dev/docs/visualization/perfetto-ui).

@@ -1,56 +1,66 @@
 <!-- Copyright 2026 The xLLM Authors. SPDX-License-Identifier: Apache-2.0 -->
 
-# NPU 采集、导出与拉回
+# NPU capture, export, and download
 
-以下命令中的 PID、scripts 路径和 run 目录需要从现场确认后赋值。
-命令在注明的环境执行；不要混用宿主机 PID 和容器 PID。
+Resolve PIDs, script paths, and run directories from the actual deployment before
+running commands. Execute each command in the indicated environment; host and
+container PIDs are not interchangeable. All names and paths below are examples.
 
-## 1. 确认执行环境
+## 1. Confirm the execution environment
 
 ```bash
-# 本地
-ssh xu@198.186.3.2
-# 远程宿主机：确认挂载，再进入容器
-sudo docker inspect zx-xllm-npu --format '{{json .Mounts}}'
-sudo docker exec -it zx-xllm-npu bash
-# 容器内
+# Local machine: replace the example SSH target with the configured target.
+ssh developer@npu-host
+# Remote host: inspect mounts before entering the deployment container.
+XLLM_CONTAINER=xllm-npu
+sudo docker inspect "$XLLM_CONTAINER" --format '{{json .Mounts}}'
+sudo docker exec -it "$XLLM_CONTAINER" bash
+# Inside the container
 command -v msprof
 msprof --help
 ps -eo pid,ppid,args
 npu-smi info
 ```
 
-不要复制文档里的示例 PID。结合进程树、启动日志、命令行及 `/proc/<pid>/exe`
-确认目标 xLLM 父进程，不能直接取 `npu-smi` 中的 worker PID。
-本地和远程分别检查 `git remote -v`、`git branch --show-current`、`git rev-parse HEAD`
-及 `git status --short`；本次相关 dirty 文件需要内容校验，HEAD 相同并不代表代码相同。
+Identify the xLLM parent process using the process tree, launch logs, command line,
+and `/proc/<pid>/exe`. Do not copy an example PID or simply select a worker PID
+from `npu-smi`. Compare `git remote -v`, `git branch --show-current`,
+`git rev-parse HEAD`, and `git status --short` in local and remote checkouts.
+Compare relevant uncommitted file contents too; matching HEADs do not prove that
+running code matches.
 
-查明远程 scripts 在容器内的路径后，阅读 `start_xllm.sh`、`run_xllm.sh`。
-旧脚本只作为配置线索：核对 binary、`python_model_path` 和当前分支是否匹配，
-并检查缓存 dtype 等参数的平台支持。例如部分 NPU 版本会拒绝
-`kv_cache_dtype=int8`，不能因为旧脚本写了此参数就直接沿用。验证 profiling
-链路时优先使用当前版本支持的默认配置；复用预编译 binary 时记录其来源与
-哈希，明确这不等于验证了 skill 分支的重新构建结果。
-服务启动环境需包含 `export PROFILING_MODE=dynamic`。通过既有启动脚本启动，
-并确认它没有清掉该变量；可检查目标进程 `/proc/<pid>/environ` 中此变量，
-不要输出整个 environ。已启动且没有该变量的服务需要按任务授权安排重启。
-仅启动 profiler 不能弥补此前的启动配置。
+Locate and read the deployment's launch and request scripts inside the container.
+Treat old scripts as configuration clues: verify the executable,
+`python_model_path`, and current branch, and check platform support for options
+such as cache dtype. Some NPU versions reject `kv_cache_dtype=int8`; do not retain
+it just because an old script uses it. Prefer supported defaults when validating
+the profiling workflow. When reusing a prebuilt executable, record its origin and
+hash and distinguish this from validating a rebuild of the skill branch.
 
-Python 模型路径可能在首次请求时才创建额外的 HCCL 通信组。服务端口已就绪
-不代表通信组可用；固定 `HCCL_IF_BASE_PORT` 可能在此时触发绑定冲突。
-沿用已验证配置，若日志报告 `Communication_Error_Bind_IP_Port`，核对具体
-IP/端口与进程，检查是否应使用 HCCL 自动选端口，不终止其他任务来释放端口。
+The service launch environment must include `export PROFILING_MODE=dynamic`.
+Verify that the launch script preserves it. If needed, inspect only that variable
+in `/proc/<pid>/environ`, without printing the entire environment. Restart an
+existing service without the variable only within the task's authorization.
+Starting the profiler cannot repair the earlier launch configuration.
 
-## 2. 预热后开启有限窗口
+The Python model path may create additional HCCL groups on the first request.
+A ready service port does not prove those groups work. A fixed `HCCL_IF_BASE_PORT`
+can cause a bind conflict at this point. Reuse a validated configuration; if logs
+report `Communication_Error_Bind_IP_Port`, inspect the specific address, port,
+and process, and check whether automatic HCCL port selection is appropriate.
+Do not terminate unrelated jobs to release ports.
 
-先使用 `run_xllm.sh` 或当前任务的 workload 发成功请求，完成预热。
-核对脚本能检测 HTTP/服务错误，不能把 curl 返回了错误 JSON 视为请求成功。
-记录实际输入/输出长度、并发、prefix-cache 命中条件与是否提前 EOS。
+## 2. Warm up, then capture a bounded window
 
-在容器交互终端 A 中：
+Send successful requests with the deployment's request script or task workload
+until warmup completes. Ensure the script detects HTTP and service errors; an
+error JSON returned by curl is not a successful request. Record actual input and
+output lengths, concurrency, prefix-cache conditions, and early EOS behavior.
+
+In interactive terminal A inside the container:
 
 ```bash
-# 填写已确认的数值和容器内独立输出目录
+# Replace these example values with the verified parent PID and a unique run path.
 XLLM_PARENT_PID=12345
 PROFILE_RUN=/path/to/profiling/run_YYYYMMDD_HHMMSS
 mkdir -p "$PROFILE_RUN"
@@ -60,61 +70,78 @@ msprof --dynamic=on --pid="$XLLM_PARENT_PID" \
   --runtime-api=on --aicpu=on 2>&1 | tee "$PROFILE_RUN/capture.log"
 ```
 
-以上为 `xllm-workflow` 的动态采集参数；先用已安装版本的 `msprof --help`
-确认支持，不支持时查对应版本工具文档，不能静默删除关键参数继续声称采集完整。
+Check support for these options with the installed `msprof --help`. If unsupported,
+consult documentation for that version; do not silently remove essential options
+and still claim complete capture.
 
-等待 attach ready 后，在终端 A 输入 `start`。确认采集已开始，在同容器终端 B
-执行正式 workload，保存输出和退出码到 `workload.log`。正式请求全部完成后，
-在 A 输入 `stop`，确认停止，再输入 `quit`，等 msprof 退出并完成数据刷盘。
-输入命令及其时间也要记入 capture.log/manifest（终端输入未必被 tee 记录）。
-不要依赖固定 sleep 代替 readiness。请求失败也要结束本次采集并保留失败证据。
+Wait for attachment readiness, then enter `start` in terminal A. Confirm capture
+has started, run the measured workload in terminal B in the same container, and
+save its output and exit status in `workload.log`. After all measured requests
+finish, enter `stop` in A, confirm capture has stopped, then enter `quit`. Wait
+for msprof to exit and flush its data. Record control commands and their times in
+capture.log or the manifest; tee may not record terminal input. Fixed sleeps do
+not replace readiness checks. If a request fails, still stop this capture and
+retain the failure evidence.
 
-用工具自动化时保留交互终端 session，逐步写入上述控制命令；不要把它们一次性
-通过管道全发完。若采用 FIFO 脚本，脚本放远程 scripts 中，确保异常退出时停止
-本次采集器、关闭 FIFO 并等待退出后再 export，不直接照搬先 export 后清理的顺序。
+For automation, keep an interactive terminal session and send control commands
+at the appropriate stages rather than piping them all at once. If using a FIFO
+script, place it in the deployment's script directory. On failure, stop only this
+collector, close the FIFO, and wait for exit before exporting.
 
-## 3. 显式导出 timeline
+## 3. Export timelines explicitly
 
-枚举本次 run 下每个 `PROF_*`，逐个执行并记录退出状态：
+Enumerate every `PROF_*` directory in this run, export each one, and record its
+exit status:
 
 ```bash
 msprof --export=on --output="$PROFILE_RUN/PROF_actual_name" \
   > "$PROFILE_RUN/export-PROF_actual_name.log" 2>&1
 ```
 
-不要仅选“最新”目录而丢掉其他 rank。完成后可用：
+Do not select only the newest directory and discard other ranks. Find outputs:
 
 ```bash
 find "$PROFILE_RUN" -type f \( -name 'msprof_*.json' \
   -o -name 'trace_view.json' -o -name '*.pt.trace.json' \)
 ```
 
-常见位置为 `PROF_*/mindstudio_profiler_output/msprof_*.json`，旧版本也可能
-位于 `timeline/`。按实际文件识别，不硬编码目录存在即成功；有 CSV 没有
-timeline 时检查 export 日志和版本支持的 timeline 导出选项。
-`step_trace_*.json` 仅有 step 信息时不能代替完整 kernel timeline。
+A common location is `PROF_*/mindstudio_profiler_output/msprof_*.json`; older
+versions may use `timeline/`. Inspect actual files instead of treating directory
+existence as success. If only CSV files appear, inspect export logs and the
+version's timeline export options. A `step_trace_*.json` containing only step
+information does not replace a complete kernel timeline.
 
-保留原始 JSON，不随意缩放时间戳。Chrome Trace 常见结构是事件数组或含
-`traceEvents` 数组的对象；检查有 `ph`、`ts`、`pid`、`tid` 的时间事件，
-完整 slice 通常为 `ph=X` 且有 `dur`，也可能使用 `B/E` 配对。
-仅 JSON 解析成功还不够，下一步需在 Perfetto 中验证真实 tracks/slices。
+Retain original JSON and do not arbitrarily rescale timestamps. Chrome Trace
+commonly uses an event array or an object containing `traceEvents`. Look for timed
+events with `ph`, `ts`, `pid`, and `tid`. Complete slices typically use `ph=X` and
+`dur`; paired `B/E` events are also possible. JSON parsing alone is insufficient:
+verify actual tracks and slices in Perfetto next.
 
-## 4. 拉回本地
+## 4. Download artifacts
 
-先在 manifest 中列出容器路径、宿主机对应路径和 rank/device。bind mount 内
-的产物可直接 scp；不在挂载内则在远程宿主机用
-`sudo docker cp zx-xllm-npu:/container/path /host/staging/path`
-暂存本次产物，并使当前用户可读，不批量改原始数据权限。
+Record container paths, corresponding host paths, and rank/device identities in
+the manifest. Files in bind mounts can be copied directly with scp. Otherwise,
+stage this run's artifacts on the remote host, for example:
 
 ```bash
-# 本地：示例中路径替换为已确认的宿主机导出目录
-mkdir -p /Users/xu/xllm-profile-artifacts/run_YYYYMMDD_HHMMSS/timelines
-scp -r xu@198.186.3.2:/host/path/to/exported_device_directory \
-  /Users/xu/xllm-profile-artifacts/run_YYYYMMDD_HHMMSS/timelines/
+# Remote host: use the container name resolved in step 1.
+sudo docker cp "$XLLM_CONTAINER:/container/path" /host/staging/path
 ```
 
-保留每个 rank/device 的目录，避免同名文件互相覆盖。远程用 `sha256sum`，
-macOS 本地用 `shasum -a 256` 校验所选 timeline，记录字节数和哈希。
-原始 PROF 可保留在远程，不必为了查看一个 rank 拉取全部大文件。
+Make staged files readable by the current user without changing permissions across
+unrelated raw data.
 
-导出命令与格式参考：[Ascend msprof 文档](https://www.hiascend.com/document/detail/en/mindstudio/700/TITools/Profiling/atlasprofiling_16_0005.html)。
+```bash
+# Local machine: replace both paths and the SSH target with verified values.
+LOCAL_ARTIFACT_DIR=/path/to/local/profile-artifacts/run_YYYYMMDD_HHMMSS
+mkdir -p "$LOCAL_ARTIFACT_DIR/timelines"
+scp -r developer@npu-host:/host/path/to/exported_device_directory \
+  "$LOCAL_ARTIFACT_DIR/timelines/"
+```
+
+Preserve rank/device directories to avoid overwriting files with identical names.
+Use `sha256sum` remotely and `shasum -a 256` on macOS to verify the selected timeline;
+record byte counts and hashes. Raw PROF data may remain remote; viewing one rank
+does not require downloading all large files.
+
+Export reference: [Ascend msprof documentation](https://www.hiascend.com/document/detail/en/mindstudio/700/TITools/Profiling/atlasprofiling_16_0005.html).

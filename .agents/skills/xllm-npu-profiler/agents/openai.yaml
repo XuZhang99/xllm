@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. SPDX-License-Identifier: Apache-2.0
 interface:
   display_name: "xLLM NPU Profiling / Perfetto"
-  short_description: "采集 xLLM NPU timeline，导出并在 Perfetto 中可视化定位性能瓶颈"
-  default_prompt: "使用 $xllm-npu-profiler 采集 xLLM 的 NPU profiling，导出 timeline，并在 https://ui.perfetto.dev 打开分析，交付文件路径和关键区间证据。"
+  short_description: "Capture NPU timelines and analyze them in Perfetto"
+  default_prompt: "Use $xllm-npu-profiler to capture xLLM NPU profiling data, export a timeline, and analyze it at https://ui.perfetto.dev, returning artifact paths and evidence from key intervals."
