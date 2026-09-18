@@ -45,6 +45,10 @@ class DeviceStream:
     def join(self) -> None:
         self._device_module.current_stream(self._device).wait_stream(self._stream)
 
+    def record_on_current(self, tensor: torch.Tensor) -> None:
+        """Keep a side-stream allocation alive for its current-stream consumer."""
+        tensor.record_stream(self._device_module.current_stream(self._device))
+
 
 _STREAMS: dict[tuple[str, int, str], DeviceStream] = {}
 

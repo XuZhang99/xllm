@@ -16,14 +16,15 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import torch
 
-from xllm.python.device_stream import DeviceStream, get_device_stream
+from xllm.python.device_stream import get_device_stream
 from xllm.python.models import glm5_2
 from xllm.python.models.glm5_2 import Glm52Config, Glm52ForCausalLM
 from xllm.python.models.weight_utils import W8A8WeightLoader
@@ -191,6 +192,17 @@ def test_glm_dsa_multi_stream_config_is_opt_in() -> None:
     assert Glm52Config.from_dict(_config(enable_dsa_multi_stream=True)).enable_dsa_multi_stream
 
 
+@pytest.mark.parametrize("interleave", [False, True])
+def test_glm_indexer_stream_selection(monkeypatch: pytest.MonkeyPatch, interleave: bool) -> None:
+    streams = MagicMock(side_effect=lambda _device, name: name)
+    monkeypatch.setattr(glm5_2, "get_device_stream", streams)
+    cfg = Glm52Config.from_dict(_config(enable_dsa_multi_stream=True, indexer_rope_interleave=interleave))
+    indexer = glm5_2.Glm52Indexer(cfg, torch.float32, torch.device("cpu"))
+    assert indexer._weights_stream == "dsa_indexer_weights"
+    assert indexer._q_stream == (None if interleave else "dsa_indexer_q")
+    assert streams.call_count == (1 if interleave else 2)
+
+
 @pytest.mark.parametrize("dynamic", [False, True])
 @pytest.mark.parametrize("rank", [0, 1])
 def test_glm_projection_quantization_loads_tp_shards(dynamic: bool, rank: int) -> None:
@@ -228,7 +240,7 @@ def test_glm_projection_quantization_loads_tp_shards(dynamic: bool, rank: int) -
 
 
 @pytest.mark.parametrize("mode", ["normal", "cp", "layerwise"])
-def test_glm_dsa_indexer_stream_forks_and_joins_before_attention(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+def test_glm_dsa_projections_precede_indexer(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     cfg_values = _config(
         tp_size=1,
         dp_size=1,
@@ -272,17 +284,6 @@ def test_glm_dsa_indexer_stream_forks_and_joins_before_attention(monkeypatch: py
     attention.kv_a_layernorm = torch.nn.Identity()
     attention.o_proj = torch.nn.Identity()
     attention.indexer = _Indexer()
-
-    indexer_stream = MagicMock()
-    main_stream = MagicMock()
-    main_stream.wait_stream.side_effect = lambda _stream: call_order.append("join")
-    fake_npu = SimpleNamespace(
-        current_stream=MagicMock(return_value=main_stream),
-        stream=MagicMock(return_value=nullcontext()),
-    )
-
-    fake_npu.Stream = MagicMock(return_value=indexer_stream)
-    attention._indexer_stream = DeviceStream(torch.device("cpu"), fake_npu)
 
     backend = MagicMock()
     backend.mla_index_context.return_value = object()
@@ -331,162 +332,143 @@ def test_glm_dsa_indexer_stream_forks_and_joins_before_attention(monkeypatch: py
 
     attention(hidden, torch.arange(2), model.model.rotary.cos_sin_cache)
 
-    indexer_stream.wait_stream.assert_called_once_with(main_stream)
-    main_stream.wait_stream.assert_called_once_with(indexer_stream)
-    assert call_order.index("indexer") < call_order.index("q_b")
-    assert call_order.index("q_b") < call_order.index("join")
-    assert call_order.index("kv_a") < call_order.index("join")
-    assert call_order.index("join") < call_order.index("attention")
+    assert call_order.index("q_b") < call_order.index("indexer")
+    assert call_order.index("kv_a") < call_order.index("indexer")
+    assert call_order.index("indexer") < call_order.index("attention")
 
 
-@pytest.mark.skipif(
-    not hasattr(torch, "npu") or not torch.npu.is_available(),
-    reason="requires an available NPU",
-)
-def test_glm_dsa_multi_stream_matches_single_stream_on_npu(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("device_type", ["cpu", "npu"])
+@pytest.mark.parametrize("interleave", [False, True])
+@pytest.mark.parametrize("quantized", [False, True])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+@torch.inference_mode()
+def test_glm_indexer_projection_overlap_matches_serial(
+    monkeypatch: pytest.MonkeyPatch, device_type: str, interleave: bool, quantized: bool, dtype: torch.dtype
 ) -> None:
-    cfg_values = _config(
-        tp_size=1,
-        dp_size=1,
-        world_size=1,
-        ep_size=1,
-        num_attention_heads=2,
-    )
-    model = Glm52ForCausalLM(cfg_values)
-    attention = model.model.layers[0].self_attn
-    device = torch.device("npu")
+    if device_type == "npu" and (not hasattr(torch, "npu") or not torch.npu.is_available()):
+        pytest.skip("requires an available NPU")
+    device = torch.device(device_type)
+    torch.manual_seed(42)
+    cfg = Glm52Config.from_dict(_config(indexer_rope_interleave=interleave))
+    indexer = glm5_2.Glm52Indexer(cfg, dtype, device)
+    indexer.wq_b = torch.nn.Linear(cfg.q_lora_rank, cfg.index_n_heads * cfg.index_head_dim, device=device, dtype=dtype)
+    hidden = torch.randn(3, cfg.hidden_size, device=device, dtype=dtype)
+    qr = torch.randn(3, cfg.q_lora_rank, device=device, dtype=dtype)
+    positions = torch.arange(3, device=device)
+    angles = torch.randn(3, cfg.qk_rope_head_dim // 2, device=device, dtype=dtype)
+    cos_sin = torch.cat((angles.cos(), angles.sin()), dim=-1)
+    cache = torch.zeros(1, 3, 1, cfg.index_head_dim, device=device, dtype=torch.int8 if quantized else dtype)
+    scales = torch.ones(1, 3, 1, 1, device=device, dtype=torch.float16) if quantized else None
+    order: list[str] = []
+    active = ["main"]
 
-    class _NpuIndexer(torch.nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.register_buffer(
-                "weight",
-                torch.randn(cfg_values["q_lora_rank"], cfg_values["q_lora_rank"], device=device),
-            )
+    class _Stream:
+        def __init__(self, name: str) -> None:
+            self.name = name
 
-        def select_qli(
-            self,
-            _hidden: torch.Tensor,
-            q_c: torch.Tensor,
-            *_args: object,
-        ) -> torch.Tensor:
-            scores = torch.matmul(q_c, self.weight)
-            return torch.topk(scores, cfg_values["index_topk"], dim=-1).indices.to(torch.int32).unsqueeze(1)
+        def wait_for_current(self) -> None:
+            order.append(self.name + "_fork")
 
-    class _Backend:
-        @staticmethod
-        def mla_index_context(_attention: object) -> object:
-            return object()
+        @contextmanager
+        def activate(self) -> Iterator[None]:
+            active[0] = self.name
+            try:
+                yield
+            finally:
+                active[0] = "main"
 
-        @staticmethod
-        def execute_mla(
-            q_latent: torch.Tensor,
-            _q_pe: torch.Tensor,
-            k_latent: torch.Tensor,
-            _k_pe: torch.Tensor,
-            _attention: object,
-            *,
-            topk: torch.Tensor,
-        ) -> torch.Tensor:
-            topk_sum = topk.to(q_latent.dtype).sum(dim=-1, keepdim=True)
-            return q_latent + k_latent + topk_sum
+        def join(self) -> None:
+            order.append(self.name + "_join")
 
-    torch.manual_seed(0)
-    attention.q_a_proj = torch.nn.Linear(
-        cfg_values["hidden_size"], cfg_values["q_lora_rank"], bias=False, device=device
-    )
-    attention.q_a_layernorm = torch.nn.Identity()
-    attention.q_b_proj = torch.nn.Linear(
-        cfg_values["q_lora_rank"],
-        cfg_values["num_attention_heads"] * (cfg_values["qk_nope_head_dim"] + cfg_values["qk_rope_head_dim"]),
-        bias=False,
-        device=device,
-    )
-    attention.kv_a_proj_with_mqa = torch.nn.Linear(
-        cfg_values["hidden_size"],
-        cfg_values["kv_lora_rank"] + cfg_values["qk_rope_head_dim"],
-        bias=False,
-        device=device,
-    )
-    attention.kv_a_layernorm = torch.nn.Identity()
-    attention.o_proj = torch.nn.Linear(
-        cfg_values["num_attention_heads"] * cfg_values["v_head_dim"],
-        cfg_values["hidden_size"],
-        bias=False,
-        device=device,
-    )
-    attention.indexer = _NpuIndexer()
-    attention.W_UK = torch.randn(
-        cfg_values["num_attention_heads"],
-        cfg_values["qk_nope_head_dim"],
-        cfg_values["kv_lora_rank"],
-        device=device,
-    )
-    attention.W_UV = torch.randn(
-        cfg_values["num_attention_heads"],
-        cfg_values["kv_lora_rank"],
-        cfg_values["v_head_dim"],
-        device=device,
+        def record_on_current(self, tensor: torch.Tensor) -> None:
+            pass
+
+    for name, module in (("q", indexer.wq_b), ("weights", indexer.weights_proj), ("k", indexer.wk)):
+        module.register_forward_hook(lambda _module, _args, _out, name=name: order.append(name + "_" + active[0]))
+
+    def _update(k: torch.Tensor, scale: torch.Tensor | None) -> None:
+        order.append("cache")
+        cache.copy_(k.reshape_as(cache))
+        if scales is not None:
+            scales.copy_(scale.reshape_as(scales))
+
+    ctx = SimpleNamespace(
+        actual_seq_q=[3],
+        actual_seq_kv=[3],
+        cp_context=None,
+        index_cache=cache,
+        index_cache_scale=scales,
+        update_index_cache=_update,
+        materialize_index_cache=lambda: (cache, scales, None),
+        get_quant_indexer_metadata=lambda *_args: None,
     )
 
-    monkeypatch.setattr(
-        glm5_2,
-        "get_forward_context",
-        lambda: SimpleNamespace(attention_backend=_Backend(), cp_context=None),
-    )
-    monkeypatch.setattr(
-        glm5_2,
-        "_gather_interleave_cos_sin",
-        lambda cache, _positions: (cache, cache),
-    )
-    monkeypatch.setattr(glm5_2, "_interleave_rope_with", lambda tensor, _cos, _sin: tensor)
+    def _select(q: torch.Tensor, k: torch.Tensor, weights: torch.Tensor, *_args: object) -> torch.Tensor:
+        order.append("select")
+        # Consume every branch so stale side-stream outputs change the result.
+        return q.float().sum(dim=(1, 2)) + weights.float().sum(dim=1) + k.float().sum()
+
+    def _rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+        half = x.shape[-1] // 2
+        c, s = cos[:, 0, :, :half], sin[:, 0, :, :half]
+        even, odd = x[..., 0::2], x[..., 1::2]
+        return torch.stack((even * c - odd * s, odd * c + even * s), dim=-1).flatten(-2)
+
+    monkeypatch.setattr(glm5_2.kernels, "interleaved_rotary_embedding", _rope, raising=False)
+    monkeypatch.setattr(glm5_2.kernels, "lightning_indexer", _select, raising=False)
+    monkeypatch.setattr(glm5_2.kernels, "quant_lightning_indexer", _select, raising=False)
     monkeypatch.setattr(
         glm5_2.kernels,
-        "batch_matmul_transpose",
-        lambda lhs, rhs: torch.bmm(lhs, rhs).transpose(0, 1),
+        "dynamic_quant",
+        lambda x: (x.round().to(torch.int8), torch.ones(x.shape[:-1], device=device)),
         raising=False,
     )
 
-    hidden = torch.randn(2, cfg_values["hidden_size"], device=device)
-    positions = torch.arange(2, device=device)
-    cos_sin_cache = torch.zeros(2, cfg_values["qk_rope_head_dim"], device=device)
+    def _run() -> torch.Tensor:
+        return indexer.select_qli(hidden, qr, positions, ctx, cos_sin)
 
-    attention._indexer_stream = None
-    expected_output, expected_topk = attention(hidden, positions, cos_sin_cache)
-    torch.npu.synchronize()
-
-    attention._indexer_stream = get_device_stream(device, "test_glm_dsa")
-    actual_output, actual_topk = attention(hidden, positions, cos_sin_cache)
-    torch.npu.synchronize()
-
-    torch.testing.assert_close(actual_output, expected_output)
-    torch.testing.assert_close(actual_topk, expected_topk)
+    expected = _run()
+    if device_type == "npu":
+        torch.npu.synchronize()
+    expected_cache = cache.clone()
+    weights_stream = get_device_stream(device, "test_indexer_weights") if device_type == "npu" else _Stream("weights")
+    q_stream = get_device_stream(device, "test_indexer_q") if device_type == "npu" else _Stream("q")
+    indexer._weights_stream = weights_stream
+    indexer._q_stream = None if interleave else q_stream
+    order.clear()
+    actual = _run()
+    if device_type == "npu":
+        torch.npu.synchronize()
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(cache, expected_cache)
+    if device_type == "cpu":
+        assert "weights_weights" in order
+        assert order.index("cache") < order.index("weights_join") < order.index("select")
+        assert ("q_main" if interleave else "q_q") in order
+        if not interleave:
+            assert order.index("cache") < order.index("q_join") < order.index("select")
+        return
 
     capture_stream = torch.npu.Stream(device=device)
     capture_stream.wait_stream(torch.npu.current_stream())
     with torch.npu.stream(capture_stream):
         for _ in range(2):
-            attention(hidden, positions, cos_sin_cache)
+            _run()
     torch.npu.synchronize()
-
     graph = torch.npu.NPUGraph()
     with torch.npu.graph(graph, stream=capture_stream):
-        graph_output, graph_topk = attention(hidden, positions, cos_sin_cache)
-    graph.replay()
-    torch.npu.synchronize()
-
-    torch.testing.assert_close(graph_output, expected_output)
-    torch.testing.assert_close(graph_topk, expected_topk)
-
-    for _ in range(2):
+        graph_output = _run()
+    for _ in range(3):
         hidden.copy_(torch.randn_like(hidden))
-        attention._indexer_stream = None
-        expected_output, expected_topk = attention(hidden, positions, cos_sin_cache)
+        qr.copy_(torch.randn_like(qr))
+        indexer._weights_stream = None
+        indexer._q_stream = None
+        expected = _run()
+        expected_cache = cache.clone()
         graph.replay()
         torch.npu.synchronize()
-        torch.testing.assert_close(graph_output, expected_output)
-        torch.testing.assert_close(graph_topk, expected_topk)
+        torch.testing.assert_close(graph_output, expected)
+        torch.testing.assert_close(cache, expected_cache)
 
 
 def test_glm_layerwise_split_rank_is_validated() -> None:

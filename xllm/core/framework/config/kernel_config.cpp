@@ -23,8 +23,8 @@ limitations under the License.
 
 DEFINE_bool(enable_dsa_multi_stream,
             false,
-            "Overlap the DSA indexer and attention projections for the Python "
-            "GLM model on backends with stream support.");
+            "Overlap projections within the Python GLM DSA indexer using "
+            "SGLang NPU-style stream scheduling.");
 
 #if defined(USE_NPU)
 DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");

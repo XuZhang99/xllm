@@ -70,6 +70,9 @@ def test_dispatch_and_dependencies(runtime: SimpleNamespace, backend: str) -> No
     with stream.activate():
         pass
     stream.join()
+    tensor = MagicMock()
+    stream.record_on_current(tensor)
+    tensor.record_stream.assert_called_once_with(runtime.main)
     runtime.resolver.assert_called_with(device)
     runtime.module.Stream.assert_called_once_with(device=device)
     runtime.module.current_device.assert_not_called()
@@ -142,4 +145,5 @@ def test_stream_dependencies_on_available_device(backend: str) -> None:
             indexed = value.square()
         projected = value * 2
         stream.join()
+        stream.record_on_current(indexed)
         torch.testing.assert_close(indexed + projected, value.square() + value * 2)
