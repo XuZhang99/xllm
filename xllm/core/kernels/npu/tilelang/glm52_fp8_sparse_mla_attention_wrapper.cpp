@@ -37,6 +37,7 @@ constexpr int64_t kRopeDim = 64;
 constexpr int64_t kTopk = 2048;
 constexpr int64_t kBlockSize = 128;
 constexpr int64_t kCoreNum = 24;
+constexpr int64_t kPipelineStages = 2;
 constexpr int64_t kHeadTile = 16;
 constexpr int64_t kKvTile = 64;
 constexpr int64_t kMaxNumQueries = 1024;
@@ -211,31 +212,31 @@ void check_supported(const torch::Tensor& q_latent,
   check_workspace(workspace_k,
                   "TileLang GLM-5.2 FP8 MLA: workspace_k",
                   torch::kBFloat16,
-                  kCoreNum,
+                  kCoreNum * kPipelineStages,
                   kKvTile,
                   kLatentDim);
   check_workspace(workspace_k_rope,
                   "TileLang GLM-5.2 FP8 MLA: workspace_k_rope",
                   torch::kBFloat16,
-                  kCoreNum,
+                  kCoreNum * kPipelineStages,
                   kKvTile,
                   kRopeDim);
   check_workspace(workspace_scores,
                   "TileLang GLM-5.2 FP8 MLA: workspace_scores",
                   torch::kFloat32,
-                  kCoreNum,
+                  kCoreNum * kPipelineStages,
                   kHeadTile,
                   kKvTile);
   check_workspace(workspace_probs,
                   "TileLang GLM-5.2 FP8 MLA: workspace_probs",
                   torch::kBFloat16,
-                  kCoreNum,
+                  kCoreNum * kPipelineStages,
                   kHeadTile,
                   kKvTile);
   check_workspace(workspace_output,
                   "TileLang GLM-5.2 FP8 MLA: workspace_output",
                   torch::kFloat32,
-                  kCoreNum,
+                  kCoreNum * kPipelineStages,
                   kHeadTile,
                   kLatentDim);
   check_workspace(workspace_q,

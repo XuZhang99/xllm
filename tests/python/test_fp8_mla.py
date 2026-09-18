@@ -305,3 +305,5 @@ def test_fp8_mla_decode_uses_tilelang_sparse_attention(
     assert args[6] is actual_seq_kv
     assert args[7].shape == (256,)
     assert args[-1] == backend.scale
+    # Pipeline lowering adds a second GM slot for these five intermediates.
+    assert [workspace.size(0) for workspace in args[9:16]] == [48, 48, 48, 48, 48, 24, 24]
