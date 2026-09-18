@@ -1,6 +1,6 @@
 <!-- Copyright 2026 The xLLM Authors. SPDX-License-Identifier: Apache-2.0 -->
 
-# NPU capture, export, and download
+# NPU capture, export, and artifact transfer
 
 Resolve PIDs, script paths, and run directories from the actual deployment before
 running commands. Execute each command in the indicated environment; host and
@@ -8,14 +8,24 @@ container PIDs are not interchangeable. All names and paths below are examples.
 
 ## 1. Confirm the execution environment
 
+Use the shell where the service runs. If already on the NPU server, skip SSH.
+If already inside the service container, skip both SSH and container entry.
+For a host deployment, skip container commands entirely.
+
 ```bash
-# Local machine: replace the example SSH target with the configured target.
+# Only when the agent is on another machine:
 ssh developer@npu-host
-# Remote host: inspect mounts before entering the deployment container.
+```
+
+```bash
+# Only when xLLM runs in a container and the current shell is on its host:
 XLLM_CONTAINER=xllm-npu
 sudo docker inspect "$XLLM_CONTAINER" --format '{{json .Mounts}}'
 sudo docker exec -it "$XLLM_CONTAINER" bash
-# Inside the container
+```
+
+```bash
+# In the service environment (server host or service container):
 command -v msprof
 msprof --help
 ps -eo pid,ppid,args
@@ -24,12 +34,12 @@ npu-smi info
 
 Identify the xLLM parent process using the process tree, launch logs, command line,
 and `/proc/<pid>/exe`. Do not copy an example PID or simply select a worker PID
-from `npu-smi`. Compare `git remote -v`, `git branch --show-current`,
-`git rev-parse HEAD`, and `git status --short` in local and remote checkouts.
-Compare relevant uncommitted file contents too; matching HEADs do not prove that
-running code matches.
+from `npu-smi`. Record `git remote -v`, `git branch --show-current`,
+`git rev-parse HEAD`, and `git status --short` for the active checkout. When
+synchronizing another checkout, compare these values and relevant uncommitted
+contents too; matching HEADs alone do not prove that running code matches.
 
-Locate and read the deployment's launch and request scripts inside the container.
+Locate and read the deployment's launch and request scripts in the execution environment.
 Treat old scripts as configuration clues: verify the executable,
 `python_model_path`, and current branch, and check platform support for options
 such as cache dtype. Some NPU versions reject `kv_cache_dtype=int8`; do not retain
@@ -57,7 +67,7 @@ until warmup completes. Ensure the script detects HTTP and service errors; an
 error JSON returned by curl is not a successful request. Record actual input and
 output lengths, concurrency, prefix-cache conditions, and early EOS behavior.
 
-In interactive terminal A inside the container:
+In interactive terminal A in the service PID namespace:
 
 ```bash
 # Replace these example values with the verified parent PID and a unique run path.
@@ -75,7 +85,7 @@ consult documentation for that version; do not silently remove essential options
 and still claim complete capture.
 
 Wait for attachment readiness, then enter `start` in terminal A. Confirm capture
-has started, run the measured workload in terminal B in the same container, and
+has started, run the measured workload in terminal B where the service endpoint is reachable, and
 save its output and exit status in `workload.log`. After all measured requests
 finish, enter `stop` in A, confirm capture has stopped, then enter `quit`. Wait
 for msprof to exit and flush its data. Record control commands and their times in
@@ -117,14 +127,20 @@ events with `ph`, `ts`, `pid`, and `tid`. Complete slices typically use `ph=X` a
 `dur`; paired `B/E` events are also possible. JSON parsing alone is insufficient:
 verify actual tracks and slices in Perfetto next.
 
-## 4. Download artifacts
+## 4. Make artifacts accessible to the viewing machine
 
-Record container paths, corresponding host paths, and rank/device identities in
-the manifest. Files in bind mounts can be copied directly with scp. Otherwise,
-stage this run's artifacts on the remote host, for example:
+For a server-only run, retain the exported files and report their absolute server
+paths. No download is required for command-line analysis. If the browser already
+has access to those files, open them directly. Transfer is needed only when the
+browser runs on a different machine without access to the trace.
+
+Record the server path and rank/device identity in the manifest. For containers,
+also record the corresponding host path. A bind-mounted file is accessible from
+the host; if the export is not mounted, stage only this run's artifacts there:
+
 
 ```bash
-# Remote host: use the container name resolved in step 1.
+# Container deployment only, from its host: use the resolved container name.
 sudo docker cp "$XLLM_CONTAINER:/container/path" /host/staging/path
 ```
 
@@ -132,16 +148,17 @@ Make staged files readable by the current user without changing permissions acro
 unrelated raw data.
 
 ```bash
-# Local machine: replace both paths and the SSH target with verified values.
-LOCAL_ARTIFACT_DIR=/path/to/local/profile-artifacts/run_YYYYMMDD_HHMMSS
-mkdir -p "$LOCAL_ARTIFACT_DIR/timelines"
+# Run on the viewing machine only when transfer is needed; replace example values.
+VIEW_ARTIFACT_DIR=/path/to/profile-artifacts/run_YYYYMMDD_HHMMSS
+mkdir -p "$VIEW_ARTIFACT_DIR/timelines"
 scp -r developer@npu-host:/host/path/to/exported_device_directory \
-  "$LOCAL_ARTIFACT_DIR/timelines/"
+  "$VIEW_ARTIFACT_DIR/timelines/"
 ```
 
 Preserve rank/device directories to avoid overwriting files with identical names.
-Use `sha256sum` remotely and `shasum -a 256` on macOS to verify the selected timeline;
-record byte counts and hashes. Raw PROF data may remain remote; viewing one rank
-does not require downloading all large files.
+Use `sha256sum` on Linux or `shasum -a 256` on macOS; when transferring, compare
+source and destination hashes. Record byte counts and hashes even when keeping
+files on the server. Raw PROF data may stay in the execution environment; viewing
+one rank does not require copying all large files.
 
 Export reference: [Ascend msprof documentation](https://www.hiascend.com/document/detail/en/mindstudio/700/TITools/Profiling/atlasprofiling_16_0005.html).

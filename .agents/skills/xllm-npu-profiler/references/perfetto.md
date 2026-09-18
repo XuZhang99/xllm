@@ -2,10 +2,31 @@
 
 # Viewing and analyzing traces in Perfetto
 
+## Headless server analysis
+
+A browser is not required to generate or inspect a trace on the server. If a
+compatible Trace Processor is installed, run it directly on the exported file:
+
+```bash
+# In the environment holding the trace; use the installed executable path.
+trace_processor query /absolute/path/to/msprof_timestamp.json \
+  'SELECT COUNT(*) AS slices FROM slice;'
+```
+
+Check the installed version's help for syntax and platform support. If the tool
+is unavailable, validate the exported JSON and provide its absolute server path,
+size, SHA-256, rank/device, and the transfer command from
+[capture.md](capture.md#4-make-artifacts-accessible-to-the-viewing-machine).
+A second machine or a desktop installation is not required to finish capture.
+
+SQL results can support timeline analysis, but report browser loading and
+screenshots as pending until someone actually opens the trace in Perfetto.
+
 ## Load the actual file
 
 1. Open `https://ui.perfetto.dev` with browser controls and use **Open trace file**
-   to select the downloaded timeline, or use supported file drag-and-drop.
+   on the viewing machine to select a trace accessible there, or use supported
+   file drag-and-drop. This may be the server itself or a separate workstation.
 2. Wait for parsing and confirm a nonempty timeline, process/thread or device
    stream tracks, and selectable events. Record import warnings. The welcome
    page alone does not mean the trace was loaded.
@@ -15,7 +36,7 @@
    Save overview and interval screenshots with rank, phase, and window in filenames.
 4. Retain the original local trace. Sharing or public uploading is not required
    to open it. The website URL does not contain the local trace; deliver its
-   actual local path as well.
+   actual file path and the machine holding it as well.
 
 Start with a representative rank. Inspect other ranks when investigating
 communication tails or load imbalance. Do not manually concatenate JSON files
@@ -25,7 +46,8 @@ to construct a global timeline across ranks.
 
 Perfetto can connect to a local native Trace Processor. Check the installed tool's
 help and the [official large-trace guide](https://perfetto.dev/docs/visualization/large-traces).
-Run it on the **same local machine as the browser**, for example:
+For this browser-connected mode, run it on the **viewing machine**, with the
+trace accessible there, for example:
 
 ```bash
 # Use a separate tools directory; check for an existing installation first.
@@ -38,8 +60,9 @@ Some versions also offer `trace_processor server http <trace>`; follow the insta
 version's help. Open Perfetto, select the detected local accelerator, and confirm
 it loaded the intended trace. The default endpoint is `127.0.0.1:9001`; do not bind
 the service publicly to work around file selection. If browser controls run on
-another machine, verify whether their localhost is the machine holding the trace.
-Report the limitation if no connection is possible. Stop the trace processor
+another machine, their localhost is not the capture server. Transfer the trace
+to the viewing machine or retain server-side SQL analysis and report UI validation
+as pending; do not assume a server loopback listener is reachable by that browser. Stop the trace processor
 started for this task when finished.
 
 ## Cross-check with SQL
