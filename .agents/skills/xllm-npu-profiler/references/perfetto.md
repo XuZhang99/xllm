@@ -73,6 +73,30 @@ tracks. Record importer explanations and counts, and compare source events with
 imported slices. Do not delete events to suppress warnings or interpret display
 overflow as additional physical streams or parallelism.
 
+## Diagnostic rules
+
+- Check capture coverage first. Report missing CPU, HCCL, or rank tracks as "not
+  captured," rather than concluding the activity did not occur. Do not invent
+  prefill/decode labels when phases cannot be distinguished.
+- Aggregate kernel calls, total duration, and mean duration by name, then interpret
+  hotspots in their stream and phase context. Do not add CPU scopes, runtime APIs,
+  and device kernels together as device time.
+- Measure communication overlap using compute/communication interval intersections
+  on the same clock and within the same window. Summed stream durations can exceed
+  wall time; calculate busy/idle time using interval unions and state the denominator.
+- Investigate host bubbles using the previous device task's end, the next task's
+  start, intervening Host APIs, synchronization, copies, graph replay, and other
+  streams. Blank space or a single threshold does not establish a host bottleneck.
+- Compare rank skew only for matching requests/steps with verified clocks. A
+  single-rank trace cannot characterize an entire TP/EP group. Do not concatenate
+  independent JSON files and introduce PID/TID or clock collisions.
+- Timelines alone do not establish KV fragmentation, HBM bandwidth utilization,
+  or fusion opportunities. Obtain the relevant metrics, operator shapes, and
+  current source before concluding. Separate observations, hypotheses, and tests.
+- Profiling explains bottlenecks. User-visible speedups require matched
+  before/after measurements with profiling disabled; cumulative operator time
+  cannot directly establish a throughput improvement.
+
 ## Record reproducible evidence
 
 For each bottleneck, record the following in `timeline_notes.md`:

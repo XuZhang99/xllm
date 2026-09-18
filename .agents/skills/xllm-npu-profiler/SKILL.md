@@ -1,127 +1,142 @@
 ---
 name: xllm-npu-profiler
-description: Capture xLLM Ascend NPU profiling data, export timelines for https://ui.perfetto.dev, and analyze prefill/decode, operators, communication overlap, and host dispatch bottlenecks. Use for NPU timeline capture or Perfetto analysis of existing Ascend traces, not scheduler latency prediction sampling.
+description: Generate an end-to-end profiling trace of an xLLM Ascend NPU server run, export a Chrome-compatible timeline, and analyze it in Perfetto. Use for NPU profiling or visualization of existing traces, not scheduler latency prediction sampling.
 ---
 
 <!-- Copyright 2026 The xLLM Authors. SPDX-License-Identifier: Apache-2.0 -->
 
-# xLLM NPU Profiling and Perfetto
+# Generate an xLLM NPU Profile
 
-Complete the workflow: warm up, capture a bounded window, export a timeline,
-download it, open it in [Perfetto](https://ui.perfetto.dev), and diagnose specific
-time intervals. If the user already has a trace, start with format validation
-and visualization without restarting the service.
+Launch or reuse an xLLM server, validate a representative request, capture a short
+NPU trace, and return the exported timeline with Perfetto analysis. If the user
+already has a trace, skip server startup and capture and begin with Step 5.
 
-## Before capture
+## Prerequisites
 
-- Follow the repository's `AGENTS.md`. Discover the local checkout, SSH target,
-  remote checkout, and container from the task environment. Do not assume a
-  particular username, host, container name, or directory layout.
-- Confirm container mounts and repository and script paths before synchronizing
-  task files. Compare remotes, branches, HEADs, and relevant uncommitted contents
-  between checkouts. Preserve unrelated changes; do not reset, clean, or overwrite
-  the entire workspace.
-- Read the deployment's server launch and request scripts to identify the model,
-  ports, devices, and workload. An accuracy evaluation script is not the default
-  trace workload. If a build is needed, run `python setup.py build` in the
-  container checkout and record the actual executable path.
-- Check `npu-smi info`, existing services, and free disk space. Do not stop other
-  users' jobs. Record the device model, CANN/msprof versions, TP/DP/EP/CP, graph
-  mode, input/output token counts, and concurrency. Do not infer hardware from a
-  host alias.
-- Create a separate run directory for each capture and retain previous data.
-  Confirm service readiness, successful requests, and graph/compilation warmup
-  before starting the measured capture.
+- A working xLLM NPU build, model files, and available Ascend devices.
+- CANN `msprof` in the service environment and access to the service PID namespace.
+- A server launch command and a request workload appropriate for the model.
+- A local browser for [Perfetto](https://ui.perfetto.dev).
 
-## Choose a capture method
+Follow `AGENTS.md` and resolve SSH targets, container names, mounts, checkout paths,
+and script locations from the deployment. Compare local and remote branches,
+HEADs, and relevant uncommitted files before synchronizing changes. If a build is
+needed, run `python setup.py build` in the container checkout. Record the executable
+actually used; a prebuilt binary does not validate a new build.
 
-Prefer the [NPU capture and export procedure](references/capture.md): set
-`PROFILING_MODE=dynamic` before service startup, attach to the service parent PID
-in the same container PID namespace, control msprof with `start/stop/quit`, and
-export every `PROF_*` after the collector exits and flushes its data. Setting the
-variable only in the client or collector cannot change an existing service.
+## Step-by-step workflow
 
-Inspect the platform branches of `WorkerImpl::start_profile/stop_profile` in
-`xllm/core/runtime/worker_impl.cpp` for the current checkout. When this skill was
-introduced, the NPU branch did not support the online HTTP profiler. Do not copy
-CUDA `/start_profile` or `/stop_profile` instructions or assume `--profile_dir`
-produces NPU traces. Neither `enable_profile_step_time` nor the latency tables
-from `ProfileManager` are device timelines.
+### Step 1: Launch or reuse the server
 
-Keep captures short and preserve the deployment configuration. Choose a prefill
-workload with long inputs and short outputs, or a decode workload with enough
-steady decode steps. A decode capture still includes prefill; select the decode
-interval explicitly. Capture an additional eager trace only when operator
-mapping requires it, and retain the production graph trace as the primary evidence.
+Check device availability with `npu-smi info` and inspect existing services before
+launching. Use the task's model, device allocation, parallelism, and graph settings.
+Create a unique run directory and save launch arguments, environment versions,
+commit, executable path, and server PID in `manifest.md`.
 
-## Export and visualize
+Set this variable in the **server's launch environment**:
 
-1. Follow [capture.md](references/capture.md) and enumerate files for every
-   rank/device. Retain raw `PROF_*` directories and logs. Prefer complete
-   `msprof_*.json` files; inspect the actual event format of existing
-   `trace_view.json` or `*.pt.trace.json` files.
-2. Check that files are nonempty, parse as JSON, and contain timestamped events.
-   CSV files, databases, and metadata-only JSON are not usable timelines. Record
-   file size, SHA-256, and rank/device identity.
-3. Download the trace and **actually load it** using the
-   [Perfetto analysis procedure](references/perfetto.md). Inspect the time range,
-   Host API, device streams, kernels, and communication tracks. When browser
-   controls are available, perform the website operations using supported local
-   file selection or the documented native trace processor. If import is blocked,
-   provide the exact local file path and manual steps, and report "exported; UI
-   validation incomplete." Opening an empty website does not complete validation.
-4. Capture screenshots and measurements for representative prefill and steady
-   decode intervals. Support each conclusion with the trace file, rank/device,
-   track, start/end times, units, and relevant event names.
+```bash
+export PROFILING_MODE=dynamic
+# Run the deployment's xLLM launch command in this environment.
+```
 
-## Diagnostic rules
+For an existing server, confirm that the variable was present at startup. Setting
+it only in the profiler or request client has no effect on that server. Arrange
+any required restart within the task's authorization. Resolve the service parent
+PID inside its container; a worker PID from `npu-smi` is not a substitute.
 
-- Check capture coverage first. Report missing CPU, HCCL, or rank tracks as "not
-  captured," rather than concluding the activity did not occur. Do not invent
-  prefill/decode labels when phases cannot be distinguished.
-- Aggregate kernel calls, total duration, and mean duration by name, then interpret
-  hotspots in their stream and phase context. Do not add CPU scopes, runtime APIs,
-  and device kernels together as device time.
-- Measure communication overlap using compute/communication interval intersections
-  on the same clock and within the same window. Summed stream durations can exceed
-  wall time; calculate busy/idle time using interval unions and state the denominator.
-- Investigate host bubbles using the previous device task's end, the next task's
-  start, intervening Host APIs, synchronization, copies, graph replay, and other
-  streams. Blank space or a single threshold does not establish a host bottleneck.
-- Compare rank skew only for matching requests/steps with verified clocks. A
-  single-rank trace cannot characterize an entire TP/EP group. Do not concatenate
-  independent JSON files and introduce PID/TID or clock collisions.
-- Timelines alone do not establish KV fragmentation, HBM bandwidth utilization,
-  or fusion opportunities. Obtain the relevant metrics, operator shapes, and
-  current source before concluding. Separate observations, hypotheses, and tests.
-- Profiling explains bottlenecks. User-visible speedups require matched
-  before/after measurements with profiling disabled; cumulative operator time
-  cannot directly establish a throughput improvement.
+See [capture setup](references/capture.md#1-confirm-the-execution-environment)
+for environment checks and launch pitfalls.
 
-## Deliverables
+### Step 2: Wait for readiness and warm up
 
-Keep the following artifacts under one run directory and return clickable local
-timeline and report paths:
+Poll the deployment's readiness endpoint with a bounded timeout, inspect startup
+logs, and send warmup requests. Stop on startup or request errors. An open port
+alone does not prove that model execution or first-request HCCL setup works.
+Complete graph capture and compilation warmup before starting profiling.
+
+### Step 3: Validate the workload
+
+Verify that a representative request succeeds and returns plausible model output.
+Use an existing small accuracy check when the task requires accuracy validation;
+choose expectations for the actual model rather than imposing a universal score.
+Do not profile a known-broken workload as a successful run.
+
+Record actual input/output token counts, concurrency, prefix-cache conditions,
+and early EOS behavior in `workload.log`. A successful request is a sanity check,
+not a full accuracy benchmark.
+
+### Step 4: Capture and export the profile
+
+Follow [capture.md](references/capture.md#2-warm-up-then-capture-a-bounded-window)
+for executable commands. The required order is:
+
+1. Attach `msprof --dynamic=on` to the verified service parent PID in the same
+   PID namespace, using a fresh output directory.
+2. Wait for attachment readiness and enter `start`.
+3. Run the measured workload and verify all requests completed successfully.
+4. Enter `stop`, confirm capture stopped, then enter `quit`. Wait for collector
+   exit and data flush before exporting.
+5. Export **every** `PROF_*` directory with `msprof --export=on` and retain logs.
+
+Inspect `WorkerImpl::start_profile/stop_profile` in
+`xllm/core/runtime/worker_impl.cpp` before choosing another capture mechanism.
+The NPU path did not support the online HTTP profiler when this skill was added;
+do not assume CUDA `/start_profile`, `/stop_profile`, or `--profile_dir` applies.
+`enable_profile_step_time` and `ProfileManager` latency tables are not device traces.
+
+### Step 5: Download and view the timeline
+
+Locate complete `msprof_*.json` files, commonly under
+`PROF_*/mindstudio_profiler_output/`. Existing `trace_view.json` or
+`*.pt.trace.json` files are also candidates if their events are valid. Check for
+nonempty timestamped events, record rank/device, size, and SHA-256, and verify the
+local copy after download. Preserve directories for different ranks.
+
+Open `https://ui.perfetto.dev`, choose **Open trace file**, and load the actual
+local timeline. Confirm nonempty tracks and selectable slices. Inspect a
+representative prefill interval and steady decode steps; save screenshots and
+record the event names, tracks, time windows, and units supporting each conclusion.
+See [Perfetto analysis](references/perfetto.md) for large traces, SQL, and
+interpretation rules.
+
+If browser import is unavailable, return the exact local path and manual loading
+steps, and mark UI validation incomplete. CLI parsing or opening the welcome page
+does not prove successful browser visualization.
+
+### Step 6: Clean up and report
+
+Stop collectors and temporary trace processors created for this run. Stop only
+a server started for this task when it is no longer needed; preserve reused
+services and unrelated jobs. Record the service's final state.
+
+Return the local timeline and report paths, rank/device coverage, capture/export
+status, and whether Perfetto visualization completed. Keep raw `PROF_*` data and
+logs, including failure evidence. A useful artifact layout is:
 
 ```text
 <run_id>/
-  manifest.md           # Commit/branch, executable, environment, arguments, parent PID
-  capture.log           # Start/stop/quit, errors, collector exit and flush evidence
-  workload.log          # Readiness, warmup, successful measured requests, token counts
+  manifest.md           # Configuration, versions, executable, commit, parent PID
+  capture.log           # Collector commands, timestamps, errors, exit status
+  workload.log          # Warmup and measured request results
   export.log
-  PROF_*/               # Raw/exported data; may remain remote with paths in manifest
-  timelines/            # Local copies with rank/device subdirectories
-  timeline_notes.md     # Bottlenecks, intervals, evidence, candidate changes and tests
-  screenshots/          # Overview and key intervals when UI analysis was completed
+  PROF_*/               # Raw data; may remain remote with paths in the manifest
+  timelines/            # Verified local copies organized by rank/device
+  timeline_notes.md     # Observations, interval evidence, hypotheses, next steps
+  screenshots/          # Overview and selected intervals when UI analysis succeeds
 ```
 
-Distinguish capture completion, timeline export, and Perfetto loading/analysis.
-Retain artifacts and explain diagnostic limits after failed requests, empty traces,
-export errors, warmup contamination, or missing tracks. Exit code zero alone does
-not prove successful profiling. Clean up only collectors and temporary resources
-created for this run, and record the final state of any service started for it.
+## Customization
 
-## References
+- **Prefill:** use long inputs and short outputs.
+- **Decode:** capture enough steady decode steps and exclude the initial prefill
+  interval from decode measurements.
+- **Multiple ranks:** export all ranks; start with one representative rank and
+  compare matching steps and clocks when investigating skew.
+- **Graph execution:** preserve the deployment's graph mode. Use an additional
+  eager capture only when needed for operator mapping.
+- **Longer captures:** extend only enough to cover the behavior of interest;
+  check storage and trace size before increasing the window.
 
-The linked references provide self-contained capture commands, analysis guidance,
-and official tool documentation. No adjacent workflow repository is required.
+Profiling explains bottlenecks. Validate any claimed speedup with matched
+measurements taken with profiling disabled.
