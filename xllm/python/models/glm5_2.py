@@ -64,7 +64,6 @@ from xllm.python.models.base import PyModelBase
 from xllm.python.models.deepseek_v32 import (
     DeepseekV3MLP,
     DeepseekV3MoE,
-    W8A8StaticLinear,
     _apply_half_rope,
     _create_hadamard_matrix,
     _gather_interleave_cos_sin,
@@ -84,6 +83,113 @@ from xllm.python.models.weight_utils import W8A8WeightLoader, effective_moe_tp, 
 # shapes; other gSize values are neither exposed nor tested. GLM-5.2 is 32/1 and pads Q
 # up to 64 heads at the caller (see Glm52Indexer._pad_q_heads_to_kernel_gsize).
 _QLI_KERNEL_GSIZE = 64
+
+
+class _W8A8AttentionLinear(nn.Module):
+    """Attention linear compatible with static and dynamic W8A8 checkpoints."""
+
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        device: torch.device,
+        row_parallel: bool = False,
+    ) -> None:
+        super().__init__()
+        self.out_features = out_features
+        self.row_parallel = row_parallel
+        self.weight = nn.Parameter(
+            torch.empty(out_features, in_features, dtype=torch.int8, device=device),
+            requires_grad=False,
+        )
+        self.register_buffer("deq_scale", torch.empty(0, dtype=torch.float32, device=device))
+        self.register_buffer("quant_bias", torch.empty(0, dtype=torch.int32, device=device))
+        self.register_buffer("input_scale", torch.empty(0, dtype=torch.bfloat16, device=device))
+        self.register_buffer("input_offset", torch.empty(0, dtype=torch.bfloat16, device=device))
+        self.register_buffer("weight_scale", torch.empty(0, dtype=torch.float32, device=device))
+        self.register_buffer("weight_offset", torch.empty(0, dtype=torch.float32, device=device))
+        self._dynamic_activation: bool | None = None
+
+    def _set_dynamic_activation(self, enabled: bool) -> None:
+        self._dynamic_activation = enabled
+        device = self.weight.device
+        if enabled:
+            self.weight_scale.data = torch.empty(self.out_features, 1, dtype=torch.float32, device=device)
+            self.weight_offset.data = torch.empty(self.out_features, 1, dtype=torch.float32, device=device)
+            self.deq_scale.data = torch.empty(0, dtype=torch.float32, device=device)
+            self.quant_bias.data = torch.empty(0, dtype=torch.int32, device=device)
+            self.input_scale.data = torch.empty(0, dtype=torch.bfloat16, device=device)
+            self.input_offset.data = torch.empty(0, dtype=torch.bfloat16, device=device)
+            return
+        self.deq_scale.data = torch.empty(self.out_features, dtype=torch.float32, device=device)
+        self.quant_bias.data = torch.empty(self.out_features, dtype=torch.int32, device=device)
+        self.input_scale.data = torch.empty(1, dtype=torch.bfloat16, device=device)
+        self.input_offset.data = torch.empty(1, dtype=torch.bfloat16, device=device)
+        self.weight_scale.data = torch.empty(0, dtype=torch.float32, device=device)
+        self.weight_offset.data = torch.empty(0, dtype=torch.float32, device=device)
+
+    def process_weights_after_loading(self) -> None:
+        if self._dynamic_activation is None:
+            raise RuntimeError("W8A8 attention quantization format must be selected before processing weights")
+        if not self._dynamic_activation:
+            self.weight.data = kernels.prepare_quant_weight(self.weight.data)
+            return
+        if not bool(torch.all(self.weight_offset == 0)):
+            raise ValueError("dynamic W8A8 attention requires symmetric INT8 weights with zero weight_offset")
+        self.weight.data = kernels.prepare_quant_weight(self.weight.data)
+        self.weight_scale.data = self.weight_scale.data.flatten().contiguous()
+        self.weight_offset.data = self.weight_offset.data.flatten().contiguous()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self._dynamic_activation is None:
+            raise RuntimeError("W8A8 attention quantization format must be selected before execution")
+        if self._dynamic_activation:
+            x_int8, pertoken = kernels.dynamic_quant(x)
+            return kernels.quant_matmul(
+                x_int8,
+                self.weight,
+                False,
+                self.weight_scale,
+                None,
+                pertoken,
+                None,
+                torch.bfloat16,
+            )
+        x_int8 = kernels.quantize_per_tensor(
+            x,
+            self.input_scale,
+            self.input_offset,
+            torch.qint8,
+            -1,
+        )
+        bias = self.quant_bias if not (self.row_parallel and distributed.tp_rank(x.device) != 0) else None
+        return kernels.quant_matmul(
+            x_int8,
+            self.weight,
+            False,
+            self.deq_scale,
+            None,
+            None,
+            bias,
+            torch.bfloat16,
+        )
+
+
+def _load_w8a8_attention_projection(
+    loader: W8A8WeightLoader,
+    module: _W8A8AttentionLinear,
+    prefix: str,
+    proj: str,
+    shard_dims: dict[str, int] | None = None,
+) -> None:
+    dynamic_activation = loader.w8a8_projection_uses_dynamic_activation(prefix, proj)
+    module._set_dynamic_activation(dynamic_activation)
+    loader.load_compatible_w8a8_projection(
+        prefix,
+        proj,
+        shard_dims,
+        dynamic_activation=dynamic_activation,
+    )
 
 
 @dataclass
@@ -394,11 +500,11 @@ class Glm52MLAAttention(Attention):
         self.kv_lora_rank = kv_lora
         self.num_heads_local = num_heads
 
-        self.q_a_proj = W8A8StaticLinear(cfg.hidden_size, cfg.q_lora_rank, device)
-        self.kv_a_proj_with_mqa = W8A8StaticLinear(cfg.hidden_size, kv_lora + qk_rope, device)
+        self.q_a_proj = _W8A8AttentionLinear(cfg.hidden_size, cfg.q_lora_rank, device)
+        self.kv_a_proj_with_mqa = _W8A8AttentionLinear(cfg.hidden_size, kv_lora + qk_rope, device)
         self.q_a_layernorm = RMSNorm(cfg.q_lora_rank, cfg.rms_norm_eps, dtype=dtype, device=device)
         self.kv_a_layernorm = RMSNorm(kv_lora, cfg.rms_norm_eps, dtype=dtype, device=device)
-        self.q_b_proj = W8A8StaticLinear(cfg.q_lora_rank, num_heads * (qk_nope + qk_rope), device)
+        self.q_b_proj = _W8A8AttentionLinear(cfg.q_lora_rank, num_heads * (qk_nope + qk_rope), device)
         self.kv_b_proj = ColumnParallelLinear(
             kv_lora,
             num_heads * (qk_nope + v_head),
@@ -406,7 +512,7 @@ class Glm52MLAAttention(Attention):
             dtype=dtype,
             device=device,
         )
-        self.o_proj = W8A8StaticLinear(num_heads * v_head, cfg.hidden_size, device, row_parallel=True)
+        self.o_proj = _W8A8AttentionLinear(num_heads * v_head, cfg.hidden_size, device, row_parallel=True)
         self.register_buffer(
             "W_UK",
             torch.empty(num_heads, qk_nope, kv_lora, dtype=dtype, device=device),
@@ -564,7 +670,7 @@ class Glm52Indexer(nn.Module):
         self.rope_dim = cfg.qk_rope_head_dim
         self.topk = cfg.index_topk
         self.indexer_rope_interleave = cfg.indexer_rope_interleave
-        self.wq_b = W8A8StaticLinear(cfg.q_lora_rank, self.n_head * self.head_dim, device)
+        self.wq_b = _W8A8AttentionLinear(cfg.q_lora_rank, self.n_head * self.head_dim, device)
         self.wk = nn.Linear(cfg.hidden_size, self.head_dim, bias=False, dtype=dtype, device=device)
         self.weights_proj = nn.Linear(cfg.hidden_size, self.n_head, bias=False, dtype=dtype, device=device)
         self.k_norm = nn.LayerNorm(self.head_dim, eps=1e-6, dtype=dtype, device=device)
@@ -881,21 +987,40 @@ class Glm52ForCausalLM(PyModelBase):
             loader.copy_replicated(p + "input_layernorm.weight")
             loader.copy_replicated(p + "post_attention_layernorm.weight")
             attn = p + "self_attn."
-            loader.load_w8a8_projection(attn, "q_a_proj")
+            attention = self.model.layers[i].self_attn
+            _load_w8a8_attention_projection(loader, attention.q_a_proj, attn, "q_a_proj")
             loader.copy_replicated(attn + "q_a_layernorm.weight")
-            loader.load_w8a8_projection(attn, "q_b_proj", {"weight": 0, "deq_scale": 0, "quant_bias": 0})
-            loader.load_w8a8_projection(attn, "kv_a_proj_with_mqa")
+            _load_w8a8_attention_projection(
+                loader,
+                attention.q_b_proj,
+                attn,
+                "q_b_proj",
+                {
+                    "weight": 0,
+                    "deq_scale": 0,
+                    "quant_bias": 0,
+                    "weight_scale": 0,
+                    "weight_offset": 0,
+                },
+            )
+            _load_w8a8_attention_projection(
+                loader,
+                attention.kv_a_proj_with_mqa,
+                attn,
+                "kv_a_proj_with_mqa",
+            )
             loader.copy_replicated(attn + "kv_a_layernorm.weight")
             loader.copy_shard(attn + "kv_b_proj.weight", dim=0)
-            loader.load_w8a8_projection(attn, "o_proj", {"weight": 1})
-            if not self.model.layers[i].self_attn.is_shared:
+            _load_w8a8_attention_projection(loader, attention.o_proj, attn, "o_proj", {"weight": 1})
+            if not attention.is_shared:
                 idx = attn + "indexer."
-                loader.load_w8a8_projection(idx, "wq_b")
+                assert attention.indexer is not None
+                _load_w8a8_attention_projection(loader, attention.indexer.wq_b, idx, "wq_b")
                 loader.copy_replicated(idx + "wk.weight")
                 loader.copy_replicated(idx + "k_norm.weight")
                 loader.copy_replicated(idx + "k_norm.bias")
                 loader.copy_replicated(idx + "weights_proj.weight")
-            self.model.layers[i].self_attn.process_weights_after_loading()
+            attention.process_weights_after_loading()
 
             self.model.layers[i].mlp.load_from_checkpoint(loader, p + "mlp.")
 
