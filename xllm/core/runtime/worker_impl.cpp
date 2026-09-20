@@ -519,12 +519,10 @@ bool WorkerImpl::allocate_kv_cache_storage(
 #if defined(USE_NPU)
   const bool enable_kv_cache_quant =
       kv_cache_dtype == "int8" || kv_cache_dtype == "fp8_e4m3";
-  const bool enable_indexer_cache_quant =
-      indexer_cache_dtype == "int8" || indexer_cache_dtype == "fp8_e4m3";
 #else
   const bool enable_kv_cache_quant = kv_cache_dtype == "int8";
-  const bool enable_indexer_cache_quant = indexer_cache_dtype == "int8";
 #endif
+  const bool enable_indexer_cache_quant = indexer_cache_dtype == "int8";
 #if defined(USE_NPU)
   const bool supports_npu_python_glm52_cache_quant =
       args.model_type() == "glm_moe_dsa" &&
@@ -532,13 +530,10 @@ bool WorkerImpl::allocate_kv_cache_storage(
   CHECK(!enable_kv_cache_quant ||
         (kv_cache_dtype == "fp8_e4m3" && supports_npu_python_glm52_cache_quant))
       << "NPU quantized KV cache only supports PyTorch GLM-5.2.";
-  CHECK(indexer_cache_dtype != "fp8_e4m3" ||
-        supports_npu_python_glm52_cache_quant)
-      << "NPU quantized indexer cache only supports PyTorch GLM-5.2.";
 #endif
   if (enable_lighting_indexer) {
     CHECK_EQ(kv_cache_shape.has_index_cache_scale_shape(),
-             indexer_cache_dtype == "int8")
+             enable_indexer_cache_quant)
         << "Indexer cache shape and worker quantization config must agree.";
   }
 
@@ -580,7 +575,6 @@ bool WorkerImpl::allocate_kv_cache_storage(
       .enable_kv_cache_quant(enable_kv_cache_quant)
       .kv_cache_dtype(kv_cache_dtype)
       .enable_indexer_cache_quant(enable_indexer_cache_quant)
-      .indexer_cache_dtype(indexer_cache_dtype)
       .tensor_allocator(std::move(tensor_allocator))
       .block_size(options_.block_size())
       .head_dim(args.head_dim())

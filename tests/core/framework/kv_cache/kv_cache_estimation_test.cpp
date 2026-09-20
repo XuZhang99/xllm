@@ -107,7 +107,7 @@ TEST(KVCacheEstimationTest, IndexerScaleUsesLogicalCacheCapacity) {
 }
 
 #if defined(USE_NPU)
-TEST(KVCacheEstimationTest, NpuGlm52Fp8CachesDoNotRequireScales) {
+TEST(KVCacheEstimationTest, NpuGlm52Fp8KvCacheKeepsUnquantizedIndexBudget) {
   ModelArgs model_args = make_standard_args();
   model_args.model_type("glm_moe_dsa")
       .enable_mla(true)
@@ -118,16 +118,15 @@ TEST(KVCacheEstimationTest, NpuGlm52Fp8CachesDoNotRequireScales) {
   KVCacheEstimateOptions options = make_estimate_options();
   options.dtype = torch::kBFloat16;
   options.kv_cache_dtype = "fp8_e4m3";
-  options.indexer_cache_dtype = "fp8_e4m3";
+  options.indexer_cache_dtype = "auto";
 
   const KVCacheCapacity capacity =
       estimate_kv_cache_capacity(model_args, options);
 
   EXPECT_EQ(capacity.slot_size(), 576);
   EXPECT_EQ(capacity.scale_slot_size(), 0);
-  EXPECT_EQ(capacity.index_slot_size(), 128);
-  EXPECT_TRUE(capacity.enable_indexer_cache_quant());
-  EXPECT_FALSE(capacity.enable_indexer_cache_scale());
+  EXPECT_EQ(capacity.index_slot_size(), 256);
+  EXPECT_FALSE(capacity.enable_indexer_cache_quant());
 }
 #endif
 

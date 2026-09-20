@@ -48,8 +48,7 @@ DEFINE_string(indexer_cache_dtype,
               "Indexer cache data type for quantization. \"auto\" (default): "
               "Indexer cache dtype aligns with model dtype (no "
               "quantization). \"int8\": Enables INT8 quantization when "
-              "supported. \"fp8_e4m3\": Enables E4M3 cache storage for the "
-              "NPU PyTorch GLM-5.2 implementation.");
+              "supported. Supported on NPU and MLU backends.");
 
 DEFINE_bool(enable_prefix_cache,
             true,
@@ -149,21 +148,9 @@ void KVCacheConfig::initialize() {
 }
 
 void KVCacheConfig::validate() const {
-#if defined(USE_NPU)
-  const bool indexer_cache_dtype_supported = indexer_cache_dtype_ == "auto" ||
-                                             indexer_cache_dtype_ == "int8" ||
-                                             indexer_cache_dtype_ == "fp8_e4m3";
-  constexpr const char* kSupportedIndexerCacheDtypes =
-      "\"auto\", \"int8\", and \"fp8_e4m3\"";
-#else
-  const bool indexer_cache_dtype_supported =
-      indexer_cache_dtype_ == "auto" || indexer_cache_dtype_ == "int8";
-  constexpr const char* kSupportedIndexerCacheDtypes = "\"auto\" and \"int8\"";
-#endif
-  if (!indexer_cache_dtype_supported) {
+  if (indexer_cache_dtype_ != "auto" && indexer_cache_dtype_ != "int8") {
     LOG(FATAL) << "Invalid indexer_cache_dtype=\"" << indexer_cache_dtype_
-               << "\". Supported values are exactly "
-               << kSupportedIndexerCacheDtypes << ".";
+               << "\". Supported values are exactly \"auto\" and \"int8\".";
   }
 }
 

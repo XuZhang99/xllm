@@ -18,16 +18,14 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-import torch.nn as nn
 
 from xllm.python.attention import npu_paged_attention
-from xllm.python.attention.backend import LayerCache, MlaIndexContext
+from xllm.python.attention.backend import LayerCache
 from xllm.python.attention.fp8_cache import (
     create_e4m3_decode_table,
     dequantize_e4m3,
     quantize_e4m3,
 )
-from xllm.python.models import glm5_2
 
 
 def test_e4m3_cache_encoding_matches_pytorch_float8_bits() -> None:
@@ -120,69 +118,6 @@ def test_e4m3_mla_cache_writer_quantizes_latent_and_rope() -> None:
     assert torch.equal(nope_cache[0, [2, 0]], quantize_e4m3(latent))
     assert torch.equal(rope_cache[0, [2, 0]], quantize_e4m3(rope))
     assert torch.count_nonzero(nope_cache[0, 1]) == 0
-
-
-@pytest.mark.parametrize("cache_only", [False, True])
-def test_fp8_indexer_uses_materialized_cache_and_matching_block_table(
-    monkeypatch: pytest.MonkeyPatch,
-    cache_only: bool,
-) -> None:
-    indexer = glm5_2.Glm52Indexer.__new__(glm5_2.Glm52Indexer)
-    nn.Module.__init__(indexer)
-    indexer.n_head = 1
-    indexer.head_dim = 4
-    indexer.rope_dim = 2
-    indexer.topk = 2
-    indexer.indexer_rope_interleave = False
-    indexer.wq_b = nn.Identity()
-    indexer.wk = nn.Identity()
-    indexer.k_norm = nn.Identity()
-    indexer.weights_proj = nn.Linear(4, 1, bias=False, dtype=torch.bfloat16)
-    cache = torch.zeros((2, 1, 1, 4), dtype=torch.uint8)
-    slots = torch.tensor([1, 0])
-    block_table = torch.tensor([[1, 0]], dtype=torch.int32)
-    materialized_table = torch.tensor([[0, 1]], dtype=torch.int32)
-    lengths = torch.tensor([2], dtype=torch.int32)
-    hidden = torch.tensor([[1.1, -2.2, 3.3, -4.4], [0.1, 0.2, 0.3, 0.4]], dtype=torch.bfloat16)
-
-    updates = []
-
-    def update(values: torch.Tensor, scales: torch.Tensor | None) -> None:
-        updates.append(values)
-        assert values.dtype == torch.uint8
-        assert scales is None
-        npu_paged_attention.NpuPagedAttentionBackend._update_mla_index_cache(cache, None, slots, values, scales)
-
-    def lightning_indexer(query: torch.Tensor, key: torch.Tensor, *args: object) -> torch.Tensor:
-        assert key.dtype == torch.bfloat16
-        assert args[3] is materialized_table
-        torch.testing.assert_close(key[:, 0, 0], dequantize_e4m3(quantize_e4m3(hidden)))
-        return torch.zeros((query.size(0), 1, 2), dtype=torch.int32)
-
-    monkeypatch.setattr(glm5_2.kernels, "lightning_indexer", lightning_indexer, raising=False)
-    monkeypatch.setattr(glm5_2, "get_forward_context", lambda: SimpleNamespace(execution_state=None))
-    ctx = MlaIndexContext(
-        index_cache=cache,
-        slot_mapping=slots,
-        block_table=block_table,
-        actual_seq_q=lengths,
-        actual_seq_kv=lengths,
-        index_cache_scale=None,
-        get_quant_indexer_metadata=lambda *_args: torch.empty(0),
-        update_index_cache=update,
-        materialize_index_cache=lambda: (cache.flip(0), None, materialized_table),
-    )
-
-    positions = torch.tensor([0, 1])
-    rope = torch.tensor([[1.0, 0.0], [1.0, 0.0]])
-    if cache_only:
-        # MTP top-k reuse updates the cache without running the indexer.
-        indexer._update_index_cache(hidden, positions, ctx, rope)
-    else:
-        result = indexer.select_qli(hidden, hidden, positions, ctx, rope)
-        assert result.shape == (2, 1, 2)
-    assert len(updates) == 1
-    assert torch.equal(cache[:, 0, 0], quantize_e4m3(hidden).flip(0))
 
 
 @pytest.mark.parametrize("cache_dtype", [torch.uint8, torch.bfloat16])

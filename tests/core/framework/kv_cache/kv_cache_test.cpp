@@ -858,7 +858,7 @@ TEST(KVCacheTest, MluMixedDsaLayersUseInjectedAllocatorForActualRoles) {
 #endif
 
 #if defined(USE_NPU)
-TEST(KVCacheTest, NpuGlm52Fp8CachesUseRawBytesWithoutScales) {
+TEST(KVCacheTest, NpuGlm52Fp8KvCachePreservesBf16IndexCache) {
   constexpr int64_t kBlockCount = 2;
   constexpr int64_t kBlockSize = 16;
   constexpr int64_t kKvLoraRank = 512;
@@ -866,10 +866,7 @@ TEST(KVCacheTest, NpuGlm52Fp8CachesUseRawBytesWithoutScales) {
   constexpr int64_t kIndexHeadDim = 128;
 
   KVCacheCapacity capacity;
-  capacity.n_blocks(kBlockCount)
-      .block_size(kBlockSize)
-      .enable_indexer_cache_quant(true)
-      .enable_indexer_cache_scale(false);
+  capacity.n_blocks(kBlockCount).block_size(kBlockSize);
   ModelArgs model_args;
   model_args.model_type("glm_moe_dsa")
       .enable_mla(true)
@@ -890,9 +887,7 @@ TEST(KVCacheTest, NpuGlm52Fp8CachesUseRawBytesWithoutScales) {
       .enable_lighting_indexer(true)
       .indexer_cache_enabled_layers({true, false})
       .enable_kv_cache_quant(true)
-      .kv_cache_dtype("fp8_e4m3")
-      .enable_indexer_cache_quant(true)
-      .indexer_cache_dtype("fp8_e4m3");
+      .kv_cache_dtype("fp8_e4m3");
 
   std::vector<KVCache> caches;
   allocate_kv_caches(caches, shape, options);
@@ -900,7 +895,7 @@ TEST(KVCacheTest, NpuGlm52Fp8CachesUseRawBytesWithoutScales) {
   ASSERT_EQ(caches.size(), 2U);
   EXPECT_EQ(caches[0].get_k_cache().scalar_type(), torch::kByte);
   EXPECT_EQ(caches[0].get_v_cache().scalar_type(), torch::kByte);
-  EXPECT_EQ(caches[0].get_index_cache().scalar_type(), torch::kByte);
+  EXPECT_EQ(caches[0].get_index_cache().scalar_type(), torch::kBFloat16);
   EXPECT_FALSE(caches[0].get_k_cache_scale().has_value());
   EXPECT_FALSE(caches[0].get_v_cache_scale().has_value());
   EXPECT_FALSE(caches[0].get_indexer_cache_scale().has_value());

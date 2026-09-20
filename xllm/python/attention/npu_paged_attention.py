@@ -1036,9 +1036,6 @@ class NpuPagedAttentionBackend(AttentionBackend):
         values: torch.Tensor,
         scales: torch.Tensor | None,
     ) -> None:
-        if index_cache.dtype == torch.uint8:
-            NpuPagedAttentionBackend._update_paged_cache(index_cache, slot_mapping, values)
-            return
         if slot_mapping.numel() == 0:
             return
         cache_view = index_cache.view(-1, index_cache.size(-1))

@@ -88,7 +88,6 @@ struct KVCacheCreateOptions {
   PROPERTY(bool, enable_kv_cache_huge_page_allocator) = false;
 #endif
   PROPERTY(bool, enable_indexer_cache_quant) = false;
-  PROPERTY(std::string, indexer_cache_dtype) = "auto";
 
   // DeepSeek V4 cache allocation metadata.
   PROPERTY(int64_t, block_size) = 0;
