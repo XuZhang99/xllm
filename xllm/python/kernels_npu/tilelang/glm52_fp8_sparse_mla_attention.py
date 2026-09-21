@@ -98,6 +98,7 @@ def build_glm52_fp8_sparse_mla_attention_kernel(num_heads: int, num_splits: int 
             indices_fp32_ub = T.alloc_ub((KV_TILE,), accum_dtype)
             valid_mask_ub = T.alloc_ub((32,), "uint8")
             nonnegative_mask_ub = T.alloc_ub((32,), "uint8")
+            valid_index_max_ub = T.alloc_ub((1,), accum_dtype)
             decode_table_ub = T.alloc_ub((256,), accum_dtype)
             # Older Gather uses the source extent as its output count. Only
             # the first 256 entries are addressed; pad the allocation so one
@@ -264,6 +265,24 @@ def build_glm52_fp8_sparse_mla_attention_kernel(num_heads: int, num_splits: int 
                             nonnegative_mask_ub,
                         )
 
+                        # Short contexts contain fully padded top-k tiles.
+                        # Inspect the actual mask instead of assuming valid
+                        # indices occupy a contiguous prefix.
+                        # A dynamic serial loop preserves the guard through
+                        # CrossCorePipeline, which hoists vector-only if bodies.
+                        for _short_context in T.serial(T.if_then_else(actual_kv_len < TOPK, 1, 0)):
+                            T.tile.select(
+                                indices_fp32_ub,
+                                valid_mask_ub,
+                                indices_fp32_ub,
+                                -1.0,
+                                "VSEL_TENSOR_SCALAR_MODE",
+                            )
+                            T.pipe_barrier("v")
+                            T.reduce_max(indices_fp32_ub, valid_index_max_ub, dim=0)
+                            T.set_flag("v", "s", 3)
+                            T.wait_flag("v", "s", 3)
+
                         # As in the paged DSA kernel, gather a group of sparse
                         # rows with MTE2 before handing a contiguous tile to MTE3.
                         # Amortize FP8 conversion and synchronization over four
@@ -274,70 +293,82 @@ def build_glm52_fp8_sparse_mla_attention_kernel(num_heads: int, num_splits: int 
                             # Wait before overwriting the previous MTE3 source.
                             if global_copy_group > 1:
                                 T.wait_flag("mte3", "v", ping_pong)
-                            for decode_group in T.serial(KV_COPY_ROWS // DECODE_ROWS):
-                                row_start = decode_group * DECODE_ROWS
-                                for copy_row in T.serial(DECODE_ROWS):
-                                    index_in_tile = vid * VEC_KV_TILE + copy_group * KV_COPY_ROWS + row_start + copy_row
-                                    sparse_index = indices_ub[index_in_tile]
-                                    safe_sparse_index = T.if_then_else(
-                                        sparse_index >= 0,
-                                        T.if_then_else(sparse_index < actual_kv_len, sparse_index, 0),
+                            if actual_kv_len >= TOPK or valid_index_max_ub[0] >= 0.0:
+                                for decode_group in T.serial(KV_COPY_ROWS // DECODE_ROWS):
+                                    row_start = decode_group * DECODE_ROWS
+                                    for copy_row in T.serial(DECODE_ROWS):
+                                        index_in_tile = (
+                                            vid * VEC_KV_TILE + copy_group * KV_COPY_ROWS + row_start + copy_row
+                                        )
+                                        sparse_index = indices_ub[index_in_tile]
+                                        safe_sparse_index = T.if_then_else(
+                                            sparse_index >= 0,
+                                            T.if_then_else(sparse_index < actual_kv_len, sparse_index, 0),
+                                            0,
+                                        )
+                                        logical_block = safe_sparse_index // BLOCK_SIZE
+                                        physical_block = block_table[0, query_idx * block_table_stride + logical_block]
+                                        physical_block = T.if_then_else(physical_block >= 0, physical_block, 0)
+                                        block_offset = safe_sparse_index % BLOCK_SIZE
+                                        T.copy(nope_cache[physical_block, block_offset, :], raw_cache_ub[copy_row, :])
+                                        T.copy(
+                                            rope_cache[physical_block, block_offset, :], raw_rope_cache_ub[copy_row, :]
+                                        )
+                                    T.set_flag("mte2", "v", 6)
+                                    T.wait_flag("mte2", "v", 6)
+                                    T.tile.cast(
+                                        decode_fp16_ub,
+                                        raw_cache_ub,
+                                        "CAST_NONE",
+                                        DECODE_ROWS * LATENT_DIM,
+                                    )
+                                    T.tile.cast(
+                                        decode_offsets_i32_ub, decode_fp16_ub, "CAST_RINT", DECODE_ROWS * LATENT_DIM
+                                    )
+                                    T.pipe_barrier("v")
+                                    T.tile.mul(decode_offsets_i32_ub, decode_offsets_i32_ub, 2)
+                                    T.pipe_barrier("v")
+                                    T.reinterpretcast(decode_offsets_u32_ub, decode_offsets_i32_ub, "uint32_t")
+                                    T.tile.gather(decoded_bf16_ub, decode_table_bf16_ub, decode_offsets_u32_ub, 0)
+                                    T.copy(
+                                        decoded_bf16_ub, k_gather_ub[ping_pong, row_start : row_start + DECODE_ROWS, :]
+                                    )
+                                    T.pipe_barrier("v")
+                                    T.tile.cast(
+                                        rope_decode_fp16_ub,
+                                        raw_rope_cache_ub,
+                                        "CAST_NONE",
+                                        DECODE_ROWS * ROPE_DIM,
+                                    )
+                                    T.tile.cast(
+                                        rope_decode_offsets_i32_ub,
+                                        rope_decode_fp16_ub,
+                                        "CAST_RINT",
+                                        DECODE_ROWS * ROPE_DIM,
+                                    )
+                                    T.pipe_barrier("v")
+                                    T.tile.mul(
+                                        rope_decode_offsets_i32_ub,
+                                        rope_decode_offsets_i32_ub,
+                                        2,
+                                    )
+                                    T.pipe_barrier("v")
+                                    T.reinterpretcast(
+                                        rope_decode_offsets_u32_ub, rope_decode_offsets_i32_ub, "uint32_t"
+                                    )
+                                    T.tile.gather(
+                                        decoded_rope_bf16_ub,
+                                        decode_table_bf16_ub[: DECODE_ROWS * ROPE_DIM],
+                                        rope_decode_offsets_u32_ub,
                                         0,
                                     )
-                                    logical_block = safe_sparse_index // BLOCK_SIZE
-                                    physical_block = block_table[0, query_idx * block_table_stride + logical_block]
-                                    physical_block = T.if_then_else(physical_block >= 0, physical_block, 0)
-                                    block_offset = safe_sparse_index % BLOCK_SIZE
-                                    T.copy(nope_cache[physical_block, block_offset, :], raw_cache_ub[copy_row, :])
-                                    T.copy(rope_cache[physical_block, block_offset, :], raw_rope_cache_ub[copy_row, :])
-                                T.set_flag("mte2", "v", 6)
-                                T.wait_flag("mte2", "v", 6)
-                                T.tile.cast(
-                                    decode_fp16_ub,
-                                    raw_cache_ub,
-                                    "CAST_NONE",
-                                    DECODE_ROWS * LATENT_DIM,
-                                )
-                                T.tile.cast(
-                                    decode_offsets_i32_ub, decode_fp16_ub, "CAST_RINT", DECODE_ROWS * LATENT_DIM
-                                )
-                                T.pipe_barrier("v")
-                                T.tile.mul(decode_offsets_i32_ub, decode_offsets_i32_ub, 2)
-                                T.pipe_barrier("v")
-                                T.reinterpretcast(decode_offsets_u32_ub, decode_offsets_i32_ub, "uint32_t")
-                                T.tile.gather(decoded_bf16_ub, decode_table_bf16_ub, decode_offsets_u32_ub, 0)
-                                T.copy(decoded_bf16_ub, k_gather_ub[ping_pong, row_start : row_start + DECODE_ROWS, :])
-                                T.pipe_barrier("v")
-                                T.tile.cast(
-                                    rope_decode_fp16_ub,
-                                    raw_rope_cache_ub,
-                                    "CAST_NONE",
-                                    DECODE_ROWS * ROPE_DIM,
-                                )
-                                T.tile.cast(
-                                    rope_decode_offsets_i32_ub,
-                                    rope_decode_fp16_ub,
-                                    "CAST_RINT",
-                                    DECODE_ROWS * ROPE_DIM,
-                                )
-                                T.pipe_barrier("v")
-                                T.tile.mul(
-                                    rope_decode_offsets_i32_ub,
-                                    rope_decode_offsets_i32_ub,
-                                    2,
-                                )
-                                T.pipe_barrier("v")
-                                T.reinterpretcast(rope_decode_offsets_u32_ub, rope_decode_offsets_i32_ub, "uint32_t")
-                                T.tile.gather(
-                                    decoded_rope_bf16_ub,
-                                    decode_table_bf16_ub[: DECODE_ROWS * ROPE_DIM],
-                                    rope_decode_offsets_u32_ub,
-                                    0,
-                                )
-                                T.copy(
-                                    decoded_rope_bf16_ub,
-                                    k_rope_gather_ub[ping_pong, row_start : row_start + DECODE_ROWS, :],
-                                )
+                                    T.copy(
+                                        decoded_rope_bf16_ub,
+                                        k_rope_gather_ub[ping_pong, row_start : row_start + DECODE_ROWS, :],
+                                    )
+                            else:
+                                T.tile.fill(k_gather_ub[ping_pong, :, :], 0.0)
+                                T.tile.fill(k_rope_gather_ub[ping_pong, :, :], 0.0)
                             T.set_flag("v", "mte3", ping_pong)
                             T.wait_flag("v", "mte3", ping_pong)
                             T.copy(

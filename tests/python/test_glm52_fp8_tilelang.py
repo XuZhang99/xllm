@@ -162,6 +162,25 @@ def test_all_e4m3_bytes_and_replayed_cache_updates(compiled_kernel: tuple[int, A
     torch.testing.assert_close(args[8].cpu(), torch.zeros(1, heads, 512, dtype=torch.bfloat16), atol=0, rtol=0)
 
 
+@pytest.mark.parametrize("length", (63, 2048, 2049))
+def test_padding_tiles_across_length_threshold(compiled_kernel: tuple[int, Any], length: int) -> None:
+    heads, kernel = compiled_kernel
+    args, _ = _make_inputs(heads, 1, length)
+    args[4].fill_(-1)
+    args[4][0, ::2] = length + 17
+    args[4][0, -1] = length - 1
+    page = int(args[5].cpu()[0, (length - 1) // 128])
+    expected = dequantize_e4m3(args[2].cpu()[page, (length - 1) % 128]).expand(heads, -1)
+    kernel(*args)
+    torch.testing.assert_close(args[8][0].cpu(), expected, atol=0, rtol=0)
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        kernel(*args)
+    args[4][0, -1] = -1
+    graph.replay()
+    torch.testing.assert_close(args[8].cpu(), torch.zeros(1, heads, 512, dtype=torch.bfloat16), atol=0, rtol=0)
+
+
 @pytest.mark.parametrize("splits", (2, 16))
 def test_merge_handles_extreme_scores_and_empty_shards(splits: int) -> None:
     heads = 4
