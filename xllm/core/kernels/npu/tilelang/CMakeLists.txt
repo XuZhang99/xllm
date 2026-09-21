@@ -143,6 +143,11 @@ tilelang_register_runtime_kernel(
 )
 
 tilelang_register_runtime_kernel(
+  NAME glm52_fp8_sparse_mla_merge
+  WRAPPER_SRCS glm52_fp8_sparse_mla_merge_wrapper.cpp
+)
+
+tilelang_register_runtime_kernel(
   NAME fp8_mla_cache_write
   WRAPPER_SRCS fp8_mla_cache_write_wrapper.cpp
 )

@@ -26,6 +26,7 @@ from xllm.python.kernels_npu.tilelang.glm52_fp8_sparse_mla_attention import (
     DEFAULT_ASCEND_PASS_CONFIGS,
     DEFAULT_DTYPE,
     SUPPORTED_NUM_HEADS,
+    SUPPORTED_NUM_SPLITS,
     build_glm52_fp8_sparse_mla_attention_kernel,
 )
 
@@ -37,23 +38,27 @@ class Glm52Fp8SparseMlaAttentionKernel(TilelangKernel):
     DISPATCH_SCHEMA = [
         DispatchField("num_heads", "int32"),
         DispatchField("dtype", "dtype"),
+        DispatchField("num_splits", "int32"),
     ]
     SPECIALIZATIONS = [
         {
-            "variant_key": f"h{num_heads}_bf16",
+            "variant_key": f"h{num_heads}_s{num_splits}_bf16",
             "num_heads": num_heads,
             "dtype": DEFAULT_DTYPE,
+            "num_splits": num_splits,
         }
         for num_heads in SUPPORTED_NUM_HEADS
+        for num_splits in SUPPORTED_NUM_SPLITS
     ]
 
     @staticmethod
-    def generate_source(num_heads: int, dtype: str) -> str:
+    def generate_source(num_heads: int, dtype: str, num_splits: int = 1) -> str:
         if dtype != DEFAULT_DTYPE:
             raise ValueError(f"GLM-5.2 FP8 sparse MLA attention only supports dtype={DEFAULT_DTYPE}, got {dtype}")
         tilelang.disable_cache()
         tilelang_kernel = build_glm52_fp8_sparse_mla_attention_kernel(
             num_heads=num_heads,
+            num_splits=num_splits,
         )
         with tilelang.tvm.transform.PassContext(
             opt_level=3,

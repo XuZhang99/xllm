@@ -203,10 +203,12 @@ def test_fp8_mla_dequantizes_caches_before_sparse_attention(
     torch.testing.assert_close(captured["rope"], rope_values)
 
 
+@pytest.mark.parametrize("num_queries,num_splits", [(1, 16), (2, 8), (3, 8), (6, 4), (12, 2), (16, 1), (25, 1)])
 def test_fp8_mla_decode_uses_tilelang_sparse_attention(
     monkeypatch: pytest.MonkeyPatch,
+    num_queries: int,
+    num_splits: int,
 ) -> None:
-    num_queries = 2
     num_heads = 4
     q_latent = torch.zeros(num_heads, num_queries, 512, dtype=torch.bfloat16).transpose(0, 1)
     q_pe = torch.zeros(num_heads, num_queries, 64, dtype=torch.bfloat16).transpose(0, 1)
@@ -276,3 +278,11 @@ def test_fp8_mla_decode_uses_tilelang_sparse_attention(
     assert args[-1] == backend.scale
     # Pipeline lowering adds a second GM slot for these five intermediates.
     assert [workspace.size(0) for workspace in args[9:16]] == [48, 48, 48, 48, 48, 24, 24]
+    assert args[-2] == num_splits
+    if num_splits > 1:
+        assert args[16].shape == (24, num_heads, 512)
+        assert args[17].shape == (24, 2, 16)
+        assert args[16].dtype == args[17].dtype == torch.float32
+    else:
+        assert args[16] is args[13]
+        assert args[17] is args[11]

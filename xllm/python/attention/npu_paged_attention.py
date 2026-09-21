@@ -1340,6 +1340,31 @@ class NpuPagedAttentionBackend(AttentionBackend):
                 device=q_latent.device,
             ),
         )
+        num_splits = 1
+        while num_splits < 16 and q_latent.size(0) * num_splits * 2 <= _GLM52_FP8_ATTN_CORE_NUM:
+            num_splits *= 2
+        partial, stats = workspaces[4], workspaces[2]
+        if num_splits > 1:
+            partial = get_execution_buffer(
+                ("GLM52_FP8_SFA_PARTIAL", q_latent.device, q_latent.size(1)),
+                lambda: torch.empty(
+                    _GLM52_FP8_ATTN_CORE_NUM,
+                    q_latent.size(1),
+                    _GLM52_FP8_ATTN_LATENT_DIM,
+                    dtype=torch.float32,
+                    device=q_latent.device,
+                ),
+            )
+            stats = get_execution_buffer(
+                ("GLM52_FP8_SFA_STATS", q_latent.device),
+                lambda: torch.empty(
+                    _GLM52_FP8_ATTN_CORE_NUM,
+                    2,
+                    _GLM52_FP8_ATTN_HEAD_TILE,
+                    dtype=torch.float32,
+                    device=q_latent.device,
+                ),
+            )
         return kernels.glm52_fp8_sparse_mla_attention_out(
             q_latent,
             q_pe,
@@ -1351,6 +1376,9 @@ class NpuPagedAttentionBackend(AttentionBackend):
             decode_table,
             output,
             *workspaces,
+            partial,
+            stats,
+            num_splits,
             self.scale,
         )
 

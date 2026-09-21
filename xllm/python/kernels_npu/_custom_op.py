@@ -1049,6 +1049,9 @@ def _glm52_fp8_sparse_mla_attention_out_fake(
     workspace_output: torch.Tensor,
     workspace_q: torch.Tensor,
     workspace_q_rope: torch.Tensor,
+    workspace_partial: torch.Tensor,
+    workspace_stats: torch.Tensor,
+    num_splits: int,
     softmax_scale: float,
 ) -> torch.Tensor:
     del (
@@ -1067,6 +1070,9 @@ def _glm52_fp8_sparse_mla_attention_out_fake(
         workspace_output,
         workspace_q,
         workspace_q_rope,
+        workspace_partial,
+        workspace_stats,
+        num_splits,
         softmax_scale,
     )
     return output

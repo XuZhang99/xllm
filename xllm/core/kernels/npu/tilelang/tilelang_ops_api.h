@@ -59,7 +59,15 @@ void glm52_fp8_sparse_mla_attention(const torch::Tensor& q_latent,
                                     torch::Tensor& workspace_output,
                                     torch::Tensor& workspace_q,
                                     torch::Tensor& workspace_q_rope,
+                                    torch::Tensor& workspace_partial,
+                                    torch::Tensor& workspace_stats,
+                                    int64_t num_splits,
                                     float softmax_scale);
+
+void glm52_fp8_sparse_mla_merge(const torch::Tensor& partial,
+                                const torch::Tensor& stats,
+                                torch::Tensor& output,
+                                int64_t num_splits);
 
 // Take the first token from each row of an existing row-major int32 verify
 // buffer and pack it with `spec_width - 1` proposer columns into graph-owned

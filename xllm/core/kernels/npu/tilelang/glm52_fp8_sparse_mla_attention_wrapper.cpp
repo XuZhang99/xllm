@@ -302,6 +302,9 @@ void glm52_fp8_sparse_mla_attention(const torch::Tensor& q_latent,
                                     torch::Tensor& workspace_output,
                                     torch::Tensor& workspace_q,
                                     torch::Tensor& workspace_q_rope,
+                                    torch::Tensor& workspace_partial,
+                                    torch::Tensor& workspace_stats,
+                                    int64_t num_splits,
                                     float softmax_scale) {
   check_supported(q_latent,
                   q_rope,
@@ -321,6 +324,28 @@ void glm52_fp8_sparse_mla_attention(const torch::Tensor& q_latent,
                   workspace_q_rope);
   if (q_latent.size(0) == 0) {
     return;
+  }
+
+  CHECK(num_splits == 1 || num_splits == 2 || num_splits == 4 ||
+        num_splits == 8 || num_splits == 16);
+  if (num_splits > 1) {
+    CHECK_LE(q_latent.size(0) * num_splits, kCoreNum);
+  }
+  if (num_splits > 1) {
+    check_workspace(workspace_partial,
+                    "TileLang GLM-5.2 FP8 MLA: workspace_partial",
+                    torch::kFloat32,
+                    kCoreNum,
+                    q_latent.size(1),
+                    kLatentDim);
+    check_workspace(workspace_stats,
+                    "TileLang GLM-5.2 FP8 MLA: workspace_stats",
+                    torch::kFloat32,
+                    kCoreNum,
+                    2,
+                    kHeadTile);
+    check_same_device(workspace_partial, q_latent, "workspace_partial");
+    check_same_device(workspace_stats, q_latent, "workspace_stats");
   }
 
   CHECK_LE(q_latent.size(0),
@@ -347,7 +372,9 @@ void glm52_fp8_sparse_mla_attention(const torch::Tensor& q_latent,
           Glm52Fp8SparseMlaAttentionNumHeads{
               static_cast<int32_t>(q_latent.size(1))},
           Glm52Fp8SparseMlaAttentionDType{
-              to_tilelang_dtype(q_latent.scalar_type())});
+              to_tilelang_dtype(q_latent.scalar_type())},
+          Glm52Fp8SparseMlaAttentionNumSplits{
+              static_cast<int32_t>(num_splits)});
   const auto* entry =
       find_glm52_fp8_sparse_mla_attention_kernel_entry(specialization);
   CHECK(entry != nullptr)
@@ -367,7 +394,9 @@ void glm52_fp8_sparse_mla_attention(const torch::Tensor& q_latent,
           const_cast<void*>(actual_seq_lengths_kv.data_ptr())),
       reinterpret_cast<uint8_t*>(
           const_cast<void*>(e4m3_decode_table.data_ptr())),
-      reinterpret_cast<uint8_t*>(output.data_ptr()),
+      static_cast<uint8_t*>(num_splits == 1 ? output.data_ptr()
+                                            : workspace_partial.data_ptr()),
+      static_cast<uint8_t*>(workspace_stats.data_ptr()),
       reinterpret_cast<uint8_t*>(workspace_k.data_ptr()),
       reinterpret_cast<uint8_t*>(workspace_k_rope.data_ptr()),
       reinterpret_cast<uint8_t*>(workspace_scores.data_ptr()),
@@ -383,6 +412,10 @@ void glm52_fp8_sparse_mla_attention(const torch::Tensor& q_latent,
       static_cast<int32_t>(block_table.size(1)),
       softmax_scale,
       stream);
+  if (num_splits > 1) {
+    glm52_fp8_sparse_mla_merge(
+        workspace_partial, workspace_stats, output, num_splits);
+  }
 }
 
 }  // namespace xllm::kernel::npu::tilelang

@@ -14,8 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 import tilelang.language as T
@@ -43,17 +41,21 @@ MAX_CACHE_BLOCKS = 32768
 MAX_BLOCK_TABLE_LEN = 32768
 DEFAULT_DTYPE = "bf16"
 SUPPORTED_NUM_HEADS = (4, 8, 16)
+SUPPORTED_NUM_SPLITS = (1, 2, 4, 8, 16)
 
 
-def build_glm52_fp8_sparse_mla_attention_kernel(num_heads: int) -> PrimFunc:
+def build_glm52_fp8_sparse_mla_attention_kernel(num_heads: int, num_splits: int = 1) -> "PrimFunc":
     if num_heads not in SUPPORTED_NUM_HEADS:
         raise ValueError(
             f"GLM-5.2 FP8 sparse MLA attention only supports num_heads in {SUPPORTED_NUM_HEADS}, got {num_heads}"
         )
 
-    num_kv_tiles = TOPK // KV_TILE
+    if num_splits not in SUPPORTED_NUM_SPLITS:
+        raise ValueError(f"unsupported FP8 MLA split count: {num_splits}")
+    num_kv_tiles = TOPK // KV_TILE // num_splits
     input_dtype = "bfloat16"
     accum_dtype = "float32"
+    output_dtype = input_dtype if num_splits == 1 else accum_dtype
     index_dtype = "int32"
 
     @T.prim_func
@@ -66,7 +68,8 @@ def build_glm52_fp8_sparse_mla_attention_kernel(num_heads: int) -> PrimFunc:
         block_table: T.Tensor((1, MAX_NUM_QUERIES * MAX_BLOCK_TABLE_LEN), index_dtype),
         actual_seq_lengths_kv: T.Tensor((MAX_NUM_QUERIES,), index_dtype),
         e4m3_decode_table: T.Tensor((256,), accum_dtype),
-        output: T.Tensor((MAX_NUM_QUERIES, num_heads, LATENT_DIM), input_dtype),
+        output: T.Tensor((MAX_NUM_QUERIES * num_splits, num_heads, LATENT_DIM), output_dtype),
+        split_stats: T.Tensor((MAX_NUM_QUERIES * num_splits, 2, HEAD_TILE), accum_dtype),
         workspace_k: T.Tensor((CORE_NUM, KV_TILE, LATENT_DIM), input_dtype),
         workspace_k_rope: T.Tensor((CORE_NUM, KV_TILE, ROPE_DIM), input_dtype),
         workspace_scores: T.Tensor((CORE_NUM, HEAD_TILE, KV_TILE), accum_dtype),
@@ -128,22 +131,25 @@ def build_glm52_fp8_sparse_mla_attention_kernel(num_heads: int) -> PrimFunc:
             normalizer_broadcast_ub = T.alloc_ub((VEC_HEAD_TILE, LATENT_DIM), accum_dtype)
             output_bf16_ub = T.alloc_ub((VEC_HEAD_TILE, LATENT_DIM), input_dtype)
 
-            queries_per_core = (num_queries + CORE_NUM - 1) // CORE_NUM
-            query_start = cid * queries_per_core
-            query_end = T.if_then_else(
-                query_start + queries_per_core < num_queries,
-                query_start + queries_per_core,
-                num_queries,
+            num_tasks = num_queries * num_splits
+            tasks_per_core = (num_tasks + CORE_NUM - 1) // CORE_NUM
+            task_start = cid * tasks_per_core
+            task_end = T.if_then_else(
+                task_start + tasks_per_core < num_tasks,
+                task_start + tasks_per_core,
+                num_tasks,
             )
 
-            if cid < num_queries:
+            if cid < num_tasks:
                 T.copy(e4m3_decode_table, decode_table_ub)
                 T.set_flag("mte2", "v", 4)
                 T.wait_flag("mte2", "v", 4)
                 # E4M3 values are exactly representable in BF16. Decode directly
                 # into the gather tile instead of casting every decoded row.
                 T.tile.cast(decode_table_bf16_ub, decode_table_ub, "CAST_RINT", 256)
-                for query_idx in T.serial(query_start, query_end):
+                for task_idx in T.serial(task_start, task_end):
+                    query_idx = task_idx // num_splits
+                    split_idx = task_idx % num_splits
                     T.tile.fill(q_gather_ub, 0.0)
                     T.tile.fill(q_rope_gather_ub, 0.0)
                     T.set_flag("v", "mte2", 8)
@@ -229,7 +235,10 @@ def build_glm52_fp8_sparse_mla_attention_kernel(num_heads: int) -> PrimFunc:
                         T.copy(
                             topk_indices[
                                 query_idx,
-                                tile_idx * KV_TILE : (tile_idx + 1) * KV_TILE,
+                                (split_idx * num_kv_tiles + tile_idx) * KV_TILE : (
+                                    split_idx * num_kv_tiles + tile_idx + 1
+                                )
+                                * KV_TILE,
                             ],
                             indices_ub,
                         )
@@ -487,31 +496,140 @@ def build_glm52_fp8_sparse_mla_attention_kernel(num_heads: int) -> PrimFunc:
                             partial_output_ub,
                         )
 
-                    T.tile.broadcast(normalizer_broadcast_ub, normalizer_ub)
-                    T.pipe_barrier("v")
-                    T.tile.div(
-                        accumulated_output_ub,
-                        accumulated_output_ub,
-                        normalizer_broadcast_ub,
-                    )
-                    T.pipe_barrier("v")
-                    T.copy(accumulated_output_ub, output_bf16_ub)
-                    T.set_flag("v", "mte3", 9)
-                    T.wait_flag("v", "mte3", 9)
-                    if num_heads <= VEC_HEAD_TILE:
-                        if vid == 0:
+                    if num_splits == 1:
+                        T.tile.max(normalizer_ub, normalizer_ub, 1.0)
+                        T.tile.broadcast(normalizer_broadcast_ub, normalizer_ub)
+                        T.pipe_barrier("v")
+                        T.tile.div(
+                            accumulated_output_ub,
+                            accumulated_output_ub,
+                            normalizer_broadcast_ub,
+                        )
+                        T.pipe_barrier("v")
+                        T.copy(accumulated_output_ub, output_bf16_ub)
+                        T.set_flag("v", "mte3", 9)
+                        T.wait_flag("v", "mte3", 9)
+                        if num_heads <= VEC_HEAD_TILE:
+                            if vid == 0:
+                                T.copy(
+                                    output_bf16_ub[0:num_heads, :],
+                                    output[task_idx, 0:num_heads, :],
+                                )
+                        else:
                             T.copy(
-                                output_bf16_ub[0:num_heads, :],
-                                output[query_idx, 0:num_heads, :],
+                                output_bf16_ub,
+                                output[task_idx, vid * VEC_HEAD_TILE : (vid + 1) * VEC_HEAD_TILE, :],
                             )
                     else:
+                        # Keep the unnormalized numerator in FP32 until all
+                        # KV shards are merged on the same execution stream.
+                        T.set_flag("v", "mte3", 9)
+                        T.wait_flag("v", "mte3", 9)
                         T.copy(
-                            output_bf16_ub,
-                            output[
-                                query_idx,
-                                vid * VEC_HEAD_TILE : (vid + 1) * VEC_HEAD_TILE,
-                                :,
-                            ],
+                            score_max_ub[:, 0],
+                            split_stats[task_idx, 0, vid * VEC_HEAD_TILE : (vid + 1) * VEC_HEAD_TILE],
                         )
+                        T.copy(
+                            normalizer_ub[:, 0],
+                            split_stats[task_idx, 1, vid * VEC_HEAD_TILE : (vid + 1) * VEC_HEAD_TILE],
+                        )
+                        if num_heads <= VEC_HEAD_TILE:
+                            if vid == 0:
+                                T.copy(
+                                    accumulated_output_ub[0:num_heads, :],
+                                    output[task_idx, 0:num_heads, :],
+                                )
+                        else:
+                            T.copy(
+                                accumulated_output_ub,
+                                output[task_idx, vid * VEC_HEAD_TILE : (vid + 1) * VEC_HEAD_TILE, :],
+                            )
 
     return glm52_fp8_sparse_mla_attention_kernel
+
+
+def build_glm52_fp8_sparse_mla_merge_kernel(num_heads: int, num_splits: int) -> "PrimFunc":
+    if num_heads not in SUPPORTED_NUM_HEADS or num_splits not in SUPPORTED_NUM_SPLITS[1:]:
+        raise ValueError(f"unsupported FP8 MLA merge shape: heads={num_heads}, splits={num_splits}")
+
+    @T.prim_func
+    def glm52_fp8_sparse_mla_merge_kernel(
+        partial: T.Tensor((MAX_NUM_QUERIES * num_splits, num_heads, LATENT_DIM), "float32"),
+        stats: T.Tensor((MAX_NUM_QUERIES * num_splits, 2, HEAD_TILE), "float32"),
+        output: T.Tensor((MAX_NUM_QUERIES, num_heads, LATENT_DIM), "bfloat16"),
+        num_queries: T.int32,
+    ):
+        with T.Kernel(CORE_NUM, is_npu=True) as (cid, vid):  # noqa: SIM117 - separate TileLang scopes
+            with T.Scope("V"):
+                partial_ub = T.alloc_ub((num_splits, LATENT_DIM), "float32")
+                stats_ub = T.alloc_ub((num_splits, 2, HEAD_TILE), "float32")
+                negative_max = T.alloc_ub((64,), "float32")
+                denominator = T.alloc_ub((64,), "float32")
+                weights = T.alloc_ub((64,), "float32")
+                temporary = T.alloc_ub((64,), "float32")
+                valid_mask = T.alloc_ub((32,), "uint8")
+                minimum = T.alloc_ub((1,), "float32")
+                total = T.alloc_ub((1,), "float32")
+                accumulated = T.alloc_ub((LATENT_DIM,), "float32")
+                result = T.alloc_ub((LATENT_DIM,), "bfloat16")
+                rows_per_task = (num_queries * num_heads + 47) // 48
+                row_start = (cid * 2 + vid) * rows_per_task
+                row_end = T.if_then_else(
+                    row_start + rows_per_task < num_queries * num_heads,
+                    row_start + rows_per_task,
+                    num_queries * num_heads,
+                )
+                for row in T.serial(row_start, row_end):
+                    T.barrier_all()
+                    query_idx = row // num_heads
+                    head_idx = row % num_heads
+                    for split_idx in T.serial(num_splits):
+                        T.copy(partial[query_idx * num_splits + split_idx, head_idx, :], partial_ub[split_idx, :])
+                        T.copy(stats[query_idx * num_splits + split_idx, :, :], stats_ub[split_idx, :, :])
+                    T.tile.fill(negative_max, 3.402823466e38)
+                    T.tile.fill(denominator, 0.0)
+                    T.barrier_all()
+                    for split_idx in T.serial(num_splits):
+                        negative_max[split_idx] = stats_ub[split_idx, 0, head_idx]
+                        denominator[split_idx] = stats_ub[split_idx, 1, head_idx]
+                    T.barrier_all()
+
+                    # Empty shards must not contribute, including when every
+                    # shard is empty on a padded ACLGraph replay row.
+                    T.tile.compare(valid_mask, denominator, 0.0, "GT")
+                    T.pipe_barrier("v")
+                    T.tile.select(negative_max, valid_mask, negative_max, 3.402823466e38, "VSEL_TENSOR_SCALAR_MODE")
+                    T.pipe_barrier("v")
+                    T.reduce_min(negative_max, minimum, dim=0)
+                    T.pipe_barrier("v")
+                    T.tile.broadcast(temporary, minimum, axis=0)
+                    T.pipe_barrier("v")
+                    T.tile.sub(weights, temporary, negative_max)
+                    T.pipe_barrier("v")
+                    T.tile.exp(weights, weights)
+                    T.pipe_barrier("v")
+                    T.tile.select(weights, valid_mask, weights, 0.0, "VSEL_TENSOR_SCALAR_MODE")
+                    T.pipe_barrier("v")
+                    T.tile.mul(temporary, weights, denominator)
+                    T.pipe_barrier("v")
+                    T.reduce_sum(temporary, total, dim=0)
+                    T.pipe_barrier("v")
+                    T.tile.max(total, total, 1.0)
+                    T.pipe_barrier("v")
+                    T.tile.broadcast(temporary, total, axis=0)
+                    T.pipe_barrier("v")
+                    T.tile.div(weights, weights, temporary)
+                    T.tile.fill(accumulated, 0.0)
+                    T.set_flag("v", "s", 0)
+                    T.wait_flag("v", "s", 0)
+                    for split_idx in T.serial(num_splits):
+                        if weights[split_idx] > 0.0:
+                            T.tile.axpy(accumulated, partial_ub[split_idx, :], weights[split_idx])
+                            T.pipe_barrier("v")
+                    T.tile.cast(result, accumulated, "CAST_RINT", LATENT_DIM)
+                    T.set_flag("v", "mte3", 0)
+                    T.wait_flag("v", "mte3", 0)
+                    T.copy(result, output[query_idx, head_idx, :])
+                    T.barrier_all()
+
+    return glm52_fp8_sparse_mla_merge_kernel

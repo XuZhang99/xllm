@@ -71,6 +71,9 @@ torch::Tensor glm52_fp8_sparse_mla_attention_out_npu(
     torch::Tensor& workspace_output,
     torch::Tensor& workspace_q,
     torch::Tensor& workspace_q_rope,
+    torch::Tensor& workspace_partial,
+    torch::Tensor& workspace_stats,
+    int64_t num_splits,
     double softmax_scale) {
   xllm::kernel::npu::tilelang::glm52_fp8_sparse_mla_attention(
       q_latent,
@@ -89,6 +92,9 @@ torch::Tensor glm52_fp8_sparse_mla_attention_out_npu(
       workspace_output,
       workspace_q,
       workspace_q_rope,
+      workspace_partial,
+      workspace_stats,
+      num_splits,
       static_cast<float>(softmax_scale));
   return output;
 }
@@ -546,7 +552,9 @@ TORCH_LIBRARY(xllm_ops, m) {
       "Tensor(a!) output, Tensor(b!) workspace_k, Tensor(c!) "
       "workspace_k_rope, Tensor(d!) workspace_scores, Tensor(e!) "
       "workspace_probs, Tensor(f!) workspace_output, Tensor(g!) workspace_q, "
-      "Tensor(h!) workspace_q_rope, float softmax_scale) -> Tensor(a!)");
+      "Tensor(h!) workspace_q_rope, Tensor(i!) workspace_partial, "
+      "Tensor(j!) workspace_stats, int num_splits, float softmax_scale) -> "
+      "Tensor(a!)");
   m.def("rms_norm(Tensor input, Tensor weight, float eps) -> Tensor");
   m.def(
       "rms_norm_gated(Tensor input, Tensor gate, Tensor weight, float eps) -> "
