@@ -33,6 +33,13 @@ void fp8_cache_write(const torch::Tensor& slots,
                      const torch::Tensor& values,
                      torch::Tensor& cache);
 
+// Encode floating-point latent/RoPE rows and scatter to raw E4M3 caches.
+void fp8_mla_cache_write(const torch::Tensor& slots,
+                         const torch::Tensor& latent,
+                         const torch::Tensor& rope,
+                         torch::Tensor& latent_cache,
+                         torch::Tensor& rope_cache);
+
 // Compute GLM-5.2 decode-only sparse MLA attention directly from raw E4M3
 // paged latent and RoPE caches. All output and workspace tensors are caller
 // owned to keep graph capture allocation-free.

@@ -45,6 +45,15 @@ void fp8_cache_write_npu(const torch::Tensor& slots,
   xllm::kernel::npu::tilelang::fp8_cache_write(slots, values, cache);
 }
 
+void fp8_mla_cache_write_npu(const torch::Tensor& slots,
+                             const torch::Tensor& latent,
+                             const torch::Tensor& rope,
+                             torch::Tensor& latent_cache,
+                             torch::Tensor& rope_cache) {
+  xllm::kernel::npu::tilelang::fp8_mla_cache_write(
+      slots, latent, rope, latent_cache, rope_cache);
+}
+
 torch::Tensor glm52_fp8_sparse_mla_attention_out_npu(
     const torch::Tensor& q_latent,
     const torch::Tensor& q_rope,
@@ -528,6 +537,9 @@ void ensure_xllm_ops_registered() {
 TORCH_LIBRARY(xllm_ops, m) {
   m.def("fp8_cache_write(Tensor slots, Tensor values, Tensor(a!) cache) -> ()");
   m.def(
+      "fp8_mla_cache_write(Tensor slots, Tensor latent, Tensor rope, "
+      "Tensor(a!) latent_cache, Tensor(b!) rope_cache) -> ()");
+  m.def(
       "glm52_fp8_sparse_mla_attention_out(Tensor q_latent, Tensor q_rope, "
       "Tensor nope_cache, Tensor rope_cache, Tensor topk_indices, Tensor "
       "block_table, Tensor actual_seq_lengths_kv, Tensor e4m3_decode_table, "
@@ -744,6 +756,7 @@ TORCH_LIBRARY(xllm_ops, m) {
 
 TORCH_LIBRARY_IMPL(xllm_ops, PrivateUse1, m) {
   m.impl("fp8_cache_write", TORCH_FN(xllm::fp8_cache_write_npu));
+  m.impl("fp8_mla_cache_write", TORCH_FN(xllm::fp8_mla_cache_write_npu));
   m.impl("glm52_fp8_sparse_mla_attention_out",
          TORCH_FN(xllm::glm52_fp8_sparse_mla_attention_out_npu));
   m.impl("rms_norm", TORCH_FN(xllm::rms_norm_npu));

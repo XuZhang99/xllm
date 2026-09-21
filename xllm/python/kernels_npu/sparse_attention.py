@@ -336,6 +336,17 @@ def fp8_cache_write(slots: torch.Tensor, values: torch.Tensor, cache: torch.Tens
     torch.ops.xllm_ops.fp8_cache_write(slots, values, cache)
 
 
+def fp8_mla_cache_write(
+    slots: torch.Tensor,
+    latent: torch.Tensor,
+    rope: torch.Tensor,
+    latent_cache: torch.Tensor,
+    rope_cache: torch.Tensor,
+) -> None:
+    """Encode and scatter latent/RoPE rows, skipping negative padding slots."""
+    torch.ops.xllm_ops.fp8_mla_cache_write(slots, latent, rope, latent_cache, rope_cache)
+
+
 def glm52_fp8_sparse_mla_attention_out(
     q_latent: torch.Tensor,
     q_rope: torch.Tensor,
@@ -379,6 +390,7 @@ def glm52_fp8_sparse_mla_attention_out(
 
 __all__ = [
     "fp8_cache_write",
+    "fp8_mla_cache_write",
     "glm52_fp8_sparse_mla_attention_out",
     "lightning_indexer",
     "lightning_indexer_out",

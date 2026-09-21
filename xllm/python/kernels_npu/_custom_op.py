@@ -1076,6 +1076,16 @@ def _fp8_cache_write_fake(slots: torch.Tensor, values: torch.Tensor, cache: torc
     del slots, values, cache
 
 
+def _fp8_mla_cache_write_fake(
+    slots: torch.Tensor,
+    latent: torch.Tensor,
+    rope: torch.Tensor,
+    latent_cache: torch.Tensor,
+    rope_cache: torch.Tensor,
+) -> None:
+    del slots, latent, rope, latent_cache, rope_cache
+
+
 register_fake("xllm_ops::rms_norm", _rms_norm_fake)
 register_fake("xllm_ops::rms_norm_gated", _rms_norm_gated_fake)
 register_fake("xllm_ops::l2_norm", _l2_norm_fake)
@@ -1129,3 +1139,4 @@ register_fake("xllm_ops::sfa_dcp_remap_out", _sfa_dcp_remap_out_fake)
 register_fake("xllm_ops::glm52_fp8_sparse_mla_attention_out", _glm52_fp8_sparse_mla_attention_out_fake)
 
 register_fake("xllm_ops::fp8_cache_write", _fp8_cache_write_fake)
+register_fake("xllm_ops::fp8_mla_cache_write", _fp8_mla_cache_write_fake)

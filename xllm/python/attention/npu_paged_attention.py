@@ -1023,6 +1023,15 @@ class NpuPagedAttentionBackend(AttentionBackend):
         rope_cache: torch.Tensor,
     ) -> None:
         if nope_cache.dtype == torch.uint8:
+            if nope_cache.device.type == "npu" and k_latent.size(-1) == 512 and k_rope.size(-1) == 64:
+                kernels.fp8_mla_cache_write(
+                    slot_mapping.view(-1),
+                    k_latent.view(-1, 512),
+                    k_rope.view(-1, 64),
+                    nope_cache.view(-1, 512),
+                    rope_cache.view(-1, 64),
+                )
+                return
             NpuPagedAttentionBackend._update_paged_cache(nope_cache, slot_mapping, quantize_e4m3(k_latent))
             NpuPagedAttentionBackend._update_paged_cache(rope_cache, slot_mapping, quantize_e4m3(k_rope))
             return
