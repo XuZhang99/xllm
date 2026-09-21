@@ -683,6 +683,9 @@ class Glm52MLAAttention(Attention):
                     self.kv_a_layernorm.eps,
                 )
 
+        if context.commit_cache is not None:
+            context.commit_cache()
+
         if reuse_topk_indices:
             if prev_topk_indices is None:
                 raise ValueError("MTP DSA top-k reuse requires indices from the previous draft step")
@@ -848,7 +851,7 @@ class Glm52MLAAttention(Attention):
         owns_layer_cache = self.cfg.layerwise_split_rank == layer_owner
         fused_mla_ready = getattr(self, "_fused_mla_ready", hasattr(self, "qkv_a_proj"))
         if self._use_fused_mla_decode and fused_mla_ready and cp_context is None and not layerwise:
-            preprocess_context = backend.mla_preprocess_context(self)
+            preprocess_context = backend.mla_preprocess_context(self, num_tokens=num_tokens)
             if preprocess_context is not None:
                 cos, sin = _gather_interleave_cos_sin(cos_sin_cache, positions)
                 return self._forward_fused_mla_decode(

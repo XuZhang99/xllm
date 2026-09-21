@@ -836,6 +836,7 @@ class NpuPagedAttentionBackend(AttentionBackend):
     def mla_preprocess_context(
         self,
         layer: Attention,
+        num_tokens: int | None = None,
     ) -> MlaPreprocessContext | None:
         metadata = self._metadata
         if metadata is None or metadata.is_prefill or metadata.is_chunked_prefill:
@@ -845,7 +846,48 @@ class NpuPagedAttentionBackend(AttentionBackend):
         if kv_cache is None or rope_cache is None:
             raise RuntimeError(f"MLA latent cache is missing for layer {layer.layer_id}")
         if kv_cache.dtype == torch.uint8:
-            return None
+            if (
+                num_tokens is None
+                or num_tokens <= 0
+                or num_tokens > metadata.slot_mapping.numel()
+                or self.dtype != torch.bfloat16
+                or metadata.has_kv_shard
+                or tuple(kv_cache.shape[1:]) != (128, 1, 512)
+                or tuple(rope_cache.shape[1:]) != (128, 1, 64)
+                or rope_cache.dtype != torch.uint8
+            ):
+                return None
+            # The native preprocess accepts BF16 caches. Stage only this
+            # batch, then encode and scatter into the real paged FP8 cache.
+            # Layers reuse these buffers in order on the execution stream.
+            blocks = (num_tokens + 127) // 128
+            buffer_key = (num_tokens, kv_cache.device, metadata.slot_mapping.dtype)
+            staged_kv = get_execution_buffer(
+                ("MLA_PREPROCESS_FP8_KV", *buffer_key),
+                lambda: torch.empty((blocks, 128, 1, 512), dtype=torch.bfloat16, device=kv_cache.device),
+            )
+            staged_rope = get_execution_buffer(
+                ("MLA_PREPROCESS_FP8_ROPE", *buffer_key),
+                lambda: torch.empty((blocks, 128, 1, 64), dtype=torch.bfloat16, device=rope_cache.device),
+            )
+            staged_slots = get_execution_buffer(
+                ("MLA_PREPROCESS_FP8_SLOTS", *buffer_key),
+                # Native MLA preprocess requires int32 even when live FP8
+                # cache slots use int64; writeback keeps the live slot dtype.
+                lambda: torch.arange(num_tokens, dtype=torch.int32, device=kv_cache.device),
+            )
+            return MlaPreprocessContext(
+                kv_cache=staged_kv,
+                rope_cache=staged_rope,
+                slot_mapping=staged_slots,
+                commit_cache=lambda: self._update_mla_cache(
+                    metadata.slot_mapping[:num_tokens],
+                    staged_kv.view(-1, 512)[:num_tokens],
+                    staged_rope.view(-1, 64)[:num_tokens],
+                    kv_cache,
+                    rope_cache,
+                ),
+            )
         return MlaPreprocessContext(
             kv_cache=kv_cache,
             rope_cache=rope_cache,

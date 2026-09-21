@@ -171,6 +171,7 @@ class MlaPreprocessContext:
     kv_cache: torch.Tensor
     rope_cache: torch.Tensor
     slot_mapping: torch.Tensor
+    commit_cache: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -270,9 +271,10 @@ class AttentionBackend(ABC):
     def mla_preprocess_context(
         self,
         layer: Attention,
+        num_tokens: int | None = None,
     ) -> MlaPreprocessContext | None:
-        """Return decode cache tensors for a fused preprocessing region."""
-        del layer
+        """Return decode caches; num_tokens opts into staged cache writeback."""
+        del layer, num_tokens
         return None
 
     def mla_index_context(self, layer: Attention) -> MlaIndexContext:

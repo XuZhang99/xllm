@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -261,3 +261,58 @@ def test_mla_preprocess_v2_python_wrapper_matches_low_level_op() -> None:
     torch.testing.assert_close(wrapper_outputs[0], low_level_outputs[4], rtol=1e-2, atol=1e-2)
     torch.testing.assert_close(wrapper_outputs[1], low_level_outputs[0], rtol=1e-2, atol=1e-2)
     torch.testing.assert_close(wrapper_outputs[2], low_level_outputs[2], rtol=1e-2, atol=1e-2)
+
+
+@pytest.mark.parametrize("slot_dtype", (torch.int32, torch.int64))
+def test_fp8_staged_preprocess_replays_live_slots(monkeypatch: pytest.MonkeyPatch, slot_dtype: torch.dtype) -> None:
+    mla = _require_mla_preprocess_v2()
+    from xllm.python.attention import npu_paged_attention
+    from xllm.python.attention.backend import LayerCache
+    from xllm.python.attention.fp8_cache import quantize_e4m3
+    from xllm.python.kernels_npu.sparse_attention import fp8_mla_cache_write
+
+    # conftest stubs the registry; bind the real native wrapper for this test.
+    monkeypatch.setattr(npu_paged_attention.kernels, "fp8_mla_cache_write", fp8_mla_cache_write, raising=False)
+    monkeypatch.setattr(npu_paged_attention, "get_execution_buffer", lambda _key, create: create())
+    inputs = _make_inputs(mla)
+    raw_key = torch.full((_BLOCK_NUM, 128, 1, 512), 42, dtype=torch.uint8, device="npu")
+    raw_rope = torch.full((_BLOCK_NUM, 128, 1, 64), 42, dtype=torch.uint8, device="npu")
+    slots = torch.full((_TOKEN_NUM,), -1, dtype=slot_dtype, device="npu")
+    backend = object.__new__(npu_paged_attention.NpuPagedAttentionBackend)
+    backend.dtype = _DTYPE
+    backend._kv_caches = [LayerCache(key=raw_key, value=raw_rope)]
+    backend._metadata = SimpleNamespace(
+        is_prefill=False, is_chunked_prefill=False, has_kv_shard=False, slot_mapping=slots
+    )
+    context = backend.mla_preprocess_context(SimpleNamespace(layer_id=0), num_tokens=_TOKEN_NUM)
+    assert context is not None and context.commit_cache is not None
+    assert context.slot_mapping.dtype == torch.int32
+    staged_inputs = dict(
+        inputs, kv_cache=context.kv_cache, rope_cache=context.rope_cache, slot_mapping=context.slot_mapping
+    )
+    _run_low_level_op(staged_inputs)
+    context.commit_cache()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        staged_outputs = _run_low_level_op(staged_inputs)
+        context.commit_cache()
+
+    expected_key, expected_rope = raw_key.cpu(), raw_rope.cpu()
+    for live_slots in ([127, 128], [-1, 253]):
+        inputs["hidden"].normal_()
+        slots.copy_(torch.tensor(live_slots, dtype=slot_dtype, device="npu"))
+        inputs["slot_mapping"].copy_(
+            torch.tensor([max(slot, 0) for slot in live_slots], dtype=torch.int32, device="npu")
+        )
+        reference = _run_low_level_op(inputs)
+        graph.replay()
+        for output_index in (0, 2, 4):
+            torch.testing.assert_close(staged_outputs[output_index], reference[output_index], rtol=1e-2, atol=1e-2)
+        key_values = inputs["kv_cache"].cpu().view(-1, 512)
+        rope_values = inputs["rope_cache"].cpu().view(-1, 64)
+        for slot in live_slots:
+            if slot >= 0:
+                expected_key.view(-1, 512)[slot] = quantize_e4m3(key_values[slot])
+                expected_rope.view(-1, 64)[slot] = quantize_e4m3(rope_values[slot])
+        torch.testing.assert_close(raw_key.cpu(), expected_key, atol=0, rtol=0)
+        torch.testing.assert_close(raw_rope.cpu(), expected_rope, atol=0, rtol=0)

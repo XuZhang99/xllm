@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -138,6 +139,75 @@ def test_mla_preprocess_context_requires_unquantized_cache(cache_dtype: torch.dt
         assert context.kv_cache is key
         assert context.rope_cache is value
         assert context.slot_mapping is slots
+
+
+@pytest.mark.parametrize("num_tokens", (3, 129))
+@pytest.mark.parametrize("slot_dtype", (torch.int32, torch.int64))
+def test_fp8_preprocess_stages_only_current_tokens_and_commits_live_slots(
+    monkeypatch: pytest.MonkeyPatch, num_tokens: int, slot_dtype: torch.dtype
+) -> None:
+    buffers: dict[tuple, torch.Tensor] = {}
+
+    def get_buffer(key: tuple, create: Callable[[], torch.Tensor]) -> torch.Tensor:
+        if key not in buffers:
+            buffers[key] = create()
+        return buffers[key]
+
+    monkeypatch.setattr(npu_paged_attention, "get_execution_buffer", get_buffer)
+    backend = object.__new__(npu_paged_attention.NpuPagedAttentionBackend)
+    backend.dtype = torch.bfloat16
+    slots = torch.arange(num_tokens + 2, dtype=slot_dtype) + 259
+    slots[1] = -1
+    backend._metadata = SimpleNamespace(
+        is_prefill=False, is_chunked_prefill=False, has_kv_shard=False, slot_mapping=slots
+    )
+    key = torch.full((16, 128, 1, 512), 42, dtype=torch.uint8)
+    rope = torch.full((16, 128, 1, 64), 42, dtype=torch.uint8)
+    backend._kv_caches = [LayerCache(key=key, value=rope)]
+    layer = SimpleNamespace(layer_id=0)
+    context = backend.mla_preprocess_context(layer, num_tokens=num_tokens)
+    assert context is not None and context.commit_cache is not None
+    assert context.kv_cache.shape == ((num_tokens + 127) // 128, 128, 1, 512)
+    assert context.rope_cache.shape == ((num_tokens + 127) // 128, 128, 1, 64)
+    torch.testing.assert_close(context.slot_mapping, torch.arange(num_tokens, dtype=torch.int32))
+    assert slots.dtype == slot_dtype
+    expected_key, expected_rope = key.clone(), rope.clone()
+    torch.manual_seed(20260921)
+    for offset in (0, 512):
+        live_slots = slots[:num_tokens] + offset
+        live_slots[1] = -1
+        slots[:num_tokens].copy_(live_slots)
+        latent = torch.randn(num_tokens, 512, dtype=torch.bfloat16)
+        positional = torch.randn(num_tokens, 64, dtype=torch.bfloat16)
+        context.kv_cache.view(-1, 512)[:num_tokens].copy_(latent)
+        context.rope_cache.view(-1, 64)[:num_tokens].copy_(positional)
+        valid = live_slots >= 0
+        expected_key.view(-1, 512)[live_slots[valid]] = quantize_e4m3(latent[valid])
+        expected_rope.view(-1, 64)[live_slots[valid]] = quantize_e4m3(positional[valid])
+        context.commit_cache()
+        torch.testing.assert_close(key, expected_key, atol=0, rtol=0)
+        torch.testing.assert_close(rope, expected_rope, atol=0, rtol=0)
+    reused = backend.mla_preprocess_context(layer, num_tokens=num_tokens)
+    assert reused.kv_cache is context.kv_cache
+    assert reused.rope_cache is context.rope_cache
+    assert reused.slot_mapping is context.slot_mapping
+
+
+@pytest.mark.parametrize("unsupported", ("prefill", "chunked", "sharded", "dtype", "shape", "zero", "oversized"))
+def test_fp8_preprocess_staging_preserves_fallbacks(unsupported: str) -> None:
+    backend = object.__new__(npu_paged_attention.NpuPagedAttentionBackend)
+    backend.dtype = torch.float16 if unsupported == "dtype" else torch.bfloat16
+    backend._metadata = SimpleNamespace(
+        is_prefill=unsupported == "prefill",
+        is_chunked_prefill=unsupported == "chunked",
+        has_kv_shard=unsupported == "sharded",
+        slot_mapping=torch.tensor([0]),
+    )
+    key = torch.empty((1, 128, 1, 256 if unsupported == "shape" else 512), dtype=torch.uint8)
+    rope = torch.empty((1, 128, 1, 64), dtype=torch.uint8)
+    backend._kv_caches = [LayerCache(key=key, value=rope)]
+    num_tokens = 0 if unsupported == "zero" else 2 if unsupported == "oversized" else 1
+    assert backend.mla_preprocess_context(SimpleNamespace(layer_id=0), num_tokens=num_tokens) is None
 
 
 def test_fp8_mla_dequantizes_caches_before_sparse_attention(

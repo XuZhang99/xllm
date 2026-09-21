@@ -533,11 +533,13 @@ def test_glm_attention_reuse_updates_index_cache() -> None:
         ),
     ],
 )
+@pytest.mark.parametrize("staged_cache", (False, True))
 def test_glm_attention_fused_decode_preprocesses_and_writes_cache_once(
     use_mlapo_v2: bool,
     num_tokens: int,
     reuse_topk_indices: bool,
     expect_mlapo_v2: bool,
+    staged_cache: bool,
 ) -> None:
     attention = glm5_2.Glm52MLAAttention.__new__(glm5_2.Glm52MLAAttention)
     nn.Module.__init__(attention)
@@ -598,15 +600,24 @@ def test_glm_attention_fused_decode_preprocesses_and_writes_cache_once(
     q_pe = torch.ones(num_tokens, 1, 1)
     attn_out = torch.ones(num_tokens, 1, 1)
     projected = torch.ones(num_tokens, 1, 2)
+    cache_commit = MagicMock() if staged_cache else None
     preprocess_context = glm5_2.MlaPreprocessContext(
         kv_cache=torch.empty(2, 1, 1),
         rope_cache=torch.empty(2, 1, 1),
         slot_mapping=torch.arange(num_tokens + 1),
+        commit_cache=cache_commit,
     )
     backend = MagicMock()
     backend.mla_preprocess_context.return_value = preprocess_context
     backend.mla_index_context.return_value = MagicMock()
     backend.execute_mla.return_value = attn_out
+
+    def execute_mla(*_args: object, **_kwargs: object) -> torch.Tensor:
+        if cache_commit is not None:
+            cache_commit.assert_called_once_with()
+        return attn_out
+
+    backend.execute_mla.side_effect = execute_mla
 
     with (
         patch.object(
@@ -651,6 +662,7 @@ def test_glm_attention_fused_decode_preprocesses_and_writes_cache_once(
         )
 
     attention.qkv_a_proj.forward_quantized.assert_not_called()
+    backend.mla_preprocess_context.assert_called_once_with(attention, num_tokens=num_tokens)
     selected_preprocess = mlapo_v2 if expect_mlapo_v2 else capturable_preprocess
     unselected_preprocess = capturable_preprocess if expect_mlapo_v2 else mlapo_v2
     selected_preprocess.assert_called_once()
