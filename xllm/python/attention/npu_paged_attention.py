@@ -94,6 +94,8 @@ class _PreparedMlaAttention:
     max_seq_len: int
     is_prefill: bool
     is_chunked_prefill: bool
+    is_mixed: bool = False
+    is_spec_verify: bool = False
     has_kv_shard: bool = False
 
 
@@ -170,6 +172,22 @@ class _PreparedPagedAttention:
     actual_seq_kv: list[int]
 
 
+def _compact_fp8_sfa_pages(block_table: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Map fixed-size page-table rows to a compact, legacy-ordered SFA cache."""
+    source_pages = block_table.clone()
+    compact_table = torch.arange(block_table.numel(), dtype=block_table.dtype, device=block_table.device).view_as(
+        block_table
+    )
+    if block_table.size(1) > 1:
+        swap = (block_table[:, 1] >= 0).unsqueeze(-1)
+        source_pages[:, :2] = torch.where(swap, block_table[:, :2].flip(-1), block_table[:, :2])
+        compact_table[:, :2] = torch.where(swap, compact_table[:, :2].flip(-1), compact_table[:, :2])
+    compact_table = torch.where(block_table >= 0, compact_table, -1)
+    # Invalid entries still occupy a fixed output page, but the table masks
+    # them out. Clamping avoids dynamic nonzero/masked_select synchronization.
+    return source_pages.reshape(-1).clamp_min(0).to(torch.int64), compact_table
+
+
 class NpuPagedAttentionBackend(AttentionBackend):
     """NPU attention backend dispatching to npu_fused_infer_attention_score."""
 
@@ -227,6 +245,7 @@ class NpuPagedAttentionBackend(AttentionBackend):
         self._kv_owner_representatives: torch.Tensor | None = None
         self._materialized_block_table: torch.Tensor | None = None
         self._sfa_page_layout: _SfaPageLayout | None = None
+        self._fp8_sfa_pages: tuple[torch.Tensor, torch.Tensor] | None = None
         self._causal_mask = (
             torch.triu(torch.ones(2048, 2048, dtype=torch.float32), 1).to(torch.int8).contiguous().to(device)
         )
@@ -357,6 +376,7 @@ class NpuPagedAttentionBackend(AttentionBackend):
                 max_seq_len=max(actual_seq_kv, default=0),
                 is_prefill=metadata.is_prefill,
                 is_chunked_prefill=metadata.is_chunked_prefill,
+                is_mixed=getattr(metadata, "is_mixed", False),
             )
         return _PreparedPagedAttention(block_table, list(query_ends), actual_seq_q, actual_seq_kv)
 
@@ -388,6 +408,7 @@ class NpuPagedAttentionBackend(AttentionBackend):
             self._kv_owner_representatives = None
             self._materialized_block_table = None
             self._sfa_page_layout = None
+            self._fp8_sfa_pages = None
             return
         if prepared is not None:
             if self._is_mla or not isinstance(prepared, _PreparedPagedAttention):
@@ -400,6 +421,7 @@ class NpuPagedAttentionBackend(AttentionBackend):
             self._actual_seq_kv = prepared.actual_seq_kv
             return
         self._metadata = metadata
+        self._fp8_sfa_pages = None
         expanded = resolve_expanded_decode_metadata(metadata, block_size=self.logical_page_size)
         self._use_expanded_decode = expanded is not None
         block_table = expanded.block_table if expanded is not None else metadata.block_table
@@ -1208,6 +1230,18 @@ class NpuPagedAttentionBackend(AttentionBackend):
                 layer_id,
             )
         if nope_cache.dtype == torch.uint8:
+            metadata = getattr(self, "_metadata", None)
+            if (
+                metadata is not None
+                and (metadata.is_prefill or metadata.is_chunked_prefill or metadata.is_mixed)
+                and block_table is self._block_table_i32
+                and 0 < block_table.numel() < nope_cache.size(0)
+            ):
+                if self._fp8_sfa_pages is None:
+                    self._fp8_sfa_pages = _compact_fp8_sfa_pages(block_table)
+                source_pages, block_table = self._fp8_sfa_pages
+                nope_cache = nope_cache.index_select(0, source_pages)
+                rope_cache = rope_cache.index_select(0, source_pages)
             nope_cache = dequantize_e4m3(nope_cache, torch.bfloat16)
             rope_cache = dequantize_e4m3(rope_cache, torch.bfloat16)
         out = get_execution_buffer(

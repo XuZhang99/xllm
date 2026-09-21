@@ -273,6 +273,75 @@ def test_fp8_mla_dequantizes_caches_before_sparse_attention(
     torch.testing.assert_close(captured["rope"], rope_values)
 
 
+@pytest.mark.parametrize("phase", ("prefill", "chunked", "mixed"))
+@pytest.mark.parametrize("canonical_table", (False, True))
+def test_fp8_prefill_compacts_only_active_canonical_pages(
+    monkeypatch: pytest.MonkeyPatch, phase: str, canonical_table: bool
+) -> None:
+    block_table = torch.tensor([[7, 3, -1], [5, 0, 4]], dtype=torch.int32)
+    backend = object.__new__(npu_paged_attention.NpuPagedAttentionBackend)
+    backend._metadata = SimpleNamespace(
+        is_prefill=phase == "prefill", is_chunked_prefill=phase == "chunked", is_mixed=phase == "mixed"
+    )
+    backend._block_table_i32 = block_table
+    backend._fp8_sfa_pages = None
+    backend.scale = 0.0625
+    torch.manual_seed(20260921)
+    key = quantize_e4m3(torch.randn(8, 128, 1, 512))
+    rope = quantize_e4m3(torch.randn(8, 128, 1, 64))
+    decoded_key, decoded_rope = dequantize_e4m3(key), dequantize_e4m3(rope)
+    captured: dict[str, torch.Tensor] = {}
+
+    def sparse_attention(*args: torch.Tensor) -> torch.Tensor:
+        captured.update(key=args[1], rope=args[8], table=args[4])
+        return args[-1]
+
+    monkeypatch.setattr(npu_paged_attention, "get_execution_buffer", lambda _key, create: create())
+    monkeypatch.setattr(npu_paged_attention.kernels, "sparse_flash_attention_out", sparse_attention, raising=False)
+    selected_table = block_table if canonical_table else block_table.clone()
+    cached_pages = None
+    for layer in range(2):
+        backend._mla_sparse(
+            torch.zeros(3, 4, 512, dtype=torch.bfloat16),
+            torch.zeros(3, 4, 64, dtype=torch.bfloat16),
+            key,
+            rope,
+            torch.zeros(3, 1, 2048, dtype=torch.int32),
+            selected_table,
+            torch.tensor([1, 3], dtype=torch.int32),
+            torch.tensor([129, 257], dtype=torch.int32),
+            layer,
+        )
+        assert captured["key"].size(0) == (6 if canonical_table else 8)
+        if canonical_table:
+            torch.testing.assert_close(captured["table"], torch.tensor([[1, 0, -1], [4, 3, 5]], dtype=torch.int32))
+            if layer:
+                assert backend._fp8_sfa_pages is cached_pages
+            cached_pages = backend._fp8_sfa_pages
+        else:
+            assert captured["table"] is selected_table
+            assert backend._fp8_sfa_pages is None
+        for row in range(2):
+            for col in range(3):
+                original_page = int(block_table[row, col])
+                if original_page >= 0:
+                    mapped_page = int(captured["table"][row, col])
+                    torch.testing.assert_close(captured["key"][mapped_page], decoded_key[original_page])
+                    torch.testing.assert_close(captured["rope"][mapped_page], decoded_rope[original_page])
+
+
+@pytest.mark.parametrize("pages", ([[3], [-1]], [[-1, 2], [1, -1]], [[2, 2, -1], [0, 3, 1]]))
+def test_compact_fp8_pages_preserve_mapping_and_negative_entries(pages: list[list[int]]) -> None:
+    original = torch.tensor(pages, dtype=torch.int32)
+    source, compact = npu_paged_attention._compact_fp8_sfa_pages(original)
+    assert source.numel() == original.numel()
+    torch.testing.assert_close(compact < 0, original < 0)
+    for row in range(original.size(0)):
+        for col in range(original.size(1)):
+            if original[row, col] >= 0:
+                assert source[compact[row, col]] == original[row, col]
+
+
 @pytest.mark.parametrize("num_queries,num_splits", [(1, 16), (2, 8), (3, 8), (6, 4), (12, 2), (16, 1), (25, 1)])
 def test_fp8_mla_decode_uses_tilelang_sparse_attention(
     monkeypatch: pytest.MonkeyPatch,

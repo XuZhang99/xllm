@@ -197,6 +197,7 @@ def _mla_metadata(*, prefill: bool = False, chunked: bool = False) -> SimpleName
     metadata = _ordinary_metadata(paged=True)
     metadata.is_prefill = prefill
     metadata.is_chunked_prefill = chunked
+    metadata.is_mixed = False
     metadata.q_cu_seq_lens = torch.tensor([3, 5] if prefill or chunked else [1, 2], dtype=torch.int32)
     metadata.q_cu_seq_lens_host_values = [0, 3, 5] if prefill or chunked else [0, 1, 2]
     metadata.slot_mapping = torch.arange(5 if prefill or chunked else 2, dtype=torch.int32)
@@ -214,6 +215,8 @@ def test_prepared_mla_borrows_final_views_without_device_work(
     backend._metadata = active
     metadata = _mla_metadata(prefill=prefill, chunked=chunked)
     backend._mla_quant_indexer_metadata["previous_slot"] = object()
+    previous_pages = (torch.tensor([0]), torch.tensor([[0]], dtype=torch.int32))
+    backend._fp8_sfa_pages = previous_pages
 
     def reject_tensor_work(*args: object, **kwargs: object) -> torch.Tensor:
         raise AssertionError("prepared MLA must borrow final views without Device work")
@@ -225,6 +228,7 @@ def test_prepared_mla_borrows_final_views_without_device_work(
     state = backend.prepare_metadata(metadata)
     assert backend._metadata is active
     assert "previous_slot" in backend._mla_quant_indexer_metadata
+    assert backend._fp8_sfa_pages is previous_pages
     metadata.q_cu_seq_lens_host_values[:] = [-99]
     metadata.kv_seq_lens_host_values[:] = [-99]
     metadata.prepared_attention_state = state
@@ -239,6 +243,20 @@ def test_prepared_mla_borrows_final_views_without_device_work(
     assert backend._mla_max_seqlen_q == (3 if prefill or chunked else 1)
     assert backend._mla_max_seqlen_k == 6
     assert not backend._mla_quant_indexer_metadata
+    assert backend._fp8_sfa_pages is None
+    assert not state.is_spec_verify
+    assert not state.is_mixed
+
+
+def test_prepared_mla_preserves_mixed_forward_type() -> None:
+    backend = _mla_backend()
+    metadata = _mla_metadata(chunked=True)
+    metadata.is_mixed = True
+
+    state = backend.prepare_metadata(metadata)
+
+    assert state.is_mixed
+    assert not state.is_spec_verify
 
 
 @pytest.mark.parametrize("invalid", ["table", "query_dtype", "kv_shape", "slots"])
@@ -269,6 +287,8 @@ def test_prepared_graph_rejection_preserves_active_slot(is_mla: bool, prefill: b
     backend.prepare(active)
     active_state = backend._metadata
     backend._mla_quant_indexer_metadata["active_slot"] = object()
+    active_pages = (torch.tensor([0]), torch.tensor([[0]], dtype=torch.int32))
+    backend._fp8_sfa_pages = active_pages
     # Even a warmed graph must not accept prepared eager metadata.
     backend._graph_workspace = object()
     backend._graph_outputs[2] = object()
@@ -282,5 +302,6 @@ def test_prepared_graph_rejection_preserves_active_slot(is_mla: bool, prefill: b
     assert backend._metadata is active_state
     assert backend._block_table_i32 is active.block_table
     assert "active_slot" in backend._mla_quant_indexer_metadata
+    assert backend._fp8_sfa_pages is active_pages
     assert backend._current_graph_output is None
     assert backend._current_graph_lse is None
