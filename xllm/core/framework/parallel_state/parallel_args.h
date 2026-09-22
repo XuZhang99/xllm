@@ -116,6 +116,8 @@ struct ParallelArgs {
   int32_t get_group_size_by_type(const std::string& group_type) const {
     if (group_type == "tp") {
       return tp_size();
+    } else if (group_type == "pp") {
+      return pp_size();
     } else if (group_type == "sp") {
       return sp_size();
     } else if (group_type == "cfg") {
@@ -145,6 +147,20 @@ struct ParallelArgs {
 
   // dp size
   PROPERTY(int32_t, dp_size) = 1;
+
+  PROPERTY(int32_t, pp_size) = 1;
+
+  [[nodiscard]] int32_t pp_rank() const noexcept {
+    return pp_size_ > 1 ? rank_ / (world_size_ / pp_size_) : 0;
+  }
+
+  [[nodiscard]] int64_t pipeline_layer_begin(int64_t layers) const noexcept {
+    return layers * pp_rank() / pp_size_;
+  }
+
+  [[nodiscard]] int64_t pipeline_layer_end(int64_t layers) const noexcept {
+    return layers * (pp_rank() + 1) / pp_size_;
+  }
 
   // ep size
   PROPERTY(int32_t, ep_size) = 1;

@@ -44,6 +44,8 @@ limitations under the License.
 #include "util/threadpool.h"
 namespace xllm {
 
+class PipelineDispatcher;
+
 class ModelLoader;
 
 class LLMEngine : public Engine {
@@ -52,7 +54,7 @@ class LLMEngine : public Engine {
   LLMEngine(const runtime::Options& options,
             std::shared_ptr<DistManager> dist_manager = nullptr);
 
-  virtual ~LLMEngine() = default;
+  virtual ~LLMEngine();
 
   ForwardOutput step(std::vector<Batch>& batch) override;
 
@@ -140,6 +142,8 @@ class LLMEngine : public Engine {
           layer_offsets) override;
 
  private:
+  ForwardOutput step_pipeline(std::vector<Batch>& batch);
+  std::unique_ptr<PipelineDispatcher> pipeline_dispatcher_;
   // ---- RL deep-sleep path (SleepableAllocator), isolated from the xtensor
   // ---- (PageAllocator) sleep/wakeup path. ----
   // True when the engine uses the RL SleepableAllocator path (enable_sleep_mode

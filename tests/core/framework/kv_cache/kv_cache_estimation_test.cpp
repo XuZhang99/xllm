@@ -61,6 +61,16 @@ TEST(KVCacheEstimationTest, EstimatesStandardAttentionBlocks) {
   EXPECT_EQ(capacity.n_blocks(), 128);
 }
 
+TEST(KVCacheEstimationTest, PipelineUsesLargestStageForCommonBlockBudget) {
+  ModelArgs args = make_standard_args();
+  args.n_layers(5);
+  KVCacheEstimateOptions options = make_estimate_options();
+  options.pp_size = 2;
+  const KVCacheCapacity capacity = estimate_kv_cache_capacity(args, options);
+  EXPECT_EQ(capacity.n_blocks(), options.cache_size_in_bytes / (3 * 16 * 128));
+  EXPECT_EQ(capacity.n_layers(), 5);
+}
+
 TEST(KVCacheEstimationTest, IgnoresLinearStateSlotsWithoutLinearAttention) {
   ModelArgs model_args = make_standard_args();
   KVCacheEstimateOptions options = make_estimate_options();

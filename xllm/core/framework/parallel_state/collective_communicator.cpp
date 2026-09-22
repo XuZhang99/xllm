@@ -255,6 +255,10 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "TORCH") {
     parallel_args_ = std::make_unique<ParallelArgs>(
         global_rank, world_size, dp_size, cp_size, nullptr, ep_size);
+    const int32_t pp_size = ParallelConfig::get_instance().pp_size();
+    CHECK_GT(pp_size, 0);
+    CHECK_EQ(world_size % pp_size, 0);
+    parallel_args_->pp_size(pp_size);
     parallel_args_->kv_split_size(
         ::xllm::ParallelConfig::get_instance().kv_split_size());
     apply_layerwise_split_config(parallel_args_.get());
@@ -432,7 +436,8 @@ void CollectiveCommunicator::create_process_groups(
       << "world_size (" << world_size
       << ") must be divisible by dp_size * cp_size (" << dp_size << " * "
       << normalized_cp_size << ")";
-  const int32_t tp_size = world_size / (dp_size * normalized_cp_size);
+  const int32_t pp_size = parallel_args_->pp_size();
+  const int32_t tp_size = world_size / (dp_size * normalized_cp_size * pp_size);
   std::optional<parallel_state::ContextParallelTopology> cp_topology;
   if (normalized_cp_size > 1) {
     cp_topology.emplace(global_rank,
@@ -444,7 +449,7 @@ void CollectiveCommunicator::create_process_groups(
   CHECK_GT(tp_size, 0) << "attention tp_size must be positive: world_size="
                        << world_size << ", dp_size=" << dp_size
                        << ", cp_size=" << normalized_cp_size;
-  CHECK_EQ(tp_size * dp_size * normalized_cp_size, world_size)
+  CHECK_EQ(tp_size * dp_size * normalized_cp_size * pp_size, world_size)
       << "world_size (" << world_size << ") must equal dp_size * cp_size * "
       << "tp_size (" << dp_size << " * " << normalized_cp_size << " * "
       << tp_size << ")";
@@ -590,7 +595,8 @@ void CollectiveCommunicator::create_process_groups(
   int32_t moe_tp_size = world_size / ep_size;
   CHECK_EQ(moe_tp_size * ep_size, world_size);
   if (ep_size == 1) {
-    parallel_args_->moe_tp_group_ = process_group_.get();
+    parallel_args_->moe_tp_group_ =
+        pp_size > 1 ? tp_group_.get() : process_group_.get();
     parallel_args_->eplb_group_ = process_group_.get();
   } else {
     port_offset = global_rank / moe_tp_size + 1;

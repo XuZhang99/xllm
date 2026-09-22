@@ -396,6 +396,17 @@ TEST(KVCacheConfigValidationTest, RejectsUnsupportedIndexerCacheDtypes) {
       "indexer_cache_dtype.*auto.*int8");
 }
 
+TEST(ConfigJsonTest, PipelineParallelSizeRoundTrips) {
+  ParallelConfig parallel_config;
+  EXPECT_EQ(parallel_config.pp_size(), 1);
+  const auto json = config::parse_json_string(R"json({"pp_size": 2})json");
+  parallel_config.from_json(json);
+  EXPECT_EQ(parallel_config.pp_size(), 2);
+  nlohmann::ordered_json serialized;
+  parallel_config.append_config_json(serialized);
+  EXPECT_EQ(serialized["pp_size"], 2);
+}
+
 TEST(ConfigJsonTest, ParallelConfigReadsContextParallelSize) {
   CpSizeFlagGuard flag_guard;
   const JsonReader json =

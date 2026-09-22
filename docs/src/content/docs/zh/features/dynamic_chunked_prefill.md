@@ -11,8 +11,8 @@ title: 动态 Chunked Prefill
 
 本实现迁移了 vLLM-Ascend Dynamic Chunked Pipeline Parallel 的启动测量、
 二次延迟模型和动态 chunk 选择，并接入 xLLM 的 C++ 调度器。
-xLLM 当前没有 LLM 流水线并行（PP）执行链路，本功能不提供 PP，
-也不代表已经实现完整的 Dynamic CPP。
+该选项不会自动启用 PP；独立的[实验性 PP 路径](../pipeline_parallel)
+新增 GLM 分层执行和 sequence 子批次重叠，完整 Dynamic CPP 调度仍待完善。
 
 参考实现：
 
@@ -86,8 +86,8 @@ xLLM 当前没有 LLM 流水线并行（PP）执行链路，本功能不提供 P
 1. 在空闲 NPU 上验证长输入、并发、prefix cache、CP 和 decode graph 的组合，
    比较输出、TTFT、吞吐及实际 chunk 序列。
 2. 增加带历史长度的测量和有界在线再校准，明确样本归属和计时同步成本。
-3. 独立实现 PP 层分片、rank 通信、多个在途 batch 调度和输出路由，再将本预测器
-   接入 PP 的 chunk 调度，验证真实的流水线空闲时间改善。
+3. 在实验性 PP 执行链上完善逐 stage 的 profiling 和 chunk 调度，
+   验证真实的流水线空闲时间改善。
 
 ### 本次迁移的验证记录（2026-09-15）
 

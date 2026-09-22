@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "llm_engine.h"
+#include "core/distributed_runtime/llm_engine.h"
 
 #include <absl/strings/str_format.h>
 #include <absl/time/clock.h>
@@ -35,6 +35,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/options.h"
 #include "core/common/global_flags.h"
+#include "core/distributed_runtime/pipeline_dispatcher.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
@@ -128,7 +129,13 @@ LLMEngine::LLMEngine(const runtime::Options& options,
   dp_local_size_ = worker_clients_num_ / dp_size_;
   // MLU and NPU model-side CP both use orthogonal CP x attention-TP, so the
   // DP-local TP width is divided by CP.
-  dp_local_tp_size_ = dp_local_size_ / cp_size_;
+  dp_local_tp_size_ =
+      dp_local_size_ / cp_size_ / ParallelConfig::get_instance().pp_size();
+
+  if (ParallelConfig::get_instance().pp_size() > 1) {
+    pipeline_dispatcher_ = std::make_unique<PipelineDispatcher>(
+        ParallelConfig::get_instance().pp_size());
+  }
 
   // create ThreadPool for link cluster
   link_threadpool_ = std::make_unique<ThreadPool>(
@@ -495,6 +502,7 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
 
   KVCacheEstimateOptions estimate_options;
+  estimate_options.pp_size = ParallelConfig::get_instance().pp_size();
   estimate_options.dtype = dtype_;
   estimate_options.kv_cache_dtype = options_.kv_cache_dtype();
   estimate_options.indexer_cache_dtype =
@@ -1100,12 +1108,72 @@ bool LLMEngine::unlink_p2p(const std::vector<std::string>& remote_addrs) {
   return true;
 }
 
+LLMEngine::~LLMEngine() = default;
+
+ForwardOutput LLMEngine::step_pipeline(std::vector<Batch>& batch) {
+  CHECK_EQ(batch.size(), 1);
+  const int32_t stages = ParallelConfig::get_instance().pp_size();
+  const int32_t microbatch_count =
+      std::min<int32_t>(stages, static_cast<int32_t>(batch.front().size()));
+  CHECK_GT(microbatch_count, 0);
+  const auto& budgets = batch.front().get_allowed_max_tokens();
+  CHECK_EQ(budgets.size(), batch.front().size());
+  std::vector<std::vector<Batch>> microbatches(microbatch_count);
+  std::vector<ForwardInput> inputs;
+  inputs.reserve(microbatch_count);
+  for (int32_t microbatch = 0; microbatch < microbatch_count; ++microbatch) {
+    microbatches[microbatch].emplace_back();
+    const size_t begin = batch.front().size() * microbatch / microbatch_count;
+    const size_t end =
+        batch.front().size() * (microbatch + 1) / microbatch_count;
+    for (size_t index = begin; index < end; ++index) {
+      microbatches[microbatch].front().add(batch.front()[index],
+                                           budgets[index]);
+    }
+    inputs.emplace_back(
+        std::move(prepare_inputs(microbatches[microbatch]).front()));
+  }
+  std::vector<RawForwardOutput> outputs(microbatch_count);
+  pipeline_dispatcher_->run(
+      microbatch_count, [&](int32_t stage, int32_t microbatch) {
+        std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
+        futures.reserve(dp_local_tp_size_);
+        for (uint32_t lane = 0; lane < dp_local_tp_size_; ++lane) {
+          const uint32_t rank = stage * dp_local_tp_size_ + lane;
+          futures.emplace_back(
+              worker_clients_[rank]->step_remote_async(inputs[microbatch]));
+        }
+        auto results = folly::collectAll(futures).get();
+        for (const auto& result : results) {
+          CHECK(result.hasValue() && result.value().has_value())
+              << "Pipeline stage " << stage << " failed at microbatch "
+              << microbatch;
+        }
+        if (stage + 1 == stages) {
+          outputs[microbatch] = std::move(results.front().value().value());
+        }
+      });
+  for (int32_t microbatch = 0; microbatch < microbatch_count; ++microbatch) {
+    CHECK(outputs[microbatch].src_seq_idxes.empty())
+        << "PP does not support beam search";
+    microbatches[microbatch].front().process_sample_output(outputs[microbatch],
+                                                           false);
+  }
+  return {};
+}
+
 ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   if (worker_clients_.empty()) {
     // empty worker, return
     return {};
   }
   Timer timer;
+  if (pipeline_dispatcher_ != nullptr && batch.size() == 1 &&
+      batch.front().size() > 0) {
+    ForwardOutput output = step_pipeline(batch);
+    COUNTER_ADD(engine_latency_seconds, timer.elapsed_seconds());
+    return output;
+  }
   DCHECK(dp_size_ == batch.size())
       << "Split DP batch failed with dp_size as " << dp_size_
       << " and actual batch size as " << batch.size() << ".";
@@ -1153,9 +1221,12 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
       LOG(FATAL) << "Failed to execute model, result has no value";
     }
   }
+  const uint32_t pipeline_output_offset =
+      (ParallelConfig::get_instance().pp_size() - 1) * dp_local_tp_size_;
   // Interruption is reported per dp group via its driver worker's output.
   for (uint32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    const uint32_t worker_begin = dp_rank * dp_local_size_;
+    const uint32_t worker_begin =
+        dp_rank * dp_local_size_ + pipeline_output_offset;
     const auto& result = results[worker_begin].value();
     if (result.value().outputs.empty() && layer_forward_interrupted_) {
       throw ForwardInterruptedException();
@@ -1170,7 +1241,7 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   size_t dp_rank = 0;
   for (auto worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_size_) {
-    auto result = results[worker_rank].value();
+    auto result = results[worker_rank + pipeline_output_offset].value();
     // if src_seq_idxes is not empty, skip sample output processing and
     // process beam search output instead
     if (result.value().src_seq_idxes.size() == 0) {

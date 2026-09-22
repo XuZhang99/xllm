@@ -36,6 +36,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/xllm_build_info.h"
+#include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kernel_config.h"
@@ -450,6 +451,38 @@ Master::Master(const Options& options, EngineType type)
   const std::vector<torch::Device> devices = {visible_devices[device_idx]};
   // World size is the node count (one worker per process).
   const int32_t global_world_size = options_.nnodes();
+  const ParallelConfig& pp_config = ParallelConfig::get_instance();
+  CHECK_GE(pp_config.pp_size(), 1);
+  CHECK_EQ(global_world_size % pp_config.pp_size(), 0)
+      << "pp_size must divide world_size";
+  if (pp_config.pp_size() > 1) {
+    CHECK(Platform::is_npu());
+    CHECK(ModelConfig::is_python_model_impl(
+        ModelConfig::get_instance().model_impl()));
+    CHECK_EQ(KernelConfig::get_instance().npu_kernel_backend(), "TORCH");
+    CHECK_EQ(util::get_model_type(model_path, options_.backend()),
+             "glm_moe_dsa");
+    CHECK(type == EngineType::LLM);
+    CHECK_EQ(options_.dp_size(), 1);
+    CHECK_EQ(options_.cp_size(), 1);
+    CHECK_EQ(options_.ep_size(), 1);
+    CHECK_EQ(pp_config.kv_split_size_effective(), 1);
+    CHECK_EQ(pp_config.layerwise_split_size(), 1);
+    CHECK(!options_.enable_graph()) << "PP currently requires eager execution";
+    CHECK(!options_.enable_schedule_overlap());
+    CHECK(!options_.enable_shm())
+        << "PP requires independent stage inputs over RPC";
+    CHECK_EQ(options_.num_speculative_tokens(), 0);
+    CHECK(!options_.enable_disagg_pd());
+    CHECK(!options_.enable_offline_inference())
+        << "PP currently requires online workers";
+    CHECK(!KVCacheConfig::get_instance().enable_xtensor());
+    CHECK(!options_.enable_kvcache_store());
+    CHECK(!BeamSearchConfig::get_instance().enable_beam_search_kernel());
+    CHECK_LE(options_.host_blocks_factor(), 1.0);
+    CHECK(!EPLBConfig::get_instance().enable_eplb());
+    CHECK(!pp_config.enable_multi_stream_parallel());
+  }
   std::string model_type;
   if ((options_.cp_size() > 1 && Platform::uses_model_cp_sharding()) ||
       (ModelConfig::is_python_model_impl(

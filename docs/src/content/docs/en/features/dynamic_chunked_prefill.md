@@ -10,8 +10,9 @@ cached history to choose its next prefill chunk. It is disabled by default.
 This ports the startup profiling and quadratic chunk predictor from
 [vLLM-Ascend Dynamic CPP](https://github.com/vllm-project/vllm-ascend/blob/0526083dd4aae02a02afeb0de680c119d8e5e732/vllm_ascend/core/profiling_chunk_predictor.py),
 with reference to SGLang's `DynamicChunkSizer`, into xLLM's C++ scheduler.
-It does **not** add LLM pipeline parallelism (PP); full Dynamic CPP requires a
-future PP execution path.
+This option does not enable pipeline parallelism by itself. The separate
+[experimental PP path](../pipeline_parallel) adds GLM stage execution and
+sequence microbatch overlap; complete Dynamic CPP scheduling remains follow-up work.
 
 ## Configuration
 
@@ -75,8 +76,8 @@ The existing latency-aware scheduler remains responsible for batch latency limit
 
 Future work: validate long-context/concurrent/prefix-cache/CP/graph combinations
 on idle NPUs; add bounded online calibration with explicit sample ownership; then
-implement PP layer placement, inter-rank transport, in-flight batches, and output
-routing before measuring pipeline bubble reductions. No PP performance claim is
+extend the experimental PP path with stage-aware chunk scheduling before
+measuring pipeline bubble reductions. No PP performance claim is
 implied by this feature.
 
 ### Migration validation (2026-09-15)

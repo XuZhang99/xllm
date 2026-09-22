@@ -35,3 +35,13 @@ if(USE_NPU)
     "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
     "-Wl,--no-whole-archive")
 endif()
+
+cc_test(
+  NAME
+    pipeline_dispatcher_test
+  SRCS
+    pipeline_dispatcher_test.cpp
+  DEPS
+    :util
+    GTest::gtest_main
+)
