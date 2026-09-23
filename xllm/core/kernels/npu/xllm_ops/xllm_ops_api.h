@@ -433,6 +433,7 @@ mla_preprocess_v2(const torch::Tensor& input,
                   bool q_down_out_flag);
 
 bool has_mla_preprocess_v2();
+bool has_mla_preprocess_v2_glm();
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 compressor(const at::Tensor& x,

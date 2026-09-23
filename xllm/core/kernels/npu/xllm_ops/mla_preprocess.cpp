@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <dlfcn.h>
 #include <torch/library.h>
 
 #include <tuple>
@@ -100,6 +101,28 @@ bool has_mla_preprocess_v2() {
       aclnn::detail::get_op_api_func_addr(
           "aclnnMlaPreprocessV2GetWorkspaceSize") != nullptr &&
       aclnn::detail::get_op_api_func_addr("aclnnMlaPreprocessV2") != nullptr;
+  return is_available;
+}
+
+bool has_mla_preprocess_v2_glm() {
+  static const bool is_available = []() {
+    void* version = aclnn::detail::get_op_api_func_addr(
+        "xllm_mla_preprocess_v2_layout_version");
+    void* execute = aclnn::detail::get_op_api_func_addr("aclnnMlaPreprocessV2");
+    Dl_info version_info{};
+    Dl_info execute_info{};
+    // Require the capability marker from the library providing the operator.
+    // A later custom package must not enable an older library's GLM path.
+    if (version == nullptr || execute == nullptr ||
+        dladdr(version, &version_info) == 0 ||
+        dladdr(execute, &execute_info) == 0 ||
+        version_info.dli_fbase != execute_info.dli_fbase) {
+      return false;
+    }
+    using LayoutVersion = uint32_t (*)();
+    return reinterpret_cast<LayoutVersion>(version)() >= 2 &&
+           has_mla_preprocess_v2();
+  }();
   return is_available;
 }
 

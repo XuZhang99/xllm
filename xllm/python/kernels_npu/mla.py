@@ -33,8 +33,8 @@ _INT8_NZ_COLUMN_BLOCK_SIZE = 32
 MLA_PREPROCESS_V2_MAX_TOKENS = 1024
 _MLA_PREPROCESS_V2_KV_LORA_RANK = 512
 _MLA_PREPROCESS_V2_QK_ROPE_HEAD_DIM = 64
-_MLA_PREPROCESS_V2_Q_LORA_RANK = 1536
-_MLA_PREPROCESS_V2_QK_NOPE_HEAD_DIM = 128
+_MLA_PREPROCESS_V2_DEEPSEEK_LAYOUT = (1536, 128)
+_MLA_PREPROCESS_V2_GLM_LAYOUT = (2048, 192)
 _KV_RMSNORM_ROPE_CACHE = getattr(
     torch_npu,
     "npu_kv_rmsnorm_rope_cache",
@@ -56,13 +56,15 @@ def supports_mla_preprocess_v2(
     qk_nope_head_dim: int,
 ) -> bool:
     """Return whether MLAPO v2 supports this MLA layout."""
-    return (
-        kv_lora_rank == _MLA_PREPROCESS_V2_KV_LORA_RANK
-        and qk_rope_head_dim == _MLA_PREPROCESS_V2_QK_ROPE_HEAD_DIM
-        and q_lora_rank == _MLA_PREPROCESS_V2_Q_LORA_RANK
-        and qk_nope_head_dim == _MLA_PREPROCESS_V2_QK_NOPE_HEAD_DIM
-        and has_mla_preprocess_v2()
-    )
+    if kv_lora_rank != _MLA_PREPROCESS_V2_KV_LORA_RANK or qk_rope_head_dim != _MLA_PREPROCESS_V2_QK_ROPE_HEAD_DIM:
+        return False
+    layout = (q_lora_rank, qk_nope_head_dim)
+    if layout == _MLA_PREPROCESS_V2_DEEPSEEK_LAYOUT:
+        return has_mla_preprocess_v2()
+    if layout == _MLA_PREPROCESS_V2_GLM_LAYOUT:
+        capability_op = getattr(torch.ops.xllm_ops, "has_mla_preprocess_v2_glm", None)
+        return capability_op is not None and bool(capability_op())
+    return False
 
 
 def _reorder_rope_axis(
@@ -187,10 +189,12 @@ def deepseek_mla_preprocess_decode_v2(
     norm_epsilon: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Run the fused xLLM MLAPO v2 decode path."""
-    # The vendor tiling and vector kernel use fixed Q projection dimensions.
-    # Passing a different wdq_dim does not change those internal strides.
-    if q_lora_rank != _MLA_PREPROCESS_V2_Q_LORA_RANK or w_uk.shape[1] != _MLA_PREPROCESS_V2_QK_NOPE_HEAD_DIM:
-        raise ValueError("MLAPO v2 requires q_lora_rank=1536 and qk_nope_head_dim=128")
+    if (q_lora_rank, w_uk.shape[1]) not in (_MLA_PREPROCESS_V2_DEEPSEEK_LAYOUT, _MLA_PREPROCESS_V2_GLM_LAYOUT):
+        raise ValueError("MLAPO v2 requires Q/nope dimensions 1536/128 or 2048/192")
+    if (q_lora_rank, w_uk.shape[1]) == _MLA_PREPROCESS_V2_GLM_LAYOUT and not supports_mla_preprocess_v2(
+        kv_lora_rank, qk_rope_head_dim, q_lora_rank=q_lora_rank, qk_nope_head_dim=w_uk.shape[1]
+    ):
+        raise RuntimeError("GLM MLAPO v2 requires the updated xllm_ops operator package and binding")
     cache_mode = _NZ_CACHE_MODE if _mla_cache_mode(kv_cache) == "PA_NZ" else _KROPE_CTKV_CACHE_MODE
     num_tokens = hidden.shape[0]
     q_latent, _, q_pe, _, q_c = torch.ops.xllm_ops.mla_preprocess_v2(
