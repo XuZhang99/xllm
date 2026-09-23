@@ -54,6 +54,120 @@ def _require_mla_preprocess_v2() -> ModuleType:
     return mla
 
 
+@pytest.mark.parametrize(
+    "q_lora_rank,qk_nope_head_dim,expected",
+    [(1536, 128, True), (2048, 128, False), (1536, 192, False), (2048, 192, False)],
+)
+def test_mla_preprocess_v2_rejects_unsupported_projection_dimensions(
+    monkeypatch: pytest.MonkeyPatch, q_lora_rank: int, qk_nope_head_dim: int, expected: bool
+) -> None:
+    mla = _require_mla_preprocess_v2()
+    monkeypatch.setattr(mla, "has_mla_preprocess_v2", lambda: True)
+    assert (
+        mla.supports_mla_preprocess_v2(512, 64, q_lora_rank=q_lora_rank, qk_nope_head_dim=qk_nope_head_dim) is expected
+    )
+
+
+@pytest.mark.parametrize("tokens", (1, 4, 16))
+@pytest.mark.parametrize("graph_mode", (False, True))
+@torch.inference_mode()
+def test_glm_decode_preprocess_matches_unfused_projections(
+    monkeypatch: pytest.MonkeyPatch, tokens: int, graph_mode: bool
+) -> None:
+    mla = _require_mla_preprocess_v2()
+    from xllm.python.kernels_npu import attention as attention_kernels
+    from xllm.python.kernels_npu import linear, normalization, quantization, rotary_embedding
+    from xllm.python.models import glm5_2
+
+    for name, value in {
+        "supports_mla_preprocess_v2": mla.supports_mla_preprocess_v2,
+        "prepare_quant_weight": linear.prepare_quant_weight,
+        "rms_norm": normalization.rms_norm,
+        "quant_matmul": quantization.quant_matmul,
+        "quantize_per_tensor": quantization.quantize_per_tensor,
+    }.items():
+        monkeypatch.setattr(glm5_2.kernels, name, value, raising=False)
+    cfg = glm5_2.Glm52Config(hidden_size=256, n_heads=4, n_layers=1, indexer_types=["shared"])
+    layer = glm5_2.Glm52MLAAttention(cfg, 0, _DTYPE, torch.device("npu"))
+    torch.manual_seed(20260922)
+    for projection in (layer.q_a_proj, layer.kv_a_proj_with_mqa, layer.q_b_proj, layer.o_proj):
+        projection._set_dynamic_activation(False)
+        projection.weight.data.random_(-4, 5)
+        projection.deq_scale.fill_(0.002)
+        projection.quant_bias.zero_()
+        projection.input_scale.fill_(0.05)
+        projection.input_offset.zero_()
+    layer.q_a_layernorm.weight.data.fill_(1)
+    layer.kv_a_layernorm.weight.data.fill_(1)
+    layer.kv_b_proj.weight.data.normal_(std=0.01)
+    layer.process_weights_after_loading()
+    assert not layer._use_mlapo_v2
+    assert layer._fused_mla_ready
+    hidden = torch.randn(tokens, cfg.hidden_size, dtype=_DTYPE, device="npu")
+    cos = torch.ones(tokens, 1, 1, 64, dtype=_DTYPE, device="npu") * 0.8
+    sin = torch.ones_like(cos) * 0.6
+    key = torch.full((1, 128, 1, 512), float("nan"), dtype=_DTYPE, device="npu")
+    rope = torch.full((1, 128, 1, 64), float("nan"), dtype=_DTYPE, device="npu")
+    slots = torch.arange(tokens, dtype=torch.int32, device="npu")
+
+    def preprocess() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return mla.deepseek_mla_preprocess_decode(
+            hidden,
+            layer.kv_a_proj_with_mqa.input_scale,
+            layer.kv_a_proj_with_mqa.input_offset,
+            layer._decode_qkv_weight,
+            layer._decode_qkv_deq_scale,
+            layer._decode_qkv_quant_bias,
+            layer.q_a_layernorm.weight,
+            layer.q_b_proj.input_scale,
+            layer.q_b_proj.input_offset,
+            layer.q_b_proj.weight,
+            layer.q_b_proj.deq_scale,
+            layer.q_b_proj.quant_bias,
+            layer.W_UK,
+            layer.kv_a_layernorm.weight,
+            cos,
+            sin,
+            slots,
+            key,
+            rope,
+            512,
+            2048,
+            4,
+            192,
+            64,
+            cfg.rms_norm_eps,
+            cfg.rms_norm_eps,
+        )
+
+    graph = None
+    if graph_mode:
+        preprocess()
+        torch.npu.synchronize()
+        graph = torch.npu.NPUGraph()
+        with torch.npu.graph(graph):
+            actual = preprocess()
+    for _ in range(2):
+        hidden.normal_()
+        q_c = layer.q_a_layernorm(layer.q_a_proj(hidden))
+        q = layer.q_b_proj(q_c).view(tokens, 4, 256)
+        q_nope, q_rope = q.split((192, 64), dim=-1)
+        q_latent = attention_kernels.batch_matmul_transpose(q_nope, layer.W_UK)
+        q_pe = rotary_embedding.interleaved_rotary_embedding(q_rope, cos, sin)
+        kv, kr = layer.kv_a_proj_with_mqa(hidden).split((512, 64), dim=-1)
+        expected_key = layer.kv_a_layernorm(kv)
+        expected_rope = rotary_embedding.interleaved_rotary_embedding(kr.view(tokens, 1, 64), cos, sin)
+        if graph is None:
+            actual = preprocess()
+        else:
+            graph.replay()
+        torch.npu.synchronize()
+        for got, expected in zip(actual, (q_c, q_latent, q_pe)):
+            torch.testing.assert_close(got, expected, rtol=2e-2, atol=2e-2)
+        torch.testing.assert_close(key.view(-1, 512)[:tokens], expected_key, rtol=2e-2, atol=2e-2)
+        torch.testing.assert_close(rope.view(-1, 1, 64)[:tokens], expected_rope, rtol=2e-2, atol=2e-2)
+
+
 def _make_inputs(mla: ModuleType) -> dict[str, torch.Tensor | int | float | bool]:
     device = torch.device("npu")
     torch.manual_seed(0)

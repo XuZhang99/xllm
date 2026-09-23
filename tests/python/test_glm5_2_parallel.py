@@ -173,7 +173,12 @@ def test_glm_mlapo_requires_config_device_and_runtime_support(
 
     assert actual is expected
     if enable_mlapo and device_type in ("npu", "privateuseone"):
-        supports.assert_called_once_with(cfg.kv_lora_rank, cfg.qk_rope_head_dim)
+        supports.assert_called_once_with(
+            cfg.kv_lora_rank,
+            cfg.qk_rope_head_dim,
+            q_lora_rank=cfg.q_lora_rank,
+            qk_nope_head_dim=cfg.qk_nope_head_dim,
+        )
     else:
         supports.assert_not_called()
 
@@ -401,6 +406,39 @@ def test_dynamic_attention_prepares_one_fused_qkv_projection() -> None:
     torch.testing.assert_close(attention._dynamic_qkv_weight_scale, expected_scale)
     assert attention._dynamic_mla_ready is True
     assert attention._fused_mla_ready is True
+
+
+def test_static_attention_keeps_generic_decode_weights_in_original_rope_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = Glm52Config.from_dict(_config(indexer_types=["shared"]))
+    attention = glm5_2.Glm52MLAAttention(cfg, 0, torch.float32, torch.device("cpu"))
+    attention._use_fused_mla_decode = True
+    for projection in (attention.q_a_proj, attention.kv_a_proj_with_mqa, attention.q_b_proj, attention.o_proj):
+        projection._set_dynamic_activation(False)
+        projection.weight.data.copy_(torch.arange(projection.weight.numel()).reshape_as(projection.weight))
+        projection.deq_scale.copy_(torch.arange(projection.out_features) + 0.5)
+        projection.quant_bias.copy_(torch.arange(projection.out_features))
+        projection.input_scale.fill_(1)
+        projection.input_offset.zero_()
+    qkv_weight = torch.cat((attention.kv_a_proj_with_mqa.weight, attention.q_a_proj.weight), dim=0).clone()
+    q_b_weight = attention.q_b_proj.weight.clone()
+    expected_scales = torch.cat((attention.kv_a_proj_with_mqa.deq_scale, attention.q_a_proj.deq_scale))
+    expected_bias = torch.cat((attention.kv_a_proj_with_mqa.quant_bias, attention.q_a_proj.quant_bias))
+    monkeypatch.setattr(
+        glm5_2.kernels, "prepare_quant_weight", lambda weight: weight.transpose(0, 1).contiguous(), raising=False
+    )
+    prepare_v2 = MagicMock(side_effect=AssertionError("unsupported layout must not prepare MLAPO v2 weights"))
+    monkeypatch.setattr(glm5_2.kernels, "prepare_mla_preprocess_v2_qkv", prepare_v2, raising=False)
+    monkeypatch.setattr(glm5_2.kernels, "prepare_mla_preprocess_v2_q_b", prepare_v2, raising=False)
+
+    attention.process_weights_after_loading()
+
+    assert attention._fused_mla_ready
+    assert not attention._use_mlapo_v2
+    torch.testing.assert_close(attention._decode_qkv_weight, qkv_weight.transpose(0, 1))
+    torch.testing.assert_close(attention._decode_qkv_deq_scale, expected_scales)
+    torch.testing.assert_close(attention._decode_qkv_quant_bias, expected_bias)
+    torch.testing.assert_close(attention.q_b_proj.weight, q_b_weight.transpose(0, 1))
+    prepare_v2.assert_not_called()
 
 
 @pytest.mark.parametrize("ep_rank", [0, 2, 3])

@@ -96,6 +96,8 @@ def _can_use_mlapo_v2(cfg: Glm52Config, device: torch.device) -> bool:
         and kernels.supports_mla_preprocess_v2(
             cfg.kv_lora_rank,
             cfg.qk_rope_head_dim,
+            q_lora_rank=cfg.q_lora_rank,
+            qk_nope_head_dim=cfg.qk_nope_head_dim,
         )
     )
 
@@ -557,6 +559,9 @@ class Glm52MLAAttention(Attention):
         # produced indices on later steps.
         is_mtp_topk_fallback = cfg.model_type.endswith("_mtp") and cfg.index_share_for_mtp_iteration
         for name in (
+            "_decode_qkv_weight",
+            "_decode_qkv_deq_scale",
+            "_decode_qkv_quant_bias",
             "_mlapo_input_norm_weight",
             "_mlapo_input_norm_bias",
             "_mlapo_q_norm_bias",
@@ -624,6 +629,7 @@ class Glm52MLAAttention(Attention):
         else:
             qkv_proj = getattr(self, "qkv_a_proj", None)
             qkv_input_scale = qkv_proj.input_scale if qkv_proj is not None else self.kv_a_proj_with_mqa.input_scale
+            qkv_input_offset = qkv_proj.input_offset if qkv_proj is not None else self.kv_a_proj_with_mqa.input_offset
             if self._use_mlapo_v2 and hidden.shape[0] <= kernels.MLA_PREPROCESS_V2_MAX_TOKENS:
                 q_c, q_latent, q_pe = kernels.deepseek_mla_preprocess_decode_v2(
                     hidden,
@@ -657,16 +663,16 @@ class Glm52MLAAttention(Attention):
                 q_c, q_latent, q_pe = kernels.deepseek_mla_preprocess_decode(
                     hidden,
                     qkv_input_scale,
-                    self._mlapo_qkv_input_offset,
-                    self._mlapo_qkv_weight,
-                    self._mlapo_qkv_deq_scale,
-                    self._mlapo_qkv_quant_bias,
+                    qkv_input_offset,
+                    self._decode_qkv_weight,
+                    self._decode_qkv_deq_scale,
+                    self._decode_qkv_quant_bias,
                     self.q_a_layernorm.weight,
                     self.q_b_proj.input_scale,
-                    self._mlapo_q_b_input_offset,
-                    self._mlapo_q_b_weight,
-                    self._mlapo_q_b_deq_scale,
-                    self._mlapo_q_b_quant_bias,
+                    self.q_b_proj.input_offset,
+                    self.q_b_proj.weight,
+                    self.q_b_proj.deq_scale,
+                    self.q_b_proj.quant_bias,
                     self.W_UK,
                     self.kv_a_layernorm.weight,
                     rope_cos,
@@ -779,14 +785,24 @@ class Glm52MLAAttention(Attention):
             q_deq_scale = self.q_a_proj.deq_scale
             kv_quant_bias = self.kv_a_proj_with_mqa.quant_bias
             q_quant_bias = self.q_a_proj.quant_bias
+            # The capturable composition consumes ordinary quant-matmul
+            # weights with interleaved RoPE rows. MLAPO v2 has a separate
+            # packed/reordered layout and cannot share these buffers.
+            qkv_weight = torch.cat((kv_weight, q_weight), dim=0)
+            self._decode_qkv_weight = kernels.prepare_quant_weight(qkv_weight)
+            self._decode_qkv_deq_scale = torch.cat((kv_deq_scale, q_deq_scale), dim=0)
+            self._decode_qkv_quant_bias = torch.cat((kv_quant_bias, q_quant_bias), dim=0)
+            self._fused_mla_ready = True
+
+        if shared_qkv_quant and self._use_mlapo_v2:
             (
                 self._mlapo_qkv_weight,
                 self._mlapo_qkv_deq_scale,
                 self._mlapo_qkv_quant_bias,
             ) = kernels.prepare_mla_preprocess_v2_qkv(
-                torch.cat((kv_weight, q_weight), dim=0),
-                torch.cat((kv_deq_scale, q_deq_scale), dim=0),
-                torch.cat((kv_quant_bias, q_quant_bias), dim=0),
+                qkv_weight,
+                self._decode_qkv_deq_scale,
+                self._decode_qkv_quant_bias,
                 self.kv_lora_rank,
                 self.qk_rope_head_dim,
             )
