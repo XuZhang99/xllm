@@ -29,7 +29,6 @@ limitations under the License.
 #include <optional>
 
 #include "common/device_monitor.h"
-#include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "core/common/global_flags.h"
 #include "core/distributed_runtime/master.h"
@@ -427,9 +426,6 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
       continue;
     }
     if (result.has_value()) {
-      if (result.value().outputs.empty() && layer_forward_interrupted_) {
-        throw ForwardInterruptedException();
-      }
       // if src_seq_idxes is not empty, skip sample output processing and
       // process beam search output instead
       if (result.value().src_seq_idxes.size() == 0) {

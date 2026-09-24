@@ -109,7 +109,6 @@ service XllmRpcService {
   rpc GetInstanceInfo(InstanceID) returns (InstanceMetaInfo) {}
   rpc Heartbeat(HeartbeatRequest) returns (Status) {}
   rpc GetStaticDecodeList(InstanceID) returns (InstanceIDs) {}
-  rpc GetStaticPrefillList(InstanceID) returns (InstanceIDs) {}
   // xllm service receive response from decode instance directly in disagg pd mode.
   // This can eliminate the cost brought by forwarding through prefill.
   rpc Generations(xllm.proto.DisaggStreamGenerations) returns (xllm.proto.StatusSet) {}

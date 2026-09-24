@@ -52,7 +52,6 @@ class SchedulerConfig final {
          "max_decode_token_per_sequence",
          "priority_strategy",
          "enable_mix_batch",
-         "enable_online_preempt_offline",
          "aggressive_coeff",
          "starve_threshold",
          "enable_starve_prevent",
@@ -81,8 +80,6 @@ class SchedulerConfig final {
   PROPERTY(std::string, priority_strategy) = "fcfs";
 
   PROPERTY(bool, enable_mix_batch) = true;
-
-  PROPERTY(bool, enable_online_preempt_offline) = true;
 
   PROPERTY(double, aggressive_coeff) = 1.0;
 

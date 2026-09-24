@@ -210,8 +210,6 @@ class LLMEngine : public Engine {
   // NOTE: Perhaps it can be optimized to create a global thread pool.
   std::unique_ptr<ThreadPool> threadpool_ = nullptr;
 
-  bool layer_forward_interrupted_ = false;
-
   // threadpool for link cluster
   std::unique_ptr<ThreadPool> link_threadpool_;
 };

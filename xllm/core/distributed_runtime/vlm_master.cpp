@@ -156,7 +156,6 @@ VLMMaster::VLMMaster(const Options& options)
       .enable_service_routing(options_.enable_service_routing())
       .disable_log_stats(options_.disable_log_stats())
       .disable_ttft_profiling(options_.disable_ttft_profiling())
-      .enable_forward_interruption(options_.enable_forward_interruption())
       .enable_schedule_overlap(options_.enable_schedule_overlap())
       .server_idx(options_.server_idx());
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);

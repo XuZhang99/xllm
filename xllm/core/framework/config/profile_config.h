@@ -50,7 +50,6 @@ class ProfileConfig final {
          "max_global_tpot_ms",
          "enable_profile_kv_blocks",
          "disable_ttft_profiling",
-         "enable_forward_interruption",
          "enable_online_profile",
          "profile_backend",
          "profile_dir"}};
@@ -72,8 +71,6 @@ class ProfileConfig final {
   PROPERTY(bool, enable_profile_kv_blocks) = true;
 
   PROPERTY(bool, disable_ttft_profiling) = false;
-
-  PROPERTY(bool, enable_forward_interruption) = false;
 
   // Whether to enable the online timeline profiling endpoints
   // (/start_profile and /stop_profile). CUDA only for now.

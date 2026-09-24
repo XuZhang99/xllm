@@ -226,8 +226,6 @@ DECLARE_string(priority_strategy);
 
 DECLARE_bool(enable_mix_batch);
 
-DECLARE_bool(enable_online_preempt_offline);
-
 // --- mix scheduler config ---
 DECLARE_double(aggressive_coeff);
 
@@ -269,8 +267,6 @@ DECLARE_int32(profile_max_prompt_length);
 DECLARE_bool(enable_profile_kv_blocks);
 
 DECLARE_bool(disable_ttft_profiling);
-
-DECLARE_bool(enable_forward_interruption);
 
 DECLARE_bool(enable_online_profile);
 

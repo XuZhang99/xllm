@@ -26,7 +26,6 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "core/common/interruption_bus.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
@@ -333,8 +332,6 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
 
   // Decoder
   QWen3Eagle3DecoderLayer decoder_{nullptr};
-
-  bool layer_forward_interrupted_ = false;
 };
 TORCH_MODULE(QWen3Eagle3Model);
 

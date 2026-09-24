@@ -209,8 +209,6 @@ Options create_options(const std::string& instance_name, bool is_local) {
       .tool_call_parser(model_config.tool_call_parser())
       .reasoning_parser(model_config.reasoning_parser())
       .priority_strategy(scheduler_config.priority_strategy())
-      .enable_online_preempt_offline(
-          scheduler_config.enable_online_preempt_offline())
       .host_blocks_factor(kv_cache_store_config.host_blocks_factor())
       .enable_kvcache_store(kv_cache_store_config.enable_kvcache_store())
       .prefetch_timeout(kv_cache_store_config.prefetch_timeout())
@@ -231,7 +229,6 @@ Options create_options(const std::string& instance_name, bool is_local) {
       .profile_max_prompt_length(profile_config.profile_max_prompt_length())
       .enable_profile_kv_blocks(profile_config.enable_profile_kv_blocks())
       .disable_ttft_profiling(profile_config.disable_ttft_profiling())
-      .enable_forward_interruption(profile_config.enable_forward_interruption())
       .enable_task_pipeline(execution_config.enable_task_pipeline())
       .enable_graph(execution_config.enable_graph())
       .enable_graph_mode_decode_no_padding(

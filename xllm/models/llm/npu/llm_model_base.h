@@ -26,7 +26,6 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "core/common/interruption_bus.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
@@ -139,9 +138,6 @@ class LlmModelImplBase : public torch::nn::Module {
   // mode type: qwen2, qwen3 .etc
   LlmModelImplBase(const std::string& model_type, const ModelArgs& args)
       : model_type_(model_type) {
-    InterruptionBus::get_instance().subscribe([this](bool interrupted) {
-      this->layer_forward_interrupted_ = interrupted;
-    });
     mrope_section_ = args.rope_scaling_mrope_section();
   }
 
@@ -244,10 +240,6 @@ class LlmModelImplBase : public torch::nn::Module {
 
       auto& layer = layers_[i];
 
-      if (layer_forward_interrupted_) {
-        LOG(INFO) << "Forward interrupted at layer: " << i;
-        return ModelOutput();
-      }
       const int32_t layer_index = i;
       rolling_guard.before_layer(layer_index);
 
@@ -389,8 +381,6 @@ class LlmModelImplBase : public torch::nn::Module {
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
   std::vector<DecoderLayerType> layers_;
-
-  bool layer_forward_interrupted_ = false;
 
   int32_t max_seq_len_ = 0;
 

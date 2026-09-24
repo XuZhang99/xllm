@@ -56,7 +56,6 @@ class XServiceClient {
   void heartbeat();
   InstanceInfo get_instance_info(const std::string& instance_name);
   std::vector<std::string> get_static_decode_list();
-  std::vector<std::string> get_static_prefill_list();
 
   // get all xllm_service addrs
   std::vector<std::string> get_all_xservice_addrs();

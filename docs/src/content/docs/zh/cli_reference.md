@@ -116,7 +116,6 @@ xLLM 使用 gflags 管理服务启动参数。`--model <PATH>` 是唯一必填�
 | `max_decode_token_per_sequence` | `int32` | `256` | ZeroEvictionScheduler 中每个 sequence 的最大 decode token 数。 |
 | `priority_strategy` | `string` | `"fcfs"` | 请求优先级策略，例如 `fcfs`、`priority`、`deadline`。 |
 | `enable_mix_batch` | `bool` | `true` | 是否在同一 batch 中运行 prefill 和 decode。启用 CP 或 MTP 时会被强制设为 `false`。 |
-| `enable_online_preempt_offline` | `bool` | `true` | 是否允许在线请求抢占离线请求。 |
 | `aggressive_coeff` | `double` | `1.0` | MixScheduler 紧急度判断的激进系数。 |
 | `starve_threshold` | `double` | `1.0` | MixScheduler 的饥饿阈值系数。 |
 | `enable_starve_prevent` | `bool` | `true` | 是否启用 MixScheduler 的防饥饿机制。 |
@@ -202,7 +201,6 @@ xLLM 使用 gflags 管理服务启动参数。`--model <PATH>` 是唯一必填�
 | `max_global_tpot_ms` | `int32` | `std::numeric_limits<int32_t>::max()` | 全局 TPOT 阈值，单位毫秒。 |
 | `enable_profile_kv_blocks` | `bool` | `true` | profiling 时是否生成 KV Cache blocks。 |
 | `disable_ttft_profiling` | `bool` | `false` | 是否禁用 TTFT profiling。 |
-| `enable_forward_interruption` | `bool` | `false` | 是否启用 forward interruption。 |
 | `enable_online_profile` | `bool` | `false` | 是否启用在线 timeline profiling 端点（`/start_profile` 和 `/stop_profile`）；目前仅支持 CUDA，需配合以 `nsys --capture-range=cudaProfilerApi` 启动 server。 |
 | `profile_backend` | `string` | `"torch"` | 在线 profiling 后端。`torch` 在进程内记录 CPU+CUDA 活动，并在 `/stop_profile` 时写出 Chrome trace，无需外部 profiler；`cuda` 仅切换 CUDA profiler 的 capture range，需配合以 `nsys --capture-range=cudaProfilerApi` 启动。 |
 | `profile_dir` | `string` | `""` | `torch` 在线 profiling 后端写出 timeline trace 的目录；为空表示当前工作目录。 |

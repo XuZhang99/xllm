@@ -26,7 +26,6 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "core/common/interruption_bus.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/hf_model_loader.h"
 #include "core/framework/model/model_input_params.h"
@@ -196,9 +195,6 @@ TORCH_MODULE(MiniMaxM2MoeDecoderLayer);
 class MiniMaxM2ModelImpl : public torch::nn::Module {
  public:
   explicit MiniMaxM2ModelImpl(const ModelContext& context) {
-    InterruptionBus::get_instance().subscribe(
-        [this](bool interrupted) { layer_forward_interrupted_ = interrupted; });
-
     const auto& options = context.get_tensor_options();
     const auto& model_args = context.get_model_args();
     const auto& parallel_args = context.get_parallel_args();
@@ -331,7 +327,6 @@ class MiniMaxM2ModelImpl : public torch::nn::Module {
   int64_t hidden_size_ = 0;
   int32_t max_seq_len_ = 0;
   bool enable_mla_ = false;
-  bool layer_forward_interrupted_ = false;
 };
 TORCH_MODULE(MiniMaxM2Model);
 

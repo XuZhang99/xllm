@@ -84,8 +84,6 @@ class VLMEngine : public Engine {
   uint32_t worker_clients_num_;
   uint32_t dp_local_tp_size_;
 
-  bool layer_forward_interrupted_ = false;
-
   std::shared_ptr<DistManager> dist_manager_ = nullptr;
 
   std::unique_ptr<ThreadPool> threadpool_ = nullptr;

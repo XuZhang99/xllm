@@ -190,8 +190,6 @@ struct Options {
 
   PROPERTY(std::string, priority_strategy) = "fcfs";
 
-  PROPERTY(bool, enable_online_preempt_offline) = true;
-
   // host block factor, e.g. host block num = host_blocks_factor * hbm block num
   PROPERTY(double, host_blocks_factor) = 0.0;
 

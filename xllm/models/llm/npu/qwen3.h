@@ -279,10 +279,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 
       auto& layer = layers_[i];
       const int32_t layer_index = i;
-      if (layer_forward_interrupted_) {
-        LOG(INFO) << "Forward interrupted at layer: " << i;
-        return ModelOutput();
-      }
       rolling_guard.before_layer(layer_index);
 
       layer(h,

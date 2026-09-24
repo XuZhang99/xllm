@@ -91,8 +91,6 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("transfer_listen_port", &Options::transfer_listen_port_)
       .def_readwrite("disable_ttft_profiling",
                      &Options::disable_ttft_profiling_)
-      .def_readwrite("enable_forward_interruption",
-                     &Options::enable_forward_interruption_)
       .def_readwrite("enable_graph", &Options::enable_graph_)
       .def_readwrite("enable_graph_mode_decode_no_padding",
                      &Options::enable_graph_mode_decode_no_padding_)

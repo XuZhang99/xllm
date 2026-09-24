@@ -142,7 +142,6 @@ class ContinuousScheduler : public Scheduler {
     // TODO: think if distinguish prefill and decode priority strategy
     PROPERTY(std::string,
              priority_strategy) = "fcfs";  // priority, deadline, fcfs
-    PROPERTY(bool, enable_online_preempt_offline) = true;
 
     PROPERTY(bool, enable_profile_step_time) = false;
     // use predicted latency for latency aware schedule
@@ -155,8 +154,6 @@ class ContinuousScheduler : public Scheduler {
     PROPERTY(bool, enable_profile_kv_blocks) = true;
     // true if disable ttft profiling
     PROPERTY(bool, disable_ttft_profiling) = false;
-    // true if enable forward interruption
-    PROPERTY(bool, enable_forward_interruption) = false;
     // all requests use single global ttft
     PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
     // all requests use single global tpot

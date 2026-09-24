@@ -51,9 +51,6 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
   // Whether to disable TTFT profiling
   bool disable_ttft_profiling = false;
 
-  // Whether to enable forward interruption
-  bool enable_forward_interruption = false;
-
   // Whether to enable shared memory for executing model
   bool enable_shm = false;
 

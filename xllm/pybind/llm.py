@@ -122,7 +122,6 @@ class LLM:
         enable_schedule_overlap: bool = False,
         kv_cache_transfer_mode: str = "PUSH",
         disable_ttft_profiling: bool = False,
-        enable_forward_interruption: bool = False,
         enable_graph: bool = False,
         enable_graph_mode_decode_no_padding: bool = False,
         enable_prefill_piecewise_graph: bool = False,
@@ -194,7 +193,6 @@ class LLM:
         options.enable_schedule_overlap = enable_schedule_overlap
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
         options.disable_ttft_profiling = disable_ttft_profiling
-        options.enable_forward_interruption = enable_forward_interruption
         options.enable_graph = enable_graph
         options.enable_graph_mode_decode_no_padding = enable_graph_mode_decode_no_padding
         options.enable_prefill_piecewise_graph = enable_prefill_piecewise_graph

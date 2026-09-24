@@ -26,7 +26,6 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "core/common/interruption_bus.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
@@ -52,10 +51,6 @@ class MtpModelImplBase : public torch::nn::Module {
   MtpModelImplBase(const std::string& model_type, const ModelContext& context)
       : model_type_(model_type),
         device_(context.get_tensor_options().device()) {
-    InterruptionBus::get_instance().subscribe([this](bool interrupted) {
-      this->layer_forward_interrupted_ = interrupted;
-    });
-
     auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
 
@@ -196,11 +191,6 @@ class MtpModelImplBase : public torch::nn::Module {
       auto& layer = layers_[i];
       const int32_t layer_index = static_cast<int32_t>(i);
 
-      if (layer_forward_interrupted_) {
-        LOG(INFO) << "Forward interrupted at layer: " << i;
-        return ModelOutput();
-      }
-
       forward_layer(layer,
                     h,
                     cos_pos,
@@ -340,7 +330,6 @@ class MtpModelImplBase : public torch::nn::Module {
   torch::nn::ModuleList blocks_{nullptr};
   std::vector<DecoderLayerType> layers_;
 
-  bool layer_forward_interrupted_ = false;
   bool enable_rot_ = false;
   torch::Device device_;
   int32_t index_topk_ = 0;

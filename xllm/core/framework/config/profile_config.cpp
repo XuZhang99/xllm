@@ -52,10 +52,6 @@ DEFINE_bool(disable_ttft_profiling,
             false,
             "Whether to disable TTFT profiling.");
 
-DEFINE_bool(enable_forward_interruption,
-            false,
-            "Whether to enable forward interruption.");
-
 DEFINE_bool(enable_online_profile,
             false,
             "Whether to enable the online timeline profiling endpoints "
@@ -88,7 +84,6 @@ void ProfileConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_global_tpot_ms);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_profile_kv_blocks);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(disable_ttft_profiling);
-  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_forward_interruption);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_online_profile);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(profile_backend);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(profile_dir);
@@ -103,7 +98,6 @@ void ProfileConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_global_tpot_ms);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_profile_kv_blocks);
   XLLM_CONFIG_ASSIGN_FROM_JSON(disable_ttft_profiling);
-  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_forward_interruption);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_online_profile);
   XLLM_CONFIG_ASSIGN_FROM_JSON(profile_backend);
   XLLM_CONFIG_ASSIGN_FROM_JSON(profile_dir);
@@ -128,8 +122,6 @@ void ProfileConfig::append_config_json(
       config_json, default_config, enable_profile_kv_blocks);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, disable_ttft_profiling);
-  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
-      config_json, default_config, enable_forward_interruption);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_online_profile);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

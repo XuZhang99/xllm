@@ -941,15 +941,6 @@ void Sequence::generate_output_tokens_logprobs(
       tokens_);
 }
 
-Slice<int32_t> Sequence::get_generated_tokens() const {
-  // Return a slice of generated token IDs (excluding prompt tokens)
-  if (num_tokens_ > num_prompt_tokens_) {
-    return {tokens_.data() + num_prompt_tokens_,
-            num_tokens_ - num_prompt_tokens_};
-  }
-  return {tokens_.data(), 0};
-}
-
 bool Sequence::update_prefetch_result(uint32_t timeout, uint32_t& success_cnt) {
   if (prefetch_results_.empty()) {
     return true;

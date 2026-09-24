@@ -31,7 +31,6 @@ limitations under the License.
 #include <optional>
 
 #include "common/device_monitor.h"
-#include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "common/options.h"
 #include "core/common/global_flags.h"
@@ -94,9 +93,6 @@ constexpr size_t kXTensorWeightPageSafetyMargin = 20;
 LLMEngine::LLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
     : options_(options), dist_manager_(dist_manager) {
-  InterruptionBus::get_instance().subscribe([this](bool interrupted) {
-    this->layer_forward_interrupted_ = interrupted;
-  });
   auto master_node_addr = options.master_node_addr().value_or("");
   CHECK(!master_node_addr.empty())
       << " LLM need to set master node addr, Please set --master_node_addr.";
@@ -1144,20 +1140,12 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
 
   DCHECK_EQ(dp_size_, worker_clients_num_ / dp_local_size_);
   // Every worker must have produced a value before EPLB consumes all results
-  // and before promotions are committed to the shared prefix cache below; an
-  // interrupted or failed worker must not reach those non-reversible steps.
+  // and before promotions are committed to the shared prefix cache below; a
+  // failed worker must not reach those non-reversible steps.
   for (uint32_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
     if (!results[worker_rank].hasValue() || !results[worker_rank].value()) {
       LOG(FATAL) << "Failed to execute model, result has no value";
-    }
-  }
-  // Interruption is reported per dp group via its driver worker's output.
-  for (uint32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    const uint32_t worker_begin = dp_rank * dp_local_size_;
-    const auto& result = results[worker_begin].value();
-    if (result.value().outputs.empty() && layer_forward_interrupted_) {
-      throw ForwardInterruptedException();
     }
   }
 

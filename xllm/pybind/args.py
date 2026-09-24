@@ -153,14 +153,6 @@ class ArgumentParser:
             help="Whether to disable TTFT profiling.",
         )
         self.parser.add_argument(
-            "--enable_forward_interruption",
-            nargs="?",
-            const=True,
-            default=False,
-            type=_str_to_bool,
-            help="Whether to enable forward interruption.",
-        )
-        self.parser.add_argument(
             "--enable_graph",
             nargs="?",
             const=True,

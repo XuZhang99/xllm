@@ -116,7 +116,6 @@ xLLM uses gflags to manage service startup parameters. `--model <PATH>` is the o
 | `max_decode_token_per_sequence` | `int32` | `256` | Maximum decode tokens per sequence for ZeroEvictionScheduler. |
 | `priority_strategy` | `string` | `"fcfs"` | Request priority strategy, for example `fcfs`, `priority`, or `deadline`. |
 | `enable_mix_batch` | `bool` | `true` | Whether to run prefill and decode in the same batch. Forced to `false` when CP or MTP is active. |
-| `enable_online_preempt_offline` | `bool` | `true` | Whether online requests can preempt offline requests. |
 | `aggressive_coeff` | `double` | `1.0` | Aggressive coefficient for MixScheduler urgency judgment. |
 | `starve_threshold` | `double` | `1.0` | Starvation threshold coefficient for MixScheduler. |
 | `enable_starve_prevent` | `bool` | `true` | Whether to enable anti-starvation behavior in MixScheduler. |
@@ -202,7 +201,6 @@ xLLM uses gflags to manage service startup parameters. `--model <PATH>` is the o
 | `max_global_tpot_ms` | `int32` | `std::numeric_limits<int32_t>::max()` | Global TPOT threshold in milliseconds. |
 | `enable_profile_kv_blocks` | `bool` | `true` | Whether to generate KV Cache blocks for profiling. |
 | `disable_ttft_profiling` | `bool` | `false` | Whether to disable TTFT profiling. |
-| `enable_forward_interruption` | `bool` | `false` | Whether to enable forward interruption. |
 | `enable_online_profile` | `bool` | `false` | Whether to enable the online timeline profiling endpoints (`/start_profile` and `/stop_profile`). CUDA only for now; pair with launching the server under `nsys --capture-range=cudaProfilerApi`. |
 | `profile_backend` | `string` | `"torch"` | Online profiling backend. `torch` records CPU+CUDA activities in-process and writes a Chrome trace on `/stop_profile`, no external profiler needed. `cuda` only toggles the CUDA profiler capture range and requires launching under `nsys --capture-range=cudaProfilerApi`. |
 | `profile_dir` | `string` | `""` | Directory the `torch` online profiling backend writes timeline traces to. Empty means the current working directory. |

@@ -58,10 +58,6 @@ DEFINE_string(priority_strategy,
               "fcfs",
               "Priority strategy for requests(e.g. fcfs, priority, deadline).");
 
-DEFINE_bool(enable_online_preempt_offline,
-            true,
-            "Whether to enable online preempt offline.");
-
 DEFINE_double(aggressive_coeff,
               1.0,
               "Aggressive coefficient for MixScheduler urgency judgment.");
@@ -94,7 +90,6 @@ void SchedulerConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_decode_token_per_sequence);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(priority_strategy);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_mix_batch);
-  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_online_preempt_offline);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(aggressive_coeff);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(starve_threshold);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_starve_prevent);
@@ -113,7 +108,6 @@ void SchedulerConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_decode_token_per_sequence);
   XLLM_CONFIG_ASSIGN_FROM_JSON(priority_strategy);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_mix_batch);
-  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_online_preempt_offline);
   XLLM_CONFIG_ASSIGN_FROM_JSON(aggressive_coeff);
   XLLM_CONFIG_ASSIGN_FROM_JSON(starve_threshold);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_starve_prevent);
@@ -145,8 +139,6 @@ void SchedulerConfig::append_config_json(
       config_json, default_config, priority_strategy);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_mix_batch);
-  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
-      config_json, default_config, enable_online_preempt_offline);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, aggressive_coeff);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

@@ -16,7 +16,6 @@ cc_library(
     dit_scheduler.h
     scheduler_factory.h
     request_priority_queue.h
-    perf_model.h
     fixed_steps_scheduler.h
   SRCS
     scheduler_policy.cpp
@@ -29,7 +28,6 @@ cc_library(
     async_response_processor.cpp
     dit_scheduler.cpp
     scheduler_factory.cpp
-    perf_model.cpp
     fixed_steps_scheduler.cpp
   DEPS
     :batch

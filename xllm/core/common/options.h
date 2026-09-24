@@ -181,8 +181,6 @@ class Options {
 
   PROPERTY(std::string, priority_strategy) = "fcfs";
 
-  PROPERTY(bool, enable_online_preempt_offline) = true;
-
   PROPERTY(double, host_blocks_factor) = 0.0;
 
   PROPERTY(bool, enable_kvcache_store) = false;
@@ -210,8 +208,6 @@ class Options {
   PROPERTY(bool, enable_profile_kv_blocks) = true;
   // true if disable ttft profiling
   PROPERTY(bool, disable_ttft_profiling) = false;
-  // true if enable forward interruption
-  PROPERTY(bool, enable_forward_interruption) = false;
   // Enable the task pipeline; scheduler overlap determines the slot count.
   PROPERTY(bool, enable_task_pipeline) = false;
 
