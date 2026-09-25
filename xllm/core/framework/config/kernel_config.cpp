@@ -148,8 +148,8 @@ void KernelConfig::from_json(const JsonReader& json) {
 
 void KernelConfig::append_config_json(
     nlohmann::ordered_json& config_json) const {
-#if defined(USE_NPU)
   const KernelConfig default_config;
+#if defined(USE_NPU)
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_customize_mla_kernel);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

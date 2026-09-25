@@ -253,6 +253,8 @@ py::dict PyCausalLM::build_config_dict(
   // a derived member function, so pass it explicitly for the Python executor.
   d["cp_rank"] = cp_rank_;
   d["layerwise_split_rank"] = layerwise_split_rank_;
+  d["enable_dsa_multi_stream"] =
+      ExecutionConfig::get_instance().enable_dsa_multi_stream();
   const bool requires_eager_execution =
       !model_args_.layers_to_capture().empty() ||
       model_args_.model_type() == "DFlashDraftModel" ||

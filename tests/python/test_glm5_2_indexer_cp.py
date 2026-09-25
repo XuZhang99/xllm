@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 import torch
@@ -226,6 +226,10 @@ def test_empty_query_rank_still_populates_index_cache(quantized: bool) -> None:
         segment_kv_seq_lens_tensor=empty.to(torch.int32),
     )
     indexer = _indexer()
+    indexer._q_stream = MagicMock()
+    indexer._weights_stream = MagicMock()
+    indexer._q_stream.wait_for_current.side_effect = AssertionError("empty Q must not fork")
+    indexer._weights_stream.wait_for_current.side_effect = AssertionError("empty weights must not fork")
     backend, metadata, cache = _backend_and_metadata(quantized)
     metadata.slot_mapping = torch.tensor([0])
     metadata.kv_seq_lens = torch.tensor([1])
@@ -512,7 +516,8 @@ def test_interleaved_indexer_rope_uses_inplace_partial_kernel() -> None:
     torch.testing.assert_close(output[:, :2], torch.tensor([[0.0, 5.0], [9.0, 23.0]]))
 
 
-def test_indexer_reuses_interleaved_rope_angles_for_query_and_cache() -> None:
+@pytest.mark.parametrize("multi_stream", [False, True])
+def test_indexer_reuses_interleaved_rope_angles_for_query_and_cache(multi_stream: bool) -> None:
     cfg = glm5_2.Glm52Config(
         hidden_size=2,
         q_lora_rank=2,
@@ -524,6 +529,8 @@ def test_indexer_reuses_interleaved_rope_angles_for_query_and_cache() -> None:
     )
     indexer = glm5_2.Glm52Indexer(cfg, torch.float32, torch.device("cpu"))
     index_cache = torch.zeros(1, 1, 1, 4)
+    if multi_stream:
+        indexer._weights_stream = MagicMock()
     block_table = torch.zeros(1, 1, dtype=torch.int32)
     ctx = SimpleNamespace(
         actual_seq_q=torch.tensor([1]),
@@ -569,7 +576,8 @@ def test_indexer_reuses_interleaved_rope_angles_for_query_and_cache() -> None:
     )
 
 
-def test_indexer_keeps_distinct_rope_angles_for_distinct_cache_positions() -> None:
+@pytest.mark.parametrize("multi_stream", [False, True])
+def test_indexer_keeps_distinct_rope_angles_for_distinct_cache_positions(multi_stream: bool) -> None:
     cfg = glm5_2.Glm52Config(
         hidden_size=2,
         q_lora_rank=2,
@@ -581,6 +589,8 @@ def test_indexer_keeps_distinct_rope_angles_for_distinct_cache_positions() -> No
     )
     indexer = glm5_2.Glm52Indexer(cfg, torch.float32, torch.device("cpu"))
     index_cache = torch.zeros(1, 1, 1, 4)
+    if multi_stream:
+        indexer._weights_stream = MagicMock()
     block_table = torch.zeros(1, 1, dtype=torch.int32)
     ctx = SimpleNamespace(
         actual_seq_q=torch.tensor([1]),

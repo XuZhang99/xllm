@@ -108,6 +108,11 @@ DEFINE_bool(
     "Enable FIA for Qwen3.5 decode attention. Applies to both target and MTP "
     "draft models. Prefill attention is unaffected.");
 
+DEFINE_bool(enable_dsa_multi_stream,
+            false,
+            "Overlap projections within the Python GLM DSA indexer using "
+            "SGLang NPU-style stream scheduling.");
+
 namespace xllm {
 
 void ExecutionConfig::from_flags() {
@@ -127,6 +132,7 @@ void ExecutionConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(random_seed);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(python_graph_backend);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_fia_decode);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_dsa_multi_stream);
 }
 
 void ExecutionConfig::from_json(const JsonReader& json) {
@@ -146,6 +152,7 @@ void ExecutionConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(random_seed);
   XLLM_CONFIG_ASSIGN_FROM_JSON(python_graph_backend);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_fia_decode);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_dsa_multi_stream);
 }
 
 void ExecutionConfig::append_config_json(
@@ -183,6 +190,8 @@ void ExecutionConfig::append_config_json(
       config_json, default_config, python_graph_backend);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_fia_decode);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_dsa_multi_stream);
 }
 
 ExecutionConfig& ExecutionConfig::get_instance() {

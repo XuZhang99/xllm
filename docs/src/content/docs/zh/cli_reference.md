@@ -221,6 +221,7 @@ xLLM 使用 gflags 管理服务启动参数。`--model <PATH>` 是唯一必填�
 | `input_shm_size` | `uint64` | `1024` | 输入共享内存大小，默认 1GB。 |
 | `output_shm_size` | `uint64` | `128` | 输出共享内存大小，默认 128MB。 |
 | `random_seed` | `int32` | `-1` | 随机数生成器 seed；`-1` 表示不固定 seed。 |
+| `enable_dsa_multi_stream` | `bool` | `false` | 为 Python GLM indexer 启用局部并行：K/weights 投影在辅助流执行，query/cache 行相同时保留融合投影；主流同步后再更新 index cache。非 interleaved RoPE 还可并行 Q 投影/RoPE 与 cache 准备。主 attention 准备完成后才执行 indexer。要求模型后端和设备流能力均受支持。 |
 
 ## KernelConfig
 
