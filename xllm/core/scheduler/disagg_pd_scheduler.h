@@ -156,8 +156,6 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // info
   void register_instance_info(const std::string& server_name, Engine* engine);
 
-  void update_token_latency_metrics(std::vector<Sequence*>& sequences) override;
-
   // remote instance name(ID) -> instance info
   std::unordered_map<std::string, InstanceInfo> remote_instances_info_;
 
@@ -205,11 +203,6 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // instance_to_received_requests_map_ when the request is processed.
   std::unordered_map<std::string, std::string> request_to_instance_map_;
   std::mutex received_request_map_mutex_;
-
-  // Lock for multi-threaded read-write latency metrics
-  std::vector<int64_t> recent_ttft_;
-  std::vector<int64_t> recent_tbt_;
-  std::mutex latency_metrics_mutex_;
 
   // Lock for multi-threaded read-write linked instances
   std::mutex linked_instances_mutex_;

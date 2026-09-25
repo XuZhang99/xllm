@@ -134,13 +134,8 @@ class TestDisaggPDScheduler final : public DisaggPDScheduler {
     return request_queue_.read(*request);
   }
 
-  static int64_t amortized_token_latency_for_test(int64_t latency,
-                                                  size_t num_tokens) {
-    return amortized_token_latency(latency, num_tokens);
-  }
-
   void update_metrics(std::vector<Sequence*>& sequences) {
-    update_token_latency_metrics(sequences);
+    scheduler_metrics_->update_token_latency_metrics(sequences);
   }
 };
 
@@ -633,20 +628,6 @@ TEST(DisaggPDSchedulerTest, EmptyOverlapOutputPreservesLatencyClock) {
     EXPECT_TRUE(ttft.empty());
     EXPECT_TRUE(tbt.empty());
   }
-}
-
-TEST(DisaggPDSchedulerTest, AmortizedTokenLatencyRoundsHalfUp) {
-  // Amortized per-token latency is round(latency / n) via (latency + n/2) / n.
-  EXPECT_EQ(TestDisaggPDScheduler::amortized_token_latency_for_test(100, 4),
-            25);
-  EXPECT_EQ(TestDisaggPDScheduler::amortized_token_latency_for_test(101, 4),
-            25);
-  EXPECT_EQ(TestDisaggPDScheduler::amortized_token_latency_for_test(102, 4),
-            26);
-  EXPECT_EQ(TestDisaggPDScheduler::amortized_token_latency_for_test(50, 5), 10);
-  EXPECT_EQ(TestDisaggPDScheduler::amortized_token_latency_for_test(53, 5), 11);
-  // With a single committed token amortized latency equals the raw latency.
-  EXPECT_EQ(TestDisaggPDScheduler::amortized_token_latency_for_test(37, 1), 37);
 }
 
 TEST(DisaggPDSchedulerTest, SchedulerDoesNotOverwriteSpeculativeOutputGauge) {

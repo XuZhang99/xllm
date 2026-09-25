@@ -40,6 +40,7 @@ limitations under the License.
 #include "scheduler.h"
 #include "scheduler/profile/profile_manager.h"
 #include "scheduler/request_priority_queue.h"
+#include "scheduler/scheduler_metrics.h"
 
 namespace xllm {
 class Engine;
@@ -214,10 +215,6 @@ class ContinuousScheduler : public Scheduler {
   // process the batch output
   void process_batch_output(bool enable_schedule_overlap);
 
-  static int64_t microseconds_to_milliseconds(int64_t microseconds);
-  // i.e. round(latency / num_tokens). num_tokens must be > 0.
-  static int64_t amortized_token_latency(int64_t latency, size_t num_tokens);
-
   const Options options_;
 
   // BatchMode resolved from options/global config (subsumes old scheduler
@@ -264,6 +261,7 @@ class ContinuousScheduler : public Scheduler {
   std::unique_ptr<AsyncResponseProcessor> response_processor_;
 
   std::unique_ptr<ProfileManager> profile_manager_;
+  std::unique_ptr<SchedulerMetrics> scheduler_metrics_;
 
   bool enable_prefix_cache_ = false;
   bool has_linear_attention_layers_ = false;
@@ -327,18 +325,11 @@ class ContinuousScheduler : public Scheduler {
 
   std::vector<Batch> schedule_request(const absl::Duration& timeout);
 
-  virtual void update_token_latency_metrics(std::vector<Sequence*>& sequences);
-
   void step_with_schedule_overlap(const absl::Duration& timeout);
 
   void refresh_sequences_from_requests(
       const std::vector<std::shared_ptr<Request>>& requests,
       std::vector<Sequence*>& sequences) const;
-
-  std::vector<int64_t> get_num_occupied_slots(
-      std::vector<Sequence*>& sequences) const;
-  std::vector<int64_t> get_active_activation_in_bytes();
-  void update_memory_metrics(std::vector<Sequence*>& sequences);
 
   void create_queues(const Options& options);
 };

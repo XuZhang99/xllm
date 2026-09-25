@@ -17,6 +17,7 @@ cc_library(
     scheduler_factory.h
     request_priority_queue.h
     fixed_steps_scheduler.h
+    scheduler_metrics.h
   SRCS
     scheduler_policy.cpp
     prefill_first_policy.cpp
@@ -24,6 +25,7 @@ cc_library(
     unified_policy.cpp
     zero_eviction_scheduler.cpp
     continuous_scheduler.cpp
+    scheduler_metrics.cpp
     disagg_pd_scheduler.cpp
     async_response_processor.cpp
     dit_scheduler.cpp

@@ -1168,54 +1168,9 @@ void DisaggPDScheduler::do_permanent_rejection(
   req_to_channel_map_.erase(request->request_id());
 }
 
-void DisaggPDScheduler::update_token_latency_metrics(
-    std::vector<Sequence*>& sequences) {
-  std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
-
-  const auto now = absl::Now();
-  const bool speculative_metrics_enabled =
-      options_.num_speculative_tokens() > 0;
-  for (Sequence* sequence : sequences) {
-    if (sequence->is_chunked_prefill_stage() ||
-        sequence->last_token_handled()) {
-      continue;
-    }
-    // Read the committed-token count before tbt(), which resets it.
-    const size_t committed_tokens = sequence->generated_tokens_since_latency();
-    // Overlap can advance KV state to decode before any real token arrives.
-    // Preserve the latency clock until there is a committed token to observe.
-    if (committed_tokens == 0) {
-      continue;
-    }
-    const int64_t tbt_microseconds = sequence->tbt_microseconds(now);
-    const int64_t tbt_milliseconds =
-        microseconds_to_milliseconds(tbt_microseconds);
-    if (sequence->is_first_token()) {
-      HISTOGRAM_OBSERVE(time_to_first_token_latency_milliseconds,
-                        tbt_milliseconds);
-      sequence->set_time_to_first_token_latency_seconds(
-          static_cast<double>(tbt_milliseconds) / 1000);
-      recent_ttft_.emplace_back(tbt_milliseconds);
-    } else {
-      int64_t inter_token_latency_us = tbt_microseconds;
-      recent_tbt_.emplace_back(tbt_milliseconds);
-      if (speculative_metrics_enabled) {
-        inter_token_latency_us =
-            amortized_token_latency(tbt_microseconds, committed_tokens);
-      }
-      HISTOGRAM_OBSERVE(inter_token_latency_microseconds,
-                        inter_token_latency_us);
-      HISTOGRAM_OBSERVE(inter_token_latency_milliseconds,
-                        microseconds_to_milliseconds(inter_token_latency_us));
-    }
-  }
-}
-
 void DisaggPDScheduler::get_latency_metrics(std::vector<int64_t>& ttft,
                                             std::vector<int64_t>& tbt) {
-  std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
-  ttft = std::move(recent_ttft_);
-  tbt = std::move(recent_tbt_);
+  scheduler_metrics_->get_latency_metrics(ttft, tbt);
 }
 
 bool DisaggPDScheduler::link_instance(const std::string& instance_name,

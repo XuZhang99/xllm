@@ -27,7 +27,6 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "common/metrics.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/rec_config.h"
@@ -76,6 +75,12 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
 
   kv_cache_manager_ = engine_->block_manager_pool();
   CHECK(kv_cache_manager_ != nullptr);
+  scheduler_metrics_ =
+      std::make_unique<SchedulerMetrics>(engine_,
+                                         kv_cache_manager_,
+                                         options_.dp_size(),
+                                         options_.num_speculative_tokens(),
+                                         options_.enable_disagg_pd());
 
   enable_prefix_cache_ =
       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
@@ -521,57 +526,6 @@ void ContinuousScheduler::generate() {
   response_processor_->wait_completion();
 }
 
-int64_t ContinuousScheduler::microseconds_to_milliseconds(
-    int64_t microseconds) {
-  return (microseconds + 500) / 1000;
-}
-
-int64_t ContinuousScheduler::amortized_token_latency(int64_t latency,
-                                                     size_t num_tokens) {
-  const int64_t n = static_cast<int64_t>(num_tokens);
-  return (latency + n / 2) / n;
-}
-
-void ContinuousScheduler::update_token_latency_metrics(
-    std::vector<Sequence*>& sequences) {
-  const auto now = absl::Now();
-  const bool speculative_metrics_enabled =
-      options_.num_speculative_tokens() > 0;
-  for (Sequence* sequence : sequences) {
-    if (sequence->is_chunked_prefill_stage() ||
-        sequence->last_token_handled()) {
-      // skip chunked prefill stage
-      continue;
-    }
-    // Read the committed-token count before tbt(), which resets it.
-    const size_t committed_tokens = sequence->generated_tokens_since_latency();
-    // Overlap can advance KV state to decode before any real token arrives.
-    // Preserve the latency clock until there is a committed token to observe.
-    if (committed_tokens == 0) {
-      continue;
-    }
-    const int64_t tbt_microseconds = sequence->tbt_microseconds(now);
-    const int64_t tbt_milliseconds =
-        microseconds_to_milliseconds(tbt_microseconds);
-    if (sequence->is_first_token()) {
-      HISTOGRAM_OBSERVE(time_to_first_token_latency_milliseconds,
-                        tbt_milliseconds);
-      sequence->set_time_to_first_token_latency_seconds(
-          static_cast<double>(tbt_milliseconds) / 1000);
-    } else {
-      int64_t inter_token_latency_us = tbt_microseconds;
-      if (speculative_metrics_enabled) {
-        inter_token_latency_us =
-            amortized_token_latency(tbt_microseconds, committed_tokens);
-      }
-      HISTOGRAM_OBSERVE(inter_token_latency_microseconds,
-                        inter_token_latency_us);
-      HISTOGRAM_OBSERVE(inter_token_latency_milliseconds,
-                        microseconds_to_milliseconds(inter_token_latency_us));
-    }
-  }
-}
-
 void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
   std::vector<Sequence*>& to_be_processed_sequences =
       enable_schedule_overlap ? last_running_sequences_ : running_sequences_;
@@ -581,13 +535,10 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
   // Always refresh the sequence pointers from requests before dereferencing.
   refresh_sequences_from_requests(to_be_processed_requests,
                                   to_be_processed_sequences);
-  // update token latency metrics
-  update_token_latency_metrics(to_be_processed_sequences);
-
-  // update slot usage and activation metrics
-  update_memory_metrics(to_be_processed_sequences);
+  scheduler_metrics_->update(to_be_processed_sequences);
 
   std::vector<std::shared_ptr<Request>> stream_requests;
+  stream_requests.reserve(to_be_processed_requests.size());
   // process request output in batch
   for (auto request : to_be_processed_requests) {
     // ignore cancelled/finished requests when enable_schedule_overlap.
@@ -633,88 +584,6 @@ void ContinuousScheduler::refresh_sequences_from_requests(
     for (auto& sequence : request_sequences) {
       if (sequence != nullptr) {
         sequences.emplace_back(sequence.get());
-      }
-    }
-  }
-}
-
-std::vector<int64_t> ContinuousScheduler::get_num_occupied_slots(
-    std::vector<Sequence*>& sequences) const {
-  std::vector<int64_t> num_occupied_slots(options_.dp_size());
-  std::vector<int64_t> num_unfilled_blocks(options_.dp_size());
-  std::vector<size_t> num_used_blocks = kv_cache_manager_->num_used_blocks();
-
-  auto block_size = kv_cache_manager_->block_size();
-
-  for (auto& sequence : sequences) {
-    const int32_t dp_rank = sequence->dp_rank();
-    // last_block_len is the length of the last unfilled block of each
-    // sequence.
-    int32_t last_block_len =
-        sequence->kv_state().kv_cache_tokens_num() % block_size;
-    num_occupied_slots[dp_rank] += last_block_len;
-    num_unfilled_blocks[dp_rank] += last_block_len > 0 ? 1 : 0;
-  }
-
-  for (int32_t dp_rank = 0; dp_rank < options_.dp_size(); ++dp_rank) {
-    num_occupied_slots[dp_rank] +=
-        (num_used_blocks[dp_rank] - num_unfilled_blocks[dp_rank]) * block_size;
-  }
-  return num_occupied_slots;
-}
-
-std::vector<int64_t> ContinuousScheduler::get_active_activation_in_bytes() {
-  std::vector<int64_t> all_active_activation_in_bytes =
-      engine_->get_active_activation_memory();
-  std::vector<int64_t> active_activation_in_bytes(options_.dp_size());
-
-  const int32_t dp_local_tp_size =
-      all_active_activation_in_bytes.size() / options_.dp_size();
-
-  for (int32_t dp_rank = 0; dp_rank < options_.dp_size(); ++dp_rank) {
-    active_activation_in_bytes[dp_rank] =
-        all_active_activation_in_bytes[dp_rank * dp_local_tp_size];
-  }
-  return active_activation_in_bytes;
-}
-
-void ContinuousScheduler::update_memory_metrics(
-    std::vector<Sequence*>& sequences) {
-  if (sequences.empty()) {
-    return;
-  }
-  std::vector<int64_t> num_occupied_slots = get_num_occupied_slots(sequences);
-  std::vector<int64_t> active_activation_size_in_bytes =
-      get_active_activation_in_bytes();
-  int64_t num_total_slots =
-      kv_cache_manager_->num_blocks() * kv_cache_manager_->block_size();
-
-  for (int32_t dp_rank = 0; dp_rank < options_.dp_size(); ++dp_rank) {
-    double occupied_slots_ratio =
-        static_cast<double>(num_occupied_slots[dp_rank]) / num_total_slots;
-    double active_kv_cache_size_in_kilobytes =
-        occupied_slots_ratio * GAUGE_VALUE(total_kv_cache_size_in_kilobytes);
-    int64_t active_activation_size_in_kilobytes =
-        active_activation_size_in_bytes[dp_rank] / 1024;
-
-    MULTI_HISTOGRAM_OBSERVE(
-        active_kv_cache_size_in_kilobytes,
-        std::to_string(dp_rank),
-        static_cast<int64_t>(active_kv_cache_size_in_kilobytes));
-
-    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      MULTI_HISTOGRAM_OBSERVE(decode_active_activation_size_in_kilobytes,
-                              std::to_string(dp_rank),
-                              active_activation_size_in_kilobytes);
-    } else {
-      if (sequences[0]->is_first_token()) {
-        MULTI_HISTOGRAM_OBSERVE(prefill_active_activation_size_in_kilobytes,
-                                std::to_string(dp_rank),
-                                active_activation_size_in_kilobytes);
-      } else {
-        MULTI_HISTOGRAM_OBSERVE(decode_active_activation_size_in_kilobytes,
-                                std::to_string(dp_rank),
-                                active_activation_size_in_kilobytes);
       }
     }
   }
