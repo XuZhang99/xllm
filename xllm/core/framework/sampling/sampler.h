@@ -16,7 +16,6 @@ limitations under the License.
 
 #pragma once
 #include <c10/core/TensorOptions.h>
-#include <torch/torch.h>
 #include <torch/types.h>
 
 #include "sampling_params.h"

@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <folly/futures/Future.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "executor.h"
 #include "forward_params.h"

@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <optional>
 #include <tuple>

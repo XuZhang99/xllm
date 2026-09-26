@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 #include <pybind11/pybind11.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <memory>
 #include <vector>

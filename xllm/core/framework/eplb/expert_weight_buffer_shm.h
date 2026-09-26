@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <fcntl.h>
 #include <pthread.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 #include <unistd.h>
 
 #include <memory>

@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <brpc/server.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <atomic>
 #include <memory>

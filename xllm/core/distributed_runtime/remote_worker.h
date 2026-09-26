@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <brpc/channel.h>
 #include <folly/futures/Future.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "comm_channel.h"
 #include "common/macros.h"

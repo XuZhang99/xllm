@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <pybind11/pybind11.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <cstdint>
 #include <memory>

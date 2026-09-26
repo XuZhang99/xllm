@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <folly/futures/Future.h>
 #include <sys/mman.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <memory>
 #include <mutex>

@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "framework/batch/batch.h"
 #include "framework/kv_cache/kv_cache.h"

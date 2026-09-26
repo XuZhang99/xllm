@@ -15,7 +15,7 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <opencv2/opencv.hpp>
 #include <string>

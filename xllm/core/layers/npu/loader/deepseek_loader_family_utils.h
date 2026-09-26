@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <absl/strings/match.h>
 #include <glog/logging.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <algorithm>
 #include <cctype>

@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <numeric>
 #include <string>

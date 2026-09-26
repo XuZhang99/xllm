@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_args.h"

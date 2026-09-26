@@ -18,7 +18,7 @@ limitations under the License.
 #include <brpc/server.h>
 #include <folly/futures/Future.h>
 #include <sys/types.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <atomic>
 #include <cstdint>

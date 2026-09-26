@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/module.h>

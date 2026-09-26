@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "common/macros.h"
 #include "util/threadpool.h"

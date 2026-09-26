@@ -18,7 +18,7 @@ limitations under the License.
 
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <limits>
 #include <vector>

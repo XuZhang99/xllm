@@ -19,7 +19,7 @@ limitations under the License.
 #include <cuda_runtime.h>
 #include <glog/logging.h>
 #include <nvtx3/nvToolsExt.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <utility>
 

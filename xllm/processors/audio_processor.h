@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "core/common/macros.h"
 #include "core/framework/model/model_args.h"

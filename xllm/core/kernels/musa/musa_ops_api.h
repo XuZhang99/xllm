@@ -18,7 +18,7 @@ limitations under the License.
 #include <ATen/DynamicLibrary.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <glog/logging.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <cstdint>
 #include <optional>

@@ -18,7 +18,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 #include <xlite/xlite.h>
 
 #include "core/framework/parallel_state/parallel_args.h"

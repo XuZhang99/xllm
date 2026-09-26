@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <absl/container/flat_hash_map.h>
 #include <acl/acl.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <array>
 #include <atomic>

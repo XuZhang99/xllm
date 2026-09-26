@@ -17,7 +17,7 @@ limitations under the License.
 #pragma once
 
 #include <folly/futures/Future.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "common/types.h"
 #include "core/framework/speculative/speculative_profile_registry.h"

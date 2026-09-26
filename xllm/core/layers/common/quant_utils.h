@@ -19,7 +19,7 @@ limitations under the License.
 // (add_matmul.cpp, dit_parallel_linear.h).
 
 #include <glog/logging.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <optional>
 #include <string>

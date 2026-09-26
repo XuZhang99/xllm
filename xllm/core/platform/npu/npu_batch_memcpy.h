@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <acl/acl.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <cstdint>

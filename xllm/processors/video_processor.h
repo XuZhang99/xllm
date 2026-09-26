@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <glog/logging.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "core/framework/model/model_args.h"
 #include "core/framework/multimodal/mm_data.h"

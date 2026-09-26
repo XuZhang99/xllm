@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <c10/core/Device.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <vector>
 

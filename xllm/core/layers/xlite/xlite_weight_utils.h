@@ -17,7 +17,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 #include <torch_npu/csrc/core/npu/NPUFormat.h>  // at_npu::native::npu_format_cast (NZ)
 #include <xlite/xlite.h>
 

@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <absl/strings/match.h>
 #include <acl/acl.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <memory>
 #include <string>

@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/core/npu/NPUFormat.h>

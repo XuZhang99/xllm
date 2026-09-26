@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "forward_params.h"
 #include "framework/model/causal_lm.h"

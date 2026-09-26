@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "framework/kv_cache/kv_shard_layout.h"
 #include "layers/mlu/dcp_attention_merge.h"

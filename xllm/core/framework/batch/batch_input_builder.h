@@ -16,7 +16,7 @@ limitations under the License.
 // batch_input_builder.h
 #pragma once
 
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <cstdint>

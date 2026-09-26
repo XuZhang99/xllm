@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <glog/logging.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 #include <torch_npu/torch_npu.h>
 
 #include <mutex>

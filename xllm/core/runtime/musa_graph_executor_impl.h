@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <absl/container/flat_hash_map.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include "torch_musa/csrc/core/MUSAStream.h"
 

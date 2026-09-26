@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include <torch/torch.h>
 #include <torch/types.h>
 
 #if defined(USE_NPU)

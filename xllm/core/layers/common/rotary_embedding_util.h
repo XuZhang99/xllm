@@ -18,7 +18,7 @@ limitations under the License.
 
 #include <c10/core/Device.h>
 #include <c10/core/ScalarType.h>
-#include <torch/torch.h>
+#include <torch/types.h>
 
 #include <functional>
 #include <tuple>
