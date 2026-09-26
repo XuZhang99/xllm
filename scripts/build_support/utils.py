@@ -2,6 +2,7 @@ import base64
 import os
 import platform
 import shlex
+import shutil
 import subprocess
 import sys
 import sysconfig
@@ -168,6 +169,40 @@ def get_cmake_dir() -> str:
     cmake_dir = os.path.join(get_base_dir(), "build", dir_name)
     os.makedirs(cmake_dir, exist_ok=True)
     return cmake_dir
+
+
+# A single translation unit that pulls in torch is tens of megabytes of object
+# code, so the ccache default limit (5 GB) is evicted faster than it fills and
+# the hit rate collapses on a clean or near-clean tree.
+_CCACHE_MAXSIZE = "50G"
+
+
+def configure_ccache(env: dict[str, str]) -> None:
+    """Make ccache usable before a CMake build, or say why it will not be.
+
+    Values already present in the environment win, so a caller that mounts a
+    pre-warmed cache elsewhere can override any of them.
+    """
+    ccache = shutil.which("ccache")
+    if ccache is None:
+        logger.warning(
+            "ccache not found: every rebuild recompiles every file and a clean "
+            "build is a fresh full build. Install ccache to fix this."
+        )
+        return
+
+    env.setdefault("CCACHE_MAXSIZE", _CCACHE_MAXSIZE)
+    # Keeping paths relative to the source tree lets one cache serve several
+    # build directories (build/cmake.<platform>-<impl>-<version>) and, in CI,
+    # runners whose checkout lives under a different absolute path.
+    env.setdefault("CCACHE_BASEDIR", get_base_dir())
+    cache_dir = env.get("CCACHE_DIR") or os.path.join(os.path.expanduser("~"), ".cache", "ccache")
+    logger.info(f"ccache: {ccache}")
+    logger.info(f"ccache: cache dir {cache_dir}, max size {env['CCACHE_MAXSIZE']}")
+    logger.info(
+        "ccache: this directory must be persisted between CI runs, or mounted "
+        "into the build container, to have any effect there."
+    )
 
 
 def check_and_install_pre_commit() -> None:

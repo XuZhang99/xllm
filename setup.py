@@ -29,6 +29,7 @@ from scripts.build_support.env import (
 )
 from scripts.build_support.utils import (
     check_and_install_pre_commit,
+    configure_ccache,
     get_ascend_platform,
     get_base_dir,
     get_cmake_dir,
@@ -502,6 +503,7 @@ class ExtBuild(build_ext):
 
         env: dict[str, str] = os.environ.copy()
         env["VCPKG_MAX_CONCURRENCY"] = str(max_jobs)
+        configure_ccache(env)
         logger.info(f"CMake Args: {cmake_args}")
         logger.info(f"Env: {env}")
 
