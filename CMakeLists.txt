@@ -130,6 +130,15 @@ if (CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(-O3)
 endif()
 
+# A dev loop is dominated by the optimizer running over very large template
+# instantiations, not by parsing. -O1 keeps semantics identical and drops most
+# of that work. Opt-in only: never ship an artifact built with this on.
+option(XLLM_DEV_MODE "Build with -O1 for faster iteration, for development only" OFF)
+if(XLLM_DEV_MODE)
+  message(STATUS "XLLM_DEV_MODE=ON: compiling with -O1, for iteration only")
+  add_compile_options(-O1)
+endif()
+
 option(USE_MSPTI "Enable MSPTI for NPU Profiling" OFF)
 if(USE_MSPTI)
   add_definitions(-DUSE_MSPTI)

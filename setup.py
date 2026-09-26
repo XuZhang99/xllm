@@ -302,6 +302,7 @@ class ExtBuild(build_ext):
         ("arch=", None, "target arch type (x86 or arm)"),
         ("generate-so=", None, "generate so or binary"),
         ("enable-ha=", None, "enable Mooncake etcd high availability"),
+        ("dev=", None, "build for fast iteration: -O1 and no unit tests"),
         ("tilelang-jobs=", None, "maximum parallel TileLang compile workers"),
     ]
 
@@ -312,6 +313,7 @@ class ExtBuild(build_ext):
         self.arch: str | None = None
         self.generate_so: bool = False
         self.enable_ha: bool = False
+        self.dev: bool = False
         self.tilelang_jobs: int | str | None = None
 
     def finalize_options(self) -> None:
@@ -390,6 +392,8 @@ class ExtBuild(build_ext):
             f"-DXLLM_ATB_LAYERS_SOURCE_DIR={os.path.join(self.base_dir, 'third_party', 'xllm_atb_layers')}",
             f"-DCMAKE_JOB_POOLS=archive={archive_jobs}",
         ]
+        if self.dev:
+            cmake_args += ["-DXLLM_DEV_MODE=ON"]
         if self.device != "maca":
             cmake_args += ["-DUSE_CCACHE=ON"]
 
@@ -999,6 +1003,11 @@ def parse_arguments() -> dict[str, Any]:
         default=None,
         help="Maximum parallel TileLang compile workers, e.g. --tilelang-jobs 16; auto-selects a safe default when omitted",
     )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Build for fast iteration: -O1 and skip the unit-test targets; never ship the result",
+    )
 
     args = parser.parse_args()
 
@@ -1013,6 +1022,7 @@ def parse_arguments() -> dict[str, Any]:
         "enable_ha": enable_ha,
         "test_name": args.test_name,
         "tilelang_jobs": args.tilelang_jobs,
+        "dev": args.dev,
     }
 
 
@@ -1030,8 +1040,14 @@ if __name__ == "__main__":
     generate_so = config["generate_so"]
     test_name = config.get("test_name")
     tilelang_jobs = config.get("tilelang_jobs")
+    dev = config.get("dev", False)
 
     if "SKIP_TEST" in os.environ:
+        BUILD_TEST_FILE = False
+    if dev:
+        # Iterating on the main binary does not need the unit-test executables,
+        # which are a large share of a full build.
+        logger.warning("🛠️ dev mode: -O1, unit-test targets are not built; do not ship this build")
         BUILD_TEST_FILE = False
     if "SKIP_EXPORT" in os.environ:
         BUILD_EXPORT = False
@@ -1048,6 +1064,7 @@ if __name__ == "__main__":
             "arch": arch,
             "generate_so": generate_so,
             "enable_ha": enable_ha,
+            "dev": dev,
             "tilelang_jobs": tilelang_jobs,
         },
         "bdist_wheel": {
