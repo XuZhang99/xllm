@@ -27,10 +27,12 @@ RUN_OPTS=(
   -v /usr/local/sbin/:/usr/local/sbin/
   -v /export/home:/export/home
   -v /export/home/npu_vcpkg_cache_abi_1:/root/.cache/vcpkg # cached vcpkg installed dir
+  -v /export/home/npu_ccache:/root/.cache/ccache # cached compiler cache (CCACHE_DIR)
   -v "${TRITON_BINARY_CACHE}":"${TRITON_BINARY_CACHE}" # cached triton_npu binary dir
   -v /etc/hccn.conf:/etc/hccn.conf
   -w /export/home
   -e TRITON_BINARY_PATH="${TRITON_BINARY_CACHE}"
+  -e CCACHE_DIR=/root/.cache/ccache
 )
 
 CMD="$*"

@@ -18,7 +18,9 @@ RUN_OPTS=(
   --shm-size '128gb'
   -v /export/home:/export/home
   -v /export/home/cuda_vcpkg_cache:/root/.cache/vcpkg # cached vcpkg installed dir
+  -v /export/home/cuda_ccache:/root/.cache/ccache # cached compiler cache (CCACHE_DIR)
   -w /export/home
+  -e CCACHE_DIR=/root/.cache/ccache
 )
 
 CMD="$*"

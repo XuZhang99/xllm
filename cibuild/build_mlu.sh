@@ -18,7 +18,9 @@ RUN_OPTS=(
   --shm-size '128gb'
   -v /export/home:/export/home
   -v /export/home/mlu_vcpkg_cache:/root/.cache/vcpkg # cached vcpkg installed dir
+  -v /export/home/mlu_ccache:/root/.cache/ccache # cached compiler cache (CCACHE_DIR)
   -w /export/home
+  -e CCACHE_DIR=/root/.cache/ccache
 )
 
 if [[ -d /data/export-home ]]; then
