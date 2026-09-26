@@ -16,6 +16,7 @@ limitations under the License.
 #include "processors/transforms.h"
 
 #include <glog/logging.h>
+#include <torch/torch.h>
 
 #include <algorithm>
 

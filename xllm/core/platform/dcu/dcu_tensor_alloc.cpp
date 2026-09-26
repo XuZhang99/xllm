@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 #include <hip/hip_runtime.h>
+#include <torch/torch.h>
 
 #include <limits>
 

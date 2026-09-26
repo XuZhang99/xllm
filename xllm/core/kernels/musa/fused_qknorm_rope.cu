@@ -18,6 +18,7 @@ limitations under the License.
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <torch/cuda.h>
+#include <torch/torch.h>
 
 #include <cmath>
 #include <type_traits>

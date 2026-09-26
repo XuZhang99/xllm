@@ -16,6 +16,7 @@ limitations under the License.
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/all.h>
+#include <torch/torch.h>
 
 #include "core/kernels/cuda/device_utils.cuh"
 #include "core/kernels/musa/musa_ops_api.h"

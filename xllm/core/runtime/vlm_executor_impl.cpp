@@ -16,6 +16,7 @@ limitations under the License.
 #include "vlm_executor_impl.h"
 
 #include <glog/logging.h>
+#include <torch/torch.h>
 
 #include "common/global_flags.h"
 #include "common/metrics.h"

@@ -16,6 +16,7 @@ limitations under the License.
 #include "layers/mlu/deepseek_v4_ref_utils.h"
 
 #include <glog/logging.h>
+#include <torch/torch.h>
 
 #include <algorithm>
 #include <cmath>

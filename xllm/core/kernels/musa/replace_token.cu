@@ -16,6 +16,7 @@ limitations under the License.
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
 #include <torch/cuda.h>
+#include <torch/torch.h>
 
 #include <cstdint>
 

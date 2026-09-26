@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/platform/musa/musa_utils.h"
 #elif defined(USE_DCU)
 #include <c10/hip/HIPCachingAllocator.h>
+#include <torch/torch.h>
 #endif
 
 namespace xllm {

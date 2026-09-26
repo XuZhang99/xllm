@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <glog/logging.h>
+#include <torch/torch.h>
 #include <unistd.h>
 
 #include <cstdlib>

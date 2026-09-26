@@ -17,6 +17,7 @@ limitations under the License.
 #include <c10/cuda/CUDAGuard.h>
 #include <musa_bf16.h>
 #include <musa_fp8.h>
+#include <torch/torch.h>
 
 #include <cstdint>
 #include <limits>

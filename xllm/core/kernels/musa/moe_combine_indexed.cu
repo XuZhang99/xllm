@@ -17,6 +17,7 @@ limitations under the License.
 // shared CUDA exception macros while launching with an explicit musaStream_t.
 #include <c10/cuda/CUDAException.h>
 #include <musa.h>
+#include <torch/torch.h>
 
 #include <cstddef>
 #include <cstdint>

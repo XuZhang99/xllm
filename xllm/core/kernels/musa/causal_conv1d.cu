@@ -22,6 +22,7 @@ limitations under the License.
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <torch/all.h>
+#include <torch/torch.h>
 
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_store.cuh>

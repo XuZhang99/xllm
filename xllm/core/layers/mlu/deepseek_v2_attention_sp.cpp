@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <torch/torch.h>
+
 #include <tuple>
 
 #include "deepseek_v2_attention.h"

@@ -16,6 +16,7 @@ limitations under the License.
 #include "util/linalg.h"
 
 #include <glog/logging.h>
+#include <torch/torch.h>
 
 #include <cmath>
 #include <vector>

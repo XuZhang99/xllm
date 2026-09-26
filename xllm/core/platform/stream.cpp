@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/platform/stream.h"
 
 #include <glog/logging.h>
+#include <torch/torch.h>
 
 #include <exception>
 #include <memory>

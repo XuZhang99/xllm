@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "deepseek_v2_sparse_moe_block.h"
 
+#include <torch/torch.h>
+
 #include <utility>
 
 #include "common/global_flags.h"

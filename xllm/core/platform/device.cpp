@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "device.h"
 
+#include <torch/torch.h>
+
 #include "core/framework/config/model_config.h"
 #include "core/platform/platform.h"
 #if defined(USE_NPU)
