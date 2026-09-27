@@ -398,6 +398,43 @@ inline aclTensor* convert_type(const at::Tensor& at_tensor) {
       at_npu::native::custom_ops::get_npu_format(at_tensor);
   if (npu_format == ACL_FORMAT_FRACTAL_NZ) {
     format = ACL_FORMAT_FRACTAL_NZ;
+    // ACLNN uses the five-dimensional physical shape for FRACTAL_NZ inputs.
+    // The NPU tensor view remains [E, K, N] (or [K, N]), while the storage
+    // descriptor must expose the [E, N/32, K/16, 16, 32] tiles.
+    storage_dims.clear();
+    const auto sizes = at_tensor.sizes();
+    if (sizes.size() == 5) {
+      // Some ACLNN custom operators consume the physical five-dimensional NZ
+      // view directly.  The tensor already carries the matching physical
+      // strides, so preserve both descriptors verbatim.
+      storage_dims.assign(sizes.begin(), sizes.end());
+      return acl_create_tensor(sizes.data(),
+                               sizes.size(),
+                               acl_data_type,
+                               at_tensor.strides().data(),
+                               at_tensor.storage_offset(),
+                               format,
+                               storage_dims.data(),
+                               storage_dims.size(),
+                               const_cast<void*>(at_tensor.storage().data()));
+    }
+    CHECK(sizes.size() == 2 || sizes.size() == 3)
+        << "FRACTAL_NZ tensor must have two or three view dimensions, got "
+        << sizes.size();
+    const int64_t rank_offset = sizes.size() == 3 ? 1 : 0;
+    const int64_t k = sizes[rank_offset];
+    const int64_t n = sizes[rank_offset + 1];
+    CHECK_EQ(k % 16, 0)
+        << "FRACTAL_NZ K dimension must be divisible by 16, got " << k;
+    CHECK_EQ(n % 32, 0)
+        << "FRACTAL_NZ N dimension must be divisible by 32, got " << n;
+    if (sizes.size() == 3) {
+      storage_dims.push_back(sizes[0]);
+    }
+    storage_dims.push_back(n / 32);
+    storage_dims.push_back(k / 16);
+    storage_dims.push_back(16);
+    storage_dims.push_back(32);
   } else {
     switch (dim_num) {
       case 3:

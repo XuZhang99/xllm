@@ -143,6 +143,46 @@ at::Tensor quant_matmul(const at::Tensor& x1,
                         const c10::optional<at::Tensor>& bias,
                         c10::optional<at::ScalarType> output_dtype);
 
+torch::Tensor quant_matmul_out(
+    const torch::Tensor& x1,
+    const torch::Tensor& x2,
+    const bool transpose2,
+    const torch::Tensor& scale,
+    const std::optional<torch::Tensor>& offset,
+    const std::optional<torch::Tensor>& pertoken_scale,
+    const std::optional<torch::Tensor>& bias,
+    std::optional<torch::ScalarType> output_dtype,
+    torch::Tensor& output);
+
+torch::Tensor grouped_matmul_out(const torch::Tensor& x,
+                                 const torch::Tensor& weight,
+                                 const torch::Tensor& scale,
+                                 const torch::Tensor& per_token_scale,
+                                 const torch::Tensor& group_list,
+                                 int64_t split_item,
+                                 int64_t group_type,
+                                 int64_t group_list_type,
+                                 torch::Tensor& output);
+
+bool has_moe_grouped_matmul_swiglu_quant();
+
+std::tuple<torch::Tensor, torch::Tensor> moe_grouped_matmul_swiglu_quant(
+    const torch::Tensor& x,
+    const torch::Tensor& weight,
+    const torch::Tensor& weight_scale,
+    const torch::Tensor& x_scale,
+    const torch::Tensor& group_list);
+
+bool has_moe_init_routing_v3();
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+moe_init_routing_v3(const torch::Tensor& x,
+                    const torch::Tensor& expert_idx,
+                    int64_t active_num,
+                    int64_t expert_num,
+                    torch::IntArrayRef active_expert_range,
+                    int64_t quant_mode);
+
 at::Tensor quantize_per_tensor(const at::Tensor& self,
                                const at::Tensor& scales,
                                const at::Tensor& zero_points,
