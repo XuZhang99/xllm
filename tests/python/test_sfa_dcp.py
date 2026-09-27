@@ -244,6 +244,9 @@ def test_glm_quant_indexer_without_cp_uses_materialized_scale() -> None:
     indexer.rope_dim = 0
     indexer.topk = 2
     indexer.indexer_rope_interleave = False
+    indexer._q_stream = None
+    indexer._weights_stream = None
+    indexer._wk_weights_proj_ready = False
     indexer.wq_b = MagicMock(return_value=torch.ones(2, 2))
     indexer.wk = MagicMock(return_value=torch.ones(2, 2))
     indexer.k_norm = nn.Identity()
@@ -277,7 +280,7 @@ def test_glm_quant_indexer_without_cp_uses_materialized_scale() -> None:
         return quantized, scale
 
     with (
-        patch.object(glm5_2, "_apply_half_rope", side_effect=lambda _cache, value, _positions: value),
+        patch.object(glm5_2, "_apply_half_rope_with_cos_sin", side_effect=lambda value, _cos, _sin: value),
         patch.object(
             glm5_2.kernels,
             "dynamic_quant",
@@ -300,9 +303,9 @@ def test_glm_quant_indexer_without_cp_uses_materialized_scale() -> None:
         output = indexer.select_qli(
             torch.ones(2, 3),
             torch.ones(2, 3),
-            torch.tensor([0, 1]),
             context,
-            torch.empty(0),
+            (torch.empty(2, 0), torch.empty(2, 0)),
+            (torch.empty(2, 0), torch.empty(2, 0)),
         )
 
     assert output is topk
