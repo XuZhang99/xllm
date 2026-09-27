@@ -64,7 +64,8 @@ DEFINE_string(
     "activities in-process and writes a Chrome trace on "
     "/stop_profile, no external profiler needed; 2: 'cuda' only toggles "
     "the CUDA profiler capture range and requires launching under "
-    "nsys --capture-range=cudaProfilerApi; 3: 'ascend' (default on NPU) "
+    "nsys --capture-range=cudaProfilerApi; on NPU 'torch' uses "
+    "torch_npu.profiler for CPU+NPU activities; 3: 'ascend' (NPU) "
     "records CANN operator, API and communication data. Export with msprof.");
 
 DEFINE_string(profile_dir,

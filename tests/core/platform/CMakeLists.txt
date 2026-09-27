@@ -3,6 +3,18 @@ include(cc_test)
 if(USE_NPU)
   cc_test(
     NAME
+      npu_torch_profiler_test
+    SRCS
+      npu_torch_profiler_test.cpp
+      ${PROJECT_SOURCE_DIR}/xllm/core/platform/npu/npu_torch_profiler.cpp
+    DEPS
+      GTest::gtest_main
+      glog::glog
+      pybind11::embed
+  )
+
+  cc_test(
+    NAME
       npu_profiler_test
     SRCS
       npu_profiler_test.cpp

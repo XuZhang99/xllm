@@ -10,10 +10,10 @@ Timeline profiling is essential for diagnosing performance bottlenecks in an onl
 
 xLLM provides the equivalent capability with platform-specific backends, selected by `--profile_backend`:
 
-- **`torch` (default on non-NPU builds)** — records CPU and CUDA activities in-process via libtorch's Kineto profiler (the C++ equivalent of `torch.profiler.profile`) and writes a Chrome trace to disk on `/stop_profile`. No external profiler is required: just launch the server normally and drive the two endpoints. This mirrors vLLM's default `TorchProfilerWrapper`.
+- **`torch` (default)** — on Ascend NPU, uses `torch_npu.profiler` to collect CPU operators and NPU activity and exports `trace_view.json` on stop, matching vLLM-Ascend. On other supported platforms, records CPU and CUDA activities in-process via libtorch's Kineto profiler (the C++ equivalent of `torch.profiler.profile`) and writes a Chrome trace to disk on `/stop_profile`. No external profiler is required: just launch the server normally and drive the two endpoints. This mirrors vLLM's default `TorchProfilerWrapper`.
 - **`cuda`** — only toggles the CUDA profiler capture range (`cudaProfilerStart()` / `cudaProfilerStop()`). It records nothing on its own and must be paired with NVIDIA Nsight Systems (`nsys`): the server is launched under `nsys profile` with a capture range tied to the CUDA Profiler API, and the two endpoints open and close the window that `nsys` records.
 
-**`ascend` (default on NPU)** uses the CANN profiling API to collect NPU tasks, AscendCL calls, and HCCL communication. It supports both native C++ and Python models, including ACLGraph replay. Raw data is flushed on stop and exported with `msprof`. This backend does not collect PyTorch CPU operator stacks.
+**`ascend` (NPU only)** uses the CANN profiling API to collect NPU tasks, AscendCL calls, and HCCL communication. It supports both native C++ and Python models, including ACLGraph replay. Raw data is flushed on stop and exported with `msprof`. This backend does not collect PyTorch CPU operator stacks.
 
 ## Introduction
 
@@ -30,12 +30,13 @@ HTTP POST /start_profile
         -> WorkerImpl::start_profile
              -> TorchProfiler::start            (Kineto, default)
                 or CudaProfiler::start          (cudaProfilerStart, --profile_backend=cuda)
-                or NpuProfiler::start           (CANN, default on NPU)
+                or NpuTorchProfiler::start      (torch_npu.profiler, NPU default)
+                or NpuProfiler::start           (CANN, --profile_backend=ascend)
 ```
 
-The engine fans the request out to every local and remote worker concurrently and waits for all of them to acknowledge. Profiler state is managed by a singleton in each worker process. The NPU backend shares CANN initialization within a process and tracks capture separately for each device. `/stop_profile` stops the devices and flushes each process's output.
+The engine fans the request out to every local and remote worker concurrently and waits for all of them to acknowledge. Profiler state is managed by a singleton in each worker process. The native `ascend` backend shares CANN initialization within a process and tracks capture separately for each device. `/stop_profile` stops the devices and flushes each process's output.
 
-For the `torch` backend, the profiler is enabled and disabled on the worker's compute thread (the one that runs the forward pass), so host-side CPU operators are captured. On `/stop_profile`, libtorch writes the Chrome trace itself; the file goes to `--profile_dir` (the current working directory when unset). For the `cuda` backend, the trace output location is controlled by `nsys` (its `-o` flag), not by xLLM.
+For the `torch` backend, the profiler is enabled and disabled on the worker's compute thread (the one that runs the forward pass), so host-side CPU operators are captured. On `/stop_profile`, torch_npu exports the NPU trace or libtorch writes the Kineto Chrome trace; the file goes to `--profile_dir` (the current working directory when unset). For the `cuda` backend, the trace output location is controlled by `nsys` (its `-o` flag), not by xLLM.
 
 ## Usage
 
@@ -46,6 +47,24 @@ Profiling is opt-in. Start the server with profiling enabled:
 ```
 
 `enable_online_profile`, `profile_backend`, and `profile_dir` can also be set via the JSON config file. The endpoints only act when `--enable_online_profile=true`; otherwise they respond with an error explaining how to enable the feature.
+
+### Ascend PyTorch backend (`torch`, default on NPU)
+
+Add these options on every worker process:
+
+```shell
+--enable_online_profile=true --profile_backend=torch --profile_dir=/tmp/xllm-profile
+```
+
+After warmup, call `POST /start_profile`, send requests, and call `POST /stop_profile`. Each worker uses `torch_npu.profiler.profile` with CPU and NPU activities, Level1 and PipeUtilization. Stack, shape, module and memory recording are disabled. Raw data is retained alongside the export. Repeated start/stop calls are idempotent and each new capture gets a separate rank/PID/timestamp directory.
+
+Stop synchronously flushes and exports `<profile_dir>/xllm_rank<rank>_<pid>_<timestamp>_ascend_pt/ASCEND_PROFILER_OUTPUT/trace_view.json`. Allow enough HTTP/RPC timeout for large traces. Open this file in Perfetto or MindStudio Insight. Missing exports cause the endpoint to report failure; the raw directory printed in the log can be parsed again offline:
+
+```shell
+python -c 'from torch_npu.profiler import analyse; analyse("/absolute/path/to/session_ascend_pt")'
+```
+
+The torch_npu collector is process-wide and captures the current device. Use one worker process per NPU, as in distributed serving with `--nnodes=<world-size>` and a separate `--node_rank` per process. Multiple workers in a single process are rejected; use `ascend` for that deployment. CPU callbacks belong to the worker compute thread; use `--enable_task_pipeline=false` with `torch`. The separate task-pipeline launch thread is not supported by this backend. Native C++ and Python model execution on the compute thread are both supported, including device activity from ACLGraph replay; replay does not re-run every PyTorch CPU operator in the captured graph.
 
 ### Ascend NPU backend (`ascend`)
 
@@ -111,7 +130,7 @@ Drive the window with the same `/start_profile` and `/stop_profile` endpoints. W
 
 ## Viewing traces
 
-For the `torch` backend, open the generated `.pt.trace.json` in [Perfetto](https://ui.perfetto.dev), `chrome://tracing`, or TensorBoard.
+For the `torch` backend, open NPU `trace_view.json` or Kineto `.pt.trace.json` in [Perfetto](https://ui.perfetto.dev), `chrome://tracing`, or TensorBoard.
 
 For the `cuda` backend, open the generated `.nsys-rep` in the Nsight Systems GUI, or summarize it on the command line:
 
@@ -121,7 +140,7 @@ nsys stats xllm_profile.nsys-rep
 
 ## Notice
 
-- Ascend NPU uses `--profile_backend=ascend`; unsupported backend/platform combinations return an error. Do not combine this backend with another CANN profiler (including `PROFILING_MODE=dynamic` or profiling configured through `aclInit`).
+- Ascend NPU supports `--profile_backend=torch` (default) and `ascend`; unsupported combinations return an error. Do not combine either backend with another CANN profiler (including `PROFILING_MODE=dynamic` or profiling configured through `aclInit`).
 - The two endpoints are only active when `--enable_online_profile=true`; otherwise they respond with an error explaining how to enable the feature.
 - With `--profile_backend=cuda`, `cudaProfilerStart`/`cudaProfilerStop` only have an effect when the server is running under a profiler such as `nsys` (or `ncu`) configured with `--capture-range=cudaProfilerApi`. Calling the endpoints without such a profiler attached is harmless but produces no trace. For multi-process / multi-GPU runs, `nsys` recommends launching with `--trace-fork-before-exec=true` so child worker processes are traced.
 - Profiling adds runtime overhead. Enable it only for diagnosis, not in steady-state production serving, and keep the capture window short.

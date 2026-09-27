@@ -10,10 +10,10 @@ sidebar:
 
 xLLM 提供等价的能力，并通过 `--profile_backend` 选择对应平台的后端：
 
-- **`torch`（非 NPU 构建的默认后端）** —— 通过 libtorch 的 Kineto profiler（即 `torch.profiler.profile` 的 C++ 等价实现）在进程内采集 CPU 与 CUDA 活动，并在 `/stop_profile` 时把 Chrome trace 直接写到磁盘。无需任何外部 profiler：正常启动服务、调用这两个接口即可。该方式与 vLLM 默认的 `TorchProfilerWrapper` 对齐。
+- **`torch`（默认）** —— 在 Ascend NPU 上通过 `torch_npu.profiler` 采集 CPU 算子与 NPU 活动，停止时导出 `trace_view.json`，与 vLLM-Ascend 对齐。在其他支持的平台上，通过 libtorch 的 Kineto profiler（即 `torch.profiler.profile` 的 C++ 等价实现）在进程内采集 CPU 与 CUDA 活动，并在 `/stop_profile` 时把 Chrome trace 直接写到磁盘。无需任何外部 profiler：正常启动服务、调用这两个接口即可。该方式与 vLLM 默认的 `TorchProfilerWrapper` 对齐。
 - **`cuda`** —— 仅开关 CUDA profiler 的 capture range（`cudaProfilerStart()` / `cudaProfilerStop()`）。它本身不记录任何内容，必须与 NVIDIA Nsight Systems（`nsys`）配合使用：服务在 `nsys profile` 下启动，并将 capture range 绑定到 CUDA Profiler API，这两个接口负责开启/关闭 `nsys` 实际记录的窗口。
 
-**`ascend`（NPU 默认后端）** 通过 CANN profiling API 采集 NPU 任务、AscendCL 调用和 HCCL 通信，适用于原生 C++ 与 Python 模型，也覆盖 ACLGraph 重放。停止采集后落盘原始数据，再使用 `msprof` 导出。该后端不采集 PyTorch CPU 算子调用栈。
+**`ascend`（仅 NPU）** 通过 CANN profiling API 采集 NPU 任务、AscendCL 调用和 HCCL 通信，适用于原生 C++ 与 Python 模型，也覆盖 ACLGraph 重放。停止采集后落盘原始数据，再使用 `msprof` 导出。该后端不采集 PyTorch CPU 算子调用栈。
 
 ## 原理介绍
 
@@ -30,12 +30,13 @@ HTTP POST /start_profile
         -> WorkerImpl::start_profile
              -> TorchProfiler::start            (Kineto，默认)
                 或 CudaProfiler::start          (cudaProfilerStart，--profile_backend=cuda)
-                或 NpuProfiler::start           (CANN，NPU 默认)
+                或 NpuTorchProfiler::start      (torch_npu.profiler，NPU 默认)
+                或 NpuProfiler::start           (CANN，--profile_backend=ascend)
 ```
 
-Engine 会将请求并发广播到所有本地和远程 worker，并等待全部确认。每个 worker 进程通过单例管理 profiler 状态。NPU 后端在进程内共享 CANN 初始化，分别维护各设备的采集状态；`/stop_profile` 停止各设备采集并完成各进程的数据落盘。
+Engine 会将请求并发广播到所有本地和远程 worker，并等待全部确认。每个 worker 进程通过单例管理 profiler 状态。原生 `ascend` 后端在进程内共享 CANN 初始化，分别维护各设备的采集状态；`/stop_profile` 停止各设备采集并完成各进程的数据落盘。
 
-对于 `torch` 后端，profiler 在 worker 的计算线程（即执行 forward 的线程）上开启与关闭，从而能采集到主机侧的 CPU 算子。在 `/stop_profile` 时，由 libtorch 自行写出 Chrome trace，文件落到 `--profile_dir`（未设置时为当前工作目录）。对于 `cuda` 后端，trace 的输出位置由 `nsys` 控制（其 `-o` 参数），而非由 xLLM 管理。
+对于 `torch` 后端，profiler 在 worker 的计算线程（即执行 forward 的线程）上开启与关闭，从而能采集到主机侧的 CPU 算子。在 `/stop_profile` 时，由 torch_npu 导出 NPU trace，或由 libtorch 写出 Kineto Chrome trace，文件落到 `--profile_dir`（未设置时为当前工作目录）。对于 `cuda` 后端，trace 的输出位置由 `nsys` 控制（其 `-o` 参数），而非由 xLLM 管理。
 
 ## 使用方式
 
@@ -46,6 +47,24 @@ Engine 会将请求并发广播到所有本地和远程 worker，并等待全部
 ```
 
 `enable_online_profile`、`profile_backend` 与 `profile_dir` 也可以通过 JSON 配置文件设置。仅当 `--enable_online_profile=true` 时这两个接口才会生效；否则会返回错误并提示如何开启该功能。
+
+### Ascend PyTorch 后端（`torch`，NPU 默认）
+
+在每个 worker 进程的启动命令中加入：
+
+```shell
+--enable_online_profile=true --profile_backend=torch --profile_dir=/tmp/xllm-profile
+```
+
+模型预热后，调用 `POST /start_profile`，发送需要采集的推理请求，再调用 `POST /stop_profile`。该后端与 vLLM-Ascend 一样调用 `torch_npu.profiler.profile`，采集 CPU 算子及 NPU 活动，使用 Level1 和 PipeUtilization，关闭调用栈、shape、模块和内存记录。保留原始数据，重复 start/stop 幂等，新一轮采集使用新的 rank/PID/时间戳目录。
+
+停止接口会同步刷新数据并导出 `<profile_dir>/xllm_rank<rank>_<pid>_<timestamp>_ascend_pt/ASCEND_PROFILER_OUTPUT/trace_view.json`，可在 Perfetto 或 MindStudio Insight 中打开。较大的 trace 需要足够长的 HTTP/RPC 超时。若导出文件缺失，接口返回失败；可根据日志中的原始目录离线重新解析：
+
+```shell
+python -c 'from torch_npu.profiler import analyse; analyse("/absolute/path/to/session_ascend_pt")'
+```
+
+torch_npu 采集器是进程级单例，采集当前设备。分布式部署请采用一进程一卡，设置 `--nnodes=<world-size>`，各进程使用不同的 `--node_rank`。同进程多 worker 会被拒绝，该场景使用 `ascend`。CPU 回调绑定 worker 的计算线程，因此 `torch` 需要 `--enable_task_pipeline=false`，暂不支持独立的 task pipeline 发射线程。支持计算线程上的原生 C++ 和 Python 模型，以及 ACLGraph replay 的设备活动；replay 不会重新执行图内的每个 PyTorch CPU 算子。
 
 ### Ascend NPU 后端（`ascend`）
 
@@ -110,7 +129,7 @@ nsys profile \
 
 ## 查看 trace
 
-对于 `torch` 后端，在 [Perfetto](https://ui.perfetto.dev)、`chrome://tracing` 或 TensorBoard 中打开生成的 `.pt.trace.json`。
+对于 `torch` 后端，在 [Perfetto](https://ui.perfetto.dev)、`chrome://tracing` 或 TensorBoard 中打开生成的 NPU `trace_view.json` 或 Kineto `.pt.trace.json`。
 
 对于 `cuda` 后端，在 Nsight Systems GUI 中打开生成的 `.nsys-rep`，或在命令行汇总：
 
@@ -120,7 +139,7 @@ nsys stats xllm_profile.nsys-rep
 
 ## 注意事项
 
-- Ascend NPU 使用 `--profile_backend=ascend`，不支持的后端与平台组合会返回错误。
+- Ascend NPU 支持 `--profile_backend=torch`（默认）和 `ascend`，不支持的后端与平台组合会返回错误。
 - 仅当 `--enable_online_profile=true` 时这两个接口才会生效；否则会返回错误并提示如何开启该功能。
 - 使用 `--profile_backend=cuda` 时，`cudaProfilerStart`/`cudaProfilerStop` 只有在服务运行于 `nsys`（或 `ncu`）这类配置了 `--capture-range=cudaProfilerApi` 的 profiler 之下时才会生效。未挂载此类 profiler 时调用接口无害，但不会产生 trace。对于多进程 / 多 GPU 场景，`nsys` 推荐使用 `--trace-fork-before-exec=true` 启动，以便子 worker 进程也被采集。
 - 采集会带来运行时开销，仅建议在诊断时开启，不要在稳态生产服务中长期开启，且采集窗口应尽量短。
