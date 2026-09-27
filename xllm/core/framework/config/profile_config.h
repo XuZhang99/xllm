@@ -25,11 +25,7 @@ limitations under the License.
 
 namespace xllm {
 
-#if defined(USE_NPU)
-inline constexpr const char* kDefaultProfileBackend = "ascend";
-#else
 inline constexpr const char* kDefaultProfileBackend = "torch";
-#endif
 
 class JsonReader;
 
@@ -88,7 +84,9 @@ class ProfileConfig final {
   // "cuda" only toggles the CUDA profiler capture range
   // (cudaProfilerStart/Stop) and requires launching the server under nsys with
   // --capture-range=cudaProfilerApi to record a trace.
-  // "ascend" (default on NPU) records CANN operator/API/communication data.
+  // On NPU, "torch" uses torch_npu.profiler for CPU+NPU activities.
+  // "ascend" records CANN operator/API/communication data without CPU
+  // operators.
   PROPERTY(std::string, profile_backend) = kDefaultProfileBackend;
 
   // Directory the "torch" and "ascend" backends write traces to. Empty means

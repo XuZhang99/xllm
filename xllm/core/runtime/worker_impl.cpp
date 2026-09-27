@@ -64,6 +64,7 @@ limitations under the License.
 #include "core/platform/platform.h"
 #if defined(USE_NPU)
 #include "core/platform/npu/npu_profiler.h"
+#include "core/platform/npu/npu_torch_profiler.h"
 #include "platform/npu/device_capture_lock.h"
 #elif defined(USE_CUDA) || defined(USE_DCU) || defined(USE_MUSA)
 #include "platform/torch_profiler.h"
@@ -1686,18 +1687,30 @@ bool WorkerImpl::start_profile() {
   const auto& cfg = ProfileConfig::get_instance();
   LOG(INFO) << "Starting profiling with backend: " << cfg.profile_backend();
 #if defined(USE_NPU)
-  if (cfg.profile_backend() != "ascend") {
-    LOG(ERROR) << "NPU profiling requires --profile_backend=ascend.";
+  if (cfg.profile_backend() != "ascend" && cfg.profile_backend() != "torch") {
+    LOG(ERROR) << "NPU profiling requires --profile_backend=torch or ascend.";
+    return false;
+  }
+  if (cfg.profile_backend() == "torch" && options_.enable_task_pipeline()) {
+    LOG(ERROR)
+        << "NPU torch profiling requires --enable_task_pipeline=false "
+           "so CPU callbacks run on the model's compute thread. "
+           "Use --profile_backend=ascend for task-pipeline device traces.";
     return false;
   }
   const std::string profile_dir = cfg.profile_dir();
+  const bool use_torch = cfg.profile_backend() == "torch";
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
-      [this, profile_dir, promise = std::move(promise)]() mutable {
-        promise.setWith([this, &profile_dir]() {
+      [this, profile_dir, use_torch, promise = std::move(promise)]() mutable {
+        promise.setWith([this, &profile_dir, use_torch]() {
           // Drain torch_npu's host dispatch queue as well as device streams.
           c10_npu::device_synchronize();
+          if (use_torch) {
+            return NpuTorchProfiler::get_instance().start(
+                profile_dir, device_.index(), parallel_args_.rank());
+          }
           return NpuProfiler::get_instance().start(profile_dir,
                                                    device_.index());
         });
@@ -1730,18 +1743,23 @@ bool WorkerImpl::stop_profile() {
   const auto& cfg = ProfileConfig::get_instance();
   LOG(INFO) << "Stopping profiling with backend: " << cfg.profile_backend();
 #if defined(USE_NPU)
-  if (cfg.profile_backend() != "ascend") {
-    LOG(ERROR) << "NPU profiling requires --profile_backend=ascend.";
+  if (cfg.profile_backend() != "ascend" && cfg.profile_backend() != "torch") {
+    LOG(ERROR) << "NPU profiling requires --profile_backend=torch or ascend.";
     return false;
   }
+  const bool use_torch = cfg.profile_backend() == "torch";
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
-    promise.setWith([this]() {
-      c10_npu::device_synchronize();
-      return NpuProfiler::get_instance().stop(device_.index());
-    });
-  });
+  threadpool_.schedule(
+      [this, use_torch, promise = std::move(promise)]() mutable {
+        promise.setWith([this, use_torch]() {
+          c10_npu::device_synchronize();
+          if (use_torch) {
+            return NpuTorchProfiler::get_instance().stop(device_.index());
+          }
+          return NpuProfiler::get_instance().stop(device_.index());
+        });
+      });
   return std::move(future).get();
 #elif defined(USE_CUDA)
   if (cfg.profile_backend() == "cuda") {
