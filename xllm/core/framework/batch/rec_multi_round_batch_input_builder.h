@@ -22,30 +22,23 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "batch_input_builder.h"
+#include "core/framework/batch/batch_input_builder.h"
+#include "core/framework/batch/rec_batch_input_builder.h"
 #include "core/framework/multimodal/mm_data.h"
-#include "framework/request/sequence.h"
-#include "framework/request/sequences_group.h"
-#include "rec_batch_input_builder.h"
-#include "runtime/forward_params.h"
-#include "util/threadpool.h"
+#include "core/framework/request/sequence.h"
+#include "core/framework/request/sequences_group.h"
+#include "core/runtime/forward_params.h"
+#include "core/util/threadpool.h"
 
 namespace xllm {
 
 struct ModelArgs;
 
-class RecMultiRoundBatchInputBuilder : public RecBatchInputBuilder {
+class RecMultiRoundBatchInputBuilder final : public RecBatchInputBuilder {
  public:
   explicit RecMultiRoundBatchInputBuilder(
-      const std::vector<SequencesGroup*>& sequence_groups,
-      const std::vector<uint32_t>& allowed_max_tokens,
-      const std::vector<torch::Tensor>& input_embeddings_vec,
-      const std::vector<MMData>& mm_data_vec,
-      // for beam-search
-      std::vector<BlockTransferInfo>* swap_block_transfer_infos,
-      const uint64_t batch_id,
+      const BatchInputData& data,
       const ModelArgs* args,
-      BatchForwardType batch_forward_type,
       MPMCThreadPool* thread_pool = nullptr);
 
   ~RecMultiRoundBatchInputBuilder() override = default;
@@ -166,9 +159,8 @@ class RecMultiRoundBatchInputBuilder : public RecBatchInputBuilder {
                            BuilderState* state_ptr,
                            std::unordered_set<int32_t>* write_block_ids_ptr);
 
-  // Input data (same semantics as in BatchInputBuilder)
-  // Extracted from sequence_groups_ in constructor
-  std::vector<Sequence*> sequences_;
+  // Non-owning scheduled view, in the same order as allowed_max_tokens_.
+  const std::vector<Sequence*>& sequences_;
   const std::vector<uint32_t>& allowed_max_tokens_;
   const std::vector<torch::Tensor>& input_embeddings_vec_;
   const std::vector<MMData>& mm_data_vec_;

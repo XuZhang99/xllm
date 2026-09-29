@@ -23,35 +23,41 @@ limitations under the License.
 #include <limits>
 #include <vector>
 
+#include "core/framework/batch/batch_input_data.h"
 #include "core/framework/multimodal/mm_data.h"
-#include "framework/batch/batch_forward_type.h"
-#include "framework/request/request.h"
-#include "framework/request/sequence.h"
-#include "framework/request/sequences_group.h"
-#include "runtime/forward_params.h"
-#include "util/threadpool.h"
+#include "core/framework/request/request.h"
+#include "core/framework/request/sequence.h"
+#include "core/framework/request/sequences_group.h"
+#include "core/runtime/forward_params.h"
+#include "core/util/threadpool.h"
 
 namespace xllm {
 
 struct ModelArgs;
 
-static uint64_t batch_counter_ = 1;
 constexpr uint64_t UNINITIALIZED_BATCH_ID = 0x0;
 
-class Batch {
+class Batch final {
  public:
   Batch() = default;
+  // Group-only inputs must explicitly select a OneRec input type.
+  explicit Batch(BatchInputType input_type) : input_type_(input_type) {}
 
-  Batch(Sequence* sequence);
-  Batch(const std::vector<Sequence*>& sequences);
+  BatchInputType input_type() const { return input_type_; }
+  void reserve(size_t sequence_count, size_t group_count);
+
+  explicit Batch(Sequence* sequence);
+  explicit Batch(const std::vector<Sequence*>& sequences);
 
   void add(Sequence* sequence,
            uint32_t allowed_max_token = std::numeric_limits<uint32_t>::max());
 
   void add(const std::vector<Sequence*>& sequences);
 
-  void add(SequencesGroup* sequence_group) {
-    sequence_groups_.push_back(sequence_group);
+  void add(SequencesGroup* sequence_group);
+
+  const std::vector<SequencesGroup*>& sequence_groups() const {
+    return sequence_groups_;
   }
 
   void update_forward_type(Sequence* sequence);
@@ -63,15 +69,7 @@ class Batch {
     swap_block_transfer_infos_ = std::move(swap_block_transfer_infos);
   }
 
-  void set_batch_id() {
-    if (batch_id_ == UNINITIALIZED_BATCH_ID) {
-      batch_id_ = batch_counter_;
-      batch_counter_++;
-      if (batch_counter_ == UINT64_MAX) {
-        batch_counter_ = 1;
-      }
-    }
-  }
+  void set_batch_id();
 
   uint64_t batch_id() const { return batch_id_; }
 
@@ -149,6 +147,7 @@ class Batch {
     bool from_sample_slot = false;
   };
 
+  BatchInputData input_data();
   void refresh_output_targets();
   void refresh_onerec_prefill_output_targets();
   bool update_sequence_state(Sequence* seq, bool replace_fake_token);
@@ -187,6 +186,7 @@ class Batch {
   // sequence.
   std::vector<OutputTarget> output_targets_;
 
+  BatchInputType input_type_ = BatchInputType::SEQUENCE;
   BatchForwardType batch_forward_type_;
 
   uint64_t batch_id_ = UNINITIALIZED_BATCH_ID;

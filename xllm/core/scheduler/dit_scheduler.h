@@ -25,14 +25,15 @@ limitations under the License.
 #include <queue>
 #include <unordered_map>
 
-#include "common/macros.h"
-#include "common/types.h"
-#include "distributed_runtime/dit_engine.h"
-#include "distributed_runtime/engine.h"
-#include "framework/batch/dit_batch.h"
-#include "framework/request/dit_request.h"
-#include "scheduler.h"
-#include "util/threadpool.h"
+#include "core/common/macros.h"
+#include "core/common/types.h"
+#include "core/distributed_runtime/dit_engine.h"
+#include "core/distributed_runtime/engine.h"
+#include "core/framework/batch/dit_batch.h"
+#include "core/framework/batch/dit_batch_factory.h"
+#include "core/framework/request/dit_request.h"
+#include "core/scheduler/scheduler.h"
+#include "core/util/threadpool.h"
 
 namespace xllm {
 
@@ -108,6 +109,7 @@ class DiTDynamicBatchScheduler : public DiTScheduler {
 
   // the engine to run the batch
   DiTEngine* engine_;
+  DiTBatchFactory batch_factory_;
 
   // a thread safe queue of requests, bounded by kRequestQueueSize
   // the schedule owns the requests and manages their lifetimes.

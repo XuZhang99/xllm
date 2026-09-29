@@ -13,17 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "onerec_xattention_batch_input_builder.h"
+#include "core/framework/batch/onerec_xattention_batch_input_builder.h"
 
 #include <algorithm>
 #include <vector>
 
-#include "common/global_flags.h"
+#include "core/common/global_flags.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/request/onerec_sequence.h"
 #include "core/util/rec_model_utils.h"
+#include "core/util/tensor_helper.h"
 #include "core/util/utils.h"
-#include "util/tensor_helper.h"
 
 namespace xllm {
 

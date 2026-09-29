@@ -27,22 +27,22 @@ limitations under the License.
 #include <mutex>
 #include <unordered_map>
 
-#include "async_response_processor.h"
-#include "common/macros.h"
-#include "common/types.h"
-#include "framework/batch/batch.h"
-#include "framework/block/kv_cache_manager.h"
-#include "framework/request/priority_comparator.h"
-#include "framework/request/request.h"
-#include "framework/request/sequence.h"
-#include "runtime/xservice_client.h"
-#include "scheduler.h"
-#include "scheduler/profile/profile_manager.h"
-#include "scheduler/request_priority_queue.h"
-#include "scheduler/scheduler_metrics.h"
+#include "core/common/macros.h"
+#include "core/common/types.h"
+#include "core/framework/batch/batch.h"
+#include "core/framework/batch/sequence_batch_factory.h"
+#include "core/framework/block/kv_cache_manager.h"
+#include "core/framework/request/priority_comparator.h"
+#include "core/framework/request/request.h"
+#include "core/framework/request/sequence.h"
+#include "core/runtime/xservice_client.h"
+#include "core/scheduler/async_response_processor.h"
+#include "core/scheduler/profile/profile_manager.h"
+#include "core/scheduler/request_priority_queue.h"
+#include "core/scheduler/scheduler.h"
+#include "core/scheduler/scheduler_metrics.h"
 
 namespace xllm {
-class BatchFactory;
 class Engine;
 class RequestPriorityQueue;
 class SchedulerConfig;
@@ -230,8 +230,8 @@ class ContinuousScheduler : public Scheduler {
   // Process-wide scheduler configuration, resolved once at construction.
   const SchedulerConfig& scheduler_config_;
 
-  // Process-wide batch factory, resolved once at construction.
-  BatchFactory& batch_factory_;
+  // Each scheduler owns a factory configured for its DP topology.
+  SequenceBatchFactory batch_factory_;
 
   // Policy object that encapsulates all batch-assembly logic.
   std::unique_ptr<SchedulerPolicy> policy_;

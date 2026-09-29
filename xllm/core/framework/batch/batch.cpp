@@ -14,37 +14,38 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "batch.h"
+#include "core/framework/batch/batch.h"
 
 #include <c10/core/DeviceType.h>
 #include <torch/torch.h>
 
 #include <algorithm>
+#include <atomic>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include "batch_input_builder.h"
-#include "common/global_flags.h"
-#include "common/metrics.h"
+#include "core/common/global_flags.h"
+#include "core/common/metrics.h"
+#include "core/framework/batch/batch_input_builder.h"
+#include "core/framework/batch/rec_batch_input_builder.h"
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/model/model_input_params.h"
 #include "core/framework/request/onerec_sequence.h"
 #include "core/framework/request/rec_sequence.h"
+#include "core/framework/request/sequence.h"
+#include "core/framework/sampling/sampling_params.h"
+#include "core/runtime/params_utils.h"
 #include "core/util/rec_model_utils.h"
-#include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
-#include "framework/request/sequence.h"
-#include "framework/sampling/sampling_params.h"
-#include "rec_batch_input_builder.h"
-#include "runtime/params_utils.h"
-#include "util/slice.h"
-#include "util/tensor_helper.h"
-#include "util/utils.h"
+#include "core/util/slice.h"
+#include "core/util/tensor_helper.h"
+#include "core/util/utils.h"
 
 namespace xllm {
 namespace {
@@ -140,12 +141,14 @@ void Batch::add(Sequence* sequence, uint32_t allowed_max_token) {
   CHECK(!sequence->finished());
   CHECK_GT(allowed_max_token, 0);
 
-  sequences_.push_back(sequence);
-  allowed_max_tokens_.push_back(allowed_max_token);
+  set_batch_id();
+  sequences_.emplace_back(sequence);
+  allowed_max_tokens_.emplace_back(allowed_max_token);
 
   const auto& input_embedding = sequence->get_input_embedding();
-  if (input_embedding.defined())
+  if (input_embedding.defined()) {
     input_embeddings_vec_.emplace_back(input_embedding);
+  }
 
   update_forward_type(sequence);
 }
@@ -192,25 +195,60 @@ void Batch::add(const std::vector<Sequence*>& sequences) {
   }
 }
 
+void Batch::set_batch_id() {
+  static std::atomic<uint64_t> next_batch_id{1};
+  while (batch_id_ == UNINITIALIZED_BATCH_ID) {
+    batch_id_ = next_batch_id.fetch_add(1, std::memory_order_relaxed);
+  }
+}
+
+void Batch::reserve(size_t sequence_count, size_t group_count) {
+  sequences_.reserve(sequence_count);
+  allowed_max_tokens_.reserve(sequence_count);
+  input_embeddings_vec_.reserve(sequence_count);
+  sequence_groups_.reserve(group_count);
+}
+
+void Batch::add(SequencesGroup* sequence_group) {
+  CHECK(sequence_group != nullptr);
+  CHECK(!sequence_group->sequences().empty());
+  set_batch_id();
+  sequence_groups_.emplace_back(sequence_group);
+}
+
+BatchInputData Batch::input_data() {
+  CHECK_EQ(sequences_.size(), allowed_max_tokens_.size());
+  const bool group_input = input_type_ == BatchInputType::ONEREC ||
+                           input_type_ == BatchInputType::ONEREC_XATTENTION;
+  if (group_input) {
+    CHECK(sequences_.empty() || !sequence_groups_.empty())
+        << "OneRec input requires request groups";
+  } else {
+    CHECK(sequence_groups_.empty() || !sequences_.empty())
+        << "Sequence input requires scheduled sequences; group-only input "
+           "requires an explicit OneRec batch input type";
+  }
+  return {sequences_,
+          sequence_groups_,
+          allowed_max_tokens_,
+          input_embeddings_vec_,
+          mm_data_vec_,
+          &swap_block_transfer_infos_,
+          batch_id_,
+          batch_forward_type_};
+}
+
 ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                                           uint32_t min_decoding_batch_size,
                                           const ModelArgs& args,
                                           int32_t cp_size) {
-  if (sequences_.empty() && !sequence_groups_.empty()) {
+  if (input_type_ != BatchInputType::SEQUENCE) {
     output_targets_.clear();
     return prepare_rec_forward_input(
         num_decoding_tokens, min_decoding_batch_size, args);
   }
   refresh_output_targets();
-  BatchInputBuilder builder(sequences_,
-                            allowed_max_tokens_,
-                            input_embeddings_vec_,
-                            mm_data_vec_,
-                            &swap_block_transfer_infos_,
-                            batch_id_,
-                            &args,
-                            batch_forward_type_,
-                            cp_size);
+  BatchInputBuilder builder(input_data(), &args, cp_size);
   ForwardInput forward_input =
       builder.build_forward_input(num_decoding_tokens, min_decoding_batch_size);
   linear_restore_src_blocks_ = builder.take_linear_restore_src_blocks();
@@ -221,12 +259,14 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               uint32_t min_decoding_batch_size,
                                               const ModelArgs& args,
                                               MPMCThreadPool* thread_pool) {
-  RecType rec_type = RecType::kNone;
-  if (!sequence_groups_.empty() && !sequence_groups_[0]->sequences().empty()) {
-    rec_type = sequence_groups_[0]->sequences()[0]->rec_type();
-  }
+  CHECK(input_type_ != BatchInputType::SEQUENCE)
+      << "Rec input requires an explicit Rec batch input type";
   output_targets_.clear();
-  if (rec_type == RecType::kOneRec) {
+  if (empty()) {
+    return ForwardInput{};
+  }
+  if (input_type_ == BatchInputType::ONEREC ||
+      input_type_ == BatchInputType::ONEREC_XATTENTION) {
     if (!sequence_groups_.empty()) {
       // OneRec REC batches are tracked via sequence_groups_, while output
       // target generation still walks sequences_. Refresh the flattened
@@ -241,16 +281,8 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
     }
   }
 
-  auto builder = RecBatchInputBuilder::create(rec_type,
-                                              sequence_groups_,
-                                              allowed_max_tokens_,
-                                              input_embeddings_vec_,
-                                              mm_data_vec_,
-                                              &swap_block_transfer_infos_,
-                                              batch_id_,
-                                              &args,
-                                              batch_forward_type_,
-                                              thread_pool);
+  auto builder = RecBatchInputBuilder::create(
+      input_type_, input_data(), &args, thread_pool);
   return builder->build_rec_forward_input(num_decoding_tokens,
                                           min_decoding_batch_size);
 }
@@ -419,18 +451,11 @@ std::unordered_map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(
 ForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                                           ThreadPool* thread_pool,
                                           int32_t cp_size) {
+  CHECK(input_type_ == BatchInputType::SEQUENCE)
+      << "Distributed input transport requires a sequence batch";
   dp_balance_shuffle_seqs();
   refresh_output_targets();
-  BatchInputBuilder builder(sequences_,
-                            allowed_max_tokens_,
-                            input_embeddings_vec_,
-                            mm_data_vec_,
-                            &swap_block_transfer_infos_,
-                            batch_id_,
-                            &args,
-                            batch_forward_type_,
-                            cp_size,
-                            thread_pool);
+  BatchInputBuilder builder(input_data(), &args, cp_size, thread_pool);
   ForwardInput forward_input =
       builder.build_forward_input(/*num_decoding_tokens=*/0,
                                   /*min_decoding_batch_size=*/0);

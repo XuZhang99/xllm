@@ -29,7 +29,6 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
-#include "framework/batch/batch_factory.h"
 #include "framework/request/priority_comparator.h"
 #include "util/timer.h"
 #include "util/utils.h"

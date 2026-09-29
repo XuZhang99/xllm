@@ -5,6 +5,8 @@ cc_test(
     batch_test
   SRCS
     batch_test.cpp
+    batch_factory_test.cpp
+    dit_batch_test.cpp
   DEPS
     :config
     :batch

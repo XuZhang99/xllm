@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "dit_scheduler.h"
+#include "core/scheduler/dit_scheduler.h"
 
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
@@ -26,13 +26,13 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "common/metrics.h"
-#include "distributed_runtime/dit_engine.h"
-#include "framework/config/service_config.h"
-#include "framework/request/dit_request.h"
-#include "util/blocking_counter.h"
-#include "util/tensor_helper.h"
-#include "util/utils.h"
+#include "core/common/metrics.h"
+#include "core/distributed_runtime/dit_engine.h"
+#include "core/framework/config/service_config.h"
+#include "core/framework/request/dit_request.h"
+#include "core/util/blocking_counter.h"
+#include "core/util/tensor_helper.h"
+#include "core/util/utils.h"
 
 namespace xllm {
 
@@ -263,19 +263,13 @@ std::vector<DiTBatch> DiTDynamicBatchScheduler::prepare_batch() {
     }
   }
 
-  DiTBatch batches;
-  for (size_t idx = 0; idx < running_requests_.size(); ++idx) {
-    auto request = running_requests_[idx];
-    batches.add(request);
-  }
-
   GAUGE_SET(num_pending_requests,
             pending_requests_.load(std::memory_order_relaxed));
   GAUGE_SET(num_running_requests, running_requests_.size());
   GAUGE_SET(num_waiting_requests,
             request_queue_.size() + deferred_requests_.size());
 
-  return {batches};
+  return batch_factory_.create_batches(running_requests_);
 }
 
 std::vector<DiTBatch> DiTDynamicBatchScheduler::schedule_request(

@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "onerec_batch_input_builder.h"
+#include "core/framework/batch/onerec_batch_input_builder.h"
 
 #include <glog/logging.h>
 
@@ -26,12 +26,12 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "core/framework/model/model_input_params.h"
 #include "core/framework/request/onerec_sequence.h"
-#include "framework/model/model_input_params.h"
-#include "framework/sampling/sampling_params.h"
-#include "util/tensor_helper.h"
-#include "util/threadpool.h"
-#include "util/utils.h"
+#include "core/framework/sampling/sampling_params.h"
+#include "core/util/tensor_helper.h"
+#include "core/util/threadpool.h"
+#include "core/util/utils.h"
 
 namespace xllm {
 namespace {
@@ -76,24 +76,17 @@ OneRecBatchInputBuilder::get_perf_cache() {
   return cache;
 }
 
-OneRecBatchInputBuilder::OneRecBatchInputBuilder(
-    const std::vector<SequencesGroup*>& sequence_groups,
-    const std::vector<uint32_t>& allowed_max_tokens,
-    const std::vector<torch::Tensor>& input_embeddings_vec,
-    const std::vector<MMData>& mm_data_vec,
-    std::vector<BlockTransferInfo>* swap_block_transfer_infos,
-    const uint64_t batch_id,
-    const ModelArgs* args,
-    BatchForwardType batch_forward_type,
-    MPMCThreadPool* thread_pool)
-    : sequence_groups_(sequence_groups),
-      allowed_max_tokens_(allowed_max_tokens),
-      input_embeddings_vec_(input_embeddings_vec),
-      mm_data_vec_(mm_data_vec),
-      swap_block_transfer_infos_(swap_block_transfer_infos),
-      batch_id_(batch_id),
+OneRecBatchInputBuilder::OneRecBatchInputBuilder(const BatchInputData& data,
+                                                 const ModelArgs* args,
+                                                 MPMCThreadPool* thread_pool)
+    : sequence_groups_(data.sequence_groups),
+      allowed_max_tokens_(data.allowed_max_tokens),
+      input_embeddings_vec_(data.input_embeddings),
+      mm_data_vec_(data.mm_data),
+      swap_block_transfer_infos_(data.swap_block_transfer_infos),
+      batch_id_(data.batch_id),
       args_(args),
-      batch_forward_type_(batch_forward_type),
+      batch_forward_type_(data.forward_type),
       thread_pool_(thread_pool) {
   // Get references to function-local statics (safe initialization)
   auto& perf_cache = get_perf_cache();

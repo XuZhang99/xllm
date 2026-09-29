@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors.
+/* Copyright 2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,29 +15,25 @@ limitations under the License.
 
 #pragma once
 
-#include <cstdint>
 #include <memory>
+#include <vector>
 
-#include "core/framework/batch/batch_input_data.h"
-#include "core/framework/model/model_args.h"
-#include "core/runtime/forward_params.h"
-#include "core/util/threadpool.h"
+#include "core/framework/request/dit_request.h"
+#include "core/runtime/dit_forward_params.h"
 
 namespace xllm {
 
-class RecBatchInputBuilder {
+class DiTBatchInputBuilder final {
  public:
-  virtual ~RecBatchInputBuilder() = default;
+  // The request container is owned by DiTBatch and outlives this builder.
+  explicit DiTBatchInputBuilder(
+      const std::vector<std::shared_ptr<DiTRequest>>& requests)
+      : requests_(requests) {}
 
-  virtual ForwardInput build_rec_forward_input(
-      uint32_t num_decoding_tokens,
-      uint32_t min_decoding_batch_size) = 0;
+  DiTForwardInput build_forward_input() const;
 
-  static std::unique_ptr<RecBatchInputBuilder> create(
-      BatchInputType input_type,
-      const BatchInputData& data,
-      const ModelArgs* args,
-      MPMCThreadPool* thread_pool = nullptr);
+ private:
+  const std::vector<std::shared_ptr<DiTRequest>>& requests_;
 };
 
 }  // namespace xllm

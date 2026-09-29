@@ -6,8 +6,13 @@ cc_library(
     batch
   HDRS
     dit_batch.h
+    dit_batch_factory.h
+    dit_batch_input_builder.h
+    batch_input_data.h
     batch.h
-    batch_factory.h
+    batch_assembler.h
+    sequence_batch_factory.h
+    rec_batch_factory.h
     batch_input_builder.h
     rec_batch_input_builder.h
     onerec_batch_input_builder.h
@@ -15,8 +20,12 @@ cc_library(
     rec_multi_round_batch_input_builder.h
   SRCS
     dit_batch.cpp
+    dit_batch_factory.cpp
+    dit_batch_input_builder.cpp
     batch.cpp
-    batch_factory.cpp
+    batch_assembler.cpp
+    sequence_batch_factory.cpp
+    rec_batch_factory.cpp
     batch_input_builder.cpp
     rec_batch_input_builder.cpp
     onerec_batch_input_builder.cpp

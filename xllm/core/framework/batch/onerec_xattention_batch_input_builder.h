@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include "onerec_batch_input_builder.h"
+#include "core/framework/batch/onerec_batch_input_builder.h"
 
 namespace xllm {
 
@@ -25,27 +25,12 @@ namespace xllm {
 // without polluting OneRecBatchInputBuilder.
 class OneRecXAttentionBatchInputBuilder final : public OneRecBatchInputBuilder {
  public:
-  explicit OneRecXAttentionBatchInputBuilder(
-      const std::vector<SequencesGroup*>& sequence_groups,
-      const std::vector<uint32_t>& allowed_max_tokens,
-      const std::vector<torch::Tensor>& input_embeddings_vec,
-      const std::vector<MMData>& mm_data_vec,
-      std::vector<BlockTransferInfo>* swap_block_transfer_infos,
-      const uint64_t batch_id,
-      const ModelArgs* args,
-      BatchForwardType batch_forward_type,
-      MPMCThreadPool* thread_pool = nullptr)
-      : OneRecBatchInputBuilder(sequence_groups,
-                                allowed_max_tokens,
-                                input_embeddings_vec,
-                                mm_data_vec,
-                                swap_block_transfer_infos,
-                                batch_id,
-                                args,
-                                batch_forward_type,
-                                thread_pool),
-        sequence_groups_(sequence_groups),
-        allowed_max_tokens_(allowed_max_tokens),
+  OneRecXAttentionBatchInputBuilder(const BatchInputData& data,
+                                    const ModelArgs* args,
+                                    MPMCThreadPool* thread_pool = nullptr)
+      : OneRecBatchInputBuilder(data, args, thread_pool),
+        sequence_groups_(data.sequence_groups),
+        allowed_max_tokens_(data.allowed_max_tokens),
         args_(args) {}
 
   ForwardInput build_rec_forward_input(

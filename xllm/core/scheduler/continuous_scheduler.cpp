@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "continuous_scheduler.h"
+#include "core/scheduler/continuous_scheduler.h"
 
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
@@ -27,19 +27,19 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
+#include "core/distributed_runtime/engine.h"
+#include "core/framework/batch/sequence_batch_factory.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
-#include "distributed_runtime/engine.h"
-#include "framework/batch/batch_factory.h"
-#include "framework/model/model_args.h"
-#include "framework/request/priority_comparator.h"
-#include "framework/request/request.h"
-#include "framework/request/sequence.h"
-#include "scheduler/request_priority_queue.h"
-#include "scheduler/scheduler_policy.h"
-#include "util/timer.h"
-#include "util/utils.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/request/priority_comparator.h"
+#include "core/framework/request/request.h"
+#include "core/framework/request/sequence.h"
+#include "core/scheduler/request_priority_queue.h"
+#include "core/scheduler/scheduler_policy.h"
+#include "core/util/timer.h"
+#include "core/util/utils.h"
 
 namespace xllm {
 
@@ -67,7 +67,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
     : options_(options),
       batch_mode_(create_batch_mode(options)),
       scheduler_config_(::xllm::SchedulerConfig::get_instance()),
-      batch_factory_(*BatchFactory::get_instance(options.dp_size())),
+      batch_factory_(options.dp_size()),
       engine_(engine),
       request_queue_(options.request_queue_size()) {
   CHECK(engine_ != nullptr);

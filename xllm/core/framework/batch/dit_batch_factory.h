@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors.
+/* Copyright 2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,29 +15,18 @@ limitations under the License.
 
 #pragma once
 
-#include <cstdint>
 #include <memory>
+#include <vector>
 
-#include "core/framework/batch/batch_input_data.h"
-#include "core/framework/model/model_args.h"
-#include "core/runtime/forward_params.h"
-#include "core/util/threadpool.h"
+#include "core/framework/batch/dit_batch.h"
 
 namespace xllm {
 
-class RecBatchInputBuilder {
+// DiT requests have no autoregressive sequence or KV-budget contract.
+class DiTBatchFactory final {
  public:
-  virtual ~RecBatchInputBuilder() = default;
-
-  virtual ForwardInput build_rec_forward_input(
-      uint32_t num_decoding_tokens,
-      uint32_t min_decoding_batch_size) = 0;
-
-  static std::unique_ptr<RecBatchInputBuilder> create(
-      BatchInputType input_type,
-      const BatchInputData& data,
-      const ModelArgs* args,
-      MPMCThreadPool* thread_pool = nullptr);
+  std::vector<DiTBatch> create_batches(
+      const std::vector<std::shared_ptr<DiTRequest>>& requests) const;
 };
 
 }  // namespace xllm

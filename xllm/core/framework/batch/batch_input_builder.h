@@ -26,18 +26,24 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "core/framework/batch/batch_input_data.h"
 #include "core/framework/multimodal/mm_data.h"
-#include "framework/request/sequence.h"
-#include "runtime/forward_params.h"
-#include "util/threadpool.h"
+#include "core/framework/request/sequence.h"
+#include "core/runtime/forward_params.h"
+#include "core/util/threadpool.h"
 
 namespace xllm {
 
 class BatchInputBuilderTestPeer;
 struct ModelArgs;
 
-class BatchInputBuilder {
+class BatchInputBuilder final {
  public:
+  BatchInputBuilder(const BatchInputData& data,
+                    const ModelArgs* args,
+                    int32_t cp_size = 1,
+                    ThreadPool* thread_pool = nullptr);
+
   explicit BatchInputBuilder(
       const std::vector<Sequence*>& sequences,
       const std::vector<uint32_t>& allowed_max_tokens,

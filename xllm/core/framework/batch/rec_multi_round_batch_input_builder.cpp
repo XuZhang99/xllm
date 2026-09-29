@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "rec_multi_round_batch_input_builder.h"
+#include "core/framework/batch/rec_multi_round_batch_input_builder.h"
 
 #include <c10/core/DeviceType.h>
 #include <torch/torch.h>
@@ -25,22 +25,22 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "common/global_flags.h"
-#include "common/metrics.h"
+#include "core/common/global_flags.h"
+#include "core/common/metrics.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/model/model_input_params.h"
+#include "core/framework/request/sequence.h"
+#include "core/framework/request/sequences_group.h"
+#include "core/framework/sampling/sampling_params.h"
+#include "core/runtime/params_utils.h"
+#include "core/util/blocking_counter.h"
 #include "core/util/rec_model_utils.h"
-#include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
-#include "framework/request/sequence.h"
-#include "framework/request/sequences_group.h"
-#include "framework/sampling/sampling_params.h"
-#include "runtime/params_utils.h"
-#include "util/blocking_counter.h"
-#include "util/slice.h"
-#include "util/tensor_helper.h"
-#include "util/threadpool.h"
-#include "util/utils.h"
+#include "core/util/slice.h"
+#include "core/util/tensor_helper.h"
+#include "core/util/threadpool.h"
+#include "core/util/utils.h"
 
 namespace xllm {
 namespace {
@@ -69,31 +69,20 @@ std::vector<int32_t> build_q_cu_seq_lens_vec(
 }  // namespace
 
 RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
-    const std::vector<SequencesGroup*>& sequence_groups,
-    const std::vector<uint32_t>& allowed_max_tokens,
-    const std::vector<torch::Tensor>& input_embeddings_vec,
-    const std::vector<MMData>& mm_data_vec,
-    std::vector<BlockTransferInfo>* swap_block_transfer_infos,
-    const uint64_t batch_id,
+    const BatchInputData& data,
     const ModelArgs* args,
-    BatchForwardType batch_forward_type,
     MPMCThreadPool* thread_pool)
-    : allowed_max_tokens_(allowed_max_tokens),
-      input_embeddings_vec_(input_embeddings_vec),
-      mm_data_vec_(mm_data_vec),
+    : sequences_(data.sequences),
+      allowed_max_tokens_(data.allowed_max_tokens),
+      input_embeddings_vec_(data.input_embeddings),
+      mm_data_vec_(data.mm_data),
       args_(args),
-      batch_forward_type_(batch_forward_type),
-      swap_block_transfer_infos_(swap_block_transfer_infos),
+      batch_forward_type_(data.forward_type),
+      swap_block_transfer_infos_(data.swap_block_transfer_infos),
       thread_pool_(thread_pool),
-      batch_id_(batch_id) {
-  // Extract sequences from sequence_groups
-  sequences_.clear();
-  for (auto* seq_group : sequence_groups) {
-    const auto& group_sequences = seq_group->sequences();
-    for (const auto& seq_ptr : group_sequences) {
-      sequences_.push_back(seq_ptr.get());
-    }
-  }
+      batch_id_(data.batch_id) {
+  // Groups own the sequences, but only the scheduled view has matching budgets.
+  CHECK_EQ(sequences_.size(), allowed_max_tokens_.size());
 
   num_sequences_ = static_cast<int32_t>(sequences_.size());
   CHECK_GT(num_sequences_, 0);

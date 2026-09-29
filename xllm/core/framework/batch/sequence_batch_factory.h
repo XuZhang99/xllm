@@ -15,42 +15,32 @@ limitations under the License.
 
 #pragma once
 
-#include "common/metrics.h"
-#include "framework/batch/batch.h"
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include "core/framework/batch/batch.h"
+#include "core/framework/batch/batch_assembler.h"
+#include "core/framework/request/request.h"
 
 namespace xllm {
 
-class BatchFactory {
+// LLM and VLM share sequence scheduling, KV state and token budgets. Their
+// multimodal differences belong to input building, not DP batch assembly.
+class SequenceBatchFactory final {
  public:
-  static BatchFactory* get_instance(int32_t dp_size, int32_t cp_size = 1) {
-    static BatchFactory instance(dp_size, cp_size);
-    return &instance;
-  }
+  explicit SequenceBatchFactory(int32_t dp_size);
 
   std::vector<Batch> create_batches(
       const std::vector<std::shared_ptr<Request>>& running_requests,
       const std::vector<Sequence*>& running_sequences,
       const std::vector<size_t>& running_sequences_budgets,
-      // for beam-search
       std::vector<std::vector<BlockTransferInfo>>* swap_block_transfer_infos =
-          nullptr);
-
-  std::vector<Batch> create_rec_batches(
-      const std::vector<std::shared_ptr<Request>>& running_requests,
-      const std::vector<Sequence*>& running_sequences,
-      const std::vector<size_t>& running_sequences_budgets,
-      std::vector<std::vector<BlockTransferInfo>>* swap_block_transfer_infos =
-          nullptr);
+          nullptr) const;
 
  private:
-  BatchFactory(int32_t dp_size, int32_t cp_size)
-      : dp_size_(dp_size), cp_size_(cp_size) {}
-  ~BatchFactory() = default;
-
-  DISALLOW_COPY_AND_ASSIGN(BatchFactory);
-
- private:
-  int32_t dp_size_;
-  int32_t cp_size_;
+  BatchAssembler assembler_;
 };
+
 }  // namespace xllm

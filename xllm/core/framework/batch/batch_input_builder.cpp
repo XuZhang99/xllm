@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "batch_input_builder.h"
+#include "core/framework/batch/batch_input_builder.h"
 
 #include <c10/core/DeviceType.h>
 #include <glog/logging.h>
@@ -28,26 +28,26 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "common/global_flags.h"
-#include "common/metrics.h"
+#include "core/common/global_flags.h"
+#include "core/common/metrics.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/service_config.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/model/model_input_params.h"
 #include "core/framework/multimodal/mm_visitor.h"
-#include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
-#include "framework/request/sequence.h"
-#include "framework/sampling/sampling_params.h"
+#include "core/framework/request/sequence.h"
+#include "core/framework/sampling/sampling_params.h"
 #if defined(USE_MUSA)
 #include "layers/common/attention_metadata.h"
 #endif
+#include "core/runtime/params_utils.h"
+#include "core/util/blocking_counter.h"
+#include "core/util/tensor_helper.h"
+#include "core/util/threadpool.h"
+#include "core/util/utils.h"
 #include "models/vlm/mposition/mposition.h"
-#include "runtime/params_utils.h"
-#include "util/blocking_counter.h"
-#include "util/tensor_helper.h"
-#include "util/threadpool.h"
-#include "util/utils.h"
 
 namespace xllm {
 namespace {
@@ -205,6 +205,21 @@ bool should_save_linear_checkpoint(Sequence* sequence,
 
 }  // namespace
 
+BatchInputBuilder::BatchInputBuilder(const BatchInputData& data,
+                                     const ModelArgs* args,
+                                     int32_t cp_size,
+                                     ThreadPool* thread_pool)
+    : BatchInputBuilder(data.sequences,
+                        data.allowed_max_tokens,
+                        data.input_embeddings,
+                        data.mm_data,
+                        data.swap_block_transfer_infos,
+                        data.batch_id,
+                        args,
+                        data.forward_type,
+                        cp_size,
+                        thread_pool) {}
+
 BatchInputBuilder::BatchInputBuilder(
     const std::vector<Sequence*>& sequences,
     const std::vector<uint32_t>& allowed_max_tokens,
@@ -227,7 +242,8 @@ BatchInputBuilder::BatchInputBuilder(
       num_sequences_(sequences.size()),
       swap_block_transfer_infos_(swap_block_transfer_infos),
       batch_id_(batch_id),
-      cp_size_(1) {
+      cp_size_(cp_size) {
+  CHECK_GT(cp_size_, 0);
   // Reserve space for better performance
   const size_t reserve_size = 1024;
   state_.flatten_tokens_vec.reserve(reserve_size);

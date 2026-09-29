@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "scheduler/profile/profile_manager.h"
+#include "core/scheduler/profile/profile_manager.h"
 
 #include <absl/time/time.h>
 #include <gflags/gflags.h>
@@ -28,21 +28,21 @@ limitations under the License.
 #include <random>
 #include <sstream>
 
-#include "common/global_flags.h"
+#include "core/common/global_flags.h"
+#include "core/framework/batch/sequence_batch_factory.h"
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/service_config.h"
 #include "core/framework/config/speculative_config.h"
+#include "core/framework/request/request_state.h"
 #include "core/framework/speculative/speculative_profile_registry.h"
-#include "framework/batch/batch_factory.h"
-#include "framework/request/request_state.h"
+#include "core/runtime/acl_graph_bucket_policy.h"
+#include "core/scheduler/profile/graph_warmup.h"
+#include "core/util/rec_model_utils.h"
+#include "core/util/utils.h"
 #include "platform/platform.h"
-#include "runtime/acl_graph_bucket_policy.h"
-#include "scheduler/profile/graph_warmup.h"
-#include "util/rec_model_utils.h"
-#include "util/utils.h"
 
 namespace xllm {
 namespace {
@@ -66,7 +66,7 @@ int32_t decode_warmup_token_bucket(const DecodeGraphWarmupPlan& plan,
 }  // namespace
 
 ProfileManager::ProfileManager(Engine* engine, const Options& options)
-    : options_(options), engine_(engine) {
+    : options_(options), engine_(engine), batch_factory_(options.dp_size()) {
   CHECK(engine_ != nullptr);
   int32_t max_decode_batch_size = options_.max_seqs_per_batch();
   const int32_t max_concurrent_requests =
@@ -1000,8 +1000,8 @@ double ProfileManager::run_request(int32_t token_length,
     sequences_budget.emplace_back(token_length - prefix_length);
   }
   // build batch
-  auto batches = BatchFactory::get_instance(options_.dp_size())
-                     ->create_batches(requests, sequences, sequences_budget);
+  auto batches =
+      batch_factory_.create_batches(requests, sequences, sequences_budget);
 
   absl::Time start_time = absl::Now();
   engine_->step(batches);
@@ -1042,9 +1042,8 @@ double ProfileManager::run_request(
     sequences_budget.emplace_back(token_length - prefix_length);
   }
   // build batch
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(requests, sequences, sequences_budget, nullptr);
+  auto batches = batch_factory_.create_batches(
+      requests, sequences, sequences_budget, nullptr);
 
   absl::Time start_time = absl::Now();
   engine_->step(batches);
@@ -1074,9 +1073,8 @@ double ProfileManager::run_decode_request(
     sequences_budget.emplace_back(1);
   }
 
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(requests, sequences, sequences_budget, nullptr);
+  auto batches = batch_factory_.create_batches(
+      requests, sequences, sequences_budget, nullptr);
 
   absl::Time start_time = absl::Now();
   engine_->step(batches);
@@ -1112,9 +1110,8 @@ double ProfileManager::run_graph_decode_request(
     sequences_budget.emplace_back(1);
   }
 
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(requests, sequences, sequences_budget, nullptr);
+  auto batches = batch_factory_.create_batches(
+      requests, sequences, sequences_budget, nullptr);
 
   absl::Time start_time = absl::Now();
   engine_->step(batches);

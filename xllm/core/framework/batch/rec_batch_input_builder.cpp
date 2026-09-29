@@ -13,77 +13,38 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "rec_batch_input_builder.h"
+#include "core/framework/batch/rec_batch_input_builder.h"
 
 #include <glog/logging.h>
 
 #include <cstdint>
 #include <memory>
 
-#include "core/util/rec_model_utils.h"
-#include "onerec_batch_input_builder.h"
-#include "onerec_xattention_batch_input_builder.h"
-#include "rec_multi_round_batch_input_builder.h"
+#include "core/framework/batch/onerec_batch_input_builder.h"
+#include "core/framework/batch/onerec_xattention_batch_input_builder.h"
+#include "core/framework/batch/rec_multi_round_batch_input_builder.h"
 
 namespace xllm {
 
 std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
-    RecType rec_type,
-    const std::vector<SequencesGroup*>& sequence_groups,
-    const std::vector<uint32_t>& allowed_max_tokens,
-    const std::vector<torch::Tensor>& input_embeddings_vec,
-    const std::vector<MMData>& mm_data_vec,
-    std::vector<BlockTransferInfo>* swap_block_transfer_infos,
-    uint64_t batch_id,
+    BatchInputType input_type,
+    const BatchInputData& data,
     const ModelArgs* args,
-    BatchForwardType batch_forward_type,
     MPMCThreadPool* thread_pool) {
-  switch (rec_type) {
-    case RecType::kOneRec:
-      if (is_onerec_xattention_mode()) {
-        return std::make_unique<OneRecXAttentionBatchInputBuilder>(
-            sequence_groups,
-            allowed_max_tokens,
-            input_embeddings_vec,
-            mm_data_vec,
-            swap_block_transfer_infos,
-            batch_id,
-            args,
-            batch_forward_type,
-            thread_pool);
-      }
-      return std::make_unique<OneRecBatchInputBuilder>(
-          sequence_groups,
-          allowed_max_tokens,
-          input_embeddings_vec,
-          mm_data_vec,
-          swap_block_transfer_infos,
-          batch_id,
-          args,
-          batch_forward_type,
-          thread_pool);
-    case RecType::kLlmRec:
-      // Check if Rec multi-round mode is enabled
-      if (is_rec_multi_round_mode()) {
-        return std::make_unique<RecMultiRoundBatchInputBuilder>(
-            sequence_groups,
-            allowed_max_tokens,
-            input_embeddings_vec,
-            mm_data_vec,
-            swap_block_transfer_infos,
-            batch_id,
-            args,
-            batch_forward_type,
-            thread_pool);
-      }
-      // Fall through for non-multi-round LlmRec (not yet implemented)
-      break;
-    case RecType::kNone:
+  switch (input_type) {
+    case BatchInputType::ONEREC:
+      return std::make_unique<OneRecBatchInputBuilder>(data, args, thread_pool);
+    case BatchInputType::ONEREC_XATTENTION:
+      return std::make_unique<OneRecXAttentionBatchInputBuilder>(
+          data, args, thread_pool);
+    case BatchInputType::REC_MULTI_ROUND:
+      return std::make_unique<RecMultiRoundBatchInputBuilder>(
+          data, args, thread_pool);
+    case BatchInputType::SEQUENCE:
       break;
   }
-
-  LOG(FATAL) << "Unsupported RecType for RecBatchInputBuilder: "
-             << static_cast<int32_t>(rec_type);
+  LOG(FATAL) << "Unsupported Rec batch input type: "
+             << static_cast<int32_t>(input_type);
   return nullptr;
 }
 

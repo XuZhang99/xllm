@@ -20,29 +20,22 @@ limitations under the License.
 #include <future>
 #include <vector>
 
+#include "core/framework/batch/rec_batch_input_builder.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/model/model_input_params.h"
 #include "core/framework/multimodal/mm_data.h"
-#include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
-#include "framework/request/sequence.h"
-#include "framework/request/sequences_group.h"
-#include "rec_batch_input_builder.h"
-#include "runtime/forward_params.h"
-#include "util/threadpool.h"
+#include "core/framework/request/sequence.h"
+#include "core/framework/request/sequences_group.h"
+#include "core/runtime/forward_params.h"
+#include "core/util/threadpool.h"
 
 namespace xllm {
 
 class OneRecBatchInputBuilder : public RecBatchInputBuilder {
  public:
-  explicit OneRecBatchInputBuilder(
-      const std::vector<SequencesGroup*>& sequence_groups,
-      const std::vector<uint32_t>& allowed_max_tokens,
-      const std::vector<torch::Tensor>& input_embeddings_vec,
-      const std::vector<MMData>& mm_data_vec,
-      std::vector<BlockTransferInfo>* swap_block_transfer_infos,
-      const uint64_t batch_id,
-      const ModelArgs* args,
-      BatchForwardType batch_forward_type,
-      MPMCThreadPool* thread_pool = nullptr);
+  explicit OneRecBatchInputBuilder(const BatchInputData& data,
+                                   const ModelArgs* args,
+                                   MPMCThreadPool* thread_pool = nullptr);
 
  public:
   ForwardInput build_rec_forward_input(

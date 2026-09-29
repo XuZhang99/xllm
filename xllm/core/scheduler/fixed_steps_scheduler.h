@@ -24,17 +24,17 @@ limitations under the License.
 #include <queue>
 #include <semaphore>
 
-#include "async_response_processor.h"
-#include "common/macros.h"
-#include "common/types.h"
-#include "framework/batch/batch.h"
-#include "framework/batch/batch_factory.h"
-#include "framework/request/request.h"
-#include "framework/request/sequence.h"
-#include "runtime/xservice_client.h"
-#include "scheduler.h"
-#include "scheduler/continuous_scheduler.h"
-#include "util/threadpool.h"
+#include "core/common/macros.h"
+#include "core/common/types.h"
+#include "core/framework/batch/batch.h"
+#include "core/framework/batch/rec_batch_factory.h"
+#include "core/framework/request/request.h"
+#include "core/framework/request/sequence.h"
+#include "core/runtime/xservice_client.h"
+#include "core/scheduler/async_response_processor.h"
+#include "core/scheduler/continuous_scheduler.h"
+#include "core/scheduler/scheduler.h"
+#include "core/util/threadpool.h"
 
 namespace xllm {
 class Engine;
@@ -63,8 +63,7 @@ class FixedStepsScheduler : public ContinuousScheduler {
   class SchedulerPipeline {
    public:
     virtual ~SchedulerPipeline() = default;
-    virtual std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
-                                              BatchFactory* batch_factory) = 0;
+    virtual BatchInputType input_type() const = 0;
     virtual bool requires_kv_cache() const = 0;
     // Allocate KV cache for sequence, implemented by each pipeline
     virtual bool allocate_kv_cache(KVCacheManager* kv_cache_manager,
@@ -73,8 +72,9 @@ class FixedStepsScheduler : public ContinuousScheduler {
 
   class LlmRecSchedulerPipeline final : public SchedulerPipeline {
    public:
-    std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
-                                      BatchFactory* batch_factory) override;
+    BatchInputType input_type() const override {
+      return BatchInputType::SEQUENCE;
+    }
     bool requires_kv_cache() const override { return true; }
     bool allocate_kv_cache(KVCacheManager* kv_cache_manager,
                            Sequence* sequence) override;
@@ -82,8 +82,9 @@ class FixedStepsScheduler : public ContinuousScheduler {
 
   class OneRecSchedulerPipeline final : public SchedulerPipeline {
    public:
-    std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
-                                      BatchFactory* batch_factory) override;
+    BatchInputType input_type() const override {
+      return BatchInputType::ONEREC;
+    }
     bool requires_kv_cache() const override { return false; }
     bool allocate_kv_cache(KVCacheManager* /*kv_cache_manager*/,
                            Sequence* /*sequence*/) override {
@@ -93,8 +94,9 @@ class FixedStepsScheduler : public ContinuousScheduler {
 
   class OneRecXAttentionSchedulerPipeline final : public SchedulerPipeline {
    public:
-    std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
-                                      BatchFactory* batch_factory) override;
+    BatchInputType input_type() const override {
+      return BatchInputType::ONEREC_XATTENTION;
+    }
     bool requires_kv_cache() const override { return true; }
     bool allocate_kv_cache(KVCacheManager* kv_cache_manager,
                            Sequence* sequence) override;
@@ -102,8 +104,9 @@ class FixedStepsScheduler : public ContinuousScheduler {
 
   class RecMultiRoundSchedulerPipeline final : public SchedulerPipeline {
    public:
-    std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
-                                      BatchFactory* batch_factory) override;
+    BatchInputType input_type() const override {
+      return BatchInputType::REC_MULTI_ROUND;
+    }
     bool requires_kv_cache() const override { return false; }
     bool allocate_kv_cache(KVCacheManager* /*kv_cache_manager*/,
                            Sequence* /*sequence*/) override {
@@ -125,6 +128,7 @@ class FixedStepsScheduler : public ContinuousScheduler {
 
   // Lazy-initialized pipeline
   std::unique_ptr<SchedulerPipeline> scheduler_pipeline_;
+  std::unique_ptr<RecBatchFactory> rec_batch_factory_;
 
   // Holds a request consumed by the blocking wait in schedule_request() while
   // the queue was empty. prepare_batch() drains it first, through the same path

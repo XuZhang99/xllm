@@ -20,15 +20,16 @@ limitations under the License.
 #include <tuple>
 #include <vector>
 
-#include "common/macros.h"
-#include "common/types.h"
-#include "distributed_runtime/engine.h"
-#include "framework/block/block_manager_pool.h"
-#include "framework/request/request.h"
-#include "framework/request/sequence.h"
-#include "runtime/xservice_client.h"
-#include "scheduler/profile/decode_graph_warmup_plan.h"
-#include "time_predictor.h"
+#include "core/common/macros.h"
+#include "core/common/types.h"
+#include "core/distributed_runtime/engine.h"
+#include "core/framework/batch/sequence_batch_factory.h"
+#include "core/framework/block/block_manager_pool.h"
+#include "core/framework/request/request.h"
+#include "core/framework/request/sequence.h"
+#include "core/runtime/xservice_client.h"
+#include "core/scheduler/profile/decode_graph_warmup_plan.h"
+#include "core/scheduler/profile/time_predictor.h"
 
 namespace xllm {
 class Engine;
@@ -212,6 +213,7 @@ class ProfileManager {
   const Options options_;
 
   Engine* engine_;
+  SequenceBatchFactory batch_factory_;
 
   DecodeGraphWarmupPlan decode_graph_warmup_plan_;
 

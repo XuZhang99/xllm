@@ -37,7 +37,6 @@ limitations under the License.
 #include "disagg_pd.pb.h"
 #include "disagg_pd_scheduler.h"
 #include "distributed_runtime/engine.h"
-#include "framework/batch/batch_factory.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/kv_cache_transfer/pd_topology_guard.h"
 #include "framework/request/request.h"

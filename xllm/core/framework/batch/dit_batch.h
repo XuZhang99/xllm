@@ -16,22 +16,20 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/types.h>
-
-#include <limits>
+#include <cstddef>
+#include <memory>
 #include <vector>
 
-#include "framework/request/dit_request.h"
-#include "runtime/dit_forward_params.h"
+#include "core/framework/request/dit_request.h"
+#include "core/runtime/dit_forward_params.h"
 
 namespace xllm {
 
-struct DiTBatch {
+class DiTBatch final {
  public:
   DiTBatch() = default;
-  void add(const std::shared_ptr<DiTRequest>& request) {
-    request_vec_.emplace_back(request);
-  }
+  void add(std::shared_ptr<DiTRequest> request);
+  void reserve(size_t request_count) { request_vec_.reserve(request_count); }
   size_t size() const { return request_vec_.size(); }
   bool empty() const { return request_vec_.empty(); }
 

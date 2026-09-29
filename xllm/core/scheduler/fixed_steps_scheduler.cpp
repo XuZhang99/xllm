@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "fixed_steps_scheduler.h"
+#include "core/scheduler/fixed_steps_scheduler.h"
 
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
@@ -28,18 +28,18 @@ limitations under the License.
 #include <limits>
 #include <memory>
 
-#include "common/metrics.h"
-#include "common/types.h"
 #include "core/common/global_flags.h"
+#include "core/common/metrics.h"
+#include "core/common/types.h"
+#include "core/distributed_runtime/engine.h"
+#include "core/framework/batch/batch.h"
+#include "core/framework/batch/rec_batch_factory.h"
 #include "core/framework/config/rec_config.h"
 #include "core/framework/config/scheduler_config.h"
-#include "distributed_runtime/engine.h"
-#include "framework/batch/batch.h"
-#include "framework/batch/batch_factory.h"
-#include "framework/request/rec_type.h"
-#include "framework/request/request.h"
-#include "framework/request/sequence.h"
-#include "util/rec_model_utils.h"
+#include "core/framework/request/rec_type.h"
+#include "core/framework/request/request.h"
+#include "core/framework/request/sequence.h"
+#include "core/util/rec_model_utils.h"
 
 namespace xllm {
 
@@ -211,6 +211,32 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     propagate_request(request);
   }
 
+  // Select the request type before touching running requests. Disaggregated
+  // PD requests skip the prefill queue and may be the first request seen by
+  // this scheduler.
+  if (!scheduler_pipeline_) {
+    std::shared_ptr<Request> sample_request;
+    if (!prefill_queue_->empty()) {
+      sample_request = prefill_queue_->top();
+    } else {
+      for (const auto& candidate : running_requests_) {
+        if (candidate != nullptr) {
+          sample_request = candidate;
+          break;
+        }
+      }
+    }
+    if (sample_request != nullptr) {
+      const auto rec_type = sample_request->state().rec_type;
+      const bool is_rec_multi_round =
+          (rec_type == RecType::kLlmRec) && is_rec_multi_round_mode();
+      scheduler_pipeline_ =
+          create_scheduler_pipeline(rec_type, is_rec_multi_round);
+      rec_batch_factory_ = std::make_unique<RecBatchFactory>(
+          options_.dp_size(), scheduler_pipeline_->input_type());
+    }
+  }
+
   // handle finished/cancelled requests
   std::vector<std::shared_ptr<Request>> finished_requests;
   for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
@@ -235,20 +261,6 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
   running_sequences_.clear();
   running_sequences_budgets_.clear();
 
-  // Lazy initialize pipeline before handle_prefill_requests
-  // Because handle_prefill_requests accesses
-  // scheduler_pipeline_->requires_kv_cache(), we need to initialize it earlier.
-  // Initialize from prefill_queue_ since running_requests_ was just
-  // cleared.
-  if (!scheduler_pipeline_ && !prefill_queue_->empty()) {
-    const std::shared_ptr<Request>& sample_request = prefill_queue_->top();
-    auto rec_type = sample_request->state().rec_type;
-    bool is_rec_multi_round =
-        (rec_type == RecType::kLlmRec) && is_rec_multi_round_mode();
-    scheduler_pipeline_ =
-        create_scheduler_pipeline(rec_type, is_rec_multi_round);
-  }
-
   // remaining budget for the current batch
   size_t remaining_token_budget = options_.max_tokens_per_batch();
   size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
@@ -265,23 +277,24 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  auto* batch_factory = BatchFactory::get_instance(options_.dp_size());
-
-  // Use pipeline to create batches
   std::vector<Batch> batches;
-  if (scheduler_pipeline_) {
-    batches = scheduler_pipeline_->create_batches(*this, batch_factory);
-  } else {
-    // Fallback for empty requests
-    batches = batch_factory->create_rec_batches(
+  if (rec_batch_factory_) {
+    batches = rec_batch_factory_->create_batches(
         running_requests_,
         running_sequences_,
         running_sequences_budgets_,
         kv_cache_manager_->get_swap_block_transfer_infos());
+  } else {
+    // No pipeline has been selected before the first request arrives.
+    CHECK(running_requests_.empty());
+    CHECK(running_sequences_.empty());
+    batches.resize(options_.dp_size());
   }
 
   // update metrics before returning
-  if (!batches[0].empty()) {
+  if (std::any_of(batches.begin(), batches.end(), [](const Batch& batch) {
+        return !batch.empty();
+      })) {
     // only update the scheduling latency when there are requests to process
     COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
     kv_cache_manager_->transfer_blocks(batches);
@@ -404,16 +417,6 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
 }
 
 // Pipeline implementations
-std::vector<Batch> FixedStepsScheduler::LlmRecSchedulerPipeline::create_batches(
-    FixedStepsScheduler& scheduler,
-    BatchFactory* batch_factory) {
-  return batch_factory->create_batches(
-      scheduler.running_requests_,
-      scheduler.running_sequences_,
-      scheduler.running_sequences_budgets_,
-      scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
-}
-
 bool FixedStepsScheduler::LlmRecSchedulerPipeline::allocate_kv_cache(
     KVCacheManager* kv_cache_manager,
     Sequence* sequence) {
@@ -427,27 +430,6 @@ bool FixedStepsScheduler::LlmRecSchedulerPipeline::allocate_kv_cache(
   }
   return kv_cache_manager->allocate(sequence,
                                     num_tokens + max_generated_tokens);
-}
-
-std::vector<Batch> FixedStepsScheduler::OneRecSchedulerPipeline::create_batches(
-    FixedStepsScheduler& scheduler,
-    BatchFactory* batch_factory) {
-  return batch_factory->create_rec_batches(
-      scheduler.running_requests_,
-      scheduler.running_sequences_,
-      scheduler.running_sequences_budgets_,
-      scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
-}
-
-std::vector<Batch>
-FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::create_batches(
-    FixedStepsScheduler& scheduler,
-    BatchFactory* batch_factory) {
-  return batch_factory->create_rec_batches(
-      scheduler.running_requests_,
-      scheduler.running_sequences_,
-      scheduler.running_sequences_budgets_,
-      scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
 }
 
 bool FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::allocate_kv_cache(
@@ -470,17 +452,6 @@ bool FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::allocate_kv_cache(
   }
   return kv_cache_manager->allocate(sequence,
                                     num_tokens + max_generated_tokens);
-}
-
-std::vector<Batch>
-FixedStepsScheduler::RecMultiRoundSchedulerPipeline::create_batches(
-    FixedStepsScheduler& scheduler,
-    BatchFactory* batch_factory) {
-  return batch_factory->create_batches(
-      scheduler.running_requests_,
-      scheduler.running_sequences_,
-      scheduler.running_sequences_budgets_,
-      scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
 }
 
 std::unique_ptr<FixedStepsScheduler::SchedulerPipeline>
