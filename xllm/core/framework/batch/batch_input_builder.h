@@ -27,6 +27,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/batch_input_data.h"
+#include "core/framework/batch/sampling_input_builder.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "core/framework/request/sequence.h"
 #include "core/runtime/forward_params.h"
@@ -89,18 +90,12 @@ class BatchInputBuilder final {
     std::vector<int32_t> flatten_positions_vec;
     std::vector<torch::Tensor> mrope_positions_vec;
 
-    // Sampling data
-    std::vector<const RequestSamplingParam*> sampling_params;
+    SamplingInputBuilder sampling;
+
+    // Sequence-specific grammar state aligned with sampling rows.
     std::vector<JsonObjectGrammarState> json_object_states;
     std::vector<std::string> sample_sequence_ids;
     std::vector<int32_t> sample_prior_output_rows;
-    std::vector<int32_t> selected_token_idxes;
-    std::vector<int32_t> sample_idxes;
-
-    // Unique token tracking
-    std::vector<std::vector<int64_t>> unique_token_ids_vec;
-    std::vector<std::vector<int32_t>> unique_token_counts_vec;
-    std::vector<int32_t> unique_token_lens_vec;
 
     // Sequence metadata
     BatchForwardType batch_forward_type;

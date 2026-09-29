@@ -18,7 +18,7 @@ limitations under the License.
 namespace xllm {
 
 SequenceBatchFactory::SequenceBatchFactory(int32_t dp_size)
-    : assembler_(dp_size, /*input_type=*/BatchInputType::SEQUENCE) {}
+    : assembler_(dp_size) {}
 
 std::vector<Batch> SequenceBatchFactory::create_batches(
     const std::vector<std::shared_ptr<Request>>& running_requests,

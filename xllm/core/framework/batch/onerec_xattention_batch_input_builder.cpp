@@ -18,7 +18,7 @@ limitations under the License.
 #include <algorithm>
 #include <vector>
 
-#include "core/common/global_flags.h"
+#include "core/framework/batch/sampling_input_builder.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/request/onerec_sequence.h"
 #include "core/util/rec_model_utils.h"
@@ -57,12 +57,7 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
 
   std::vector<std::vector<int32_t>> block_tables_vec;
   std::vector<int32_t> new_cache_slots_vec;
-  std::vector<const RequestSamplingParam*> decode_sampling_params;
-  std::vector<int32_t> decode_selected_token_idxes;
-  std::vector<int32_t> decode_sample_idxes;
-  std::vector<std::vector<int64_t>> decode_unique_token_ids_vec;
-  std::vector<std::vector<int32_t>> decode_unique_token_counts_vec;
-  std::vector<int32_t> decode_unique_token_lens_vec;
+  SamplingInputBuilder decode_sampling;
   std::vector<int32_t> decode_positions_vec;
   int32_t decode_hidden_row_offset = 0;
 
@@ -104,33 +99,18 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
       beam_width = std::max<int32_t>(beam_width, sampling_param->beam_width);
       decode_positions_vec.emplace_back(
           get_onerec_xattention_decode_position(*sequence_ptr));
-      const int32_t sel_start =
-          static_cast<int32_t>(decode_selected_token_idxes.size());
       const int32_t decode_hidden_seq_len = std::max(total_seq_len, 1);
       for (int32_t beam_idx = 0; beam_idx < beam_width; ++beam_idx) {
-        const int32_t idx = sel_start + beam_idx;
         const int32_t selected_row = decode_hidden_row_offset +
                                      beam_idx * decode_hidden_seq_len +
                                      (decode_hidden_seq_len - 1);
-        decode_sampling_params.emplace_back(sampling_param);
-        decode_selected_token_idxes.emplace_back(selected_row);
-        decode_sample_idxes.emplace_back(idx);
-        decode_unique_token_ids_vec.emplace_back();
-        decode_unique_token_counts_vec.emplace_back();
-        decode_unique_token_lens_vec.emplace_back(0);
+        decode_sampling.append(sampling_param, selected_row);
       }
       decode_hidden_row_offset += beam_width * decode_hidden_seq_len;
     }
   }
 
-  if (!decode_selected_token_idxes.empty()) {
-    input.decoder_sampling_params.init(decode_sampling_params,
-                                       decode_selected_token_idxes,
-                                       decode_sample_idxes,
-                                       decode_unique_token_ids_vec,
-                                       decode_unique_token_counts_vec,
-                                       decode_unique_token_lens_vec);
-  }
+  input.decoder_sampling_params = decode_sampling.build();
 
   StepDecodeMeta step_meta;
   step_meta.batch_size = batch_size;

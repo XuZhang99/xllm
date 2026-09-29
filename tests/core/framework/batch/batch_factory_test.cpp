@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/rec_batch_factory.h"
+#include "core/framework/batch/sampling_input_builder.h"
 #include "core/framework/batch/sequence_batch_factory.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/rec_config.h"
@@ -50,9 +51,11 @@ class ScopedConfigValue final {
   T old_value_;
 };
 
-std::shared_ptr<Request> make_request(int32_t rank,
-                                      RecType rec_type = RecType::kNone,
-                                      int32_t beam_width = 1) {
+std::shared_ptr<Request> make_request(
+    int32_t rank,
+    RecType rec_type = RecType::kNone,
+    int32_t beam_width = 1,
+    std::vector<int32_t> prompt_tokens = {1, 2, 3}) {
   RequestSamplingParam sampling;
   sampling.beam_width = beam_width;
   StoppingChecker stopping;
@@ -60,7 +63,7 @@ std::shared_ptr<Request> make_request(int32_t rank,
   stopping.set_max_context_len(/*max_context_len=*/64);
   stopping.set_ignore_eos(true);
   RequestState state("prompt",
-                     {1, 2, 3},
+                     std::move(prompt_tokens),
                      sampling,
                      SchedulerParam{},
                      stopping,
@@ -78,6 +81,57 @@ std::shared_ptr<Request> make_request(int32_t rank,
   auto request = std::make_shared<Request>("request", "", "", std::move(state));
   request->sequences().front()->set_dp_rank(rank);
   return request;
+}
+
+TEST(SamplingInputBuilderTest,
+     MergeOffsetsSelectedRowsAndSampleRowsSeparately) {
+  RequestSamplingParam params;
+  SamplingInputBuilder first;
+  first.append(&params, 1, nullptr, nullptr, /*sample=*/false);
+  first.append(&params, 3);
+  SamplingInputBuilder second;
+  second.append(&params, 0);
+  first.merge(std::move(second), /*token_offset=*/4);
+  EXPECT_EQ(first.selected_token_indices(), (std::vector<int32_t>{1, 3, 4}));
+  EXPECT_EQ(first.sample_indices(), (std::vector<int32_t>{1, 2}));
+  const auto sampling = first.build();
+  EXPECT_TRUE(torch::equal(sampling.selected_token_idxes,
+                           torch::tensor({1, 3, 4}, torch::kInt)));
+}
+
+TEST(SamplingInputBuilderTest, PadsAndMergesAdjustedTokenCounts) {
+  RequestSamplingParam params;
+  params.frequency_penalty = 1.0;
+  SamplingInputBuilder first;
+  const SamplingInputBuilder::TokenCounts counts{{42, 3}};
+  const SamplingInputBuilder::TokenCounts excluded{{42, 1}};
+  first.append(&params, 0, &counts, &excluded);
+  SamplingInputBuilder second;
+  const SamplingInputBuilder::TokenCounts fully_excluded{{42, 3}};
+  second.append(&params, 0, &counts, &fully_excluded);
+  first.merge(std::move(second), /*token_offset=*/1);
+  const auto sampling = first.build();
+  EXPECT_TRUE(torch::equal(sampling.unique_token_ids,
+                           torch::tensor({{42}, {0}}, torch::kInt64)));
+  EXPECT_TRUE(torch::equal(sampling.unique_token_counts,
+                           torch::tensor({{2}, {0}}, torch::kInt)));
+  EXPECT_TRUE(torch::equal(sampling.unique_token_ids_lens,
+                           torch::tensor({1, 0}, torch::kInt)));
+}
+
+TEST(BatchFactoryTest, FactoriesKeepDomainsSeparateForTheSameInputContract) {
+  SequenceBatchFactory sequence_factory(/*dp_size=*/1);
+  RecBatchFactory rec_factory(/*dp_size=*/1, BatchInputType::SEQUENCE);
+  auto sequence_batches = sequence_factory.create_batches({}, {}, {});
+  auto rec_batches = rec_factory.create_batches({}, {}, {});
+  EXPECT_FALSE(sequence_batches[0].is_rec());
+  EXPECT_TRUE(rec_batches[0].is_rec());
+  EXPECT_EQ(sequence_batches[0].input_type(), BatchInputType::SEQUENCE);
+  EXPECT_EQ(rec_batches[0].input_type(), BatchInputType::SEQUENCE);
+  ModelArgs args;
+  const auto input =
+      rec_batches[0].prepare_forward_input(args, /*thread_pool=*/nullptr);
+  EXPECT_FALSE(input.token_ids.defined());
 }
 
 TEST(BatchFactoryTest, IndependentFactoriesKeepTheirOwnDpSize) {
@@ -160,6 +214,7 @@ TEST(BatchFactoryTest, FactoriesKeepIndependentInputContractsAcrossCalls) {
         {onerec}, {onerec->sequences()[0].get()}, {0});
     ASSERT_EQ(onerec_batches.size(), 2);
     EXPECT_TRUE(onerec_batches[0].empty());
+    EXPECT_TRUE(onerec_batches[0].is_rec());
     EXPECT_EQ(onerec_batches[1].input_type(), BatchInputType::ONEREC);
     EXPECT_EQ(onerec_batches[1].sequence_groups(),
               (std::vector<SequencesGroup*>{onerec->sequence_group()}));
@@ -288,15 +343,56 @@ TEST(BatchFactoryTest, OneRecInputTypeSurvivesSequenceRefresh) {
     EXPECT_TRUE(batches[0].empty());
     EXPECT_EQ(batches[0].input_type(), type);
     EXPECT_FALSE(batches[1].empty());
-    EXPECT_EQ(batches[1].size(), 0);
+    EXPECT_EQ(batches[1].size(), 1);
+    EXPECT_EQ(batches[1].num_scheduled_sequences(), 0);
+    EXPECT_EQ(batches[1].num_groups(), 1);
     EXPECT_EQ(batches[1].get_sequences(), (std::vector<Sequence*>{sequence}));
     const uint64_t batch_id = batches[1].batch_id();
     batches[1].refresh_sequences_from_groups();
     EXPECT_EQ(batches[1].size(), 1);
+    EXPECT_TRUE(batches[1].get_allowed_max_tokens().empty());
     EXPECT_EQ(batches[1].input_type(), type);
     batches[1].set_batch_id();
     EXPECT_EQ(batches[1].batch_id(), batch_id);
   }
+}
+
+TEST(BatchFactoryTest, OneRecAccessorsFollowGroupReplacementWithoutRefresh) {
+  RecBatchFactory factory(/*dp_size=*/1, BatchInputType::ONEREC);
+  auto request = make_request(0, RecType::kOneRec);
+  auto batches =
+      factory.create_batches({request}, {request->sequences()[0].get()}, {1});
+  auto replacement = request->sequences()[0]->fork(/*index=*/1);
+  auto* replacement_ptr = replacement.get();
+  request->sequences()[0] = std::move(replacement);
+  EXPECT_EQ(batches[0][0], replacement_ptr);
+  EXPECT_EQ(batches[0].get_sequences(),
+            (std::vector<Sequence*>{replacement_ptr}));
+  EXPECT_EQ(batches[0].num_scheduled_sequences(), 0);
+  EXPECT_TRUE(batches[0].get_allowed_max_tokens().empty());
+}
+
+TEST(BatchSequencePlanTest, ReorderingMovesSequencesTogetherWithBudgets) {
+  auto first = make_request(0);
+  auto second = make_request(0);
+  BatchSequencePlan plan;
+  plan.add(first->sequences()[0].get(), 2);
+  plan.add(second->sequences()[0].get(), 5);
+  plan.reorder({1, 0});
+  EXPECT_EQ(plan[0].sequence, second->sequences()[0].get());
+  EXPECT_EQ(plan[0].token_budget, 5);
+  EXPECT_EQ(plan[1].sequence, first->sequences()[0].get());
+  EXPECT_EQ(plan[1].token_budget, 2);
+}
+
+TEST(BatchSequencePlanDeathTest, RejectsInvalidPermutation) {
+  auto request = make_request(0);
+  BatchSequencePlan plan;
+  plan.add(request->sequences()[0].get(), 1);
+  plan.add(request->sequences()[0].get(), 2);
+  EXPECT_DEATH(plan.reorder({0, 0}), "must be a permutation");
+  EXPECT_DEATH(plan.reorder({0, 2}), "index < size");
+  EXPECT_DEATH(plan.reorder({0}), "source_indices.size");
 }
 
 TEST(BatchFactoryTest, EmptyRecRanksPrepareEmptyInputs) {
@@ -330,6 +426,22 @@ TEST(BatchFactoryTest, TransfersAreConsumedOnlyForActiveRanks) {
   EXPECT_FALSE(batches[1].empty());
 }
 
+TEST(BatchOutputProcessorDeathTest, RejectsBeamSourceOutsideBatch) {
+  SequenceBatchFactory factory(/*dp_size=*/1);
+  auto request = make_request(/*rank=*/0, RecType::kNone, /*beam_width=*/2);
+  auto batches =
+      factory.create_batches({request}, {request->sequences()[0].get()}, {1});
+  RawForwardOutput output;
+  output.src_seq_idxes = {1};
+  output.out_tokens = {4};
+  output.out_logprobs = {0.0F};
+  EXPECT_DEATH(batches[0].process_beam_search_output(output, false),
+               "data.sequences.size");
+  output.src_seq_idxes = {-1};
+  EXPECT_DEATH(batches[0].process_beam_search_output(output, false),
+               "src_seq_idx >= 0");
+}
+
 TEST(BatchFactoryDeathTest, RejectsInvalidDpSize) {
   EXPECT_DEATH(SequenceBatchFactory(/*dp_size=*/0), "dp_size_");
   EXPECT_DEATH((RecBatchFactory(/*dp_size=*/-1, BatchInputType::ONEREC)),
@@ -350,9 +462,9 @@ TEST(BatchFactoryDeathTest, RejectsGroupOnlySequenceInput) {
   EXPECT_DEATH(batch.prepare_forward_input(/*num_decoding_tokens=*/1,
                                            /*min_decoding_batch_size=*/0,
                                            args),
-               "requires an explicit OneRec batch input type");
+               "Sequence input requires scheduled sequences");
   EXPECT_DEATH(batch.prepare_forward_input(args, /*thread_pool=*/nullptr),
-               "requires an explicit OneRec batch input type");
+               "Sequence input requires scheduled sequences");
 }
 
 TEST(BatchFactoryDeathTest, RejectsOneRecInputWithoutRequestGroups) {
@@ -371,7 +483,7 @@ TEST(BatchFactoryDeathTest, RejectsMismatchedBudgetsAndInvalidRanks) {
   auto request = make_request(/*rank=*/0);
   auto* sequence = request->sequences()[0].get();
   EXPECT_DEATH(factory.create_batches({request}, {sequence}, {}),
-               "budgets.size");
+               "Each scheduled sequence requires one token budget");
   EXPECT_DEATH(factory.create_batches({request}, {sequence}, {0}), "budgets");
   const size_t overflow_budget =
       static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;

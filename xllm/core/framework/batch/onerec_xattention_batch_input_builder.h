@@ -19,10 +19,7 @@ limitations under the License.
 
 namespace xllm {
 
-// Isolated builder type for the future OneRec xattention pipeline.
-// It currently reuses the legacy OneRec builder behavior, but keeps a separate
-// type boundary so new step-meta / multi-round input organization can be added
-// without polluting OneRecBatchInputBuilder.
+// Adds xattention decode metadata to the common OneRec encoder/decoder input.
 class OneRecXAttentionBatchInputBuilder final : public OneRecBatchInputBuilder {
  public:
   OneRecXAttentionBatchInputBuilder(const BatchInputData& data,
@@ -30,7 +27,6 @@ class OneRecXAttentionBatchInputBuilder final : public OneRecBatchInputBuilder {
                                     MPMCThreadPool* thread_pool = nullptr)
       : OneRecBatchInputBuilder(data, args, thread_pool),
         sequence_groups_(data.sequence_groups),
-        allowed_max_tokens_(data.allowed_max_tokens),
         args_(args) {}
 
   ForwardInput build_rec_forward_input(
@@ -39,7 +35,6 @@ class OneRecXAttentionBatchInputBuilder final : public OneRecBatchInputBuilder {
 
  private:
   const std::vector<SequencesGroup*>& sequence_groups_;
-  const std::vector<uint32_t>& allowed_max_tokens_;
   const ModelArgs* args_ = nullptr;
 };
 

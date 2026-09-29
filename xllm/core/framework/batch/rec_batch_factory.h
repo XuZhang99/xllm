@@ -21,7 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/batch.h"
-#include "core/framework/batch/batch_assembler.h"
+#include "core/framework/batch/rec_batch_assembler.h"
 #include "core/framework/request/request.h"
 
 namespace xllm {
@@ -41,7 +41,7 @@ class RecBatchFactory final {
           nullptr) const;
 
  private:
-  BatchAssembler assembler_;
+  RecBatchAssembler assembler_;
 };
 
 }  // namespace xllm

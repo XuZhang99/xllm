@@ -36,7 +36,8 @@ enum class BatchInputType : int8_t {
   REC_MULTI_ROUND,
 };
 
-// Non-owning input view. The Batch and its requests must outlive the builder.
+// Non-owning per-forward view. Its sequence plan, Batch and requests must
+// outlive the builder. Builders may advance sequence execution state.
 struct BatchInputData {
   const std::vector<Sequence*>& sequences;
   const std::vector<SequencesGroup*>& sequence_groups;

@@ -66,9 +66,6 @@ std::vector<int32_t> build_q_cu_seq_lens_vec(
 
 }  // namespace
 
-// Use Meyers' Singleton pattern to avoid static initialization order fiasco
-// This ensures the cache is initialized on first use, after all dependencies
-// (like PyTorch runtime) are properly initialized.
 OneRecBatchInputBuilder::HighPerformanceCache&
 OneRecBatchInputBuilder::get_perf_cache() {
   static HighPerformanceCache cache;
@@ -88,7 +85,6 @@ OneRecBatchInputBuilder::OneRecBatchInputBuilder(const BatchInputData& data,
       args_(args),
       batch_forward_type_(data.forward_type),
       thread_pool_(thread_pool) {
-  // Get references to function-local statics (safe initialization)
   auto& perf_cache = get_perf_cache();
   perf_cache.memory_pool.reset();
 }
@@ -96,14 +92,8 @@ OneRecBatchInputBuilder::OneRecBatchInputBuilder(const BatchInputData& data,
 ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
-  // Get reference to function-local static cache (safe initialization)
   auto& perf_cache = get_perf_cache();
-
-  // ========== Global constant cache ==========
-  // Note: FIXED_POSITIONS is a simple vector, safe for static initialization
   static const std::vector<int32_t> FIXED_POSITIONS = {0};
-  // Note: FIXED_ENCODER_POSITIONS is now obtained from perf_cache to avoid
-  // static initialization order issues with torch::Tensor
 
   // ========== Fast sequence information extraction ==========
   const int32_t num_sequences =
@@ -137,36 +127,25 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
   const bool is_first_prefill = (first_sequence->num_generated_tokens() == 0);
   // const uint64_t model_version = first_sequence->get_model_version();
 
-  // ========== High-performance encoder tokens construction ==========
   auto build_encoder_tokens_optimized = [&]() -> const std::vector<int32_t>& {
     auto& cache_data = perf_cache.cache_data;
-
-    // encoder doesn't use cache key, because encoder doesn't use encoder_tokens
-    // in non-first prefill scenarios, only uses encoder_seq_len
     if (!is_first_prefill) {
       return cache_data.encoder_tokens;
     }
 
-    // Optimization: Use SIMD-friendly memory access patterns
     cache_data.encoder_tokens.clear();
     cache_data.encoder_seq_lens.clear();
-
-    // Optimization for scenarios where sequences have different lengths across
-    // sequence groups Pre-calculate total token count to avoid multiple memory
-    // reallocations
     int32_t total_tokens = 0;
     for (const auto& group_ptr : sequence_groups_) {
       if (!group_ptr->sequences().empty()) {
-        // Sequences within group have same length, only need to get first
-        // sequence's length
-        const int32_t group_encoder_seq_len =
+        const int32_t group_encoder_seq_len = static_cast<int32_t>(
             OneRecSequence::from(*group_ptr->sequences()[0])
                 .encoder_tokens()
-                .size();
-        total_tokens += group_encoder_seq_len * group_ptr->sequences().size();
+                .size());
+        total_tokens += group_encoder_seq_len *
+                        static_cast<int32_t>(group_ptr->sequences().size());
       }
     }
-
     cache_data.encoder_tokens.reserve(total_tokens);
     cache_data.encoder_seq_lens.resize(num_sequences);
     cache_data.encoder_sparse_embeddings.clear();
@@ -174,55 +153,39 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     cache_data.decoder_context_embeddings.clear();
     cache_data.decoder_context_embeddings.reserve(num_sequences);
 
-    // Process by groups in batch
     int32_t global_seq_idx = 0;
     for (const auto& group_ptr : sequence_groups_) {
       auto& group = *group_ptr;
-      const int32_t group_size = group.sequences().size();
-
-      if (group_size == 0) continue;
-
-      const int32_t group_encoder_seq_len =
-          OneRecSequence::from(*group.sequences()[0]).encoder_seq_len();
-
-      // Batch set same values
+      const int32_t group_size = static_cast<int32_t>(group.sequences().size());
+      if (group_size == 0) {
+        continue;
+      }
+      const int32_t group_encoder_seq_len = static_cast<int32_t>(
+          OneRecSequence::from(*group.sequences()[0]).encoder_seq_len());
       std::fill_n(&cache_data.encoder_seq_lens[global_seq_idx],
                   group_size,
                   group_encoder_seq_len);
-
-      // Batch copy tokens by sequence and collect sparse_embedding
       for (const auto& sequence_ptr : group.sequences()) {
         const OneRecSequence& sequence = OneRecSequence::from(*sequence_ptr);
         const auto& encoder_tokens = sequence.encoder_tokens();
-        const int32_t* src_ptr = encoder_tokens.data();
-        const int32_t group_encoder_seq_len = encoder_tokens.size();
-
-        // Use efficient batch insertion
-        if (group_encoder_seq_len > 0) {
-          cache_data.encoder_tokens.insert(cache_data.encoder_tokens.end(),
-                                           src_ptr,
-                                           src_ptr + group_encoder_seq_len);
-        }
-        // Collect sparse_embedding
+        cache_data.encoder_tokens.insert(cache_data.encoder_tokens.end(),
+                                         encoder_tokens.begin(),
+                                         encoder_tokens.end());
         const MMData& mm_data = sequence.mm_data();
-        auto sparse_embedding_optional = mm_data.get<torch::Tensor>(
+        const auto sparse_embedding = mm_data.get<torch::Tensor>(
             OneRecSequence::kEncoderSparseEmbeddingName);
-        if (sparse_embedding_optional.has_value()) {
-          cache_data.encoder_sparse_embeddings.push_back(
-              sparse_embedding_optional.value());
+        if (sparse_embedding.has_value()) {
+          cache_data.encoder_sparse_embeddings.push_back(*sparse_embedding);
         }
-
-        auto decoder_context_embedding_optional = mm_data.get<torch::Tensor>(
+        const auto decoder_context_embedding = mm_data.get<torch::Tensor>(
             OneRecSequence::kDecoderContextEmbeddingName);
-        if (decoder_context_embedding_optional.has_value()) {
+        if (decoder_context_embedding.has_value()) {
           cache_data.decoder_context_embeddings.push_back(
-              decoder_context_embedding_optional.value());
+              *decoder_context_embedding);
         }
       }
-
       global_seq_idx += group_size;
     }
-
     return cache_data.encoder_tokens;
   };
 
@@ -488,14 +451,13 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
           }
         });
     */
-    if (!perf_cache.cache_data.decoder_context_embeddings.empty()) {
+    if (!cache_data.decoder_context_embeddings.empty()) {
       // Task 3: Synchronously process decoder_embedding, inner group dimension
       // parallelization optimization
 
       // Optimization: Directly get shape information from first embedding to
       // avoid torch::cat
-      auto first_embedding =
-          perf_cache.cache_data.decoder_context_embeddings[0];
+      auto first_embedding = cache_data.decoder_context_embeddings[0];
       auto original_shape = first_embedding.sizes();
       int64_t context_len = original_shape[0];
       int64_t hidden_size = original_shape[1];
@@ -937,13 +899,13 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
   onerec_params.generated_tokens = std::move(generated_tokens);
 
   // Process sparse_embedding: Efficiently concatenate from cache_data
-  if (!perf_cache.cache_data.encoder_sparse_embeddings.empty()) {
+  if (!cache_data.encoder_sparse_embeddings.empty()) {
     // Use torch::cat for efficient concatenation, concatenate along dim=0
     onerec_params.encoder_sparse_embedding =
-        torch::cat(perf_cache.cache_data.encoder_sparse_embeddings, /*dim=*/0);
+        torch::cat(cache_data.encoder_sparse_embeddings, /*dim=*/0);
   }
 
-  if (!perf_cache.cache_data.decoder_context_embeddings.empty()) {
+  if (!cache_data.decoder_context_embeddings.empty()) {
     // Get group_width
     const int64_t group_width_val = onerec_params.group_width;
     if (group_width_val == 1 && seq_len == 0) {
@@ -951,18 +913,17 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
       // unnecessary torch::cat
       if (bs == 1) {
         onerec_params.decoder_context_embedding =
-            perf_cache.cache_data.decoder_context_embeddings[0];
+            cache_data.decoder_context_embeddings[0];
       } else {
         // Use torch::cat for efficient concatenation, concatenate along dim=0
-        auto original_context_embedding = torch::cat(
-            perf_cache.cache_data.decoder_context_embeddings, /*dim=*/0);
+        auto original_context_embedding =
+            torch::cat(cache_data.decoder_context_embeddings, /*dim=*/0);
         onerec_params.decoder_context_embedding = original_context_embedding;
       }
     } else if (group_width_val == 1 && seq_len > 0) {
       // Handle the scenario where group_width==1 and seq_len>0
       // Get information from the first embedding
-      const auto& first_embedding =
-          perf_cache.cache_data.decoder_context_embeddings[0];
+      const auto& first_embedding = cache_data.decoder_context_embeddings[0];
       auto original_shape = first_embedding.sizes();
       int64_t context_len = original_shape[0];
       int64_t hidden_size = original_shape[1];
@@ -987,7 +948,7 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
       // Copy context_embedding for each batch
       for (int64_t b = 0; b < bs; ++b) {
         const void* batch_src =
-            perf_cache.cache_data.decoder_context_embeddings[b].data_ptr();
+            cache_data.decoder_context_embeddings[b].data_ptr();
         auto* batch_dst = static_cast<char*>(dst_data) + b * batch_stride;
         std::memcpy(batch_dst, batch_src, context_size);
       }

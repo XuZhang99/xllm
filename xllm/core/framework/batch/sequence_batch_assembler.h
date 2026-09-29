@@ -15,7 +15,6 @@ limitations under the License.
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -25,13 +24,9 @@ limitations under the License.
 
 namespace xllm {
 
-// Composed by sequence and Rec factories to assemble their selected input
-// contract. Only configuration is retained; each invocation owns its scratch
-// state and the scheduler continues to own the requests and sequences.
-class BatchAssembler final {
+class SequenceBatchAssembler final {
  public:
-  BatchAssembler(int32_t dp_size, BatchInputType input_type);
-
+  explicit SequenceBatchAssembler(int32_t dp_size);
   std::vector<Batch> assemble(
       const std::vector<std::shared_ptr<Request>>& requests,
       const std::vector<Sequence*>& sequences,
@@ -40,7 +35,6 @@ class BatchAssembler final {
 
  private:
   int32_t dp_size_;
-  BatchInputType input_type_;
 };
 
 }  // namespace xllm

@@ -22,8 +22,8 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "core/framework/batch/batch_input_builder.h"
 #include "core/framework/batch/rec_batch_input_builder.h"
+#include "core/framework/batch/sampling_input_builder.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "core/framework/request/sequence.h"
 #include "core/framework/request/sequences_group.h"
@@ -53,22 +53,14 @@ class RecMultiRoundBatchInputBuilder final : public RecBatchInputBuilder {
   // implementation).
   ForwardInput build_forward_input();
 
-  // Local builder state (copy of the legacy BatchInputBuilder::BuilderState)
+  // Multi-round token/cache layout; sampling metadata is a shared component.
   struct BuilderState {
     // Token and position data
     std::vector<int32_t> flatten_tokens_vec;
     std::vector<int32_t> flatten_positions_vec;
     std::vector<torch::Tensor> mrope_positions_vec;
 
-    // Sampling data
-    std::vector<const RequestSamplingParam*> sampling_params;
-    std::vector<int32_t> selected_token_idxes;
-    std::vector<int32_t> sample_idxes;
-
-    // Unique token tracking
-    std::vector<std::vector<int64_t>> unique_token_ids_vec;
-    std::vector<std::vector<int32_t>> unique_token_counts_vec;
-    std::vector<int32_t> unique_token_lens_vec;
+    SamplingInputBuilder sampling;
 
     // Sequence metadata
     BatchForwardType batch_forward_type;
@@ -126,12 +118,7 @@ class RecMultiRoundBatchInputBuilder final : public RecBatchInputBuilder {
     std::vector<torch::Tensor> step_mrope_positions_vec;
 
     // Rec multi-round decode state buffers
-    std::vector<int32_t> decode_selected_token_idxes;
-    std::vector<const RequestSamplingParam*> decode_sampling_params;
-    std::vector<std::vector<int64_t>> decode_unique_token_ids_vec;
-    std::vector<std::vector<int32_t>> decode_unique_token_counts_vec;
-    std::vector<int32_t> decode_unique_token_lens_vec;
-    std::vector<int32_t> decode_sample_idxes;
+    SamplingInputBuilder decode_sampling;
     std::vector<int32_t> decode_positions_vec;
 
     // Rec multi-round specific metadata

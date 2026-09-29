@@ -52,9 +52,7 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
   const ModelArgs* args_ = nullptr;
   MPMCThreadPool* thread_pool_ = nullptr;
   BatchForwardType batch_forward_type_;
-  // High performance cache system
   struct HighPerformanceCache {
-    // Memory pool - avoid frequent allocation/deallocation
     struct MemoryPool {
       std::vector<std::vector<int32_t>> int32_pools;
       size_t pool_index = 0;
@@ -65,23 +63,22 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
         }
         auto& vec = int32_pools[pool_index++];
         vec.clear();
-        if (reserve_size > 0) vec.reserve(reserve_size);
+        if (reserve_size > 0) {
+          vec.reserve(reserve_size);
+        }
         return vec;
       }
 
       void reset() { pool_index = 0; }
     };
 
-    // Cache data structure
     struct CacheData {
       std::vector<int32_t> encoder_tokens;
-      std::vector<int> encoder_seq_lens;
+      std::vector<int32_t> encoder_seq_lens;
       std::vector<torch::Tensor> encoder_sparse_embeddings;
       std::vector<torch::Tensor> decoder_context_embeddings;
     };
 
-    // Pre-created constant tensors - lazy initialized to avoid static
-    // initialization order issues
     torch::Tensor fixed_positions_tensor;
     torch::Tensor fixed_encoder_positions_tensor;
     torch::Tensor empty_tensor;
@@ -90,11 +87,8 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
     MemoryPool memory_pool;
     CacheData cache_data;
 
-    // Default constructor - does NOT create tensors to avoid static
-    // initialization order fiasco
     HighPerformanceCache() = default;
 
-    // Lazy initialization of tensors - must be called before first use
     void ensure_tensors_initialized() {
       if (!tensors_initialized) {
         fixed_positions_tensor = torch::tensor({0}, torch::kInt);
@@ -105,8 +99,6 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
     }
   };
 
-  // Use function-local static to ensure proper initialization order
-  // (Meyers' Singleton pattern)
   static HighPerformanceCache& get_perf_cache();
 };
 

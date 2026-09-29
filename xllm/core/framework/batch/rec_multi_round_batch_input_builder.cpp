@@ -86,6 +86,11 @@ RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
 
   num_sequences_ = static_cast<int32_t>(sequences_.size());
   CHECK_GT(num_sequences_, 0);
+  rec_multi_round_state_.base_state.sampling.reserve(num_sequences_);
+  const int32_t beam_width =
+      std::max(1, BeamSearchConfig::get_instance().beam_width());
+  rec_multi_round_state_.decode_sampling.reserve(
+      static_cast<size_t>(num_sequences_) * beam_width);
 
   if (args_ != nullptr) {
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
@@ -216,37 +221,12 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
     // Adjust token count
     --adjusted_token_to_count_map[token_id];
 
-    // Select token for sampling
-    state.selected_token_idxes.push_back(
-        static_cast<int32_t>(state.flatten_tokens_vec.size() - 1));
-    state.sampling_params.push_back(sequence->sampling_param());
-
-    // Process unique tokens
-    const auto& seq_token_counts = sequence->token_to_count_map();
-    auto& ids = state.unique_token_ids_vec.emplace_back();
-    auto& counts = state.unique_token_counts_vec.emplace_back();
-
-    ids.reserve(seq_token_counts.size());
-    counts.reserve(seq_token_counts.size());
-
-    for (const auto& [tok_id, count] : seq_token_counts) {
-      const auto it = adjusted_token_to_count_map.find(tok_id);
-      const auto adjust_count =
-          (it != adjusted_token_to_count_map.end()) ? it->second : 0;
-
-      if (count > adjust_count) {
-        ids.push_back(tok_id);
-        counts.push_back(count - adjust_count);
-      }
-    }
-
-    state.unique_token_lens_vec.push_back(static_cast<int32_t>(ids.size()));
-
-    // Mark sample token if it's the last token
-    if (j == seq_len - 1) {
-      state.sample_idxes.push_back(
-          static_cast<int32_t>(state.selected_token_idxes.size() - 1));
-    }
+    state.sampling.append(
+        sequence->sampling_param(),
+        static_cast<int32_t>(state.flatten_tokens_vec.size() - 1),
+        &sequence->token_to_count_map(),
+        &adjusted_token_to_count_map,
+        /*sample=*/j == seq_len - 1);
   }
 
   // `linear_state_ids` is consumed per sequence, so preserve one entry per
@@ -273,23 +253,10 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
   int32_t bw =
       std::max(1, ::xllm::BeamSearchConfig::get_instance().beam_width());
   const int32_t sel_start =
-      static_cast<int32_t>(state_ptr->decode_selected_token_idxes.size());
-  state_ptr->decode_selected_token_idxes.reserve(sel_start + bw);
-  state_ptr->decode_sample_idxes.reserve(state_ptr->decode_sample_idxes.size() +
-                                         bw);
-  state_ptr->decode_unique_token_ids_vec.resize(
-      state_ptr->decode_unique_token_ids_vec.size() + bw);
-  state_ptr->decode_unique_token_counts_vec.resize(
-      state_ptr->decode_unique_token_counts_vec.size() + bw);
-  state_ptr->decode_unique_token_lens_vec.insert(
-      state_ptr->decode_unique_token_lens_vec.end(), bw, 0);
-  state_ptr->decode_sampling_params.reserve(
-      state_ptr->decode_sampling_params.size() + bw);
+      static_cast<int32_t>(state_ptr->decode_sampling.size());
   for (int32_t i = 0; i < bw; ++i) {
-    const int32_t idx = sel_start + i;
-    state_ptr->decode_selected_token_idxes.push_back(idx);
-    state_ptr->decode_sample_idxes.push_back(idx);
-    state_ptr->decode_sampling_params.push_back(sequence->sampling_param());
+    state_ptr->decode_sampling.append(sequence->sampling_param(),
+                                      sel_start + i);
   }
 }
 
@@ -399,19 +366,7 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
         swap_block_transfer_infos_->end());
   }
 
-  CHECK_EQ(state.sampling_params.size(), state.selected_token_idxes.size());
-  // Setup sampling parameters
-  if (!state.selected_token_idxes.empty()) {
-    util::pad_2d_vector<int64_t>(state.unique_token_ids_vec, /*pad_value=*/0);
-    util::pad_2d_vector(state.unique_token_counts_vec, /*pad_value=*/0);
-
-    forward_input.sampling_params.init(state.sampling_params,
-                                       state.selected_token_idxes,
-                                       state.sample_idxes,
-                                       state.unique_token_ids_vec,
-                                       state.unique_token_counts_vec,
-                                       state.unique_token_lens_vec);
-  }
+  forward_input.sampling_params = state.sampling.build();
 
   // Rec multi-round specific metadata.
   rec_multi_round_state_.total_steps = get_rec_multi_round_decode_rounds();
@@ -422,24 +377,8 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
   std::vector<int64_t> full_kv_shape;
   std::vector<int32_t> decode_positions_vec;
 
-  // Setup decoder sampling parameters for Rec multi-round decode.
-  if (!rec_multi_round_state_.decode_selected_token_idxes.empty()) {
-    CHECK_EQ(rec_multi_round_state_.decode_sampling_params.size(),
-             rec_multi_round_state_.decode_selected_token_idxes.size());
-    util::pad_2d_vector<int64_t>(
-        rec_multi_round_state_.decode_unique_token_ids_vec,
-        /*pad_value=*/0);
-    util::pad_2d_vector(rec_multi_round_state_.decode_unique_token_counts_vec,
-                        /*pad_value=*/0);
-
-    forward_input.decoder_sampling_params.init(
-        rec_multi_round_state_.decode_sampling_params,
-        rec_multi_round_state_.decode_selected_token_idxes,
-        rec_multi_round_state_.decode_sample_idxes,
-        rec_multi_round_state_.decode_unique_token_ids_vec,
-        rec_multi_round_state_.decode_unique_token_counts_vec,
-        rec_multi_round_state_.decode_unique_token_lens_vec);
-  }
+  forward_input.decoder_sampling_params =
+      rec_multi_round_state_.decode_sampling.build();
 
   // Set full_kv_shape if we have Rec multi-round decode data.
   if (is_rec_multi_round_mode() && !sequences_.empty()) {

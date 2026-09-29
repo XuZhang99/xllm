@@ -58,6 +58,10 @@ class SequencesGroup {
 
   std::vector<std::unique_ptr<Sequence>>& sequences() { return sequences_; }
 
+  const std::vector<std::unique_ptr<Sequence>>& sequences() const {
+    return sequences_;
+  }
+
   int32_t dp_rank() { return sequences_[0]->dp_rank(); }
 
   bool is_chunked_prefill_stage() const {

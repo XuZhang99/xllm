@@ -248,6 +248,7 @@ BatchInputBuilder::BatchInputBuilder(
   const size_t reserve_size = 1024;
   state_.flatten_tokens_vec.reserve(reserve_size);
   state_.flatten_positions_vec.reserve(reserve_size);
+  state_.sampling.reserve(sequences.size());
   state_.mrope_positions_vec.reserve(sequences.size());
   state_.block_tables_vec.reserve(sequences.size());
   state_.acc_logprob_vec.reserve(sequences.size());
@@ -487,6 +488,7 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     thread_state.batch_forward_type = state_.batch_forward_type;
     // Reserve per-thread scratch so parallel processing does not repeatedly
     // reallocate (which serializes on the allocator and erodes the speedup).
+    thread_state.sampling.reserve(sequences_per_thread);
     thread_state.block_tables_vec.reserve(sequences_per_thread);
     thread_state.new_token_slot_ids.reserve(sequences_per_thread);
     thread_state.kv_cache_tokens_nums.reserve(sequences_per_thread);
@@ -545,17 +547,20 @@ void BatchInputBuilder::process_sequences_multithreaded() {
   // single-threaded, so realloc churn here directly caps the achievable
   // multithreaded speedup.
   size_t total_tokens = 0;
+  size_t total_sampling_rows = 0;
   size_t total_seqs = 0;
   size_t total_slots = 0;
   size_t total_paged_indices = 0;
   size_t total_linear_restore_sources = 0;
   for (const auto& state : thread_builder_states) {
     total_tokens += state.flatten_tokens_vec.size();
+    total_sampling_rows += state.sampling.size();
     total_seqs += state.block_tables_vec.size();
     total_slots += state.new_token_slot_ids.size();
     total_paged_indices += state.paged_kv_indices.size();
     total_linear_restore_sources += state.linear_restore_src_blocks.size();
   }
+  state_.sampling.reserve(total_sampling_rows);
   state_.flatten_tokens_vec.reserve(total_tokens);
   if (!use_mrope_) {
     state_.flatten_positions_vec.reserve(total_tokens);
@@ -598,17 +603,9 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.acc_logprob_vec.insert(state_.acc_logprob_vec.end(),
                                   state.acc_logprob_vec.begin(),
                                   state.acc_logprob_vec.end());
-    // selected_token_idxes and sample_idxes need offset
-    int32_t selected_token_idxes_offset =
-        static_cast<int32_t>(state_.flatten_tokens_vec.size()) -
-        static_cast<int32_t>(state.flatten_tokens_vec.size());
-    for (const auto& idx : state.selected_token_idxes) {
-      state_.selected_token_idxes.emplace_back(idx +
-                                               selected_token_idxes_offset);
-    }
-    state_.sampling_params.insert(state_.sampling_params.end(),
-                                  state.sampling_params.begin(),
-                                  state.sampling_params.end());
+    const int32_t token_offset = static_cast<int32_t>(
+        state_.flatten_tokens_vec.size() - state.flatten_tokens_vec.size());
+    state_.sampling.merge(std::move(state.sampling), token_offset);
     if (enable_json_object_output_) {
       state_.json_object_states.insert(state_.json_object_states.end(),
                                        state.json_object_states.begin(),
@@ -621,20 +618,6 @@ void BatchInputBuilder::process_sequences_multithreaded() {
           state.sample_prior_output_rows.begin(),
           state.sample_prior_output_rows.end());
     }
-    int32_t sample_idxes_offset =
-        static_cast<int32_t>(state_.sample_idxes.size());
-    for (const auto& idx : state.sample_idxes) {
-      state_.sample_idxes.emplace_back(idx + sample_idxes_offset);
-    }
-    state_.unique_token_ids_vec.insert(state_.unique_token_ids_vec.end(),
-                                       state.unique_token_ids_vec.begin(),
-                                       state.unique_token_ids_vec.end());
-    state_.unique_token_counts_vec.insert(state_.unique_token_counts_vec.end(),
-                                          state.unique_token_counts_vec.begin(),
-                                          state.unique_token_counts_vec.end());
-    state_.unique_token_lens_vec.insert(state_.unique_token_lens_vec.end(),
-                                        state.unique_token_lens_vec.begin(),
-                                        state.unique_token_lens_vec.end());
     state_.max_seq_len = std::max(state_.max_seq_len, state.max_seq_len);
     state_.q_max_seq_len = std::max(state_.q_max_seq_len, state.q_max_seq_len);
 #if defined(USE_NPU)
@@ -994,10 +977,10 @@ void BatchInputBuilder::handle_sampling_parameters(Sequence* sequence,
                                                    BuilderState* state_ptr) {
   BuilderState& state = state_ptr ? *state_ptr : state_;
 
-  // Select token for sampling
-  state.selected_token_idxes.push_back(
-      static_cast<int32_t>(state.flatten_tokens_vec.size() - 1));
-  state.sampling_params.push_back(sequence->sampling_param());
+  state.sampling.append(
+      sequence->sampling_param(),
+      static_cast<int32_t>(state.flatten_tokens_vec.size() - 1),
+      need_unique_tokens_ ? &sequence->token_to_count_map() : nullptr);
   if (enable_json_object_output_) {
     const JsonObjectGrammarState* json_state = sequence->json_object_state();
     state.json_object_states.push_back(
@@ -1006,26 +989,6 @@ void BatchInputBuilder::handle_sampling_parameters(Sequence* sequence,
     const int32_t sampled_input_token = state.flatten_tokens_vec.back();
     state.sample_prior_output_rows.emplace_back(
         sampled_input_token < 0 ? -sampled_input_token - 1 : -1);
-  }
-  state.sample_idxes.push_back(
-      static_cast<int32_t>(state.selected_token_idxes.size() - 1));
-
-  // Process unique tokens
-  if (need_unique_tokens_) {
-    const auto& seq_token_counts = sequence->token_to_count_map();
-    auto& ids = state.unique_token_ids_vec.emplace_back();
-    auto& counts = state.unique_token_counts_vec.emplace_back();
-
-    ids.reserve(seq_token_counts.size());
-    counts.reserve(seq_token_counts.size());
-
-    for (const auto& [token_id, count] : seq_token_counts) {
-      CHECK(count >= 0) << "token count should be greater than 0";
-      ids.push_back(token_id);
-      counts.push_back(count);
-    }
-
-    state.unique_token_lens_vec.push_back(static_cast<int32_t>(ids.size()));
   }
 }
 
@@ -1353,18 +1316,8 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   forward_input.transfer_kv_infos = std::move(state_.transfer_kv_infos);
   process_swap_block_infos(forward_input);
 
-  CHECK_EQ(state_.sampling_params.size(), state_.selected_token_idxes.size());
-  // Setup sampling parameters
-  if (!state_.selected_token_idxes.empty()) {
-    util::pad_2d_vector<int64_t>(state_.unique_token_ids_vec, /*pad_value=*/0);
-    util::pad_2d_vector(state_.unique_token_counts_vec, /*pad_value=*/0);
-
-    forward_input.sampling_params.init(state_.sampling_params,
-                                       state_.selected_token_idxes,
-                                       state_.sample_idxes,
-                                       state_.unique_token_ids_vec,
-                                       state_.unique_token_counts_vec,
-                                       state_.unique_token_lens_vec);
+  if (!state_.sampling.empty()) {
+    forward_input.sampling_params = state_.sampling.build();
     if (!enable_json_object_output_) {
       return forward_input;
     }
@@ -1377,14 +1330,16 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
              forward_input.json_object_states.size());
     CHECK_EQ(sample_prior_output_rows.size(),
              forward_input.json_object_states.size());
-    if (state_.sample_idxes.size() != forward_input.json_object_states.size()) {
+    if (state_.sampling.sample_indices().size() !=
+        forward_input.json_object_states.size()) {
       std::vector<JsonObjectGrammarState> sampled_states;
-      sampled_states.reserve(state_.sample_idxes.size());
+      sampled_states.reserve(state_.sampling.sample_indices().size());
       std::vector<std::string> sampled_sequence_ids;
-      sampled_sequence_ids.reserve(state_.sample_idxes.size());
+      sampled_sequence_ids.reserve(state_.sampling.sample_indices().size());
       std::vector<int32_t> sampled_prior_output_rows;
-      sampled_prior_output_rows.reserve(state_.sample_idxes.size());
-      for (const int32_t sample_idx : state_.sample_idxes) {
+      sampled_prior_output_rows.reserve(
+          state_.sampling.sample_indices().size());
+      for (const int32_t sample_idx : state_.sampling.sample_indices()) {
         CHECK_GE(sample_idx, 0);
         CHECK_LT(static_cast<size_t>(sample_idx),
                  forward_input.json_object_states.size());
