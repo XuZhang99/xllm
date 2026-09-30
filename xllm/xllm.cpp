@@ -303,7 +303,9 @@ void init_npu_python_runtime() {
   py::module_::import("atexit").attr("register")(py::cpp_function(
       []() {
         const aclError status = aclFinalize();
-        CHECK_EQ(status, ACL_SUCCESS) << "aclFinalize failed.";
+        if (status != ACL_SUCCESS) {
+          LOG(ERROR) << "aclFinalize failed with error " << status;
+        }
       },
       py::call_guard<py::gil_scoped_release>()));
 
@@ -600,6 +602,13 @@ int main(int argc, char** argv) {
     }
   }
 
+#if defined(USE_NPU)
+  // CANN's signal cleanup can consume SIGINT before our worker shutdown
+  // handler runs. Let the server own its signals by default; an explicit
+  // environment setting can still enable CANN's automatic stack dumps.
+  CHECK_EQ(setenv("ASCEND_COREDUMP_SIGNAL", "none", /*overwrite=*/0), 0);
+#endif
+
   FLAGS_alsologtostderr = true;
   FLAGS_minloglevel = 0;
   google::ParseCommandLineFlags(&argc, &argv, true);
@@ -626,11 +635,6 @@ int main(int argc, char** argv) {
   }
 
 #if defined(USE_NPU)
-  // CANN's signal cleanup can consume SIGINT before our worker shutdown
-  // handler runs. Let the server own its signals by default; an explicit
-  // environment setting can still enable CANN's automatic stack dumps.
-  CHECK_EQ(setenv("ASCEND_COREDUMP_SIGNAL", "none", /*overwrite=*/0), 0);
-
   // Keep Python alive until run() has destroyed the master and its workers.
   // Reacquire the GIL before finalization so Python atexit hooks run before
   // extension-module static destructors (including Triton's pybind objects).

@@ -50,6 +50,8 @@ def test_npu_world_registers_shutdown_once(monkeypatch: pytest.MonkeyPatch) -> N
     collectives._ensure_world("localhost", 0, torch.device("cpu"), 0, 1)
 
     register.assert_called_once_with(collectives._shutdown_process_groups)
+    assert collectives._groups[("attn_dp", "cpu")] is dist.group.WORLD
+    assert collectives._group_ranks[("attn_dp", "cpu")] == (0,)
 
 
 def test_shutdown_process_groups_releases_world_and_cached_groups() -> None:
@@ -70,6 +72,36 @@ def test_shutdown_process_groups_releases_world_and_cached_groups() -> None:
     assert collectives._world_topology is None
     assert not collectives._world_initialized
     collectives._shutdown_process_groups()
+
+
+def test_topology_failure_keeps_world_and_store_owned_for_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed topology exchange still releases the initialized Gloo world."""
+    register = MagicMock()
+    monkeypatch.setattr(collectives.atexit, "register", register)
+    monkeypatch.setattr(collectives, "_USE_PYTHON_NPU_GROUPS", True)
+    monkeypatch.setattr(collectives, "_backend_for", lambda device: "gloo")
+    monkeypatch.setattr(
+        collectives, "_exchange_world_topology", MagicMock(side_effect=RuntimeError("topology exchange failed"))
+    )
+    collectives._stores[("localhost", 0)] = dist.HashStore()
+
+    try:
+        with pytest.raises(RuntimeError, match="topology exchange failed"):
+            collectives._ensure_world("localhost", 0, torch.device("cpu"), 0, 1)
+
+        assert dist.is_initialized()
+        register.assert_called_once_with(collectives._shutdown_process_groups)
+        register.call_args.args[0]()
+
+        assert not dist.is_initialized()
+        assert not collectives._groups
+        assert not collectives._group_ranks
+        assert not collectives._stores
+        assert collectives._world_topology is None
+        assert not collectives._world_initialized
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 
 def test_shutdown_process_groups_does_not_destroy_an_unowned_world() -> None:

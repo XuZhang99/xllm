@@ -151,6 +151,11 @@ def _ensure_world(
         world_size=global_world_size,
         timeout=timedelta(minutes=5),
     )
+    _world_initialized = True
+    if _USE_PYTHON_NPU_GROUPS:
+        # Registered after torch_npu's hook, so communicators and our cached
+        # references are released while the NPU runtime is still alive.
+        atexit.register(_shutdown_process_groups)
     # Attention-DP weight shards use one full-world group for the final
     # reduction.  It is the default process group, so no second communicator
     # is created and the group is available even when no explicit subgroup is
@@ -159,11 +164,6 @@ def _ensure_world(
     _groups[world_key] = dist.group.WORLD
     _group_ranks[world_key] = tuple(range(global_world_size))
     _world_topology = _exchange_world_topology(store, device, global_rank, global_world_size)
-    _world_initialized = True
-    if _USE_PYTHON_NPU_GROUPS:
-        # Registered after torch_npu's hook, so communicators and our cached
-        # references are released while the NPU runtime is still alive.
-        atexit.register(_shutdown_process_groups)
 
 
 def _group_memberships(group_name: str, world_size: int, global_world_size: int) -> list[list[int]]:
