@@ -59,6 +59,10 @@ std::vector<Sequence*> RecBatchState::get_sequences() const {
   return sequence_state_.group_sequences();
 }
 
+void RecBatchState::refresh_forward_type() {
+  sequence_state_.refresh_forward_type(get_sequences());
+}
+
 void RecBatchState::refresh_sequences_from_groups() {
   if (!uses_group_input()) {
     sequence_state_.refresh_sequences_from_groups();
@@ -122,6 +126,51 @@ ForwardInput RecBatchState::prepare_rec_forward_input(
       RecForwardInputBuilder::create(input_type_, data, &args, thread_pool);
   return builder->build_rec_forward_input(num_decoding_tokens,
                                           min_decoding_batch_size);
+}
+
+void RecBatchState::process_sample_output(const RawForwardOutput& output,
+                                          bool replace_fake_token) {
+  const auto sequences = get_sequences();
+  sequence_state_.output_handler().process_sample_output(
+      {sequences, sequence_state_.sequence_groups()},
+      output,
+      replace_fake_token);
+}
+
+void RecBatchState::process_sample_output(
+    const SampleOutput& output,
+    bool replace_fake_token,
+    bool force_requested_beam_result_size) {
+  const auto sequences = get_sequences();
+  sequence_state_.output_handler().process_sample_output(
+      {sequences, sequence_state_.sequence_groups()},
+      output,
+      replace_fake_token,
+      force_requested_beam_result_size);
+}
+
+void RecBatchState::process_beam_search_output(const RawForwardOutput& output,
+                                               bool replace_fake_token) {
+  const auto sequences = get_sequences();
+  sequence_state_.output_handler().process_beam_search_output(
+      {sequences, sequence_state_.sequence_groups()},
+      output,
+      replace_fake_token);
+}
+
+void RecBatchState::process_beam_sequence_group(const ForwardOutput& output) {
+  const auto sequences = get_sequences();
+  sequence_state_.output_handler().process_beam_sequence_group(
+      {sequences, sequence_state_.sequence_groups()}, output);
+}
+
+void RecBatchState::finish() {
+  for (auto* group : sequence_state_.sequence_groups()) {
+    group->finish();
+  }
+  for (auto* sequence : get_sequences()) {
+    sequence->finish();
+  }
 }
 
 }  // namespace xllm

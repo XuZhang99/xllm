@@ -27,6 +27,7 @@ limitations under the License.
 
 #include "core/framework/batch/rec_batch_factory.h"
 #include "core/framework/batch/sampling_input_builder.h"
+#include "core/framework/block/block_manager_impl.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/rec_config.h"
 #include "core/framework/model/model_args.h"
@@ -155,6 +156,57 @@ TEST(BatchFactoryTest, RecBatchFinishesSequenceAndGroupInputs) {
   EXPECT_FALSE(group_request->sequence_group()->finished());
   group_batches[0].finish();
   EXPECT_TRUE(group_request->sequence_group()->finished());
+}
+
+TEST(BatchFactoryTest, RecOutputsRefreshSamplingTargetsAcrossForwards) {
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  RecBatchFactory factory(/*dp_size=*/1, BatchInputType::SEQUENCE);
+  auto first = make_request(/*rank=*/0, RecType::kLlmRec);
+  auto second = make_request(/*rank=*/0, RecType::kLlmRec);
+  auto* first_sequence = first->sequences()[0].get();
+  auto* second_sequence = second->sequences()[0].get();
+  first_sequence->add_blocks(BlockType::KV, manager.allocate(/*num_blocks=*/1));
+  second_sequence->add_blocks(BlockType::KV,
+                              manager.allocate(/*num_blocks=*/1));
+  auto batches = factory.create_batches(
+      {first, second}, {first_sequence, second_sequence}, {2, 3});
+  auto& batch = batches[0];
+  const uint64_t batch_id = batch.batch_id();
+  ModelArgs args;
+
+  // Only the second sequence completes prefill and owns an output row.
+  (void)batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, args);
+  SampleOutput sample_output;
+  sample_output.next_tokens = torch::tensor({42}, torch::kInt);
+  batch.process_sample_output(sample_output,
+                              /*replace_fake_token=*/false,
+                              /*force_requested_beam_result_size=*/false);
+  EXPECT_EQ(first_sequence->num_generated_tokens(), 0);
+  ASSERT_EQ(second_sequence->num_generated_tokens(), 1);
+  EXPECT_EQ(second_sequence->tokens()[3], 42);
+
+  // The next forward completes the first prefill while decoding the second.
+  batch.refresh_forward_type();
+  const auto input = batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, args);
+  EXPECT_TRUE(
+      torch::equal(input.token_ids, torch::tensor({3, 42}, torch::kInt32)));
+  RawForwardOutput raw_output;
+  raw_output.outputs.resize(2);
+  raw_output.outputs[0].tokens = {RawToken{.id = 51}};
+  raw_output.outputs[1].tokens = {RawToken{.id = 43}};
+  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+
+  ASSERT_EQ(first_sequence->num_generated_tokens(), 1);
+  ASSERT_EQ(second_sequence->num_generated_tokens(), 2);
+  EXPECT_EQ(first_sequence->tokens()[3], 51);
+  EXPECT_EQ(second_sequence->tokens()[3], 42);
+  EXPECT_EQ(second_sequence->tokens()[4], 43);
+  EXPECT_EQ(batch.batch_id(), batch_id);
+  EXPECT_EQ(batch.get_allowed_max_tokens(), (std::vector<uint32_t>{2, 3}));
 }
 
 TEST(BatchFactoryTest, IndependentFactoriesKeepTheirOwnDpSize) {
@@ -392,6 +444,10 @@ TEST(BatchFactoryTest, OneRecAccessorsFollowGroupReplacementWithoutRefresh) {
             (std::vector<Sequence*>{replacement_ptr}));
   EXPECT_EQ(batches[0].num_scheduled_sequences(), 0);
   EXPECT_TRUE(batches[0].get_allowed_max_tokens().empty());
+  EXPECT_FALSE(replacement_ptr->finished());
+  batches[0].finish();
+  EXPECT_TRUE(replacement_ptr->finished());
+  EXPECT_TRUE(request->sequence_group()->finished());
 }
 
 TEST(BatchSequencePlanTest, ReorderingMovesSequencesTogetherWithBudgets) {

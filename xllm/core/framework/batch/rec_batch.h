@@ -30,37 +30,33 @@ class RecBatch final {
   RecBatchState& state() { return state_; }
   const RecBatchState& state() const { return state_; }
   void reserve(size_t sequence_count, size_t group_count) {
-    state_.sequence_state().reserve(sequence_count, group_count);
+    state_.reserve(sequence_count, group_count);
   }
   void add(Sequence* sequence,
            uint32_t token_budget = std::numeric_limits<uint32_t>::max()) {
-    state_.sequence_state().add(sequence, token_budget);
+    state_.add(sequence, token_budget);
   }
-  void add(SequencesGroup* group) { state_.sequence_state().add(group); }
-  void set_batch_id() { state_.sequence_state().set_batch_id(); }
-  uint64_t batch_id() const { return state_.sequence_state().batch_id(); }
-  bool empty() const { return state_.sequence_state().empty(); }
+  void add(SequencesGroup* group) { state_.add(group); }
+  void set_batch_id() { state_.set_batch_id(); }
+  uint64_t batch_id() const { return state_.batch_id(); }
+  bool empty() const { return state_.empty(); }
   size_t num_scheduled_sequences() const {
-    return state_.sequence_state().sequence_plan().size();
+    return state_.num_scheduled_sequences();
   }
-  size_t num_groups() const {
-    return state_.sequence_state().sequence_groups().size();
-  }
+  size_t num_groups() const { return state_.num_groups(); }
   void set_swap_block_transfer_infos(std::vector<BlockTransferInfo> infos) {
-    state_.sequence_state().set_swap_block_transfer_infos(std::move(infos));
+    state_.set_swap_block_transfer_infos(std::move(infos));
   }
   const std::vector<SequencesGroup*>& sequence_groups() const {
-    return state_.sequence_state().sequence_groups();
+    return state_.sequence_groups();
   }
   const BatchSequencePlan& sequence_plan() const {
-    return state_.sequence_state().sequence_plan();
+    return state_.sequence_plan();
   }
   const std::vector<uint32_t>& get_allowed_max_tokens() const {
-    return state_.sequence_state().sequence_plan().budgets();
+    return state_.get_allowed_max_tokens();
   }
-  void refresh_forward_type() {
-    state_.sequence_state().refresh_forward_type(get_sequences());
-  }
+  void refresh_forward_type() { state_.refresh_forward_type(); }
   Sequence* operator[](size_t index) const { return sequence(index); }
   size_t size() const;
   Sequence* sequence(size_t index) const;

@@ -17,25 +17,52 @@ limitations under the License.
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "core/framework/batch/batch_state.h"
 
 namespace xllm {
 
-// Rec-specific input contract and sequence view around shared batch state.
+// Owns Rec sequence management, forward preparation and output processing.
+// Shared batch state remains a private implementation detail.
 class RecBatchState final {
  public:
   explicit RecBatchState(BatchInputType input_type);
 
   BatchInputType input_type() const { return input_type_; }
-  BatchState& sequence_state() { return sequence_state_; }
-  const BatchState& sequence_state() const { return sequence_state_; }
+  void reserve(size_t sequence_count, size_t group_count) {
+    sequence_state_.reserve(sequence_count, group_count);
+  }
+  void add(Sequence* sequence, uint32_t token_budget) {
+    sequence_state_.add(sequence, token_budget);
+  }
+  void add(SequencesGroup* group) { sequence_state_.add(group); }
+  void set_batch_id() { sequence_state_.set_batch_id(); }
+  uint64_t batch_id() const { return sequence_state_.batch_id(); }
+  bool empty() const { return sequence_state_.empty(); }
+  size_t num_scheduled_sequences() const {
+    return sequence_state_.sequence_plan().size();
+  }
+  size_t num_groups() const { return sequence_state_.sequence_groups().size(); }
+  void set_swap_block_transfer_infos(std::vector<BlockTransferInfo> infos) {
+    sequence_state_.set_swap_block_transfer_infos(std::move(infos));
+  }
+  const std::vector<SequencesGroup*>& sequence_groups() const {
+    return sequence_state_.sequence_groups();
+  }
+  const BatchSequencePlan& sequence_plan() const {
+    return sequence_state_.sequence_plan();
+  }
+  const std::vector<uint32_t>& get_allowed_max_tokens() const {
+    return sequence_state_.sequence_plan().budgets();
+  }
 
   bool uses_group_input() const;
   size_t size() const;
   Sequence* sequence(size_t index) const;
   std::vector<Sequence*> get_sequences() const;
+  void refresh_forward_type();
   void refresh_sequences_from_groups();
 
   ForwardInput prepare_forward_input(uint32_t num_decoding_tokens,
@@ -49,6 +76,16 @@ class RecBatchState final {
                                          uint32_t min_decoding_batch_size,
                                          const ModelArgs& args,
                                          MPMCThreadPool* thread_pool);
+
+  void process_sample_output(const RawForwardOutput& output,
+                             bool replace_fake_token);
+  void process_sample_output(const SampleOutput& output,
+                             bool replace_fake_token,
+                             bool force_requested_beam_result_size);
+  void process_beam_search_output(const RawForwardOutput& output,
+                                  bool replace_fake_token);
+  void process_beam_sequence_group(const ForwardOutput& output);
+  void finish();
 
  private:
   BatchState sequence_state_;

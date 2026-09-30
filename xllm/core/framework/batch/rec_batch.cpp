@@ -60,46 +60,25 @@ ForwardInput RecBatch::prepare_rec_forward_input(
 
 void RecBatch::process_sample_output(const RawForwardOutput& output,
                                      bool replace_fake_token) {
-  const auto sequences = get_sequences();
-  state_.sequence_state().output_handler().process_sample_output(
-      {sequences, state_.sequence_state().sequence_groups()},
-      output,
-      replace_fake_token);
+  state_.process_sample_output(output, replace_fake_token);
 }
 
 void RecBatch::process_sample_output(const SampleOutput& output,
                                      bool replace_fake_token,
                                      bool force_requested_beam_result_size) {
-  const auto sequences = get_sequences();
-  state_.sequence_state().output_handler().process_sample_output(
-      {sequences, state_.sequence_state().sequence_groups()},
-      output,
-      replace_fake_token,
-      force_requested_beam_result_size);
+  state_.process_sample_output(
+      output, replace_fake_token, force_requested_beam_result_size);
 }
 
 void RecBatch::process_beam_search_output(const RawForwardOutput& output,
                                           bool replace_fake_token) {
-  const auto sequences = get_sequences();
-  state_.sequence_state().output_handler().process_beam_search_output(
-      {sequences, state_.sequence_state().sequence_groups()},
-      output,
-      replace_fake_token);
+  state_.process_beam_search_output(output, replace_fake_token);
 }
 
 void RecBatch::process_beam_sequence_group(const ForwardOutput& output) {
-  const auto sequences = get_sequences();
-  state_.sequence_state().output_handler().process_beam_sequence_group(
-      {sequences, state_.sequence_state().sequence_groups()}, output);
+  state_.process_beam_sequence_group(output);
 }
 
-void RecBatch::finish() {
-  for (auto* group : state_.sequence_state().sequence_groups()) {
-    group->finish();
-  }
-  for (auto* sequence : get_sequences()) {
-    sequence->finish();
-  }
-}
+void RecBatch::finish() { state_.finish(); }
 
 }  // namespace xllm
