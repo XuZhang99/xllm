@@ -30,15 +30,20 @@ struct BatchOutputData {
   const std::vector<SequencesGroup*>& sequence_groups;
 };
 
-// Composed by BatchState. Captures sampling targets before input building
+// Captures sampling targets before input building
 // advances KV state, and keeps them through both phases of schedule-overlap
 // writeback. Requests own the target sequences and must outlive the pending
 // forward.
 class BatchOutputHandler final {
  public:
   void clear() { output_targets_.clear(); }
-  void prepare(const BatchInputData& data,
-               bool use_context_embedding_targets = false);
+  void reserve(size_t target_count) { output_targets_.reserve(target_count); }
+  void prepare(const BatchInputData& data);
+  // Domain handlers may collect token-based and explicitly selected targets
+  // in forward row order after clear(), before input building advances KV
+  // state.
+  void add_sequence_targets(Sequence* sequence, uint32_t token_budget);
+  void add_sequence_target(Sequence* sequence);
   void process_sample_output(const BatchOutputData& data,
                              const RawForwardOutput& output,
                              bool replace_fake_token);
@@ -46,8 +51,6 @@ class BatchOutputHandler final {
                              const SampleOutput& output,
                              bool replace_fake_token,
                              bool force_requested_beam_result_size);
-  void process_beam_sequence_group(const BatchOutputData& data,
-                                   const ForwardOutput& output);
   void process_beam_search_output(const BatchOutputData& data,
                                   const RawForwardOutput& output,
                                   bool replace_fake_token);
@@ -59,8 +62,6 @@ class BatchOutputHandler final {
     bool from_sample_slot = false;
   };
 
-  void refresh_output_targets(const BatchInputData& data);
-  void refresh_onerec_prefill_output_targets(const BatchInputData& data);
   bool update_sequence_state(Sequence* sequence, bool replace_fake_token);
   void append_token_for_sequence(Sequence* sequence,
                                  const Token& token,

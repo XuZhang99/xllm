@@ -280,16 +280,25 @@ BatchInputData BatchState::input_data(const BatchSequencePlan& plan) {
           batch_forward_type_};
 }
 
-ForwardInput BatchState::prepare_sequence_input(
-    uint32_t num_decoding_tokens,
-    uint32_t min_decoding_batch_size,
-    const ModelArgs& args,
-    int32_t cp_size) {
+BatchInputData BatchState::prepare_sequence_input_data() {
   CHECK(sequence_groups_.empty() || !sequence_plan_.empty())
       << "Sequence input requires scheduled sequences; group-only input "
          "requires a domain-specific input builder";
-  const auto data = input_data(sequence_plan_);
-  output_handler_.prepare(data);
+  return input_data(sequence_plan_);
+}
+
+BatchInputData BatchState::prepare_distributed_input_data() {
+  CHECK(sequence_groups_.empty() || !sequence_plan_.empty())
+      << "Sequence input requires scheduled sequences";
+  dp_balance_shuffle_seqs();
+  return input_data(sequence_plan_);
+}
+
+ForwardInput BatchState::build_sequence_input(const BatchInputData& data,
+                                              uint32_t num_decoding_tokens,
+                                              uint32_t min_decoding_batch_size,
+                                              const ModelArgs& args,
+                                              int32_t cp_size) {
   ForwardInputBuilder builder(data, &args, cp_size);
   auto input =
       builder.build_forward_input(num_decoding_tokens, min_decoding_batch_size);
@@ -297,14 +306,10 @@ ForwardInput BatchState::prepare_sequence_input(
   return input;
 }
 
-ForwardInput BatchState::prepare_distributed_input(const ModelArgs& args,
-                                                   ThreadPool* thread_pool,
-                                                   int32_t cp_size) {
-  CHECK(sequence_groups_.empty() || !sequence_plan_.empty())
-      << "Sequence input requires scheduled sequences";
-  dp_balance_shuffle_seqs();
-  const auto data = input_data(sequence_plan_);
-  output_handler_.prepare(data);
+ForwardInput BatchState::build_distributed_input(const BatchInputData& data,
+                                                 const ModelArgs& args,
+                                                 ThreadPool* thread_pool,
+                                                 int32_t cp_size) {
   ForwardInputBuilder builder(data, &args, cp_size, thread_pool);
   auto input = builder.build_forward_input(/*num_decoding_tokens=*/0,
                                            /*min_decoding_batch_size=*/0);

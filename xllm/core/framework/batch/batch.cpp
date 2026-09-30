@@ -70,20 +70,24 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                                           uint32_t min_decoding_batch_size,
                                           const ModelArgs& args,
                                           int32_t cp_size) {
-  return state_.prepare_sequence_input(
-      num_decoding_tokens, min_decoding_batch_size, args, cp_size);
+  const auto data = state_.prepare_sequence_input_data();
+  output_handler_.prepare(data);
+  return state_.build_sequence_input(
+      data, num_decoding_tokens, min_decoding_batch_size, args, cp_size);
 }
 
 ForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                                           ThreadPool* thread_pool,
                                           int32_t cp_size) {
-  return state_.prepare_distributed_input(args, thread_pool, cp_size);
+  const auto data = state_.prepare_distributed_input_data();
+  output_handler_.prepare(data);
+  return state_.build_distributed_input(data, args, thread_pool, cp_size);
 }
 
 void Batch::process_sample_output(const RawForwardOutput& output,
                                   bool replace_fake_token) {
   const auto sequences = get_sequences();
-  state_.output_handler().process_sample_output(
+  output_handler_.process_sample_output(
       {sequences, state_.sequence_groups()}, output, replace_fake_token);
 }
 
@@ -91,17 +95,16 @@ void Batch::process_sample_output(const SampleOutput& output,
                                   bool replace_fake_token,
                                   bool force_requested_beam_result_size) {
   const auto sequences = get_sequences();
-  state_.output_handler().process_sample_output(
-      {sequences, state_.sequence_groups()},
-      output,
-      replace_fake_token,
-      force_requested_beam_result_size);
+  output_handler_.process_sample_output({sequences, state_.sequence_groups()},
+                                        output,
+                                        replace_fake_token,
+                                        force_requested_beam_result_size);
 }
 
 void Batch::process_beam_search_output(const RawForwardOutput& output,
                                        bool replace_fake_token) {
   const auto sequences = get_sequences();
-  state_.output_handler().process_beam_search_output(
+  output_handler_.process_beam_search_output(
       {sequences, state_.sequence_groups()}, output, replace_fake_token);
 }
 }  // namespace xllm

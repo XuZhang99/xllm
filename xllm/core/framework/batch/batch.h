@@ -25,6 +25,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "core/framework/batch/batch_output_handler.h"
 #include "core/framework/batch/batch_state.h"
 #include "core/framework/request/request.h"
 
@@ -130,6 +131,7 @@ class Batch final {
 
  private:
   BatchState state_;
+  BatchOutputHandler output_handler_;
 };
 
 }  // namespace xllm

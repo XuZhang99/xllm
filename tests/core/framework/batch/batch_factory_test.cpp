@@ -26,12 +26,17 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/rec_batch_factory.h"
+#include "core/framework/batch/rec_batch_output_handler.h"
 #include "core/framework/batch/sampling_input_builder.h"
 #include "core/framework/block/block_manager_impl.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/rec_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/multimodal/mm_data.h"
+#include "core/framework/multimodal/mm_type.h"
+#include "core/framework/request/onerec_sequence.h"
 #include "core/framework/request/rec_sequence.h"
 #include "core/framework/request/request.h"
 #include "core/framework/request/stopping_checker.h"
@@ -54,11 +59,13 @@ class ScopedConfigValue final {
   T old_value_;
 };
 
-std::shared_ptr<Request> make_request(
-    int32_t rank,
-    RecType rec_type = RecType::kNone,
-    int32_t beam_width = 1,
-    std::vector<int32_t> prompt_tokens = {1, 2, 3}) {
+std::shared_ptr<Request> make_request(int32_t rank,
+                                      RecType rec_type = RecType::kNone,
+                                      int32_t beam_width = 1,
+                                      std::vector<int32_t> prompt_tokens = {1,
+                                                                            2,
+                                                                            3},
+                                      MMData mm_data = {}) {
   RequestSamplingParam sampling;
   sampling.beam_width = beam_width;
   StoppingChecker stopping;
@@ -81,9 +88,18 @@ std::shared_ptr<Request> make_request(
                      /*output_func=*/nullptr,
                      /*outputs_func=*/nullptr);
   state.rec_type = rec_type;
+  state.mm_data = std::move(mm_data);
   auto request = std::make_shared<Request>("request", "", "", std::move(state));
   request->sequences().front()->set_dp_rank(rank);
   return request;
+}
+
+MMData make_decoder_context_data() {
+  MMData mm_data;
+  mm_data.add(MMType::EMBEDDING,
+              OneRecSequence::kDecoderContextEmbeddingName,
+              torch::zeros({2, 4}));
+  return mm_data;
 }
 
 TEST(SamplingInputBuilderTest,
@@ -207,6 +223,144 @@ TEST(BatchFactoryTest, RecOutputsRefreshSamplingTargetsAcrossForwards) {
   EXPECT_EQ(second_sequence->tokens()[4], 43);
   EXPECT_EQ(batch.batch_id(), batch_id);
   EXPECT_EQ(batch.get_allowed_max_tokens(), (std::vector<uint32_t>{2, 3}));
+}
+
+TEST(BatchOutputHandlerTest, DoesNotSampleOneRecDecoderContext) {
+  ScopedConfigValue<bool> prefill_only(
+      RecConfig::get_instance().enable_rec_prefill_only(), true);
+  ScopedConfigValue<int32_t> decode_rounds(
+      RecConfig::get_instance().max_decode_rounds(), 0);
+  auto request = make_request(/*rank=*/0,
+                              RecType::kOneRec,
+                              /*beam_width=*/1,
+                              /*prompt_tokens=*/{1, 2, 3},
+                              make_decoder_context_data());
+  auto* sequence = request->sequences()[0].get();
+  ASSERT_EQ(sequence->num_tokens(), 0u);
+  BatchState state;
+  state.reserve(/*sequence_count=*/1, /*group_count=*/0);
+  state.add(sequence, /*token_budget=*/1);
+  const auto data = state.input_data(state.sequence_plan());
+  BatchOutputHandler handler;
+  handler.prepare(data);
+  RawForwardOutput output;
+  output.outputs.resize(1);
+  output.outputs[0].tokens = {RawToken{.id = 42}};
+  handler.process_sample_output({data.sequences, data.sequence_groups},
+                                output,
+                                /*replace_fake_token=*/false);
+  EXPECT_EQ(sequence->num_generated_tokens(), 0u);
+}
+
+TEST(RecBatchOutputHandlerTest,
+     ContextTargetsKeepMixedOutputOrderAcrossForwards) {
+  ScopedConfigValue<bool> prefill_only(
+      RecConfig::get_instance().enable_rec_prefill_only(), true);
+  ScopedConfigValue<int32_t> decode_rounds(
+      RecConfig::get_instance().max_decode_rounds(), 0);
+  ScopedConfigValue<bool> schedule_overlap(
+      SchedulerConfig::get_instance().enable_schedule_overlap(), false);
+  auto context_request = make_request(/*rank=*/0,
+                                      RecType::kOneRec,
+                                      /*beam_width=*/1,
+                                      /*prompt_tokens=*/{1, 2, 3},
+                                      make_decoder_context_data());
+  auto partial_request = make_request(/*rank=*/0, RecType::kLlmRec);
+  auto bos_request = make_request(/*rank=*/0, RecType::kOneRec);
+  auto* context_sequence = context_request->sequences()[0].get();
+  auto* partial_sequence = partial_request->sequences()[0].get();
+  auto* bos_sequence = bos_request->sequences()[0].get();
+  ASSERT_EQ(context_sequence->num_tokens(), 0u);
+  ASSERT_EQ(bos_sequence->num_tokens(), 1u);
+  BatchState state;
+  state.reserve(/*sequence_count=*/3, /*group_count=*/0);
+  state.add(context_sequence, /*token_budget=*/1);
+  state.add(partial_sequence, /*token_budget=*/1);
+  state.add(bos_sequence, /*token_budget=*/1);
+  const auto data = state.input_data(state.sequence_plan());
+  const BatchOutputData output_data{data.sequences, data.sequence_groups};
+  RecBatchOutputHandler handler(BatchInputType::ONEREC);
+  handler.prepare(data);
+
+  // Input builders advance KV after the output targets have been captured.
+  partial_sequence->kv_state().set_kv_cache_tokens_num(/*num=*/1);
+  bos_sequence->kv_state().set_kv_cache_tokens_num(/*num=*/1);
+  RawForwardOutput raw_output;
+  raw_output.outputs.resize(2);
+  raw_output.outputs[0].tokens = {RawToken{.id = 42}};
+  raw_output.outputs[1].tokens = {RawToken{.id = 51}};
+  handler.process_sample_output(output_data,
+                                raw_output,
+                                /*replace_fake_token=*/false);
+  ASSERT_EQ(context_sequence->num_generated_tokens(), 1u);
+  ASSERT_EQ(bos_sequence->num_generated_tokens(), 1u);
+  EXPECT_EQ(context_sequence->tokens()[0], 42);
+  EXPECT_EQ(bos_sequence->tokens()[1], 51);
+  EXPECT_EQ(partial_sequence->num_generated_tokens(), 0u);
+
+  // The former context-only sequence now owns a regular decode target.
+  handler.prepare(data);
+  context_sequence->kv_state().set_kv_cache_tokens_num(/*num=*/1);
+  partial_sequence->kv_state().set_kv_cache_tokens_num(/*num=*/2);
+  bos_sequence->kv_state().set_kv_cache_tokens_num(/*num=*/2);
+  SampleOutput sample_output;
+  sample_output.next_tokens = torch::tensor({43, 52}, torch::kInt);
+  handler.process_sample_output(output_data,
+                                sample_output,
+                                /*replace_fake_token=*/false,
+                                /*force_requested_beam_result_size=*/false);
+  ASSERT_EQ(context_sequence->num_generated_tokens(), 2u);
+  ASSERT_EQ(bos_sequence->num_generated_tokens(), 2u);
+  EXPECT_EQ(context_sequence->tokens()[1], 43);
+  EXPECT_EQ(bos_sequence->tokens()[2], 52);
+  EXPECT_EQ(partial_sequence->num_generated_tokens(), 0u);
+}
+
+TEST(RecBatchOutputHandlerTest, ContextTargetsRequireLegacyGroupContract) {
+  struct ContractCase {
+    BatchInputType input_type;
+    bool prefill_only;
+    int32_t decode_rounds;
+  };
+  const ContractCase cases[] = {
+      {BatchInputType::ONEREC, false, 0},
+      {BatchInputType::ONEREC_XATTENTION, true, 2},
+      {BatchInputType::SEQUENCE, true, 0},
+  };
+  ScopedConfigValue<bool> schedule_overlap(
+      SchedulerConfig::get_instance().enable_schedule_overlap(), false);
+  for (const auto& contract : cases) {
+    ScopedConfigValue<bool> prefill_only(
+        RecConfig::get_instance().enable_rec_prefill_only(),
+        contract.prefill_only);
+    ScopedConfigValue<int32_t> decode_rounds(
+        RecConfig::get_instance().max_decode_rounds(), contract.decode_rounds);
+    auto context_request = make_request(/*rank=*/0,
+                                        RecType::kOneRec,
+                                        /*beam_width=*/1,
+                                        /*prompt_tokens=*/{1, 2, 3},
+                                        make_decoder_context_data());
+    auto bos_request = make_request(/*rank=*/0, RecType::kOneRec);
+    auto* context_sequence = context_request->sequences()[0].get();
+    auto* bos_sequence = bos_request->sequences()[0].get();
+    BatchState state;
+    state.reserve(/*sequence_count=*/2, /*group_count=*/0);
+    state.add(context_sequence, /*token_budget=*/1);
+    state.add(bos_sequence, /*token_budget=*/1);
+    const auto data = state.input_data(state.sequence_plan());
+    RecBatchOutputHandler handler(contract.input_type);
+    handler.prepare(data);
+    bos_sequence->kv_state().set_kv_cache_tokens_num(/*num=*/1);
+    RawForwardOutput output;
+    output.outputs.resize(1);
+    output.outputs[0].tokens = {RawToken{.id = 61}};
+    handler.process_sample_output({data.sequences, data.sequence_groups},
+                                  output,
+                                  /*replace_fake_token=*/false);
+    EXPECT_EQ(context_sequence->num_generated_tokens(), 0u);
+    ASSERT_EQ(bos_sequence->num_generated_tokens(), 1u);
+    EXPECT_EQ(bos_sequence->tokens()[1], 61);
+  }
 }
 
 TEST(BatchFactoryTest, IndependentFactoriesKeepTheirOwnDpSize) {

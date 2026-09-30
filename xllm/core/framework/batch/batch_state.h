@@ -22,7 +22,6 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/batch_input_data.h"
-#include "core/framework/batch/batch_output_handler.h"
 #include "core/framework/batch/batch_sequence_plan.h"
 #include "core/runtime/forward_params.h"
 #include "core/util/threadpool.h"
@@ -49,7 +48,6 @@ class BatchState final {
   const std::vector<SequencesGroup*>& sequence_groups() const {
     return sequence_groups_;
   }
-  BatchOutputHandler& output_handler() { return output_handler_; }
   void set_swap_block_transfer_infos(std::vector<BlockTransferInfo> infos) {
     swap_block_transfer_infos_ = std::move(infos);
   }
@@ -60,13 +58,19 @@ class BatchState final {
   size_t num_group_sequences() const;
   Sequence* group_sequence(size_t index) const;
   BatchInputData input_data(const BatchSequencePlan& plan);
-  ForwardInput prepare_sequence_input(uint32_t num_decoding_tokens,
-                                      uint32_t min_decoding_batch_size,
-                                      const ModelArgs& args,
-                                      int32_t cp_size);
-  ForwardInput prepare_distributed_input(const ModelArgs& args,
-                                         ThreadPool* thread_pool,
-                                         int32_t cp_size);
+  // Prepare the final sequence view before domain output handlers capture
+  // their targets. Build methods may then advance KV state.
+  BatchInputData prepare_sequence_input_data();
+  BatchInputData prepare_distributed_input_data();
+  ForwardInput build_sequence_input(const BatchInputData& data,
+                                    uint32_t num_decoding_tokens,
+                                    uint32_t min_decoding_batch_size,
+                                    const ModelArgs& args,
+                                    int32_t cp_size);
+  ForwardInput build_distributed_input(const BatchInputData& data,
+                                       const ModelArgs& args,
+                                       ThreadPool* thread_pool,
+                                       int32_t cp_size);
   static std::unordered_map<uint32_t, uint32_t> cal_seq_exchange_index(
       std::vector<uint32_t>& kv_cache_tokens_num);
 
@@ -80,7 +84,6 @@ class BatchState final {
   std::vector<MMData> mm_data_vec_;
   // Keep serialized restore sources alive through worker-result processing.
   std::vector<Block> linear_restore_src_blocks_;
-  BatchOutputHandler output_handler_;
   BatchForwardType batch_forward_type_;
   uint64_t batch_id_ = UNINITIALIZED_BATCH_ID;
 };

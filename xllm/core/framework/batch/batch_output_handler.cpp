@@ -23,12 +23,9 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <utility>
 #include <vector>
 
 #include "core/framework/config/scheduler_config.h"
-#include "core/framework/request/onerec_sequence.h"
-#include "core/framework/request/rec_sequence.h"
 #include "core/runtime/params_utils.h"
 #include "core/util/tensor_helper.h"
 
@@ -118,115 +115,54 @@ std::unordered_set<std::string> fail_json_object_requests(
 
 }  // namespace
 
-void BatchOutputHandler::prepare(const BatchInputData& data,
-                                 bool use_context_embedding_targets) {
-  if (use_context_embedding_targets) {
-    refresh_onerec_prefill_output_targets(data);
-  } else {
-    refresh_output_targets(data);
+void BatchOutputHandler::prepare(const BatchInputData& data) {
+  clear();
+  reserve(data.sequences.size());
+  for (size_t seq_index = 0; seq_index < data.sequences.size(); ++seq_index) {
+    add_sequence_targets(data.sequences[seq_index],
+                         data.allowed_max_tokens[seq_index]);
   }
 }
 
-void BatchOutputHandler::refresh_output_targets(const BatchInputData& data) {
-  output_targets_.clear();
-  if (data.sequences.empty()) {
-    return;
-  }
-
-  for (size_t seq_index = 0; seq_index < data.sequences.size(); ++seq_index) {
-    auto* sequence = data.sequences[seq_index];
-    if (sequence == nullptr) {
-      continue;
-    }
-
-    const auto token_ids = sequence->tokens();
-    const uint32_t n_tokens = token_ids.size();
-    const uint32_t n_kv_cache_tokens =
-        sequence->kv_state().kv_cache_tokens_num();
-    if (n_tokens <= n_kv_cache_tokens) {
-      continue;
-    }
-
-    CHECK(data.allowed_max_tokens[seq_index] > 0);
-    const uint32_t q_seq_len = std::min(n_tokens - n_kv_cache_tokens,
-                                        data.allowed_max_tokens[seq_index]);
-    const uint32_t seq_len = q_seq_len + n_kv_cache_tokens;
-    const auto& sample_slots = sequence->sample_slots();
-
-    if (sample_slots.empty()) {
-      if (seq_len == n_tokens) {
-        output_targets_.push_back({sequence, /*sample_id=*/0, false});
-      }
-      continue;
-    }
-
-    for (const auto& sample_slot : sample_slots) {
-      const uint32_t sample_source_position =
-          get_sample_source_position(sample_slot);
-      if (sample_source_position < n_kv_cache_tokens ||
-          sample_source_position >= seq_len) {
-        continue;
-      }
-      output_targets_.push_back(
-          {sequence, sample_slot.sample_id, /*from_sample_slot=*/true});
-    }
-  }
+void BatchOutputHandler::add_sequence_target(Sequence* sequence) {
+  CHECK(sequence != nullptr);
+  output_targets_.emplace_back(OutputTarget{sequence, /*sample_id=*/0, false});
 }
 
-void BatchOutputHandler::refresh_onerec_prefill_output_targets(
-    const BatchInputData& data) {
-  output_targets_.clear();
-  if (data.sequences.empty()) {
+void BatchOutputHandler::add_sequence_targets(Sequence* sequence,
+                                              uint32_t token_budget) {
+  if (sequence == nullptr) {
     return;
   }
 
-  for (size_t seq_index = 0; seq_index < data.sequences.size(); ++seq_index) {
-    auto* sequence = data.sequences[seq_index];
-    if (sequence == nullptr) {
+  const uint32_t n_tokens = static_cast<uint32_t>(sequence->tokens().size());
+  const uint32_t n_kv_cache_tokens = sequence->kv_state().kv_cache_tokens_num();
+  if (n_tokens <= n_kv_cache_tokens) {
+    return;
+  }
+
+  CHECK_GT(token_budget, 0);
+  const uint32_t q_seq_len =
+      std::min(n_tokens - n_kv_cache_tokens, token_budget);
+  const uint32_t seq_len = q_seq_len + n_kv_cache_tokens;
+  const auto& sample_slots = sequence->sample_slots();
+
+  if (sample_slots.empty()) {
+    if (seq_len == n_tokens) {
+      add_sequence_target(sequence);
+    }
+    return;
+  }
+
+  for (const auto& sample_slot : sample_slots) {
+    const uint32_t sample_source_position =
+        get_sample_source_position(sample_slot);
+    if (sample_source_position < n_kv_cache_tokens ||
+        sample_source_position >= seq_len) {
       continue;
     }
-
-    const auto token_ids = sequence->tokens();
-    const uint32_t n_tokens = token_ids.size();
-    const uint32_t n_kv_cache_tokens =
-        sequence->kv_state().kv_cache_tokens_num();
-    // The prefill-only contract is not restricted to OneRec deployments; only
-    // OneRec sequences carry decoder context embeddings.
-    const auto* onerec_sequence = dynamic_cast<const OneRecSequence*>(sequence);
-    const bool needs_context_target =
-        onerec_sequence != nullptr && n_tokens == 0 && n_kv_cache_tokens == 0 &&
-        onerec_sequence->num_decoder_embeddings() > 0;
-    if (needs_context_target) {
-      output_targets_.push_back({sequence, /*sample_id=*/0, false});
-      continue;
-    }
-    if (n_tokens <= n_kv_cache_tokens) {
-      continue;
-    }
-
-    CHECK(data.allowed_max_tokens[seq_index] > 0);
-    const uint32_t q_seq_len = std::min(n_tokens - n_kv_cache_tokens,
-                                        data.allowed_max_tokens[seq_index]);
-    const uint32_t seq_len = q_seq_len + n_kv_cache_tokens;
-    const auto& sample_slots = sequence->sample_slots();
-
-    if (sample_slots.empty()) {
-      if (seq_len == n_tokens) {
-        output_targets_.push_back({sequence, /*sample_id=*/0, false});
-      }
-      continue;
-    }
-
-    for (const auto& sample_slot : sample_slots) {
-      const uint32_t sample_source_position =
-          get_sample_source_position(sample_slot);
-      if (sample_source_position < n_kv_cache_tokens ||
-          sample_source_position >= seq_len) {
-        continue;
-      }
-      output_targets_.push_back(
-          {sequence, sample_slot.sample_id, /*from_sample_slot=*/true});
-    }
+    output_targets_.emplace_back(OutputTarget{
+        sequence, sample_slot.sample_id, /*from_sample_slot=*/true});
   }
 }
 
@@ -308,78 +244,6 @@ void BatchOutputHandler::process_sample_output(
   if (!::xllm::SchedulerConfig::get_instance().enable_schedule_overlap() ||
       replace_fake_token) {
     process_beam_search(data);
-  }
-}
-
-void BatchOutputHandler::process_beam_sequence_group(
-    const BatchOutputData& data,
-    const ForwardOutput& output) {
-  if (!output.beam_sequence_group.defined() ||
-      output.beam_sequence_group.numel() == 0) {
-    return;
-  }
-
-  // Get sequences from either data.sequences or data.sequence_groups
-  const auto& sequences = data.sequences;
-  if (sequences.empty()) {
-    return;
-  }
-
-  const int32_t beam_width = sequences[0]->sampling_param()->beam_width;
-  if (beam_width <= 1) {
-    return;
-  }
-  const int32_t result_width =
-      output.beam_sequence_group.defined()
-          ? static_cast<int32_t>(output.beam_sequence_group.size(1))
-          : beam_width;
-  int32_t total_rounds =
-      static_cast<int32_t>(output.beam_sequence_group.size(2));
-  size_t num_groups = data.sequence_groups.size();
-  if (num_groups == 0) {
-    // Fallback: treat data.sequences as single group
-    num_groups = sequences.size();
-  }
-
-  // Tensor should already be on CPU (transferred in get_model_output)
-  auto seq_group_accessor = output.beam_sequence_group.accessor<int32_t, 3>();
-
-  // out_logprobs from beam_search_output, shape: [batch * beam_width]
-  // Tensor should already be on CPU (transferred in get_model_output)
-  bool has_logprobs = output.beam_search_output.out_logprobs.defined() &&
-                      output.beam_search_output.out_logprobs.numel() > 0;
-
-  for (size_t g = 0; g < num_groups; ++g) {
-    std::vector<std::vector<int32_t>> group_flat2d;
-    std::vector<float> last_logprobs;
-    group_flat2d.reserve(static_cast<size_t>(result_width));
-    last_logprobs.reserve(static_cast<size_t>(result_width));
-
-    for (int32_t b = 0; b < result_width; ++b) {
-      std::vector<int32_t> row_tokens;
-      row_tokens.reserve(static_cast<size_t>(total_rounds));
-      for (int32_t c = 0; c < total_rounds; ++c) {
-        // Access [g][b][c]
-        row_tokens.push_back(seq_group_accessor[g][b][c]);
-      }
-      group_flat2d.emplace_back(std::move(row_tokens));
-      if (has_logprobs) {
-        // logprobs is flattened [batch * result_width] for multi-round widened
-        // final output.
-        int32_t logprob_idx = static_cast<int32_t>(g) * result_width + b;
-        last_logprobs.push_back(
-            output.beam_search_output.out_logprobs[logprob_idx].item<float>());
-      }
-    }
-    // Access sequence from data.sequence_groups if available
-    Sequence* seq = data.sequence_groups.empty()
-                        ? sequences[g]
-                        : data.sequence_groups[g]->sequences()[0].get();
-    RecSequence::from(*seq).set_beam_search_result(
-        RecBeamSearchResult(result_width,
-                            total_rounds,
-                            std::move(group_flat2d),
-                            std::move(last_logprobs)));
   }
 }
 

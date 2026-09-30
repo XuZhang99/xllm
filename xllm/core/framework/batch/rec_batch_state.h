@@ -21,6 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/batch_state.h"
+#include "core/framework/batch/rec_batch_output_handler.h"
 
 namespace xllm {
 
@@ -90,6 +91,7 @@ class RecBatchState final {
  private:
   BatchState sequence_state_;
   BatchInputType input_type_;
+  RecBatchOutputHandler output_handler_;
 };
 
 }  // namespace xllm

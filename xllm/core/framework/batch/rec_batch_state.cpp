@@ -20,12 +20,11 @@ limitations under the License.
 #include <limits>
 
 #include "core/framework/batch/rec_forward_input_builder.h"
-#include "core/util/rec_model_utils.h"
 
 namespace xllm {
 
 RecBatchState::RecBatchState(BatchInputType input_type)
-    : input_type_(input_type) {
+    : input_type_(input_type), output_handler_(input_type) {
   switch (input_type_) {
     case BatchInputType::SEQUENCE:
     case BatchInputType::ONEREC:
@@ -75,8 +74,10 @@ ForwardInput RecBatchState::prepare_forward_input(
     const ModelArgs& args,
     int32_t cp_size) {
   if (input_type_ == BatchInputType::SEQUENCE) {
-    return sequence_state_.prepare_sequence_input(
-        num_decoding_tokens, min_decoding_batch_size, args, cp_size);
+    const auto data = sequence_state_.prepare_sequence_input_data();
+    output_handler_.prepare(data);
+    return sequence_state_.build_sequence_input(
+        data, num_decoding_tokens, min_decoding_batch_size, args, cp_size);
   }
   return prepare_rec_forward_input(num_decoding_tokens,
                                    min_decoding_batch_size,
@@ -89,7 +90,10 @@ ForwardInput RecBatchState::prepare_forward_input(const ModelArgs& args,
                                                   int32_t cp_size) {
   CHECK(input_type_ == BatchInputType::SEQUENCE)
       << "Distributed input transport requires a sequence batch";
-  return sequence_state_.prepare_distributed_input(args, thread_pool, cp_size);
+  const auto data = sequence_state_.prepare_distributed_input_data();
+  output_handler_.prepare(data);
+  return sequence_state_.build_distributed_input(
+      data, args, thread_pool, cp_size);
 }
 
 ForwardInput RecBatchState::prepare_rec_forward_input(
@@ -99,7 +103,7 @@ ForwardInput RecBatchState::prepare_rec_forward_input(
     MPMCThreadPool* thread_pool) {
   CHECK(input_type_ != BatchInputType::SEQUENCE)
       << "Rec input requires an explicit Rec batch input type";
-  sequence_state_.output_handler().clear();
+  output_handler_.clear();
   if (sequence_state_.empty()) {
     return {};
   }
@@ -118,10 +122,7 @@ ForwardInput RecBatchState::prepare_rec_forward_input(
         << "Sequence input requires scheduled sequences";
   }
   auto data = sequence_state_.input_data(*plan);
-  if (uses_group_input()) {
-    sequence_state_.output_handler().prepare(
-        data, use_legacy_onerec_prefill_only_contract());
-  }
+  output_handler_.prepare(data);
   auto builder =
       RecForwardInputBuilder::create(input_type_, data, &args, thread_pool);
   return builder->build_rec_forward_input(num_decoding_tokens,
@@ -131,7 +132,7 @@ ForwardInput RecBatchState::prepare_rec_forward_input(
 void RecBatchState::process_sample_output(const RawForwardOutput& output,
                                           bool replace_fake_token) {
   const auto sequences = get_sequences();
-  sequence_state_.output_handler().process_sample_output(
+  output_handler_.process_sample_output(
       {sequences, sequence_state_.sequence_groups()},
       output,
       replace_fake_token);
@@ -142,7 +143,7 @@ void RecBatchState::process_sample_output(
     bool replace_fake_token,
     bool force_requested_beam_result_size) {
   const auto sequences = get_sequences();
-  sequence_state_.output_handler().process_sample_output(
+  output_handler_.process_sample_output(
       {sequences, sequence_state_.sequence_groups()},
       output,
       replace_fake_token,
@@ -152,7 +153,7 @@ void RecBatchState::process_sample_output(
 void RecBatchState::process_beam_search_output(const RawForwardOutput& output,
                                                bool replace_fake_token) {
   const auto sequences = get_sequences();
-  sequence_state_.output_handler().process_beam_search_output(
+  output_handler_.process_beam_search_output(
       {sequences, sequence_state_.sequence_groups()},
       output,
       replace_fake_token);
@@ -160,7 +161,7 @@ void RecBatchState::process_beam_search_output(const RawForwardOutput& output,
 
 void RecBatchState::process_beam_sequence_group(const ForwardOutput& output) {
   const auto sequences = get_sequences();
-  sequence_state_.output_handler().process_beam_sequence_group(
+  output_handler_.process_beam_sequence_group(
       {sequences, sequence_state_.sequence_groups()}, output);
 }
 

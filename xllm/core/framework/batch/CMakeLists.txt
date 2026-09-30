@@ -16,6 +16,7 @@ cc_library(
     rec_batch_state.h
     rec_batch_group.h
     batch_output_handler.h
+    rec_batch_output_handler.h
     batch_sequence_plan.h
     batch_builder.h
     rec_batch_builder.h
@@ -38,6 +39,7 @@ cc_library(
     rec_batch_state.cpp
     rec_batch_group.cpp
     batch_output_handler.cpp
+    rec_batch_output_handler.cpp
     batch_sequence_plan.cpp
     batch_builder.cpp
     rec_batch_builder.cpp
