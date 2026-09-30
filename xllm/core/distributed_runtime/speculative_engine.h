@@ -17,7 +17,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "engine.h"
-#include "framework/batch/batch.h"
+#include "framework/batch/batch_group.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/model/model_args.h"
@@ -39,7 +39,7 @@ class SpeculativeEngineBase : public Engine {
   bool init(MasterStatus master_status) override;
 
   // step the engine forward
-  ForwardOutput step(std::vector<Batch>& batch) override;
+  ForwardOutput step(BatchGroup& batch) override;
 
   const Tokenizer* tokenizer() const override { return engine_->tokenizer(); }
 
@@ -60,7 +60,7 @@ class SpeculativeEngineBase : public Engine {
     return engine_->tokenizer_args();
   }
 
-  void update_last_step_result(std::vector<Batch>& batch) override;
+  void update_last_step_result(BatchGroup& batch) override;
 
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const override;

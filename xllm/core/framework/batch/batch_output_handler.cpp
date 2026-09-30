@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/framework/batch/batch_output_processor.h"
+#include "core/framework/batch/batch_output_handler.h"
 
 #include <glog/logging.h>
 #include <torch/torch.h>
@@ -118,8 +118,8 @@ std::unordered_set<std::string> fail_json_object_requests(
 
 }  // namespace
 
-void BatchOutputProcessor::prepare(const BatchInputData& data,
-                                   bool use_context_embedding_targets) {
+void BatchOutputHandler::prepare(const BatchInputData& data,
+                                 bool use_context_embedding_targets) {
   if (use_context_embedding_targets) {
     refresh_onerec_prefill_output_targets(data);
   } else {
@@ -127,7 +127,7 @@ void BatchOutputProcessor::prepare(const BatchInputData& data,
   }
 }
 
-void BatchOutputProcessor::refresh_output_targets(const BatchInputData& data) {
+void BatchOutputHandler::refresh_output_targets(const BatchInputData& data) {
   output_targets_.clear();
   if (data.sequences.empty()) {
     return;
@@ -173,7 +173,7 @@ void BatchOutputProcessor::refresh_output_targets(const BatchInputData& data) {
   }
 }
 
-void BatchOutputProcessor::refresh_onerec_prefill_output_targets(
+void BatchOutputHandler::refresh_onerec_prefill_output_targets(
     const BatchInputData& data) {
   output_targets_.clear();
   if (data.sequences.empty()) {
@@ -230,7 +230,7 @@ void BatchOutputProcessor::refresh_onerec_prefill_output_targets(
   }
 }
 
-void BatchOutputProcessor::process_sample_output(
+void BatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
     const RawForwardOutput& raw_output,
     bool replace_fake_token) {
@@ -311,7 +311,7 @@ void BatchOutputProcessor::process_sample_output(
   }
 }
 
-void BatchOutputProcessor::process_beam_sequence_group(
+void BatchOutputHandler::process_beam_sequence_group(
     const BatchOutputData& data,
     const ForwardOutput& output) {
   if (!output.beam_sequence_group.defined() ||
@@ -383,7 +383,7 @@ void BatchOutputProcessor::process_beam_sequence_group(
   }
 }
 
-void BatchOutputProcessor::process_sample_output(
+void BatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
     const SampleOutput& sample_output,
     bool replace_fake_token,
@@ -527,8 +527,8 @@ void BatchOutputProcessor::process_sample_output(
   }
 }
 
-bool BatchOutputProcessor::update_sequence_state(Sequence* seq,
-                                                 bool replace_fake_token) {
+bool BatchOutputHandler::update_sequence_state(Sequence* seq,
+                                               bool replace_fake_token) {
   // In chunked prefill case, if enable_schedule_overlap, we need the
   // prefill-or-not state of last stage, otherwise, we need the state
   // of current stage.
@@ -549,10 +549,10 @@ bool BatchOutputProcessor::update_sequence_state(Sequence* seq,
   return false;
 }
 
-void BatchOutputProcessor::append_token_for_sequence(Sequence* seq,
-                                                     const Token& token,
-                                                     int32_t token_idx,
-                                                     bool replace_fake_token) {
+void BatchOutputHandler::append_token_for_sequence(Sequence* seq,
+                                                   const Token& token,
+                                                   int32_t token_idx,
+                                                   bool replace_fake_token) {
   // always append a token, maybe true or fake token
   if (!replace_fake_token) {
     seq->append_token(token);
@@ -579,15 +579,14 @@ void BatchOutputProcessor::append_token_for_sequence(Sequence* seq,
   }
 }
 
-void BatchOutputProcessor::process_beam_search(
-    const BatchOutputData& data,
-    bool force_requested_result_size) {
+void BatchOutputHandler::process_beam_search(const BatchOutputData& data,
+                                             bool force_requested_result_size) {
   for (auto* sequence_group : data.sequence_groups) {
     sequence_group->process_beam_search(force_requested_result_size);
   }
 }
 
-void BatchOutputProcessor::process_beam_search_output(
+void BatchOutputHandler::process_beam_search_output(
     const BatchOutputData& data,
     const RawForwardOutput& raw_output,
     bool replace_fake_token) {

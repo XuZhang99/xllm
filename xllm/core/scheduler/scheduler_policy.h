@@ -23,7 +23,6 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "framework/batch/batch.h"
 #include "framework/block/kv_cache_manager.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"

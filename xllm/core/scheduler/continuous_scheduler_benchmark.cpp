@@ -106,8 +106,8 @@ class FakeEngine final : public Engine {
         std::make_unique<BlockManagerPool>(options, /*dp_size=*/1);
   }
 
-  ForwardOutput step(std::vector<Batch>& /*batch*/) override { return {}; }
-  void update_last_step_result(std::vector<Batch>& /*batch*/) override {}
+  ForwardOutput step(BatchGroup& /*batch*/) override { return {}; }
+  void update_last_step_result(BatchGroup& /*batch*/) override {}
   const Tokenizer* tokenizer() const override { return &fake_tokenizer_; }
   BlockManagerPool* block_manager_pool() const override {
     return block_manager_pool_.get();
@@ -130,7 +130,7 @@ class BenchContinuousScheduler final : public ContinuousScheduler {
   BenchContinuousScheduler(Engine* engine, const Options& options)
       : ContinuousScheduler(engine, options) {}
 
-  std::vector<Batch> prepare_batch_test() { return prepare_batch(); }
+  BatchGroup prepare_batch_test() { return prepare_batch(); }
 
   void process_batch_output_test(bool enable_schedule_overlap) {
     process_batch_output(enable_schedule_overlap);
@@ -257,7 +257,7 @@ void append_one_token(const std::vector<std::shared_ptr<Request>>& requests) {
 // collect_finished step frees their blocks and dispatches the completion
 // callbacks, which are then awaited so the next iteration starts clean.
 void retire_finished(BenchContinuousScheduler& scheduler) {
-  std::vector<Batch> batches = scheduler.prepare_batch_test();
+  BatchGroup batches = scheduler.prepare_batch_test();
   CHECK(batches.empty() || batches[0].empty())
       << "unfinished requests leaked into the next iteration";
   scheduler.wait_for_responses();
@@ -296,8 +296,8 @@ void BM_Scheduler_PrepareBatch_Prefill(benchmark::State& state) {
     add_requests(scheduler, requests);
     state.ResumeTiming();
 
-    std::vector<Batch> batches = scheduler.prepare_batch_test();
-    do_not_optimize(batches.data());
+    BatchGroup batches = scheduler.prepare_batch_test();
+    do_not_optimize(&batches);
 
     state.PauseTiming();
     CHECK_EQ(batches[0].size(), num_requests) << "prefill batch is incomplete";
@@ -322,8 +322,8 @@ void BM_Scheduler_PrepareBatch_Decode(benchmark::State& state) {
     append_one_token(requests);            // first token sampled
     state.ResumeTiming();
 
-    std::vector<Batch> batches = scheduler.prepare_batch_test();
-    do_not_optimize(batches.data());
+    BatchGroup batches = scheduler.prepare_batch_test();
+    do_not_optimize(&batches);
 
     state.PauseTiming();
     CHECK_EQ(batches[0].size(), num_requests) << "decode batch is incomplete";
@@ -391,8 +391,8 @@ void BM_Scheduler_DecodeWindow(benchmark::State& state) {
 
       for (int32_t step = 0; step < kDecodeSteps; ++step) {
         state.ResumeTiming();
-        std::vector<Batch> batches = scheduler.prepare_batch_test();
-        do_not_optimize(batches.data());
+        BatchGroup batches = scheduler.prepare_batch_test();
+        do_not_optimize(&batches);
         state.PauseTiming();
 
         CHECK_EQ(batches.size(), 1u);
@@ -437,8 +437,8 @@ void BM_Scheduler_CollectFinished(benchmark::State& state) {
       append_one_token(requests);
       state.ResumeTiming();
 
-      std::vector<Batch> batches = scheduler.prepare_batch_test();
-      do_not_optimize(batches.data());
+      BatchGroup batches = scheduler.prepare_batch_test();
+      do_not_optimize(&batches);
 
       state.PauseTiming();
       CHECK_EQ(batches.size(), 1u);

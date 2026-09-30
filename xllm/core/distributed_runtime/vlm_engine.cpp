@@ -383,7 +383,7 @@ bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   return true;
 }
 
-ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
+ForwardOutput VLMEngine::step(BatchGroup& batch) {
   if (worker_clients_.empty()) {
     // empty worker, return
     return {};
@@ -449,7 +449,7 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
   return {};
 }
 
-void VLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
+void VLMEngine::update_last_step_result(BatchGroup& last_batch) {
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
   std::vector<RawForwardOutput> raw_forward_outputs;
@@ -512,7 +512,7 @@ std::vector<int64_t> VLMEngine::get_active_activation_memory() const {
   return active_activation_memories;
 }
 
-std::vector<ForwardInput> VLMEngine::prepare_inputs(std::vector<Batch>& batch) {
+std::vector<ForwardInput> VLMEngine::prepare_inputs(BatchGroup& batch) {
   std::vector<ForwardInput> batched_inputs;
   batched_inputs.reserve(dp_size_);
   // some dp related variables

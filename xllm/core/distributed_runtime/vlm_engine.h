@@ -23,7 +23,7 @@ limitations under the License.
 #include "common/macros.h"
 #include "core/distributed_runtime/dist_manager.h"
 #include "engine.h"
-#include "framework/batch/batch.h"
+#include "framework/batch/batch_group.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
@@ -42,13 +42,13 @@ class VLMEngine : public Engine {
 
   virtual ~VLMEngine() = default;
 
-  ForwardOutput step(std::vector<Batch>& batch) override;
+  ForwardOutput step(BatchGroup& batch) override;
 
   const runtime::Options& options() const { return options_; }
 
   bool init(MasterStatus master_status) override;
 
-  void update_last_step_result(std::vector<Batch>& batch) override;
+  void update_last_step_result(BatchGroup& batch) override;
 
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const override;
@@ -59,7 +59,7 @@ class VLMEngine : public Engine {
   bool init_model(MasterStatus master_status);
   KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);
-  std::vector<ForwardInput> prepare_inputs(std::vector<Batch>& batch);
+  std::vector<ForwardInput> prepare_inputs(BatchGroup& batch);
   void setup_workers(const runtime::Options& options);
   void process_group_test();
 

@@ -289,7 +289,7 @@ ForwardInput BatchState::prepare_sequence_input(
       << "Sequence input requires scheduled sequences; group-only input "
          "requires an explicit OneRec batch input type";
   const auto data = input_data(sequence_plan_);
-  output_processor_.prepare(data);
+  output_handler_.prepare(data);
   BatchInputBuilder builder(data, &args, cp_size);
   auto input =
       builder.build_forward_input(num_decoding_tokens, min_decoding_batch_size);
@@ -304,7 +304,7 @@ ForwardInput BatchState::prepare_distributed_input(const ModelArgs& args,
       << "Sequence input requires scheduled sequences";
   dp_balance_shuffle_seqs();
   const auto data = input_data(sequence_plan_);
-  output_processor_.prepare(data);
+  output_handler_.prepare(data);
   BatchInputBuilder builder(data, &args, cp_size, thread_pool);
   auto input = builder.build_forward_input(/*num_decoding_tokens=*/0,
                                            /*min_decoding_batch_size=*/0);

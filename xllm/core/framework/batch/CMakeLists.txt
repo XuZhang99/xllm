@@ -10,14 +10,14 @@ cc_library(
     dit_batch_input_builder.h
     batch_input_data.h
     batch.h
+    batch_group.h
     batch_state.h
     sequence_batch.h
     rec_batch.h
-    batch_output_processor.h
+    batch_output_handler.h
     batch_sequence_plan.h
-    batch_assembly_plan.h
-    sequence_batch_assembler.h
-    rec_batch_assembler.h
+    sequence_batch_builder.h
+    rec_batch_builder.h
     sequence_batch_factory.h
     rec_batch_factory.h
     batch_input_builder.h
@@ -31,14 +31,14 @@ cc_library(
     dit_batch_factory.cpp
     dit_batch_input_builder.cpp
     batch.cpp
+    batch_group.cpp
     batch_state.cpp
     sequence_batch.cpp
     rec_batch.cpp
-    batch_output_processor.cpp
+    batch_output_handler.cpp
     batch_sequence_plan.cpp
-    batch_assembly_plan.cpp
-    sequence_batch_assembler.cpp
-    rec_batch_assembler.cpp
+    sequence_batch_builder.cpp
+    rec_batch_builder.cpp
     sequence_batch_factory.cpp
     rec_batch_factory.cpp
     batch_input_builder.cpp

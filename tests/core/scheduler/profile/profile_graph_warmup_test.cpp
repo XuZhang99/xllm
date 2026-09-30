@@ -21,6 +21,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "core/distributed_runtime/engine.h"
 #include "core/framework/block/block_manager_pool.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/model/mtp_utils.h"
@@ -99,7 +100,7 @@ class RecordingProfileEngine final : public Engine {
         .hidden_size(8);
   }
 
-  ForwardOutput step(std::vector<Batch>& batches) override {
+  ForwardOutput step(BatchGroup& batches) override {
     EXPECT_EQ(pending_steps_, 0);
     int32_t sequence_count = 0;
     for (Batch& batch : batches) {
@@ -114,7 +115,7 @@ class RecordingProfileEngine final : public Engine {
     return ForwardOutput();
   }
 
-  void update_last_step_result(std::vector<Batch>& batches) override {
+  void update_last_step_result(BatchGroup& batches) override {
     (void)batches;
     EXPECT_EQ(pending_steps_, 1);
     EXPECT_GT(block_manager_->num_used_blocks().front(), 0);

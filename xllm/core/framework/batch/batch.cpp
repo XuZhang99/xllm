@@ -20,10 +20,19 @@ limitations under the License.
 
 namespace xllm {
 
-Batch::Batch(BatchInputType input_type) {
-  if (input_type != BatchInputType::SEQUENCE) {
-    batch_.emplace<RecBatch>(input_type);
+Batch::Batch(BatchInputType input_type)
+    : Batch(input_type == BatchInputType::SEQUENCE ? BatchDomain::SEQUENCE
+                                                   : BatchDomain::REC,
+            input_type) {}
+
+Batch::Batch(BatchDomain domain, BatchInputType input_type) {
+  if (domain == BatchDomain::SEQUENCE) {
+    CHECK(input_type == BatchInputType::SEQUENCE)
+        << "Sequence batches require sequence input";
+    batch_.emplace<SequenceBatch>();
+    return;
   }
+  batch_.emplace<RecBatch>(input_type);
 }
 
 Batch::Batch(Sequence* sequence) { add(sequence); }
@@ -126,7 +135,7 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
 void Batch::process_sample_output(const RawForwardOutput& output,
                                   bool replace_fake_token) {
   const auto sequences = get_sequences();
-  state().output_processor().process_sample_output(
+  state().output_handler().process_sample_output(
       {sequences, state().sequence_groups()}, output, replace_fake_token);
 }
 
@@ -134,7 +143,7 @@ void Batch::process_sample_output(const SampleOutput& output,
                                   bool replace_fake_token,
                                   bool force_requested_beam_result_size) {
   const auto sequences = get_sequences();
-  state().output_processor().process_sample_output(
+  state().output_handler().process_sample_output(
       {sequences, state().sequence_groups()},
       output,
       replace_fake_token,
@@ -143,14 +152,14 @@ void Batch::process_sample_output(const SampleOutput& output,
 
 void Batch::process_beam_sequence_group(const ForwardOutput& output) {
   const auto sequences = get_sequences();
-  state().output_processor().process_beam_sequence_group(
+  state().output_handler().process_beam_sequence_group(
       {sequences, state().sequence_groups()}, output);
 }
 
 void Batch::process_beam_search_output(const RawForwardOutput& output,
                                        bool replace_fake_token) {
   const auto sequences = get_sequences();
-  state().output_processor().process_beam_search_output(
+  state().output_handler().process_beam_search_output(
       {sequences, state().sequence_groups()}, output, replace_fake_token);
 }
 

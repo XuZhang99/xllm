@@ -86,8 +86,8 @@ class FakeEngine : public Engine {
     fake_block_manager_ =
         std::make_unique<ControllablePrefetchBlockManagerPool>(opt);
   }
-  ForwardOutput step(std::vector<Batch>& batch) { return {}; }
-  void update_last_step_result(std::vector<Batch>& batch) { NOT_IMPLEMENTED(); }
+  ForwardOutput step(BatchGroup& batch) { return {}; }
+  void update_last_step_result(BatchGroup& batch) { NOT_IMPLEMENTED(); }
   const Tokenizer* tokenizer() const { return fake_tokenizer_.get(); }
   BlockManagerPool* block_manager_pool() const {
     return fake_block_manager_.get();
@@ -118,11 +118,11 @@ class FakeEngine : public Engine {
 class PipelinePhaseEngine final : public FakeEngine {
  public:
   PipelinePhaseEngine() : FakeEngine(/*num_blocks=*/128, /*block_size=*/4) {}
-  ForwardOutput step(std::vector<Batch>& /*batch*/) override {
+  ForwardOutput step(BatchGroup& /*batch*/) override {
     calls.emplace_back("step");
     return {};
   }
-  void update_last_step_result(std::vector<Batch>& /*batch*/) override {
+  void update_last_step_result(BatchGroup& /*batch*/) override {
     calls.emplace_back("consume");
   }
   std::vector<std::string> calls;
@@ -133,7 +133,7 @@ class TestableContinuousScheduler final : public ContinuousScheduler {
   TestableContinuousScheduler(Engine* engine, const Options& options)
       : ContinuousScheduler(engine, options) {}
 
-  std::vector<Batch> prepare_batch_test() { return prepare_batch(); }
+  BatchGroup prepare_batch_test() { return prepare_batch(); }
 
   void process_batch_output_test(bool enable_schedule_overlap) {
     process_batch_output(enable_schedule_overlap);
@@ -164,7 +164,8 @@ class TestableContinuousScheduler final : public ContinuousScheduler {
 
   void wait_for_responses() { response_processor_->wait_completion(); }
   void seed_pending_batch(Sequence* sequence) {
-    last_batch_ = {Batch(sequence)};
+    last_batch_ = BatchGroup(/*dp_size=*/1);
+    last_batch_.front().add(sequence);
     is_first_step_ = false;
   }
 };
@@ -430,7 +431,7 @@ TEST(ContinuousSchedulerTest,
 
     for (int32_t round = 0; round < 3; ++round) {
       SCOPED_TRACE(round);
-      std::vector<Batch> batches = scheduler.prepare_batch_test();
+      BatchGroup batches = scheduler.prepare_batch_test();
       ASSERT_EQ(batches.size(), 1u);
       const size_t expected_size = round == 2 ? 3u : 7u;
       ASSERT_EQ(batches.front().size(), expected_size);
@@ -465,7 +466,7 @@ TEST(ContinuousSchedulerTest,
         requests[1]->set_cancel();
       }
     }
-    std::vector<Batch> batches = scheduler.prepare_batch_test();
+    BatchGroup batches = scheduler.prepare_batch_test();
     ASSERT_EQ(batches.size(), 1u);
     EXPECT_TRUE(batches.front().empty());
     scheduler.wait_for_responses();
@@ -516,7 +517,7 @@ TEST(ContinuousSchedulerTest, EmptyOverlapOutputPreservesLatencyClock) {
                                             /*max_context_len=*/32,
                                             /*enable_schedule_overlap=*/true);
     ASSERT_TRUE(scheduler.add_request(request));
-    std::vector<Batch> batches = scheduler.prepare_batch_test();
+    BatchGroup batches = scheduler.prepare_batch_test();
     ASSERT_EQ(batches.size(), 1u);
     ASSERT_EQ(batches.front().size(), 1u);
     Sequence* sequence = request->sequences().front().get();
@@ -601,7 +602,7 @@ TEST(ContinuousSchedulerTest, PrefetchCompletesBeforeSchedulerQueueAdmission) {
   EXPECT_EQ(scheduler->scheduler_queue_size(), 0u);
   EXPECT_EQ(scheduler->get_waiting_requests_num(), 1u);
 
-  std::vector<Batch> batches = scheduler->prepare_batch_test();
+  BatchGroup batches = scheduler->prepare_batch_test();
   ASSERT_EQ(batches.size(), 1u);
   EXPECT_TRUE(batches.front().empty());
   EXPECT_EQ(scheduler->scheduler_queue_size(), 0u);
@@ -638,7 +639,7 @@ TEST(ContinuousSchedulerTest,
   ASSERT_EQ(scheduler->num_prefetch_pending_requests(), 1u);
   request->set_cancel();
 
-  std::vector<Batch> batches = scheduler->prepare_batch_test();
+  BatchGroup batches = scheduler->prepare_batch_test();
   ASSERT_EQ(batches.size(), 1u);
   EXPECT_TRUE(batches.front().empty());
   EXPECT_EQ(scheduler->num_prefetch_pending_requests(), 1u);
@@ -865,7 +866,7 @@ TEST(ContinuousSchedulerTest,
   ASSERT_TRUE(scheduler->add_request(scheduled_request));
   ASSERT_TRUE(scheduler->add_request(deferred_request));
 
-  std::vector<Batch> batches = scheduler->prepare_batch_test();
+  BatchGroup batches = scheduler->prepare_batch_test();
   ASSERT_EQ(batches.size(), 1u);
   ASSERT_EQ(batches.front().size(), 1u);
   EXPECT_EQ(batches.front()[0], scheduled_request->sequences()[0].get());
@@ -985,7 +986,7 @@ TEST(ContinuousSchedulerTest, RejectedStreamCancelsAtSchedulingBoundary) {
   make_request_decode_ready(request);
   scheduler->add_request(request);
 
-  std::vector<Batch> batch = scheduler->prepare_batch_test();
+  BatchGroup batch = scheduler->prepare_batch_test();
   ASSERT_EQ(batch.size(), 1u);
   ASSERT_EQ(batch[0].size(), 1u);
   EXPECT_LT(util::max(block_manager_pool->num_free_blocks()),
@@ -1030,7 +1031,7 @@ TEST(ContinuousSchedulerTest, FailedStreamReturnsStatusExactlyOnce) {
     callback_status = output.status;
     return true;
   };
-  std::vector<Batch> batch = scheduler->prepare_batch_test();
+  BatchGroup batch = scheduler->prepare_batch_test();
   ASSERT_EQ(batch.size(), 1u);
   ASSERT_EQ(batch[0].size(), 1u);
 
@@ -1080,7 +1081,7 @@ TEST(ContinuousSchedulerTest, BatchRejectedStreamsCancelAtSchedulingBoundary) {
     return std::vector<bool>{false, true};
   };
 
-  std::vector<Batch> batch = scheduler->prepare_batch_test();
+  BatchGroup batch = scheduler->prepare_batch_test();
   ASSERT_EQ(batch.size(), 1u);
   ASSERT_EQ(batch[0].size(), 2u);
   const size_t free_blocks_before_cancel =

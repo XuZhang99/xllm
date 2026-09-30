@@ -74,8 +74,8 @@ class FakeEngine : public Engine {
     fake_tokenizer_ = std::make_unique<FakeTokenizer>();
     fake_block_manager_ = std::make_unique<BlockManagerPool>(opt, 1);
   }
-  ForwardOutput step(std::vector<Batch>& batch) { return {}; }
-  void update_last_step_result(std::vector<Batch>& batch) { NOT_IMPLEMENTED(); }
+  ForwardOutput step(BatchGroup& batch) { return {}; }
+  void update_last_step_result(BatchGroup& batch) { NOT_IMPLEMENTED(); }
   const Tokenizer* tokenizer() const { return fake_tokenizer_.get(); }
   BlockManagerPool* block_manager_pool() const {
     return fake_block_manager_.get();
@@ -467,7 +467,7 @@ class TestableContinuousScheduler final : public ContinuousScheduler {
   TestableContinuousScheduler(Engine* engine, const Options& options)
       : ContinuousScheduler(engine, options) {}
 
-  std::vector<Batch> prepare_batch_test() { return prepare_batch(); }
+  BatchGroup prepare_batch_test() { return prepare_batch(); }
 
   std::vector<std::shared_ptr<Request>> get_running_requests() {
     return running_requests_;
@@ -549,7 +549,7 @@ TEST(SchedulerPolicyTest, UnifiedPrefixHitIncludesScheduledSuffixCapacity) {
       generate_request({kPromptTokens}, {1}, std::nullopt, std::nullopt, 10000);
   scheduler->add_request(requests[0]);
 
-  std::vector<Batch> batches = scheduler->prepare_batch_test();
+  BatchGroup batches = scheduler->prepare_batch_test();
   ASSERT_EQ(batches.size(), 1u);
   ASSERT_EQ(batches[0].size(), 1u);
   Sequence* hit_sequence = requests[0]->sequences()[0].get();

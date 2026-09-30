@@ -18,18 +18,18 @@ limitations under the License.
 namespace xllm {
 
 SequenceBatchFactory::SequenceBatchFactory(int32_t dp_size)
-    : assembler_(dp_size) {}
+    : builder_(dp_size) {}
 
-std::vector<Batch> SequenceBatchFactory::create_batches(
+BatchGroup SequenceBatchFactory::create_batches(
     const std::vector<std::shared_ptr<Request>>& running_requests,
     const std::vector<Sequence*>& running_sequences,
     const std::vector<size_t>& running_sequences_budgets,
     std::vector<std::vector<BlockTransferInfo>>* swap_block_transfer_infos)
     const {
-  return assembler_.assemble(running_requests,
-                             running_sequences,
-                             running_sequences_budgets,
-                             swap_block_transfer_infos);
+  return builder_.build(running_requests,
+                        running_sequences,
+                        running_sequences_budgets,
+                        swap_block_transfer_infos);
 }
 
 }  // namespace xllm

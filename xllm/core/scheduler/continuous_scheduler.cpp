@@ -89,7 +89,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   enable_in_batch_prefix_cache_ =
       ::xllm::KVCacheConfig::get_instance().enable_in_batch_prefix_cache();
 
-  last_batch_.resize(options_.dp_size());
+  last_batch_ = BatchGroup(static_cast<size_t>(options_.dp_size()));
 
   ProfileManager::Options profile_manager_options;
   profile_manager_options.dp_size(options.dp_size())
@@ -302,7 +302,7 @@ void ContinuousScheduler::drain_decode_restore_waiting(
   }
 }
 
-std::vector<Batch> ContinuousScheduler::prepare_batch() {
+BatchGroup ContinuousScheduler::prepare_batch() {
   Timer timer;
   drain_prefetched_requests();
   auto state = make_state();
@@ -404,10 +404,10 @@ SchedulerState ContinuousScheduler::make_state() {
   };
 }
 
-std::vector<Batch> ContinuousScheduler::schedule_request(
+BatchGroup ContinuousScheduler::schedule_request(
     const absl::Duration& timeout) {
   const auto deadline = absl::Now() + timeout;
-  std::vector<Batch> batch;
+  BatchGroup batch;
   while (true) {
     apply_cancel_requests();
     batch = prepare_batch();
@@ -450,7 +450,7 @@ void ContinuousScheduler::apply_cancel_requests() {
 void ContinuousScheduler::step(const absl::Duration& timeout) {
   if (!options_.enable_schedule_overlap()) {
     // get a new batch of requests
-    std::vector<Batch> batch = schedule_request(timeout);
+    BatchGroup batch = schedule_request(timeout);
     bool all_empty =
         std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
           return one_batch.empty();
@@ -471,7 +471,7 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
 void ContinuousScheduler::step_with_schedule_overlap(
     const absl::Duration& timeout) {
   // get a new batch of requests
-  std::vector<Batch> batch = schedule_request(timeout);
+  BatchGroup batch = schedule_request(timeout);
   bool cur_batch_all_empty =
       std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
         return one_batch.empty();
@@ -527,7 +527,7 @@ void ContinuousScheduler::generate() {
          request_queue_.size() > 0) {
     // build a batch of requests/sequences
     const auto timeout = absl::Milliseconds(50);
-    std::vector<Batch> batch = schedule_request(timeout);
+    BatchGroup batch = schedule_request(timeout);
     batch_empty = true;
     for (auto& b : batch) {
       batch_empty &= b.empty();

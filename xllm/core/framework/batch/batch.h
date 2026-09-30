@@ -20,6 +20,7 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <torch/types.h>
 
+#include <cstdint>
 #include <limits>
 #include <utility>
 #include <variant>
@@ -33,12 +34,18 @@ namespace xllm {
 
 struct ModelArgs;
 
+enum class BatchDomain : int8_t {
+  SEQUENCE,
+  REC,
+};
+
 // Engine-facing value adapter. Concrete batches own domain behavior and state.
 class Batch final {
  public:
   Batch() = default;
   // Group-only inputs must explicitly select a OneRec input type.
   explicit Batch(BatchInputType input_type);
+  Batch(BatchDomain domain, BatchInputType input_type);
   explicit Batch(SequenceBatch batch) : batch_(std::move(batch)) {}
   explicit Batch(RecBatch batch) : batch_(std::move(batch)) {}
   bool is_rec() const { return std::holds_alternative<RecBatch>(batch_); }

@@ -29,7 +29,7 @@ limitations under the License.
 
 #include "core/common/macros.h"
 #include "core/common/types.h"
-#include "core/framework/batch/batch.h"
+#include "core/framework/batch/batch_group.h"
 #include "core/framework/batch/sequence_batch_factory.h"
 #include "core/framework/block/kv_cache_manager.h"
 #include "core/framework/request/priority_comparator.h"
@@ -306,7 +306,7 @@ class ContinuousScheduler : public Scheduler {
   int32_t min_speculative_tokens_required_ = 0;
 
   // build a batch of requests from the priority queue
-  virtual std::vector<Batch> prepare_batch();
+  virtual BatchGroup prepare_batch();
 
   virtual bool if_queue_not_empty() {
     return !prefill_queue_->empty() || !chunk_queue_->empty() ||
@@ -320,7 +320,7 @@ class ContinuousScheduler : public Scheduler {
   XServiceClient* xservice_client_ = nullptr;
 
   // params for enable_schedule_overlap case
-  std::vector<Batch> last_batch_;
+  BatchGroup last_batch_;
   std::vector<std::shared_ptr<Request>> last_running_requests_;
   std::vector<Sequence*> last_running_sequences_;
   bool is_first_step_ = true;
@@ -334,7 +334,7 @@ class ContinuousScheduler : public Scheduler {
   void drain_decode_restore_waiting(
       std::vector<std::shared_ptr<Request>>& finished);
 
-  std::vector<Batch> schedule_request(const absl::Duration& timeout);
+  BatchGroup schedule_request(const absl::Duration& timeout);
 
   void step_with_schedule_overlap(const absl::Duration& timeout);
 

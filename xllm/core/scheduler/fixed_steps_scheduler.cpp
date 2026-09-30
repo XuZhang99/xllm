@@ -177,7 +177,7 @@ void FixedStepsScheduler::handle_prefill_requests(
   }
 }
 
-std::vector<Batch> FixedStepsScheduler::prepare_batch() {
+BatchGroup FixedStepsScheduler::prepare_batch() {
   Timer timer;
   drain_prefetched_requests();
   // propagate new requests to prefill_queue_
@@ -277,7 +277,7 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  std::vector<Batch> batches;
+  BatchGroup batches;
   if (rec_batch_factory_) {
     batches = rec_batch_factory_->create_batches(
         running_requests_,
@@ -288,7 +288,7 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     // No pipeline has been selected before the first request arrives.
     CHECK(running_requests_.empty());
     CHECK(running_sequences_.empty());
-    batches.resize(options_.dp_size());
+    batches = BatchGroup(static_cast<size_t>(options_.dp_size()));
   }
 
   // update metrics before returning
@@ -404,7 +404,7 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
 
     if (options_.rec_worker_max_concurrency() > 1) {
       step_semaphore_.acquire();
-      step_threadpool_->schedule(function);
+      step_threadpool_->schedule(std::move(function));
     } else {
       function();
     }

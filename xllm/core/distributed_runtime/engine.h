@@ -20,7 +20,7 @@ limitations under the License.
 #include <unordered_map>
 
 #include "core/framework/speculative/speculative_profile_registry.h"
-#include "framework/batch/batch.h"
+#include "framework/batch/batch_group.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/kv_cache_transfer/prefetch_result.h"
 #include "framework/model/model_args.h"
@@ -39,9 +39,9 @@ class Engine {
   virtual bool init(MasterStatus master_status) { return true; };
 
   // execute model with batch input
-  virtual ForwardOutput step(std::vector<Batch>& batch) = 0;
+  virtual ForwardOutput step(BatchGroup& batch) = 0;
 
-  virtual void update_last_step_result(std::vector<Batch>& batch) = 0;
+  virtual void update_last_step_result(BatchGroup& batch) = 0;
 
   // return the tokenizer
   virtual const Tokenizer* tokenizer() const { return tokenizer_.get(); }

@@ -22,7 +22,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/batch_input_data.h"
-#include "core/framework/batch/batch_output_processor.h"
+#include "core/framework/batch/batch_output_handler.h"
 #include "core/framework/batch/batch_sequence_plan.h"
 #include "core/runtime/forward_params.h"
 #include "core/util/threadpool.h"
@@ -49,7 +49,7 @@ class BatchState final {
   const std::vector<SequencesGroup*>& sequence_groups() const {
     return sequence_groups_;
   }
-  BatchOutputProcessor& output_processor() { return output_processor_; }
+  BatchOutputHandler& output_handler() { return output_handler_; }
   void set_swap_block_transfer_infos(std::vector<BlockTransferInfo> infos) {
     swap_block_transfer_infos_ = std::move(infos);
   }
@@ -80,7 +80,7 @@ class BatchState final {
   std::vector<MMData> mm_data_vec_;
   // Keep serialized restore sources alive through worker-result processing.
   std::vector<Block> linear_restore_src_blocks_;
-  BatchOutputProcessor output_processor_;
+  BatchOutputHandler output_handler_;
   BatchForwardType batch_forward_type_;
   uint64_t batch_id_ = UNINITIALIZED_BATCH_ID;
 };

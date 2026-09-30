@@ -15,19 +15,22 @@ limitations under the License.
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
 
-#include "core/framework/batch/batch.h"
+#include "core/framework/batch/batch_group.h"
 #include "core/framework/request/request.h"
 
 namespace xllm {
 
-class RecBatchAssembler final {
+// Builds sequence batches shared by LLM and VLM execution paths.
+class SequenceBatchBuilder final {
  public:
-  RecBatchAssembler(int32_t dp_size, BatchInputType input_type);
-  std::vector<Batch> assemble(
+  explicit SequenceBatchBuilder(int32_t dp_size);
+
+  BatchGroup build(
       const std::vector<std::shared_ptr<Request>>& requests,
       const std::vector<Sequence*>& sequences,
       const std::vector<size_t>& budgets,
@@ -35,8 +38,6 @@ class RecBatchAssembler final {
 
  private:
   int32_t dp_size_;
-  BatchInputType input_type_;
-  bool uses_group_input_;
 };
 
 }  // namespace xllm

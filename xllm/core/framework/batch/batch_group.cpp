@@ -13,28 +13,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
+#include "core/framework/batch/batch_group.h"
 
-#include <cstdint>
-#include <memory>
-#include <vector>
-
-#include "core/framework/batch/batch.h"
-#include "core/framework/request/request.h"
+#include <glog/logging.h>
 
 namespace xllm {
 
-class SequenceBatchAssembler final {
- public:
-  explicit SequenceBatchAssembler(int32_t dp_size);
-  std::vector<Batch> assemble(
-      const std::vector<std::shared_ptr<Request>>& requests,
-      const std::vector<Sequence*>& sequences,
-      const std::vector<size_t>& budgets,
-      std::vector<std::vector<BlockTransferInfo>>* swap_infos) const;
+BatchGroup::BatchGroup(size_t dp_size) : batches_() {
+  CHECK_GT(dp_size, 0);
+  batches_.reserve(dp_size);
+  for (size_t rank = 0; rank < dp_size; ++rank) {
+    batches_.emplace_back();
+  }
+}
 
- private:
-  int32_t dp_size_;
-};
+BatchGroup::BatchGroup(size_t dp_size,
+                       BatchDomain domain,
+                       BatchInputType input_type)
+    : batches_() {
+  CHECK_GT(dp_size, 0);
+  batches_.reserve(dp_size);
+  for (size_t rank = 0; rank < dp_size; ++rank) {
+    batches_.emplace_back(domain, input_type);
+  }
+}
 
 }  // namespace xllm

@@ -49,12 +49,12 @@ class DiTEngine : public Engine {
   std::shared_ptr<DistManager> get_dist_manager() { return dist_manager_; }
 
   // These two functions wouldn't be used in dit inference progress
-  ForwardOutput step(std::vector<Batch>& batch) override {
+  ForwardOutput step(BatchGroup& batch) override {
     ForwardOutput output;
     return output;
   }
 
-  void update_last_step_result(std::vector<Batch>& batch) override { return; }
+  void update_last_step_result(BatchGroup& batch) override { return; }
 
  protected:
   // worker client which is used for call worker

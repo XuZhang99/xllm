@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors.
+/* Copyright 2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,26 +21,25 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/batch_group.h"
-#include "core/framework/batch/sequence_batch_builder.h"
 #include "core/framework/request/request.h"
 
 namespace xllm {
 
-// LLM and VLM share sequence scheduling, KV state and token budgets. Their
-// multimodal differences belong to input building, not DP batch assembly.
-class SequenceBatchFactory final {
+// Builds Rec batches while preserving the selected Rec input contract.
+class RecBatchBuilder final {
  public:
-  explicit SequenceBatchFactory(int32_t dp_size);
+  RecBatchBuilder(int32_t dp_size, BatchInputType input_type);
 
-  BatchGroup create_batches(
-      const std::vector<std::shared_ptr<Request>>& running_requests,
-      const std::vector<Sequence*>& running_sequences,
-      const std::vector<size_t>& running_sequences_budgets,
-      std::vector<std::vector<BlockTransferInfo>>* swap_block_transfer_infos =
-          nullptr) const;
+  BatchGroup build(
+      const std::vector<std::shared_ptr<Request>>& requests,
+      const std::vector<Sequence*>& sequences,
+      const std::vector<size_t>& budgets,
+      std::vector<std::vector<BlockTransferInfo>>* swap_infos) const;
 
  private:
-  SequenceBatchBuilder builder_;
+  int32_t dp_size_;
+  BatchInputType input_type_;
+  bool uses_group_input_;
 };
 
 }  // namespace xllm

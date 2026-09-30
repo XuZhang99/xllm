@@ -270,11 +270,11 @@ bool RecEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   return pipeline_->allocate_kv_cache(kv_cache_shape);
 }
 
-ForwardOutput RecEngine::step(std::vector<Batch>& batches) {
+ForwardOutput RecEngine::step(BatchGroup& batches) {
   return pipeline_->step(batches);
 }
 
-void RecEngine::update_last_step_result(std::vector<Batch>& batch) {
+void RecEngine::update_last_step_result(BatchGroup& batch) {
   UNUSED_PARAMETER(batch);
 }
 
@@ -394,7 +394,7 @@ size_t RecEngine::LlmRecEnginePipeline::num_workers() const {
 }
 
 std::vector<ForwardInput> RecEngine::LlmRecEnginePipeline::prepare_inputs(
-    std::vector<Batch>& batch) {
+    BatchGroup& batch) {
   std::vector<ForwardInput> batched_inputs;
   batched_inputs.reserve(engine_.dp_size_);
 
@@ -446,8 +446,7 @@ std::vector<ForwardInput> RecEngine::LlmRecEnginePipeline::prepare_inputs(
   return batched_inputs;
 }
 
-ForwardOutput RecEngine::LlmRecEnginePipeline::step(
-    std::vector<Batch>& batches) {
+ForwardOutput RecEngine::LlmRecEnginePipeline::step(BatchGroup& batches) {
   if (engine_.worker_clients_.empty()) {
     return {};
   }
@@ -562,7 +561,7 @@ RecEngine::LlmRecEnginePipeline::get_active_activation_memory() const {
 }
 
 size_t RecEngine::LlmRecEnginePipeline::get_max_steps_from_batch(
-    std::vector<Batch>& batches) const {
+    BatchGroup& batches) const {
   size_t max_steps = 0;
   bool has_stopping_checker = false;
   for (auto& batch : batches) {
@@ -740,7 +739,7 @@ int64_t RecEngine::OneRecPrefillOnlyEnginePipeline::minimal_kv_cache_blocks()
 }
 
 ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
-    std::vector<Batch>& batches) {
+    BatchGroup& batches) {
   if (engine_.workers_.empty()) {
     return {};
   }
@@ -886,7 +885,7 @@ int64_t RecEngine::OneRecXAttentionEnginePipeline::minimal_kv_cache_blocks()
 }
 
 ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
-    std::vector<Batch>& batches) {
+    BatchGroup& batches) {
   if (engine_.workers_.empty()) {
     return {};
   }
@@ -1177,7 +1176,7 @@ size_t RecEngine::RecMultiRoundEnginePipeline::num_workers() const {
 }
 
 ForwardOutput RecEngine::RecMultiRoundEnginePipeline::step(
-    std::vector<Batch>& batches) {
+    BatchGroup& batches) {
   if (engine_.workers_.empty()) {
     return {};
   }

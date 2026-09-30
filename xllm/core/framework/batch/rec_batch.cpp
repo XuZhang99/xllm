@@ -93,7 +93,7 @@ ForwardInput RecBatch::prepare_rec_forward_input(
     MPMCThreadPool* thread_pool) {
   CHECK(input_type_ != BatchInputType::SEQUENCE)
       << "Rec input requires an explicit Rec batch input type";
-  state_.output_processor().clear();
+  state_.output_handler().clear();
   if (state_.empty()) {
     return {};
   }
@@ -113,8 +113,8 @@ ForwardInput RecBatch::prepare_rec_forward_input(
   }
   auto data = state_.input_data(*plan);
   if (uses_group_input()) {
-    state_.output_processor().prepare(
-        data, use_legacy_onerec_prefill_only_contract());
+    state_.output_handler().prepare(data,
+                                    use_legacy_onerec_prefill_only_contract());
   }
   auto builder =
       RecBatchInputBuilder::create(input_type_, data, &args, thread_pool);

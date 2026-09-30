@@ -107,9 +107,9 @@ class FakePrefetchEngine final : public Engine {
   explicit FakePrefetchEngine(size_t worker_count)
       : worker_count_(worker_count) {}
 
-  ForwardOutput step(std::vector<Batch>& /*batch*/) override { return {}; }
+  ForwardOutput step(BatchGroup& /*batch*/) override { return {}; }
 
-  void update_last_step_result(std::vector<Batch>& /*batch*/) override {}
+  void update_last_step_result(BatchGroup& /*batch*/) override {}
 
   std::vector<int64_t> get_active_activation_memory() const override {
     return {0};

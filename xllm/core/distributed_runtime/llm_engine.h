@@ -31,7 +31,7 @@ limitations under the License.
 #include "core/distributed_runtime/master.h"
 #include "dist_manager.h"
 #include "engine.h"
-#include "framework/batch/batch.h"
+#include "framework/batch/batch_group.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/eplb/eplb_manager.h"
 #include "framework/eplb/eplb_policy.h"
@@ -55,7 +55,7 @@ class LLMEngine : public Engine {
 
   virtual ~LLMEngine() = default;
 
-  ForwardOutput step(std::vector<Batch>& batch) override;
+  ForwardOutput step(BatchGroup& batch) override;
 
   const runtime::Options& options() const { return options_; }
 
@@ -68,7 +68,7 @@ class LLMEngine : public Engine {
       const SpeculativeProfileRegistry::ValidateTimePredictor& predictor)
       override;
 
-  void update_last_step_result(std::vector<Batch>& batch) override;
+  void update_last_step_result(BatchGroup& batch) override;
 
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const override;
@@ -155,7 +155,7 @@ class LLMEngine : public Engine {
       const ModelLoader& model_loader) const;
   KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);
-  std::vector<ForwardInput> prepare_inputs(std::vector<Batch>& batch);
+  std::vector<ForwardInput> prepare_inputs(BatchGroup& batch);
   void process_group_test();
 
  protected:

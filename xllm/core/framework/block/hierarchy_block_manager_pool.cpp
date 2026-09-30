@@ -1001,7 +1001,7 @@ void HierarchyBlockManagerPool::release_prefetch_plan(PrefetchPlan* plan,
   host_state.set_prefix_cache_matched();
 }
 
-void HierarchyBlockManagerPool::transfer_blocks(std::vector<Batch>& batches) {
+void HierarchyBlockManagerPool::transfer_blocks(BatchGroup& batches) {
   for (size_t i = 0; i < load_block_transfer_infos_.size(); ++i) {
     if (load_block_transfer_infos_[i].empty()) {
       continue;

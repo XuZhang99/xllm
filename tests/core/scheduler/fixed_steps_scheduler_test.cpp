@@ -71,13 +71,11 @@ class FakeEngine : public Engine {
     fake_tokenizer_ = std::make_unique<FakeTokenizer>();
     fake_block_manager_ = std::make_unique<BlockManagerPool>(opt, 1);
   }
-  ForwardOutput step(std::vector<Batch>& batch) override {
+  ForwardOutput step(BatchGroup& batch) override {
     (void)batch;
     return ForwardOutput();
   }
-  void update_last_step_result(std::vector<Batch>& batch) override {
-    (void)batch;
-  }
+  void update_last_step_result(BatchGroup& batch) override { (void)batch; }
   const Tokenizer* tokenizer() const override { return fake_tokenizer_.get(); }
   BlockManagerPool* block_manager_pool() const override {
     return fake_block_manager_.get();
@@ -175,7 +173,7 @@ class TestableFixedStepsScheduler final : public FixedStepsScheduler {
  public:
   using FixedStepsScheduler::FixedStepsScheduler;
 
-  std::vector<Batch> prepare_batch_test() { return prepare_batch(); }
+  BatchGroup prepare_batch_test() { return prepare_batch(); }
 
   std::vector<std::shared_ptr<Request>> get_running_requests() {
     return running_requests_;
@@ -199,7 +197,7 @@ TEST(FixedStepsSchedulerTest, PrepareBatchEmptyWhenNoRequests) {
   auto engine = std::make_unique<FakeEngine>(32, 32);
   auto opt = CreateOptions();
   TestableFixedStepsScheduler scheduler(engine.get(), opt);
-  std::vector<Batch> batches = scheduler.prepare_batch_test();
+  BatchGroup batches = scheduler.prepare_batch_test();
   EXPECT_FALSE(batches.empty());
   EXPECT_TRUE(batches[0].empty());
 }
@@ -218,7 +216,7 @@ TEST(FixedStepsSchedulerTest, PrepareBatchOneRecSchedulesRequest) {
   for (auto& req : requests) {
     scheduler.add_request(req);
   }
-  std::vector<Batch> batches = scheduler.prepare_batch_test();
+  BatchGroup batches = scheduler.prepare_batch_test();
   EXPECT_FALSE(batches.empty());
   bool has_non_empty = false;
   for (const auto& b : batches) {

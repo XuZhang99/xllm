@@ -203,8 +203,7 @@ bool SpeculativeEngineBase<TargetEngine>::
 
 // TODO: support dp batches later
 template <typename TargetEngine>
-ForwardOutput SpeculativeEngineBase<TargetEngine>::step(
-    std::vector<Batch>& batches) {
+ForwardOutput SpeculativeEngineBase<TargetEngine>::step(BatchGroup& batches) {
   return engine_->step(batches);
 }
 
@@ -287,7 +286,7 @@ int64_t SpeculativeEngineBase<TargetEngine>::calculate_kv_cache(
 
 template <typename TargetEngine>
 void SpeculativeEngineBase<TargetEngine>::update_last_step_result(
-    std::vector<Batch>& batch) {
+    BatchGroup& batch) {
   engine_->update_last_step_result(batch);
 }
 

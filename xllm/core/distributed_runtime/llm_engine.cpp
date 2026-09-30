@@ -74,7 +74,7 @@ bool contains_graph_warmup(const std::vector<ForwardInput>& inputs) {
       });
 }
 
-bool contains_graph_warmup(const std::vector<Batch>& batches) {
+bool contains_graph_warmup(const BatchGroup& batches) {
   for (const Batch& batch : batches) {
     const std::vector<Sequence*> sequences = batch.get_sequences();
     if (std::any_of(sequences.begin(), sequences.end(), [](Sequence* sequence) {
@@ -1123,7 +1123,7 @@ bool LLMEngine::unlink_p2p(const std::vector<std::string>& remote_addrs) {
   return true;
 }
 
-ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
+ForwardOutput LLMEngine::step(BatchGroup& batch) {
   if (worker_clients_.empty()) {
     // empty worker, return
     return {};
@@ -1206,7 +1206,7 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   return {};
 }
 
-void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
+void LLMEngine::update_last_step_result(BatchGroup& last_batch) {
   const bool is_graph_warmup = contains_graph_warmup(last_batch);
   int64_t completed_activation_token = -1;
   if (::xllm::EPLBConfig::get_instance().enable_eplb() && !is_graph_warmup) {
@@ -1341,7 +1341,7 @@ void LLMEngine::process_eplb_data(
   eplb_manager_->update_expert_load(tensors, completed_activation_token);
 }
 
-std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
+std::vector<ForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
   std::vector<ForwardInput> batched_inputs;
   batched_inputs.reserve(dp_size_ * cp_size_);
   // some dp related variables

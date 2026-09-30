@@ -426,7 +426,7 @@ TEST(BatchFactoryTest, TransfersAreConsumedOnlyForActiveRanks) {
   EXPECT_FALSE(batches[1].empty());
 }
 
-TEST(BatchOutputProcessorDeathTest, RejectsBeamSourceOutsideBatch) {
+TEST(BatchOutputHandlerDeathTest, RejectsBeamSourceOutsideBatch) {
   SequenceBatchFactory factory(/*dp_size=*/1);
   auto request = make_request(/*rank=*/0, RecType::kNone, /*beam_width=*/2);
   auto batches =

@@ -33,7 +33,7 @@ struct BatchOutputData {
 // Composed by Batch. Captures sampling targets before input building advances
 // KV state, and keeps them through both phases of schedule-overlap writeback.
 // Requests own the target sequences and must outlive the pending forward.
-class BatchOutputProcessor final {
+class BatchOutputHandler final {
  public:
   void clear() { output_targets_.clear(); }
   void prepare(const BatchInputData& data,

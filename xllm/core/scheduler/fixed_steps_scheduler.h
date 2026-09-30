@@ -26,7 +26,7 @@ limitations under the License.
 
 #include "core/common/macros.h"
 #include "core/common/types.h"
-#include "core/framework/batch/batch.h"
+#include "core/framework/batch/batch_group.h"
 #include "core/framework/batch/rec_batch_factory.h"
 #include "core/framework/request/request.h"
 #include "core/framework/request/sequence.h"
@@ -41,7 +41,7 @@ class Engine;
 
 // Return value structure for schedule_request
 struct ScheduleResult {
-  std::vector<Batch> batches;
+  BatchGroup batches;
   std::vector<std::shared_ptr<Request>> requests;
   std::vector<Sequence*> sequences;
 };
@@ -56,7 +56,7 @@ class FixedStepsScheduler : public ContinuousScheduler {
   void step(const absl::Duration& timeout) override;
 
  protected:
-  std::vector<Batch> prepare_batch() override;
+  BatchGroup prepare_batch() override;
 
  private:
   // Scheduler pipeline for different rec types
