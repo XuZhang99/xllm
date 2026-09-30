@@ -277,15 +277,9 @@ void DistManager::setup_multi_node_workers(
 
   // Master node need to wait all workers done
   if (options.node_rank() == 0) {
-    // if dp_size equals 1, use global process group directly
-    // if dp_size equals world_size, distributed communication is not required
-    auto dp_local_process_group_num =
-        (dp_size > 1 && dp_size < world_size) ? dp_size : 0;
-
     // create collective server to sync all workers.
     std::shared_ptr<CollectiveService> collective_service =
-        std::make_shared<CollectiveService>(
-            dp_local_process_group_num, world_size, devices[0].index());
+        std::make_shared<CollectiveService>(world_size);
     XllmServer* collective_server =
         ServerRegistry::get_instance().register_server(server_name_);
     if (!collective_server->start(

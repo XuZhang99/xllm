@@ -25,6 +25,7 @@ namespace py = pybind11;
 #endif
 
 #include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <random>
@@ -261,13 +262,8 @@ namespace {
 // empty_with_format(), so Python must be alive before the first NPU op.
 // All NPU processes go through this path for consistency — the build system
 // links against the pip-installed torch_npu .so directly.
+// The caller owns the interpreter and holds the GIL during initialization.
 void init_npu_python_runtime() {
-  bool we_initialized_python = false;
-  if (!Py_IsInitialized()) {
-    py::initialize_interpreter(/*init_signal_handlers=*/false);
-    we_initialized_python = true;
-  }
-
   // Select the same logical device this process's worker will run on. Multi-
   // process single-card serving lets every process see all TP cards and picks
   // its own via node_rank (see Master ctor). Using .front() here would pin an
@@ -297,9 +293,19 @@ void init_npu_python_runtime() {
         "    pass\n");
   }
 
-  auto acl_ret = aclInit(nullptr);
-  CHECK(acl_ret == ACL_SUCCESS || acl_ret == 500000)
+  const aclError acl_ret = aclInit(nullptr);
+  CHECK(acl_ret == ACL_SUCCESS || acl_ret == ACL_ERROR_INTERNAL_ERROR)
       << "aclInit failed with error " << acl_ret;
+
+  // We own ACL initialization, so torch_npu will skip aclFinalize. Register
+  // before importing torch_npu: Python runs exit hooks in reverse order,
+  // releasing its groups, streams and devices before we finalize CANN.
+  py::module_::import("atexit").attr("register")(py::cpp_function(
+      []() {
+        const aclError status = aclFinalize();
+        CHECK_EQ(status, ACL_SUCCESS) << "aclFinalize failed.";
+      },
+      py::call_guard<py::gil_scoped_release>()));
 
   {
     py::gil_scoped_acquire gil;
@@ -323,10 +329,6 @@ void init_npu_python_runtime() {
         "_npu_mod._original_pid = os.getpid()\n"
         "torch_npu._C._npu_setDevice(" +
         std::to_string(device_index) + ")\n");
-  }
-
-  if (we_initialized_python) {
-    PyEval_SaveThread();
   }
 }
 }  // namespace
@@ -624,7 +626,17 @@ int main(int argc, char** argv) {
   }
 
 #if defined(USE_NPU)
+  // CANN's signal cleanup can consume SIGINT before our worker shutdown
+  // handler runs. Let the server own its signals by default; an explicit
+  // environment setting can still enable CANN's automatic stack dumps.
+  CHECK_EQ(setenv("ASCEND_COREDUMP_SIGNAL", "none", /*overwrite=*/0), 0);
+
+  // Keep Python alive until run() has destroyed the master and its workers.
+  // Reacquire the GIL before finalization so Python atexit hooks run before
+  // extension-module static destructors (including Triton's pybind objects).
+  py::scoped_interpreter interpreter(/*init_signal_handlers=*/false);
   init_npu_python_runtime();
+  py::gil_scoped_release release;
 #endif
 
   return run();

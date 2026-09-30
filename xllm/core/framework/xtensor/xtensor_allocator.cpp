@@ -130,8 +130,7 @@ void XTensorAllocator::setup_multi_node_xtensor_dist(
     // Only rank0 connects to other workers
     if (::xllm::DistributedConfig::get_instance().node_rank() == 0) {
       std::shared_ptr<CollectiveService> collective_service =
-          std::make_shared<CollectiveService>(
-              0, world_size_, devices[0].index());
+          std::make_shared<CollectiveService>(world_size_);
       XllmServer* collective_server =
           ServerRegistry::get_instance().register_server(
               collective_server_name_);

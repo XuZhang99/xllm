@@ -87,12 +87,8 @@ void XTensorManagerPool::setup_multi_node_xtensor_managers(
             i, master_node_addr, dones[i], devices[i], options_));
 
     if (::xllm::DistributedConfig::get_instance().node_rank() == 0) {
-      auto dp_local_process_group_num =
-          (dp_size_ > 1 && dp_size_ < world_size) ? dp_size_ : 0;
-
       std::shared_ptr<CollectiveService> collective_service =
-          std::make_shared<CollectiveService>(
-              dp_local_process_group_num, world_size, devices[0].index());
+          std::make_shared<CollectiveService>(world_size);
       XllmServer* collective_server =
           ServerRegistry::get_instance().register_server(
               collective_server_name_);

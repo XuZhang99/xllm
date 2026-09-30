@@ -12,6 +12,17 @@ cc_test(
     GTest::gtest_main
 )
 
+cc_test(
+  NO_NPU_RUNTIME
+  NAME
+    collective_service_test
+  SRCS
+    collective_service_test.cpp
+  DEPS
+    :collective_service
+    GTest::gtest_main
+)
+
 if(USE_NPU)
   cc_test(
     NAME
