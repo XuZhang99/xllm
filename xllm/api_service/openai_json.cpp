@@ -16,10 +16,13 @@ limitations under the License.
 #include "api_service/openai_json.h"
 
 #include <absl/strings/escaping.h>
+#include <absl/strings/str_cat.h>
+#include <xxHash/xxhash.h>
 
 #include <algorithm>
 #include <bit>
 
+#include "core/common/xllm_build_info.h"
 #include "core/util/uuid.h"
 
 namespace xllm::api_service {
@@ -307,6 +310,34 @@ nlohmann::json openai_embedding_json(const proto::EmbeddingResponse& response,
   json["usage"] = {{"prompt_tokens", response.usage().prompt_tokens()},
                    {"total_tokens", response.usage().total_tokens()}};
   return json;
+}
+
+std::string openai_system_fingerprint(const std::string& configuration) {
+  return absl::StrCat(
+      "xllm-",
+      XLLM_BUILD_VERSION,
+      "-",
+      absl::Hex(XXH3_64bits(configuration.data(), configuration.size()),
+                absl::kZeroPad16));
+}
+
+void set_openai_system_fingerprint(nlohmann::json& response,
+                                   const std::string& fingerprint,
+                                   bool stream,
+                                   bool include_usage) {
+  if (fingerprint.empty()) {
+    return;
+  }
+  const auto& choices = response["choices"];
+  const bool terminal =
+      include_usage
+          ? choices.empty() && response.contains("usage")
+          : std::any_of(choices.begin(), choices.end(), [](const auto& choice) {
+              return !choice["finish_reason"].is_null();
+            });
+  if (!stream || terminal) {
+    response["system_fingerprint"] = fingerprint;
+  }
 }
 
 nlohmann::json openai_models_json(const proto::ModelListResponse& response) {

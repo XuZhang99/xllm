@@ -347,6 +347,35 @@ TEST(OpenAIRequestTest, CallPayloadParsingHandlesInvalidLengthHeaders) {
   EXPECT_EQ(call.take_request_payload(), "binary");
 }
 
+TEST(OpenAIJsonTest, FingerprintIsStableAndAppearsOnlyOnFinalStreamMessages) {
+  const std::string fingerprint = openai_system_fingerprint("model=a;tp=16");
+  EXPECT_TRUE(fingerprint.starts_with("xllm-"));
+  EXPECT_EQ(fingerprint, openai_system_fingerprint("model=a;tp=16"));
+  EXPECT_NE(fingerprint, openai_system_fingerprint("model=a;tp=8"));
+  EXPECT_NE(fingerprint, openai_system_fingerprint("model=b;tp=16"));
+  for (const bool include_usage : {false, true}) {
+    for (const bool terminal : {false, true}) {
+      nlohmann::json chunk = {
+          {"choices",
+           {{{"finish_reason",
+              terminal ? nlohmann::json("stop") : nlohmann::json(nullptr)}}}}};
+      set_openai_system_fingerprint(
+          chunk, fingerprint, /*stream=*/true, include_usage);
+      EXPECT_EQ(chunk.contains("system_fingerprint"),
+                terminal && !include_usage);
+    }
+    nlohmann::json usage = {{"choices", nlohmann::json::array()},
+                            {"usage", {{"total_tokens", 3}}}};
+    set_openai_system_fingerprint(
+        usage, fingerprint, /*stream=*/true, include_usage);
+    EXPECT_EQ(usage.contains("system_fingerprint"), include_usage);
+  }
+  nlohmann::json full = {{"choices", nlohmann::json::array()}};
+  set_openai_system_fingerprint(
+      full, fingerprint, /*stream=*/false, /*include_usage=*/false);
+  EXPECT_EQ(full["system_fingerprint"], fingerprint);
+}
+
 TEST(OpenAIJsonTest, ChatFinishAndUsageChunksKeepRequiredFields) {
   proto::ChatResponse response;
   response.set_object("chat.completion.chunk");

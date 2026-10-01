@@ -24,6 +24,7 @@ limitations under the License.
 #include <charconv>
 #include <filesystem>
 #include <limits>
+#include <sstream>
 
 #include "api_service/chat_json_parser.h"
 #include "api_service/chat_request_decoder.h"
@@ -123,6 +124,13 @@ APIService::APIService(Master* master,
   if (::xllm::DistributedConfig::get_instance().node_rank() != 0) {
     return;
   }
+  std::ostringstream configuration;
+  configuration << master->options().to_string();
+  if (const auto* args = master->model_args()) {
+    configuration << *args;
+  }
+  system_fingerprint_ =
+      api_service::openai_system_fingerprint(configuration.str());
   ServiceImplFactory::create(
       this, master, model_names, model_repository_names, model_versions);
   register_chat_completions_handler();
@@ -249,13 +257,13 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
                                     "Batched prompts require the LLM backend.");
     return;
   }
-  std::shared_ptr<Call> call =
-      std::make_shared<CompletionCall>(ctrl,
-                                       done_guard.release(),
-                                       req_pb,
-                                       resp_pb,
-                                       arena != nullptr,
-                                       /*is_http_request=*/true);
+  auto call = std::make_shared<CompletionCall>(ctrl,
+                                               done_guard.release(),
+                                               req_pb,
+                                               resp_pb,
+                                               arena != nullptr,
+                                               /*is_http_request=*/true);
+  call->set_system_fingerprint(system_fingerprint_);
   if (completion_service_impl_) {
     completion_service_impl_->process_async(call);
   } else if (rec_completion_service_impl_) {
@@ -428,7 +436,8 @@ void chat_completions_http_impl(std::unique_ptr<Service>& service,
                                 const proto::HttpRequest* request,
                                 proto::HttpResponse* response,
                                 const ChatJsonParser& chat_json_parser,
-                                const std::string& default_model) {
+                                const std::string& default_model,
+                                const std::string& system_fingerprint) {
   auto arena = GetArenaWithCheck<ChatCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ReqType>(arena);
@@ -482,6 +491,7 @@ void chat_completions_http_impl(std::unique_ptr<Service>& service,
                                          resp_pb,
                                          /*use_arena=*/arena != nullptr,
                                          /*is_http_request=*/true);
+  call->set_system_fingerprint(system_fingerprint);
   service->process_async(call);
 }
 
@@ -500,7 +510,8 @@ void APIService::register_chat_completions_handler() {
           request,
           response,
           ChatJsonParser::get(ServingMode::VLM),
-          default_model_);
+          default_model_,
+          system_fingerprint_);
     };
   } else if (chat_service_impl_) {
     chat_completions_handler_ = [this](ClosureGuard& guard,
@@ -514,7 +525,8 @@ void APIService::register_chat_completions_handler() {
           request,
           response,
           ChatJsonParser::get(ServingMode::LLM),
-          default_model_);
+          default_model_,
+          system_fingerprint_);
     };
   }
 }

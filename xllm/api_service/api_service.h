@@ -246,6 +246,7 @@ class APIService : public proto::XllmAPIService {
 
   Master* master_;
   std::string default_model_;
+  std::string system_fingerprint_;
   ChatHttpHandler chat_completions_handler_;
   mutable std::shared_mutex masters_mutex_;
   std::unordered_map<std::string, Master*> masters_;
