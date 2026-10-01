@@ -22,8 +22,49 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "api_service/openai_json.h"
+
 namespace xllm {
 namespace {
+
+TEST(ModelsServiceImplTest, OpenAIModelCardIncludesLoadedConfiguration) {
+  ModelsServiceImpl service(
+      {"alias"}, {"repository"}, {"1"}, "/models/weights", 8192);
+  proto::ModelListResponse response;
+  ASSERT_TRUE(service.list_models(nullptr, &response));
+  const auto json = api_service::openai_models_json(response);
+  const auto& card = json["data"][0];
+  EXPECT_EQ(card["id"], "alias");
+  EXPECT_EQ(card["owned_by"], "xllm");
+  EXPECT_EQ(card["root"], "/models/weights");
+  EXPECT_EQ(card["max_model_len"], 8192);
+  EXPECT_TRUE(card["parent"].is_null());
+  ASSERT_EQ(card["permission"].size(), 1);
+  const auto& permission = card["permission"][0];
+  EXPECT_EQ(permission["object"], "model_permission");
+  EXPECT_TRUE(permission["id"].get<std::string>().starts_with("modelperm-"));
+  EXPECT_EQ(permission["created"], card["created"]);
+  EXPECT_EQ(permission["organization"], "*");
+  EXPECT_TRUE(permission["group"].is_null());
+  for (const char* key : {"allow_sampling", "allow_logprobs", "allow_view"}) {
+    EXPECT_EQ(permission[key], true);
+  }
+  for (const char* key : {"allow_create_engine",
+                          "allow_search_indices",
+                          "allow_fine_tuning",
+                          "is_blocking"}) {
+    EXPECT_EQ(permission[key], false);
+  }
+}
+
+TEST(ModelsServiceImplTest, UnknownModelMetadataIsNull) {
+  ModelsServiceImpl service({"alias"}, {"repository"}, {"1"});
+  proto::ModelListResponse response;
+  ASSERT_TRUE(service.list_models(nullptr, &response));
+  const auto card = api_service::openai_models_json(response)["data"][0];
+  EXPECT_TRUE(card["root"].is_null());
+  EXPECT_TRUE(card["max_model_len"].is_null());
+}
 
 TEST(ModelsServiceImplTest, RepositoryIndexUsesRepositoryMetadata) {
   const std::vector<std::string> model_names = {"GLM-5.1", "Qwen3-8B"};

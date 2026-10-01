@@ -30,6 +30,8 @@ message ModelCard {
 
   // the organization that owns the model.
   optional string owned_by = 4 [json_name = "owned_by"];
+  optional string root = 5;
+  optional int64 max_model_len = 6 [json_name = "max_model_len"];
 }
 
 message ModelList {

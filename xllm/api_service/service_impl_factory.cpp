@@ -130,7 +130,12 @@ void ServiceImplFactory::create(
       << ", model_versions.size()=" << model_versions.size();
 
   service->models_service_impl_ = std::make_unique<ModelsServiceImpl>(
-      model_names, model_repository_names, model_versions);
+      model_names,
+      model_repository_names,
+      model_versions,
+      master->options().model_path(),
+      master->model_args() ? master->model_args()->max_position_embeddings()
+                           : 0);
 }
 
 }  // namespace xllm

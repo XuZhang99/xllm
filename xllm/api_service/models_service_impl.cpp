@@ -26,13 +26,17 @@ limitations under the License.
 namespace xllm {
 
 ModelsServiceImpl::ModelsServiceImpl(
-    const std::vector<std::string>& model_names,
-    const std::vector<std::string>& model_repository_names,
-    const std::vector<std::string>& model_versions)
-    : model_names_(model_names),
-      model_repository_names_(model_repository_names),
-      model_versions_(model_versions),
-      created_(absl::ToUnixSeconds(absl::Now())) {}
+    std::vector<std::string> model_names,
+    std::vector<std::string> model_repository_names,
+    std::vector<std::string> model_versions,
+    std::string model_path,
+    int64_t max_model_len)
+    : model_names_(std::move(model_names)),
+      model_repository_names_(std::move(model_repository_names)),
+      model_versions_(std::move(model_versions)),
+      created_(absl::ToUnixSeconds(absl::Now())),
+      model_path_(std::move(model_path)),
+      max_model_len_(max_model_len) {}
 
 bool ModelsServiceImpl::list_models(const proto::ModelListRequest* request,
                                     proto::ModelListResponse* response) {
@@ -43,6 +47,12 @@ bool ModelsServiceImpl::list_models(const proto::ModelListRequest* request,
     model_card->set_created(created_);
     model_card->set_object("model");
     model_card->set_owned_by("xllm");
+    if (!model_path_.empty()) {
+      model_card->set_root(model_path_);
+    }
+    if (max_model_len_ > 0) {
+      model_card->set_max_model_len(max_model_len_);
+    }
   }
   return true;
 }

@@ -988,16 +988,8 @@ void APIService::ModelsHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  json2pb::Pb2JsonOptions json_options;
-  json_options.bytes_to_base64 = false;
-  json_options.jsonify_empty_array = true;
-  std::string err_msg;
-  butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
-  if (!json2pb::ProtoMessageToJson(
-          *resp_pb, &json_output, json_options, &err_msg)) {
-    LOG(ERROR) << "proto to json failed";
-    return;
-  }
+  ctrl->response_attachment().append(
+      api_service::openai_models_json(*resp_pb).dump());
 }
 
 void APIService::ModelVersionsHttp(
