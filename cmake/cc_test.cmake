@@ -6,6 +6,7 @@ include(CMakeParseArguments)
 #
 # Parameters:
 # NAME: name of target (see Usage below)
+# NO_NPU_RUNTIME: keep host-only tests independent of NPU initialization
 # SRCS: List of source files for the binary
 # DEPS: List of other libraries to be linked in to the binary targets
 # COPTS: List of private compile options
@@ -39,7 +40,7 @@ function(cc_test)
 
   cmake_parse_arguments(
     CC_TEST # prefix
-    "" # options
+    "NO_NPU_RUNTIME" # options
     "NAME;ENVIRONMENT" # one value args
     "SRCS;COPTS;LINKOPTS;DEPS;INCLUDES;ARGS;DATA" # multi value args
     ${ARGN}
@@ -112,7 +113,7 @@ function(cc_test)
     PRIVATE ${CC_TEST_LINKOPTS}
   )
 
-  if(USE_NPU)
+  if(USE_NPU AND NOT CC_TEST_NO_NPU_RUNTIME)
     target_sources(${CC_TEST_NAME} PRIVATE
       "${PROJECT_SOURCE_DIR}/tests/npu_test_environment.cpp"
     )

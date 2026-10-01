@@ -21,6 +21,7 @@ around them; process-group rendezvous and topology remain shared.
 
 from __future__ import annotations
 
+import atexit
 import json
 import socket
 from collections.abc import Sequence
@@ -70,6 +71,20 @@ _group_ranks = {}
 _stores = {}
 _world_topology = None
 _world_initialized = False
+
+
+def _shutdown_process_groups() -> None:
+    """Release owned groups before torch_npu shuts down the device runtime."""
+    global _world_initialized, _world_topology
+    if not _world_initialized:
+        return
+    if dist.is_initialized():
+        dist.destroy_process_group()
+    _groups.clear()
+    _group_ranks.clear()
+    _stores.clear()
+    _world_topology = None
+    _world_initialized = False
 
 
 def _backend_for(device: torch.device) -> str:
@@ -136,6 +151,11 @@ def _ensure_world(
         world_size=global_world_size,
         timeout=timedelta(minutes=5),
     )
+    _world_initialized = True
+    if _USE_PYTHON_NPU_GROUPS:
+        # Registered after torch_npu's hook, so communicators and our cached
+        # references are released while the NPU runtime is still alive.
+        atexit.register(_shutdown_process_groups)
     # Attention-DP weight shards use one full-world group for the final
     # reduction.  It is the default process group, so no second communicator
     # is created and the group is available even when no explicit subgroup is
@@ -144,7 +164,6 @@ def _ensure_world(
     _groups[world_key] = dist.group.WORLD
     _group_ranks[world_key] = tuple(range(global_world_size))
     _world_topology = _exchange_world_topology(store, device, global_rank, global_world_size)
-    _world_initialized = True
 
 
 def _group_memberships(group_name: str, world_size: int, global_world_size: int) -> list[list[int]]:

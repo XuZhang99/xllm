@@ -15,22 +15,20 @@ limitations under the License.
 
 #pragma once
 
-#include <absl/container/flat_hash_set.h>
-#if defined(USE_NPU)
-#include <hccl/hccl.h>
-#endif
-
+#include <cstdint>
+#include <mutex>
+#include <string>
 #include <unordered_map>
 
-#include "common/macros.h"
+#include "core/common/macros.h"
 #include "worker.pb.h"
 
 namespace xllm {
 
-class CollectiveService : public proto::Collective {
+class CollectiveService final : public proto::Collective {
  public:
-  CollectiveService(int dp_group_num, int total_num, int device_idx);
-  virtual ~CollectiveService() = default;
+  explicit CollectiveService(int32_t total_num);
+  ~CollectiveService() override = default;
 
   void Sync(::google::protobuf::RpcController* controller,
             const proto::AddressInfo* request,
@@ -43,18 +41,7 @@ class CollectiveService : public proto::Collective {
  private:
   DISALLOW_COPY_AND_ASSIGN(CollectiveService);
 
-#if defined(USE_NPU)
-  void to_proto_list(const std::vector<HcclRootInfo>& src,
-                     proto::CommUniqueIdList* dst);
-  void from_proto_list(const proto::CommUniqueIdList& src,
-                       std::vector<HcclRootInfo>* dst);
-#endif
-
- private:
-  int total_num_ = 0;
-#if defined(USE_NPU)
-  std::vector<HcclRootInfo> root_infos_;
-#endif
+  int32_t total_num_ = 0;
   std::mutex mutex_;
   std::unordered_map<int32_t, std::string> addrs_map_;
 };

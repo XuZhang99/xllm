@@ -85,8 +85,7 @@ cc_library(
   SRCS
     collective_service.cpp
   DEPS
-    absl::flat_hash_set
-    glog::glog
+    absl::time
     proto::xllm_proto
 )
 
