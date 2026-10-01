@@ -5,6 +5,10 @@ cc_library(
   NAME
     api_service
   HDRS
+    openai_request.h
+    openai_json.h
+    openai_http.h
+    openai_batch.h
     api_service.h
     api_service_impl.h
     call.h
@@ -38,6 +42,8 @@ cc_library(
     embedding_output_builder.h
     utils.h
   SRCS
+    openai_request.cpp
+    openai_json.cpp
     api_service.cpp
     chat_json_parser.cpp
     chat_request_decoder.cpp

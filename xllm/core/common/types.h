@@ -105,6 +105,8 @@ enum class StatusCode : uint8_t {
   RESOURCE_EXHAUSTED = 5,
   // service unavailable (e.g., model is sleeping).
   UNAVAILABLE = 6,
+  // requested model or resource does not exist.
+  NOT_FOUND = 7,
 };
 
 class Status final {

@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "call.h"
 
+#include <charconv>
+
 #include "api_service/request_id.h"
 #include "core/common/constants.h"
 #include "core/util/verbose_trace_logger.h"
@@ -62,15 +64,23 @@ void Call::init_request_payload() {
   const auto content_len =
       controller_->http_request().GetHeader(kContentLength);
 
-  if (infer_content_len == nullptr || content_len == nullptr) return;
+  if (infer_content_len == nullptr || content_len == nullptr) {
+    return;
+  }
 
-  auto infer_len = std::stoul(*infer_content_len);
-  auto len = std::stoul(*content_len);
-
-  if (infer_len > len) {
-    LOG(ERROR) << " content length is invalid:"
-               << " infer content len is " << infer_len
-               << " , content length is " << len;
+  size_t infer_len = 0;
+  size_t len = 0;
+  const auto [infer_end, infer_error] =
+      std::from_chars(infer_content_len->data(),
+                      infer_content_len->data() + infer_content_len->size(),
+                      infer_len);
+  const auto [content_end, content_error] = std::from_chars(
+      content_len->data(), content_len->data() + content_len->size(), len);
+  if (infer_error != std::errc() || content_error != std::errc() ||
+      infer_end != infer_content_len->data() + infer_content_len->size() ||
+      content_end != content_len->data() + content_len->size() ||
+      infer_len > len || len > controller_->request_attachment().size()) {
+    LOG(ERROR) << "Invalid binary request payload length.";
     return;
   }
 

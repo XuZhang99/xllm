@@ -177,3 +177,9 @@ cc_test(
 )
 target_link_libraries(openai_service_test PRIVATE brpc leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
 add_dependencies(openai_service_test brpc-static)
+
+cc_test(
+  NAME openai_protocol_test
+  SRCS openai_protocol_test.cpp
+  DEPS api_service GTest::gtest_main nlohmann_json::nlohmann_json
+)

@@ -24,8 +24,10 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 
-#include "call.h"
+#include "api_service/call.h"
+#include "api_service/openai_http.h"
 #include "core/common/types.h"
 #include "core/util/verbose_trace_logger.h"
 
@@ -46,7 +48,8 @@ class NonStreamCall : public Call {
         done_(done),
         request_(request),
         response_(response),
-        use_arena_(use_arena) {
+        use_arena_(use_arena),
+        is_http_request_(is_http_request) {
     controller_->http_response().set_content_type("application/json");
 
     json_options_.bytes_to_base64 = false;
@@ -69,6 +72,15 @@ class NonStreamCall : public Call {
 
   // For non stream response
   bool write_and_finish(Response& response) {
+    if constexpr (std::is_same_v<Request, proto::EmbeddingRequest>) {
+      if (is_http_request_) {
+        controller_->response_attachment().append(
+            api_service::openai_embedding_json(response,
+                                               request_->encoding_format())
+                .dump());
+        return true;
+      }
+    }
     butil::IOBufAsZeroCopyOutputStream json_output(
         &controller_->response_attachment());
     std::string err_msg;
@@ -105,9 +117,17 @@ class NonStreamCall : public Call {
 
   // For non stream response
   bool finish_with_error(const StatusCode& code,
-                         const std::string& error_message) {
+                         const std::string& error_message,
+                         const std::string& param = "") {
     XLLM_VERBOSE_TRACE() << "event=request_error x-request-id=" << x_request_id_
                          << " message=" << error_message;
+    if constexpr (std::is_same_v<Response, proto::EmbeddingResponse>) {
+      if (is_http_request_) {
+        api_service::write_openai_error(
+            controller_, code, error_message, param);
+        return false;
+      }
+    }
     controller_->SetFailed(error_message);
     return true;
   }
@@ -125,6 +145,7 @@ class NonStreamCall : public Call {
   Response* response_ = nullptr;
 
   bool use_arena_ = false;
+  bool is_http_request_ = false;
   json2pb::Pb2JsonOptions json_options_;
 };
 

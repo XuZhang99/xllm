@@ -18,6 +18,8 @@ limitations under the License.
 #include <google/protobuf/util/json_util.h>
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include "anthropic.pb.h"
 #include "chat.pb.h"
 #include "completion.pb.h"
@@ -104,10 +106,45 @@ TEST(RequestParamsTest, IgnoresJsonObjectResponseFormatWhenDisabled) {
   EXPECT_TRUE(params.response_format_error.empty());
 }
 
+TEST(RequestParamsTest, TextResponseFormatUsesUnconstrainedGeneration) {
+  proto::ChatRequest request;
+  request.mutable_response_format()->set_type("text");
+  RequestParams params(request, "", "");
+  EXPECT_EQ(params.response_format, ResponseFormatType::NONE);
+  EXPECT_TRUE(params.response_format_error.empty());
+}
+
+TEST(RequestParamsTest, AcceptsNegativeFrequencyPenaltyAndMoreThanFourStops) {
+  RequestParams params;
+  params.frequency_penalty = -1.0;
+  params.stop = std::vector<std::string>{"a", "b", "c", "d", "e"};
+  EXPECT_TRUE(params.verify_params([](RequestOutput) { return false; }));
+}
+
+TEST(RequestParamsTest, TemperatureMustBeFiniteAndNonNegative) {
+  RequestParams params;
+  for (const float temperature : {0.0f, 1.0f, 3.0f, 100.0f}) {
+    params.temperature = temperature;
+    EXPECT_TRUE(params.verify_params([](RequestOutput) { return false; }));
+  }
+  for (const float temperature : {-1.0f,
+                                  std::numeric_limits<float>::infinity(),
+                                  std::numeric_limits<float>::quiet_NaN()}) {
+    params.temperature = temperature;
+    std::optional<Status> received_status;
+    EXPECT_FALSE(params.verify_params([&received_status](RequestOutput output) {
+      received_status = output.status;
+      return false;
+    }));
+    ASSERT_TRUE(received_status.has_value());
+    EXPECT_EQ(received_status->code(), StatusCode::INVALID_ARGUMENT);
+  }
+}
+
 TEST(RequestParamsTest, RejectsUnsupportedResponseFormat) {
   ScopedJsonObjectOutput disabled(/*enabled=*/false);
   proto::ChatRequest request;
-  request.mutable_response_format()->set_type("text");
+  request.mutable_response_format()->set_type("json_schema");
 
   RequestParams params(request, "", "");
   std::optional<Status> received_status;

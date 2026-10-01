@@ -16,6 +16,7 @@ limitations under the License.
 
 #include "request_params.h"
 
+#include <cmath>
 #include <type_traits>
 
 #include "core/common/global_flags.h"
@@ -133,7 +134,8 @@ std::vector<JsonTool> handle_tools(
 RequestParams::RequestParams(const proto::CompletionRequest& request,
                              const std::string& x_rid,
                              const std::string& x_rtime) {
-  request_id = generate_completion_request_id();
+  request_id = request.has_request_id() ? request.request_id()
+                                        : generate_completion_request_id();
   x_request_id = x_rid;
   x_request_time = x_rtime;
   if (x_request_id.empty() && request.has_x_request_id()) {
@@ -333,7 +335,7 @@ void init_from_chat_request(RequestParams& params, const ChatRequest& request) {
         if (ServiceConfig::get_instance().enable_json_object_output()) {
           params.response_format = ResponseFormatType::JSON_OBJECT;
         }
-      } else {
+      } else if (type != "text") {
         params.response_format_error =
             "Unsupported response_format.type: " + type +
             "; only json_object is supported";
@@ -618,19 +620,10 @@ bool RequestParams::verify_params(OutputCallback callback) const {
     }
   }
 
-  // up to 4 stop sequences
-  if (stop.has_value() && stop.value().size() > 4) {
+  // vLLM 0.23 permits any finite, non-negative sampling temperature.
+  if (!std::isfinite(temperature) || temperature < 0.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "stop size is too large",
-                        service_request_id,
-                        source_xservice_addr);
-    return false;
-  }
-
-  // temperature between [0.0, 2.0]
-  if (temperature < 0.0 || temperature > 2.0) {
-    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "temperature must be between 0.0 and 2.0",
+                        "temperature must be finite and non-negative",
                         service_request_id,
                         source_xservice_addr);
     return false;
@@ -712,10 +705,10 @@ bool RequestParams::verify_params(OutputCallback callback) const {
     return false;
   }
 
-  // frequency_penalty between [0.0, 2.0]
-  if (frequency_penalty < 0.0 || frequency_penalty > 2.0) {
+  // frequency_penalty between [-2.0, 2.0]
+  if (frequency_penalty < -2.0 || frequency_penalty > 2.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "frequency_penalty must be between 0.0 and 2.0",
+                        "frequency_penalty must be between -2.0 and 2.0",
                         service_request_id,
                         source_xservice_addr);
     return false;

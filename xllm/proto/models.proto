@@ -43,6 +43,7 @@ message ModelListRequest {
 }
 
 message ModelListResponse {
+  optional string object = 2;
   // The list of models.
   repeated ModelCard data = 1;
 }

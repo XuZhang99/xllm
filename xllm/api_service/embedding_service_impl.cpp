@@ -20,6 +20,7 @@ limitations under the License.
 #include <algorithm>
 #include <string>
 
+#include "api_service/openai_batch.h"
 #include "common/instance_name.h"
 #include "distributed_runtime/llm_master.h"
 #include "embedding_output_builder.h"
@@ -99,7 +100,16 @@ void EmbeddingServiceImpl::process_async_impl(
   // check if model is supported
   const auto& model = rpc_request.model();
   if (!models_.contains(model)) {
-    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+    call->finish_with_error(StatusCode::NOT_FOUND,
+                            "The model `" + model + "` does not exist.",
+                            "model");
+    return;
+  }
+
+  if (rpc_request.has_dimensions()) {
+    call->finish_with_error(
+        StatusCode::INVALID_ARGUMENT,
+        "dimensions is not supported by this embedding backend.");
     return;
   }
 
@@ -108,31 +118,45 @@ void EmbeddingServiceImpl::process_async_impl(
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
 
-  // TODO only support input_str for now
-  auto& input = rpc_request.input();
-
-  auto saved_request_id = request_params.request_id;
-  // schedule the request
-  master_->handle_request(
-      input,
-      std::nullopt,
-      std::move(request_params),
-      call.get(),
-      [call,
-       model,
-       request_id = std::move(saved_request_id),
-       created_time = absl::ToUnixSeconds(absl::Now())](
-          const RequestOutput& req_output) -> bool {
-        if (req_output.status.has_value()) {
-          const auto& status = req_output.status.value();
-          if (!status.ok()) {
-            return call->finish_with_error(status.code(), status.message());
-          }
+  const std::string request_id = request_params.request_id;
+  const int64_t created_time = absl::ToUnixSeconds(absl::Now());
+  OutputCallback send =
+      [call, model, request_id, created_time](RequestOutput output) {
+        if (output.status.has_value() && !output.status->ok()) {
+          return call->finish_with_error(output.status->code(),
+                                         output.status->message());
         }
-
         return send_result_to_client_brpc<EmbeddingCall>(
-            call, request_id, created_time, model, req_output);
-      });
+            call, request_id, created_time, model, output);
+      };
+  if (rpc_request.inputs().empty()) {
+    master_->handle_request(rpc_request.input(),
+                            std::nullopt,
+                            std::move(request_params),
+                            call.get(),
+                            std::move(send));
+    return;
+  }
+  auto batch = std::make_shared<api_service::OpenAIBatch>(
+      rpc_request.inputs_size(), /*choices_per_prompt=*/1, /*streaming=*/false);
+  for (int32_t index = 0; index < rpc_request.inputs_size(); ++index) {
+    const auto& input = rpc_request.inputs(index);
+    RequestParams params(
+        rpc_request, call->get_x_request_id(), call->get_x_request_time());
+    params.request_id += "-" + std::to_string(index);
+    std::optional<std::vector<int>> tokens;
+    if (!input.token_ids().empty()) {
+      tokens.emplace(input.token_ids().begin(), input.token_ids().end());
+    }
+    master_->handle_request(input.text(),
+                            std::move(tokens),
+                            std::move(params),
+                            call.get(),
+                            [batch, index, send](RequestOutput output) {
+                              return batch->accept(
+                                  index, std::move(output), send);
+                            });
+  }
 }
 
 MMEmbeddingServiceImpl::MMEmbeddingServiceImpl(
@@ -148,7 +172,16 @@ void MMEmbeddingServiceImpl::process_async_impl(
   // check if model is supported
   const auto& model = rpc_request.model();
   if (!models_.contains(model)) {
-    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+    call->finish_with_error(StatusCode::NOT_FOUND,
+                            "The model `" + model + "` does not exist.",
+                            "model");
+    return;
+  }
+
+  if (rpc_request.has_dimensions()) {
+    call->finish_with_error(
+        StatusCode::INVALID_ARGUMENT,
+        "dimensions is not supported by this embedding backend.");
     return;
   }
 

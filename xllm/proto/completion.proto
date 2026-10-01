@@ -141,6 +141,8 @@ message CompletionRequest {
   // whether to include stop strings or stop tokens in the output text.
   // default = false
   optional bool include_stop_str_in_output = 42;
+
+  repeated PromptInput prompts = 43;
 }
 
 message LogProbs {
@@ -150,7 +152,11 @@ message LogProbs {
 
   repeated int32 token_ids = 3 [json_name="token_ids"];
 
-  // rpc doesn't allow: repeated map<string, float> top_logprobs = 4;
+  message TopLogProbs {
+    map<string, float> values = 1;
+  }
+  repeated TopLogProbs top_logprobs = 4 [json_name="top_logprobs"];
+  repeated int32 text_offset = 5 [json_name="text_offset"];
 }
 
 message Choice {
