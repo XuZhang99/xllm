@@ -256,8 +256,11 @@ class ContinuousScheduler : public Scheduler {
 
   // the engine to run the batch
   Engine* engine_;
-  BatchStep batch_step_;
-  BatchResultConsumer consume_batch_result_;
+
+  using StepCallback = std::function<ForwardOutput(BatchGroup&)>;
+  using ResultCallback = std::function<void(BatchGroup&)>;
+  StepCallback step_callback_;
+  ResultCallback result_callback_;
 
   KVCacheManager* kv_cache_manager_;
 
@@ -344,13 +347,10 @@ class ContinuousScheduler : public Scheduler {
   bool is_first_step_ = true;
 
  private:
-  using BatchStep = std::function<ForwardOutput(BatchGroup&)>;
-  using BatchResultConsumer = std::function<void(BatchGroup&)>;
-
   ContinuousScheduler(Engine* engine,
                       const Options& options,
-                      BatchStep batch_step,
-                      BatchResultConsumer consume_batch_result);
+                      StepCallback step_callback,
+                      ResultCallback result_callback);
 
   // Construct a SchedulerState snapshot for the policy.
   SchedulerState make_state();

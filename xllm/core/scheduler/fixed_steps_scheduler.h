@@ -71,9 +71,11 @@ class FixedStepsScheduler : public ContinuousScheduler {
   RecBatchGroup prepare_rec_batch();
 
  private:
-  using RecStep = std::function<ForwardOutput(RecBatchGroup&)>;
+  using StepCallback = std::function<ForwardOutput(RecBatchGroup&)>;
 
-  FixedStepsScheduler(Engine* engine, RecStep rec_step, const Options& options);
+  FixedStepsScheduler(Engine* engine,
+                      StepCallback step_callback,
+                      const Options& options);
 
   // Scheduler pipeline for different rec types
   class SchedulerPipeline {
@@ -154,7 +156,7 @@ class FixedStepsScheduler : public ContinuousScheduler {
   // Scheduler thread pool for parallel execution of step()
   std::unique_ptr<ThreadPool> step_threadpool_;
 
-  RecStep rec_step_;
+  StepCallback step_callback_;
 
   // Semaphore to control concurrent execution of step()
   std::counting_semaphore<10000> step_semaphore_;

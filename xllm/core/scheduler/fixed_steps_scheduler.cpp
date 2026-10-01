@@ -44,10 +44,10 @@ limitations under the License.
 namespace xllm {
 
 FixedStepsScheduler::FixedStepsScheduler(Engine* engine,
-                                         RecStep rec_step,
+                                         StepCallback step_callback,
                                          const Options& options)
     : ContinuousScheduler(engine, options, ResourceOnlyTag{}),
-      rec_step_(std::move(rec_step)),
+      step_callback_(std::move(step_callback)),
       step_semaphore_(
           static_cast<std::ptrdiff_t>(options.rec_worker_max_concurrency())) {
   step_threadpool_ = std::make_unique<ThreadPool>(
@@ -392,7 +392,7 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
                      batches = std::move(result.batches),
                      requests = std::move(result.requests),
                      sequences = std::move(result.sequences)]() mutable {
-      rec_step_(batches);
+      step_callback_(batches);
 
       // After step completes, check and process finished/cancelled requests
       std::vector<std::shared_ptr<Request>> finished_requests;

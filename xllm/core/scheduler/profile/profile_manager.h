@@ -35,6 +35,10 @@ limitations under the License.
 
 namespace xllm {
 class ProfileManager {
+ private:
+  using StepCallback = std::function<ForwardOutput(BatchGroup&)>;
+  using ResultCallback = std::function<void(BatchGroup&)>;
+
  public:
   struct Options {
     PROPERTY(bool, enable_schedule_overlap) = false;
@@ -221,15 +225,12 @@ class ProfileManager {
       int block_size) const;
 
  private:
-  using BatchStep = std::function<ForwardOutput(BatchGroup&)>;
-  using BatchResultConsumer = std::function<void(BatchGroup&)>;
-
   friend class ContinuousScheduler;
 
   ProfileManager(Engine* engine,
                  const Options& options,
-                 BatchStep batch_step,
-                 BatchResultConsumer consume_batch_result);
+                 StepCallback step_callback,
+                 ResultCallback result_callback);
 
   std::unique_ptr<TimePredictor> prefill_time_predictor_;
   std::unique_ptr<TimePredictor> decode_time_predictor_;
@@ -238,8 +239,8 @@ class ProfileManager {
   const Options options_;
 
   Engine* engine_;
-  BatchStep batch_step_;
-  BatchResultConsumer consume_batch_result_;
+  StepCallback step_callback_;
+  ResultCallback result_callback_;
   BatchFactory batch_factory_;
 
   DecodeGraphWarmupPlan decode_graph_warmup_plan_;

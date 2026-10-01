@@ -68,22 +68,21 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine,
                                          ResourceOnlyTag)
     : ContinuousScheduler(engine, options, {}, {}) {}
 
-ContinuousScheduler::ContinuousScheduler(
-    Engine* engine,
-    const Options& options,
-    BatchStep batch_step,
-    BatchResultConsumer consume_batch_result)
+ContinuousScheduler::ContinuousScheduler(Engine* engine,
+                                         const Options& options,
+                                         StepCallback step_callback,
+                                         ResultCallback result_callback)
     : options_(options),
       batch_mode_(create_batch_mode(options)),
       scheduler_config_(::xllm::SchedulerConfig::get_instance()),
       batch_factory_(options.dp_size()),
       engine_(engine),
-      batch_step_(std::move(batch_step)),
-      consume_batch_result_(std::move(consume_batch_result)),
+      step_callback_(std::move(step_callback)),
+      result_callback_(std::move(result_callback)),
       request_queue_(options.request_queue_size()) {
   CHECK(engine_ != nullptr);
-  CHECK_EQ(static_cast<bool>(batch_step_),
-           static_cast<bool>(consume_batch_result_));
+  CHECK_EQ(static_cast<bool>(step_callback_),
+           static_cast<bool>(result_callback_));
 
   kv_cache_manager_ = engine_->block_manager_pool();
   CHECK(kv_cache_manager_ != nullptr);
@@ -115,9 +114,9 @@ ContinuousScheduler::ContinuousScheduler(
       .max_global_ttft_ms(options.max_global_ttft_ms())
       .instance_role(options.instance_role().value_or(InstanceRole::DEFAULT))
       .enable_profile_token_budget(options.enable_profile_token_budget());
-  if (batch_step_) {
-    profile_manager_ = std::make_unique<ProfileManager>(
-        engine_, profile_manager_options, batch_step_, consume_batch_result_);
+  if (step_callback_) {
+    profile_manager_ = std::unique_ptr<ProfileManager>(new ProfileManager(
+        engine_, profile_manager_options, step_callback_, result_callback_));
   }
 
   // Construct the scheduling policy from the resolved BatchMode.
@@ -134,7 +133,7 @@ ContinuousScheduler::ContinuousScheduler(
         cancel_request_queue->submit(std::move(request));
       });
   create_queues(options);
-  if (batch_step_ && options_.enable_service_routing()) {
+  if (step_callback_ && options_.enable_service_routing()) {
     // connect to master service
     xservice_client_ = XServiceClient::get_instance();
     if (!xservice_client_->initialize_done()) {
@@ -472,8 +471,8 @@ void ContinuousScheduler::apply_cancel_requests() {
 // step the scheduler forward by one step
 // may get blocked if there are no requests to process
 void ContinuousScheduler::step(const absl::Duration& timeout) {
-  CHECK(batch_step_) << "This scheduler has no ordinary batch execution "
-                        "capability.";
+  CHECK(step_callback_) << "This scheduler has no ordinary batch execution "
+                           "capability.";
   if (!options_.enable_schedule_overlap()) {
     // get a new batch of requests
     BatchGroup batch = schedule_request(timeout);
@@ -485,7 +484,7 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
       return;
     }
 
-    batch_step_(batch);
+    step_callback_(batch);
 
     // process request output in batch
     process_batch_output(false);
@@ -496,8 +495,8 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
 
 void ContinuousScheduler::step_with_schedule_overlap(
     const absl::Duration& timeout) {
-  CHECK(batch_step_) << "This scheduler has no ordinary batch execution "
-                        "capability.";
+  CHECK(step_callback_) << "This scheduler has no ordinary batch execution "
+                           "capability.";
   // get a new batch of requests
   BatchGroup batch = schedule_request(timeout);
   bool cur_batch_all_empty =
@@ -530,16 +529,16 @@ void ContinuousScheduler::step_with_schedule_overlap(
   }
   const bool consumed_before_step = previous_pending && needs_prefill_state;
   if (consumed_before_step) {
-    consume_batch_result_(last_batch_);
+    result_callback_(last_batch_);
   }
   if (!cur_batch_all_empty) {
-    batch_step_(batch);
+    step_callback_(batch);
   }
 
   // producer-consumer mode, make sure only one step is scheduled in advance
   if (previous_pending) {
     if (!consumed_before_step) {
-      consume_batch_result_(last_batch_);
+      result_callback_(last_batch_);
     }
     process_batch_output(true);
   }
@@ -550,8 +549,8 @@ void ContinuousScheduler::step_with_schedule_overlap(
 }
 
 void ContinuousScheduler::generate() {
-  CHECK(batch_step_) << "This scheduler has no ordinary batch execution "
-                        "capability.";
+  CHECK(step_callback_) << "This scheduler has no ordinary batch execution "
+                           "capability.";
   bool batch_empty = false;
   while (num_pending_requests() > 0 || !batch_empty ||
          request_queue_.size() > 0 ||
@@ -568,7 +567,7 @@ void ContinuousScheduler::generate() {
     }
 
     // run inference for the batch
-    batch_step_(batch);
+    step_callback_(batch);
 
     // process request output in batch
     process_batch_output(false);
