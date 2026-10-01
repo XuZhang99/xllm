@@ -54,7 +54,6 @@ if(USE_NPU)
     SRCS
       npu_cp_capability_test.cpp
     DEPS
-      master
       models
       parallel_state
       GTest::gtest_main

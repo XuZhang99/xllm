@@ -16,10 +16,10 @@ limitations under the License.
 #include "vlm_master.h"
 
 #include <glog/logging.h>
-#include <pybind11/pybind11.h>
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <thread>
@@ -28,17 +28,20 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "core/common/message.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/multimodal/mm_data.h"
-#include "core/platform/device_name_utils.h"
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
+#include "models/model_cp_validation.h"
+#include "models/model_registry.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
-#include "speculative_engine.h"
+#include "util/model_config_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
+#include "util/utils.h"
 #include "vlm_engine.h"
 
 namespace xllm {
@@ -48,6 +51,33 @@ namespace {
 bool should_use_vlm_speculative_engine(const Options& options) {
   return options.speculative_algorithm() != "Suffix" &&
          !options.draft_model_path().value_or("").empty();
+}
+
+template <typename Function>
+bool dispatch_engine(VLMEngine* vlm_engine,
+                     SpeculativeEngineBase<VLMEngine>* speculative_engine,
+                     Function&& function) {
+  if (vlm_engine != nullptr) {
+    return function(*vlm_engine);
+  }
+  if (speculative_engine != nullptr) {
+    return function(*speculative_engine);
+  }
+  return false;
+}
+
+void configure_disaggregated_pd_options(Options* options) {
+  CHECK(options != nullptr);
+  if (!options->enable_disagg_pd()) {
+    return;
+  }
+
+  options->enable_service_routing(true);
+  if (options->instance_role() == InstanceRole::PREFILL) {
+    options->enable_schedule_overlap(false);
+    LOG(WARNING) << "Force to disable schedule overlap for prefill instance "
+                    "in disagg pd mode.";
+  }
 }
 
 std::vector<Message> build_user_messages_from_image_urls(
@@ -118,34 +148,131 @@ std::optional<std::string> join_message_texts(
 
 }  // namespace
 
-VLMMaster::VLMMaster(const Options& options)
-    : Master(options,
-             should_use_vlm_speculative_engine(options) ? EngineType::VLMSSM
-                                                        : EngineType::VLM) {
-  if (should_use_vlm_speculative_engine(options_)) {
-    speculative_engine_ = take_engine<SpeculativeEngineBase<VLMEngine>>();
-    engine_ = speculative_engine_.get();
+VLMMaster::VLMMaster(const Options& options) : Master(options) {
+  options_.enable_mla(util::should_enable_mla(
+      std::filesystem::path(options_.model_path()), options_.backend()));
+  resolve_npu_kernel_backend(&options_);
+  configure_disaggregated_pd_options(&options_);
+  const bool use_speculative_engine =
+      should_use_vlm_speculative_engine(options_);
+  const std::string model_type =
+      util::get_model_type(options_.model_path(), options_.backend());
+  const std::optional<std::string> cp_error = validate_model_cp(
+      options_,
+      use_speculative_engine ? EngineType::VLMSSM : EngineType::VLM,
+      model_type,
+      options_.nnodes());
+  CHECK(!cp_error.has_value()) << cp_error.value();
+  const std::optional<std::string> speculative_error =
+      ModelConfig::validate_python_speculative_decode(
+          ModelConfig::get_instance().model_impl(),
+          model_type,
+          options_.num_speculative_tokens(),
+          options_.speculative_algorithm());
+  CHECK(!speculative_error.has_value()) << speculative_error.value();
+  validate_layerwise_split_size_startup_config(
+      options_, model_type, options_.nnodes());
+  CHECK(!options_.enable_task_pipeline())
+      << "Task pipeline is only supported by the LLM master.";
+  CHECK(options_.host_blocks_factor() <= 1.0)
+      << "Basic host KV cache offload supports the LLM engine and "
+         "model-based speculative engines only.";
+
+  runtime::Options engine_options = create_runtime_options();
+  engine_options.block_size(options_.block_size())
+      .max_cache_size(options_.max_cache_size())
+      .max_encoder_cache_size(options_.max_encoder_cache_size())
+      .max_processor_cache_items(options_.max_processor_cache_items())
+      .max_linear_state_cache_slots(options_.max_linear_state_cache_slots())
+      .enable_mla(options_.enable_mla())
+      .enable_flashcomm1(options_.enable_flashcomm1())
+      .flashcomm1_min_prefill_tokens(options_.flashcomm1_min_prefill_tokens())
+      .enable_mmrs_fusion(options_.enable_mmrs_fusion())
+      .mmrs_comm_mode(options_.mmrs_comm_mode())
+      .cp_size(options_.cp_size())
+      .instance_role(options_.instance_role())
+      .enable_disagg_pd(options_.enable_disagg_pd())
+      .max_tokens_per_batch(options_.max_tokens_per_batch())
+      .max_seqs_per_batch(options_.max_seqs_per_batch())
+      .enable_graph(options_.enable_graph())
+      .enable_graph_mode_decode_no_padding(
+          options_.enable_graph_mode_decode_no_padding())
+      .enable_prefill_piecewise_graph(options_.enable_prefill_piecewise_graph())
+      .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode())
+      .max_tokens_per_chunk_for_prefill(
+          options_.max_tokens_per_chunk_for_prefill());
+
+  if (use_speculative_engine) {
+    CHECK(!options_.enable_disagg_pd())
+        << "VLM speculative decoding does not support disaggregated PD";
+    CHECK(!options_.enable_service_routing())
+        << "VLM speculative decoding does not support service routing";
+    CHECK(!options_.enable_adaptive_speculative_decode())
+        << "VLM speculative decoding does not support adaptive speculative "
+           "decode";
+    const std::string draft_model_path =
+        options_.draft_model_path().value_or("");
+    CHECK(!draft_model_path.empty())
+        << "draft model path is required for VLM speculative decoding";
+    engine_options.model_id(options_.model_id())
+        .draft_model_path(draft_model_path)
+        .num_speculative_tokens(options_.num_speculative_tokens())
+        .speculative_algorithm(options_.speculative_algorithm())
+        .draft_sampling_mode(options_.draft_sampling_mode())
+        .enable_mtp_draft_body_tp1(options_.enable_mtp_draft_body_tp1())
+        .speculative_suffix_cache_max_depth(
+            options_.speculative_suffix_cache_max_depth())
+        .speculative_suffix_max_spec_factor(
+            options_.speculative_suffix_max_spec_factor())
+        .speculative_suffix_max_spec_offset(
+            options_.speculative_suffix_max_spec_offset())
+        .speculative_suffix_min_token_prob(
+            options_.speculative_suffix_min_token_prob())
+        .speculative_suffix_max_cached_requests(
+            options_.speculative_suffix_max_cached_requests())
+        .speculative_suffix_use_tree_spec(
+            options_.speculative_suffix_use_tree_spec())
+        .enable_adaptive_speculative_decode(
+            options_.enable_adaptive_speculative_decode())
+        .adaptive_speculative_min_gain(options_.adaptive_speculative_min_gain())
+        .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
+        .transfer_listen_port(options_.transfer_listen_port())
+        .host_blocks_factor(options_.host_blocks_factor())
+        .enable_kvcache_store(options_.enable_kvcache_store())
+        .store_protocol(options_.store_protocol())
+        .store_rdma_devices(options_.store_rdma_devices())
+        .store_master_server_address(options_.store_master_server_address())
+        .store_metadata_server(options_.store_metadata_server())
+        .store_local_hostname(options_.store_local_hostname())
+        .prefetch_batch_size(options_.prefetch_batch_size())
+        .prefetch_timeout(options_.prefetch_timeout())
+        .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
+        .kv_cache_dtype(options_.kv_cache_dtype());
+    speculative_engine_ =
+        std::make_unique<SpeculativeEngineBase<VLMEngine>>(engine_options);
   } else {
-    vlm_engine_ = take_engine<VLMEngine>();
-    engine_ = vlm_engine_.get();
+    vlm_engine_ = std::make_unique<VLMEngine>(engine_options);
   }
   if (!is_leader()) {
     return;
   }
 
-  CHECK(engine_->init(master_status_));
-
-  model_args_ = engine_->model_args();
-
-  if (options_.enable_service_routing()) {
-    XServiceClient* xservice_client = XServiceClient::get_instance();
-    if (!xservice_client->init(options_.etcd_addr().value_or(""),
-                               options_.instance_name().value_or(""),
-                               engine_->block_manager_pool(),
-                               options_.etcd_namespace().value_or(""))) {
-      LOG(FATAL) << "XServiceClient init fail!";
-      return;
+  auto initialize_engine = [this](auto* engine) {
+    CHECK(engine->init(options_.master_status()));
+    model_args_ = engine->model_args();
+    if (options_.enable_service_routing()) {
+      XServiceClient* xservice_client = XServiceClient::get_instance();
+      CHECK(xservice_client->init(options_.etcd_addr().value_or(""),
+                                  options_.instance_name().value_or(""),
+                                  engine->block_manager_pool(),
+                                  options_.etcd_namespace().value_or("")))
+          << "XServiceClient init fail!";
     }
+  };
+  if (use_speculative_engine) {
+    initialize_engine(speculative_engine_.get());
+  } else {
+    initialize_engine(vlm_engine_.get());
   }
 
   SchedulerOptions scheduler_options;
@@ -166,7 +293,7 @@ VLMMaster::VLMMaster(const Options& options)
       .disable_ttft_profiling(options_.disable_ttft_profiling())
       .enable_schedule_overlap(options_.enable_schedule_overlap())
       .server_idx(options_.server_idx());
-  if (should_use_vlm_speculative_engine(options_)) {
+  if (use_speculative_engine) {
     scheduler_ = create_continuous_scheduler(speculative_engine_.get(),
                                              scheduler_options);
   } else {
@@ -179,13 +306,21 @@ VLMMaster::VLMMaster(const Options& options)
     XServiceClient::get_instance()->register_instance(instance_info);
   }
 
-  chat_template_ =
-      std::make_unique<JinjaChatTemplate>(engine_->tokenizer_args());
-  tokenizer_ = engine_->tokenizer()->clone();
-  processor_ = create_multimodal_processor(model_args_,
-                                           tokenizer_,
-                                           options_.max_processor_cache_items(),
-                                           engine_->tokenizer_args());
+  auto initialize_processor = [this](auto* engine) {
+    chat_template_ =
+        std::make_unique<JinjaChatTemplate>(engine->tokenizer_args());
+    tokenizer_ = engine->tokenizer()->clone();
+    processor_ =
+        create_multimodal_processor(model_args_,
+                                    tokenizer_,
+                                    options_.max_processor_cache_items(),
+                                    engine->tokenizer_args());
+  };
+  if (use_speculative_engine) {
+    initialize_processor(speculative_engine_.get());
+  } else {
+    initialize_processor(vlm_engine_.get());
+  }
 
   request_factory_ = std::make_unique<VLMRequestFactory>(processor_.get(),
                                                          chat_template_.get(),
@@ -438,6 +573,18 @@ void VLMMaster::generate() {
   running_.store(true, std::memory_order_relaxed);
   scheduler_->generate();
   running_.store(false, std::memory_order_relaxed);
+}
+
+bool VLMMaster::start_profile() {
+  return dispatch_engine(vlm_engine_.get(),
+                         speculative_engine_.get(),
+                         [](auto& engine) { return engine.start_profile(); });
+}
+
+bool VLMMaster::stop_profile() {
+  return dispatch_engine(vlm_engine_.get(),
+                         speculative_engine_.get(),
+                         [](auto& engine) { return engine.stop_profile(); });
 }
 
 }  // namespace xllm

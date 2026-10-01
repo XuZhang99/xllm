@@ -15,12 +15,10 @@ limitations under the License.
 
 #include "llm_master.h"
 
-#include <gflags/gflags.h>
 #include <glog/logging.h>
-#include <pybind11/pybind11.h>
 
 #include <atomic>
-#include <boost/algorithm/string.hpp>
+#include <filesystem>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -28,17 +26,20 @@ limitations under the License.
 
 #include "api_service/call.h"
 #include "common/metrics.h"
-#include "core/platform/device_name_utils.h"
+#include "core/framework/config/model_config.h"
+#include "core/framework/config/speculative_config.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
+#include "models/model_cp_validation.h"
 #include "models/model_registry.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
-#include "speculative_engine.h"
+#include "util/model_config_utils.h"
 #include "util/net.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
+#include "util/utils.h"
 
 namespace xllm {
 namespace {
@@ -49,41 +50,194 @@ bool should_use_ssm_engine(const Options& options) {
           options.num_speculative_tokens() > 0);
 }
 
+template <typename Function>
+bool dispatch_engine(LLMEngine* llm_engine,
+                     SuffixSpeculativeEngine* suffix_engine,
+                     SpeculativeEngineBase<LLMEngine>* speculative_engine,
+                     Function&& function) {
+  if (llm_engine != nullptr) {
+    return function(*llm_engine);
+  }
+  if (suffix_engine != nullptr) {
+    return function(*suffix_engine);
+  }
+  if (speculative_engine != nullptr) {
+    return function(*speculative_engine);
+  }
+  return false;
+}
+
+void configure_disaggregated_pd_options(Options* options) {
+  CHECK(options != nullptr);
+  if (!options->enable_disagg_pd()) {
+    return;
+  }
+
+  options->enable_service_routing(true);
+  if (options->instance_role() == InstanceRole::PREFILL) {
+    options->enable_schedule_overlap(false);
+    LOG(WARNING) << "Force to disable schedule overlap for prefill instance "
+                    "in disagg pd mode.";
+  }
+}
+
 }  // namespace
 
 LLMMaster::LLMMaster(const Options& options)
-    : Master(
-          options,
-          should_use_ssm_engine(options) ? EngineType::SSM : EngineType::LLM) {
-  if (engine_type_ == EngineType::LLM) {
-    llm_engine_ = take_engine<LLMEngine>();
-    engine_ = llm_engine_.get();
-  } else if (options_.speculative_algorithm() == "Suffix") {
-    suffix_engine_ = take_engine<SuffixSpeculativeEngine>();
-    engine_ = suffix_engine_.get();
+    : Master(options), master_status_(options.master_status()) {
+  options_.enable_mla(util::should_enable_mla(
+      std::filesystem::path(options_.model_path()), options_.backend()));
+  resolve_npu_kernel_backend(&options_);
+  configure_disaggregated_pd_options(&options_);
+  const bool use_ssm_engine = should_use_ssm_engine(options_);
+  const EngineType engine_type =
+      use_ssm_engine ? EngineType::SSM : EngineType::LLM;
+  const std::string model_type =
+      util::get_model_type(options_.model_path(), options_.backend());
+  const std::optional<std::string> cp_error =
+      validate_model_cp(options_, engine_type, model_type, options_.nnodes());
+  CHECK(!cp_error.has_value()) << cp_error.value();
+  const std::optional<std::string> speculative_error =
+      ModelConfig::validate_python_speculative_decode(
+          ModelConfig::get_instance().model_impl(),
+          model_type,
+          options_.num_speculative_tokens(),
+          options_.speculative_algorithm());
+  CHECK(!speculative_error.has_value()) << speculative_error.value();
+  validate_layerwise_split_size_startup_config(
+      options_, model_type, options_.nnodes());
+
+  if (options_.enable_task_pipeline()) {
+    const std::string& algorithm = options_.speculative_algorithm();
+    const bool supported_speculation =
+        SpeculativeConfig::is_mtp_algorithm(algorithm) ||
+        algorithm == "DFlash" ||
+        SpeculativeConfig::is_dflash2_algorithm(algorithm);
+    CHECK((engine_type == EngineType::LLM ||
+           (engine_type == EngineType::SSM && supported_speculation)) &&
+          options_.task_type() == "generate" &&
+          !options_.enable_offline_inference())
+        << "Task pipeline requires online LLM, MTP, DFlash or DFlash2 "
+           "generation.";
+    CHECK(master_status_ == MasterStatus::WAKEUP)
+        << "Task pipeline must start with loaded weights.";
+  }
+  if (options_.host_blocks_factor() > 1.0) {
+    const bool supports_host_offload =
+        engine_type == EngineType::LLM ||
+        SpeculativeConfig::supports_host_kv_cache(
+            options_.speculative_algorithm());
+    CHECK(supports_host_offload)
+        << "Basic host KV cache offload supports the LLM engine and "
+           "model-based speculative engines only.";
+  }
+
+  if (!use_ssm_engine &&
+      (options_.task_type() == "embed" || options_.task_type() == "mm_embed")) {
+    options_.enable_schedule_overlap(false);
+    LOG(WARNING) << "Force to disable schedule overlap for embedding model, "
+                    "avoiding performance degradation.";
+  }
+
+  runtime::Options engine_options = create_runtime_options();
+  engine_options.block_size(options_.block_size())
+      .max_cache_size(options_.max_cache_size())
+      .max_linear_state_cache_slots(options_.max_linear_state_cache_slots())
+      .enable_mla(options_.enable_mla())
+      .cp_size(options_.cp_size())
+      .enable_flashcomm1(options_.enable_flashcomm1())
+      .flashcomm1_min_prefill_tokens(options_.flashcomm1_min_prefill_tokens())
+      .enable_mmrs_fusion(options_.enable_mmrs_fusion())
+      .mmrs_comm_mode(options_.mmrs_comm_mode())
+      .instance_role(options_.instance_role())
+      .enable_disagg_pd(options_.enable_disagg_pd())
+      .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
+      .transfer_listen_port(options_.transfer_listen_port())
+      .enable_service_routing(options_.enable_service_routing())
+      .server_idx(options_.server_idx())
+      .enable_task_pipeline(options_.enable_task_pipeline())
+      .enable_graph(options_.enable_graph())
+      .enable_graph_mode_decode_no_padding(
+          options_.enable_graph_mode_decode_no_padding())
+      .enable_prefill_piecewise_graph(options_.enable_prefill_piecewise_graph())
+      .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode())
+      .max_seqs_per_batch(options_.max_seqs_per_batch())
+      .max_tokens_per_batch(options_.max_tokens_per_batch())
+      .max_tokens_per_chunk_for_prefill(
+          options_.max_tokens_per_chunk_for_prefill())
+      .host_blocks_factor(options_.host_blocks_factor())
+      .enable_kvcache_store(options_.enable_kvcache_store())
+      .store_protocol(options_.store_protocol())
+      .store_rdma_devices(options_.store_rdma_devices())
+      .store_master_server_address(options_.store_master_server_address())
+      .store_metadata_server(options_.store_metadata_server())
+      .store_local_hostname(options_.store_local_hostname())
+      .prefetch_batch_size(options_.prefetch_batch_size())
+      .prefetch_timeout(options_.prefetch_timeout())
+      .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
+      .kv_cache_dtype(options_.kv_cache_dtype());
+
+  if (!use_ssm_engine) {
+    llm_engine_ = std::make_unique<LLMEngine>(engine_options);
   } else {
-    speculative_engine_ = take_engine<SpeculativeEngineBase<LLMEngine>>();
-    engine_ = speculative_engine_.get();
+    const std::string draft_model_path =
+        options_.draft_model_path().value_or("");
+    const bool use_suffix_spec = options_.speculative_algorithm() == "Suffix";
+    CHECK(use_suffix_spec || !draft_model_path.empty())
+        << "draft model path is required unless --speculative_algorithm=Suffix";
+    engine_options.draft_model_path(draft_model_path)
+        .num_speculative_tokens(options_.num_speculative_tokens())
+        .speculative_algorithm(options_.speculative_algorithm())
+        .draft_sampling_mode(options_.draft_sampling_mode())
+        .enable_mtp_draft_body_tp1(options_.enable_mtp_draft_body_tp1())
+        .speculative_suffix_cache_max_depth(
+            options_.speculative_suffix_cache_max_depth())
+        .speculative_suffix_max_spec_factor(
+            options_.speculative_suffix_max_spec_factor())
+        .speculative_suffix_max_spec_offset(
+            options_.speculative_suffix_max_spec_offset())
+        .speculative_suffix_min_token_prob(
+            options_.speculative_suffix_min_token_prob())
+        .speculative_suffix_max_cached_requests(
+            options_.speculative_suffix_max_cached_requests())
+        .speculative_suffix_use_tree_spec(
+            options_.speculative_suffix_use_tree_spec())
+        .enable_adaptive_speculative_decode(
+            options_.enable_adaptive_speculative_decode())
+        .adaptive_speculative_min_gain(
+            options_.adaptive_speculative_min_gain());
+    if (use_suffix_spec) {
+      suffix_engine_ =
+          std::make_unique<SuffixSpeculativeEngine>(engine_options);
+    } else {
+      speculative_engine_ =
+          std::make_unique<SpeculativeEngineBase<LLMEngine>>(engine_options);
+    }
   }
   if (!is_leader()) {
     return;
   }
 
-  CHECK(engine_->init(master_status_));
-  task_type_ = options_.task_type();
-
-  model_args_ = engine_->model_args();
-
-  if (options_.enable_service_routing()) {
-    xservice_client_ = XServiceClient::get_instance();
-    if (!xservice_client_->init(options_.etcd_addr().value_or(""),
-                                options_.instance_name().value_or(""),
-                                engine_->block_manager_pool(),
-                                options_.etcd_namespace().value_or(""))) {
-      LOG(FATAL) << "XServiceClient init fail!";
-      return;
+  auto initialize_engine = [this](auto* engine) {
+    CHECK(engine->init(master_status_));
+    model_args_ = engine->model_args();
+    if (options_.enable_service_routing()) {
+      xservice_client_ = XServiceClient::get_instance();
+      CHECK(xservice_client_->init(options_.etcd_addr().value_or(""),
+                                   options_.instance_name().value_or(""),
+                                   engine->block_manager_pool(),
+                                   options_.etcd_namespace().value_or("")))
+          << "XServiceClient init fail!";
     }
+  };
+  if (!use_ssm_engine) {
+    initialize_engine(llm_engine_.get());
+  } else if (options_.speculative_algorithm() == "Suffix") {
+    initialize_engine(suffix_engine_.get());
+  } else {
+    initialize_engine(speculative_engine_.get());
   }
+  task_type_ = options_.task_type();
 
   SchedulerOptions scheduler_options;
   scheduler_options.max_tokens_per_batch(options_.max_tokens_per_batch())
@@ -115,7 +269,7 @@ LLMMaster::LLMMaster(const Options& options)
       .max_global_tpot_ms(options_.max_global_tpot_ms())
       .server_idx(options_.server_idx())
       .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
-  if (engine_type_ == EngineType::LLM) {
+  if (!use_ssm_engine) {
     scheduler_ =
         create_continuous_scheduler(llm_engine_.get(), scheduler_options);
   } else if (options_.speculative_algorithm() == "Suffix") {
@@ -131,11 +285,18 @@ LLMMaster::LLMMaster(const Options& options)
     XServiceClient::get_instance()->register_instance(instance_info);
   }
 
-  // construct chat template
-  chat_template_ =
-      ChatTemplate::create(engine_->tokenizer_args(), model_args_.model_type());
-
-  tokenizer_ = engine_->tokenizer()->clone();
+  auto initialize_tokenizer = [this](auto* engine) {
+    chat_template_ = ChatTemplate::create(engine->tokenizer_args(),
+                                          model_args_.model_type());
+    tokenizer_ = engine->tokenizer()->clone();
+  };
+  if (!use_ssm_engine) {
+    initialize_tokenizer(llm_engine_.get());
+  } else if (options_.speculative_algorithm() == "Suffix") {
+    initialize_tokenizer(suffix_engine_.get());
+  } else {
+    initialize_tokenizer(speculative_engine_.get());
+  }
   Tokenizer* request_tokenizer = tokenizer_.get();
   threadpool_ = std::make_unique<ThreadPool>(
       /*num_threads=*/options_.num_request_handling_threads(),
@@ -362,26 +523,62 @@ std::vector<bool> LLMMaster::handle_rpc_responses(
   return xservice_client_->generations(outputs);
 }
 
-bool LLMMaster::sleep() { return engine_->sleep(master_status_); }
+bool LLMMaster::sleep() {
+  return dispatch_engine(
+      llm_engine_.get(),
+      suffix_engine_.get(),
+      speculative_engine_.get(),
+      [this](auto& engine) { return engine.sleep(master_status_); });
+}
 
 bool LLMMaster::wakeup() {
   WakeupOptions options;
   options.master_status = master_status_;
-  return engine_->wakeup(options);
+  return dispatch_engine(
+      llm_engine_.get(),
+      suffix_engine_.get(),
+      speculative_engine_.get(),
+      [&options](auto& engine) { return engine.wakeup(options); });
 }
 
 bool LLMMaster::wakeup(const WakeupOptions& options) {
   WakeupOptions opts = options;
   opts.master_status = master_status_;
-  return engine_->wakeup(opts);
+  return dispatch_engine(llm_engine_.get(),
+                         suffix_engine_.get(),
+                         speculative_engine_.get(),
+                         [&opts](auto& engine) { return engine.wakeup(opts); });
 }
 
 bool LLMMaster::link_p2p(const std::vector<std::string>& remote_addrs) {
-  return engine_->link_p2p(remote_addrs);
+  return dispatch_engine(
+      llm_engine_.get(),
+      suffix_engine_.get(),
+      speculative_engine_.get(),
+      [&remote_addrs](auto& engine) { return engine.link_p2p(remote_addrs); });
 }
 
 bool LLMMaster::unlink_p2p(const std::vector<std::string>& remote_addrs) {
-  return engine_->unlink_p2p(remote_addrs);
+  return dispatch_engine(llm_engine_.get(),
+                         suffix_engine_.get(),
+                         speculative_engine_.get(),
+                         [&remote_addrs](auto& engine) {
+                           return engine.unlink_p2p(remote_addrs);
+                         });
+}
+
+bool LLMMaster::start_profile() {
+  return dispatch_engine(llm_engine_.get(),
+                         suffix_engine_.get(),
+                         speculative_engine_.get(),
+                         [](auto& engine) { return engine.start_profile(); });
+}
+
+bool LLMMaster::stop_profile() {
+  return dispatch_engine(llm_engine_.get(),
+                         suffix_engine_.get(),
+                         speculative_engine_.get(),
+                         [](auto& engine) { return engine.stop_profile(); });
 }
 
 }  // namespace xllm

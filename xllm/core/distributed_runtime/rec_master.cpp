@@ -20,6 +20,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <pybind11/pybind11.h>
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -27,14 +28,17 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/framework/multimodal/mm_data.h"
+#include "models/model_cp_validation.h"
 #include "models/model_registry.h"
 #include "rec_engine.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
+#include "util/model_config_utils.h"
 #include "util/rec_model_utils.h"
 #include "util/scope_guard.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
+#include "util/utils.h"
 
 namespace xllm {
 
@@ -53,12 +57,59 @@ RecType get_rec_type(const ModelArgs& model_args) {
   return RecType::kNone;
 }
 
+void configure_disaggregated_pd_options(Options* options) {
+  CHECK(options != nullptr);
+  if (!options->enable_disagg_pd()) {
+    return;
+  }
+
+  options->enable_service_routing(true);
+  if (options->instance_role() == InstanceRole::PREFILL) {
+    options->enable_schedule_overlap(false);
+    LOG(WARNING) << "Force to disable schedule overlap for prefill instance "
+                    "in disagg pd mode.";
+  }
+}
+
 }  // namespace
 
-RecMaster::RecMaster(const Options& options)
-    : Master(options, EngineType::REC) {
-  rec_engine_ = take_engine<RecEngine>();
-  engine_ = rec_engine_.get();
+RecMaster::RecMaster(const Options& options) : Master(options) {
+  options_.enable_mla(util::should_enable_mla(
+      std::filesystem::path(options_.model_path()), options_.backend()));
+  resolve_npu_kernel_backend(&options_);
+  configure_disaggregated_pd_options(&options_);
+  const std::string model_type =
+      util::get_model_type(options_.model_path(), options_.backend());
+  const std::optional<std::string> cp_error = validate_model_cp(
+      options_, EngineType::REC, model_type, options_.nnodes());
+  CHECK(!cp_error.has_value()) << cp_error.value();
+  validate_layerwise_split_size_startup_config(
+      options_, model_type, options_.nnodes());
+  CHECK(!options_.enable_task_pipeline())
+      << "Task pipeline is only supported by the LLM master.";
+  CHECK(options_.host_blocks_factor() <= 1.0)
+      << "Basic host KV cache offload is not supported by the Rec engine.";
+
+  options_.enable_schedule_overlap(false);
+  LOG(WARNING) << "Force to disable schedule overlap for REC model, not "
+                  "supported yet.";
+  runtime::Options engine_options = create_runtime_options();
+  engine_options.block_size(options_.block_size())
+      .max_cache_size(options_.max_cache_size())
+      .enable_mla(options_.enable_mla())
+      .cp_size(options_.cp_size())
+      .max_seqs_per_batch(options_.max_seqs_per_batch())
+      .beam_width(options_.beam_width())
+      .max_tokens_per_batch(options_.max_tokens_per_batch())
+      .enable_graph(options_.enable_graph())
+      .enable_graph_mode_decode_no_padding(
+          options_.enable_graph_mode_decode_no_padding())
+      .enable_prefill_piecewise_graph(options_.enable_prefill_piecewise_graph())
+      .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode())
+      .max_tokens_per_chunk_for_prefill(
+          options_.max_tokens_per_chunk_for_prefill())
+      .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
+  rec_engine_ = std::make_unique<RecEngine>(engine_options);
   if (!is_leader()) {
     // RecEngine does not create DistManager in its constructor. LlmRec
     // starts workers in init(); skip that on non-leaders but still host
@@ -67,11 +118,9 @@ RecMaster::RecMaster(const Options& options)
     return;
   }
 
-  // Initialize with Rec engine type
-  // The rest of the initialization follows the same pattern as LLMMaster
-  CHECK(engine_->init());
+  CHECK(rec_engine_->init());
 
-  model_args_ = engine_->model_args();
+  model_args_ = rec_engine_->model_args();
   rec_type_ = get_rec_type(model_args_);
   if (rec_type_ == RecType::kNone) {
     LOG(ERROR) << "Unsupported rec model_type: " << model_args_.model_type();
@@ -81,7 +130,7 @@ RecMaster::RecMaster(const Options& options)
     XServiceClient* xservice_client = XServiceClient::get_instance();
     if (!xservice_client->init(options_.etcd_addr().value_or(""),
                                options_.instance_name().value_or(""),
-                               engine_->block_manager_pool(),
+                               rec_engine_->block_manager_pool(),
                                options_.etcd_namespace().value_or(""))) {
       LOG(FATAL) << "XServiceClient init fail!";
       return;
@@ -111,8 +160,8 @@ RecMaster::RecMaster(const Options& options)
   // Initialize chat template and tokenizer for LlmRec (Qwen3).
   if (rec_type_ == RecType::kLlmRec) {
     chat_template_ =
-        std::make_unique<JinjaChatTemplate>(engine_->tokenizer_args());
-    tokenizer_ = engine_->tokenizer()->clone();
+        std::make_unique<JinjaChatTemplate>(rec_engine_->tokenizer_args());
+    tokenizer_ = rec_engine_->tokenizer()->clone();
   } else {
     tokenizer_ = nullptr;
   }

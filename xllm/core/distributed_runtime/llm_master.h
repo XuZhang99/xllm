@@ -15,17 +15,18 @@ limitations under the License.
 
 #pragma once
 
-#include <folly/Function.h>
 #include <glog/logging.h>
 
-#include <functional>
-#include <future>
+#include <atomic>
 #include <memory>
+#include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "common/options.h"
 #include "common/rate_limiter.h"
+#include "common/types.h"
 #include "framework/chat_template/chat_template.h"
 #include "framework/request/llm_request_factory.h"
 #include "framework/request/request_output.h"
@@ -43,7 +44,9 @@ class Tokenizer;
 class LLMMaster : public Master {
  public:
   explicit LLMMaster(const Options& options);
-  ~LLMMaster();
+  ~LLMMaster() override;
+
+  const ModelArgs* model_args() const override { return &model_args_; }
 
   // handle a request, the engine will execute the request asynchronously
   // completion/encode
@@ -89,17 +92,29 @@ class LLMMaster : public Master {
   // this is a blocking call
   void generate();
 
-  bool sleep() override;
+  MasterStatus get_master_status() const { return master_status_; }
 
-  bool wakeup() override;
+  bool is_sleeping() const { return master_status_ != MasterStatus::WAKEUP; }
 
-  bool wakeup(const WakeupOptions& options) override;
+  void set_master_status(MasterStatus master_status) {
+    master_status_ = master_status;
+  }
 
-  bool link_p2p(const std::vector<std::string>& remote_addrs) override;
+  bool sleep();
 
-  bool unlink_p2p(const std::vector<std::string>& remote_addrs) override;
+  bool wakeup();
+
+  bool wakeup(const WakeupOptions& options);
+
+  bool link_p2p(const std::vector<std::string>& remote_addrs);
+
+  bool unlink_p2p(const std::vector<std::string>& remote_addrs);
+
+  bool start_profile();
+  bool stop_profile();
 
  private:
+  MasterStatus master_status_;
   XServiceClient* xservice_client_ = nullptr;
 
   // Exactly one of these owners is populated, depending on the configured

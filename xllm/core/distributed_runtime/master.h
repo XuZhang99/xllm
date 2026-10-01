@@ -15,27 +15,23 @@ limitations under the License.
 
 #pragma once
 
-#include <folly/Function.h>
+#include <torch/types.h>
 
 #include <atomic>
-#include <functional>
-#include <future>
-#include <optional>
-#include <string>
 #include <thread>
 #include <vector>
 
-#include "common/macros.h"
 #include "common/options.h"
 #include "common/rate_limiter.h"
-#include "common/types.h"
-#include "engine.h"
-#include "framework/request/request_params.h"
+#include "runtime/options.h"
+
 namespace xllm {
+
+class ModelArgs;
 
 class Master {
  public:
-  explicit Master(const Options& options, EngineType type);
+  explicit Master(const Options& options);
   virtual ~Master();
   // Rank-0 masters override this to start the scheduler loop. Non-zero
   // ranks use the default implementation, which starts a background idle
@@ -44,43 +40,9 @@ class Master {
   // Block until the idle thread exits (SIGINT/SIGTERM). Used by the
   // binary when no HTTP server is started on a non-leader rank.
   void wait();
-  virtual const Options& options() const { return options_; }
-  const ModelArgs* model_args() const {
-    return engine_ ? &engine_->model_args() : nullptr;
-  }
-  EngineType engine_type() const { return engine_type_; }
+  const Options& options() const { return options_; }
 
-  virtual bool sleep() { return false; }
-
-  virtual bool wakeup() { return false; }
-
-  virtual bool wakeup(const WakeupOptions& options) { return false; }
-
-  virtual bool link_p2p(const std::vector<std::string>& remote_addrs) {
-    return false;
-  }
-
-  // Start/stop online timeline profiling on all workers. Forwards to the
-  // engine, which broadcasts to every worker. CUDA only for now.
-  virtual bool start_profile() {
-    return engine_ ? engine_->start_profile() : false;
-  }
-
-  virtual bool stop_profile() {
-    return engine_ ? engine_->stop_profile() : false;
-  }
-
-  virtual bool unlink_p2p(const std::vector<std::string>& remote_addrs) {
-    return false;
-  }
-
-  MasterStatus get_master_status() const { return master_status_; }
-
-  bool is_sleeping() const { return master_status_ != MasterStatus::WAKEUP; }
-
-  void set_master_status(MasterStatus master_status) {
-    master_status_ = master_status;
-  }
+  virtual const ModelArgs* model_args() const = 0;
 
   RateLimiter* get_rate_limiter() { return &rate_limiter_; }
 
@@ -89,38 +51,16 @@ class Master {
   // no external caller needs it.
   bool is_leader() const { return options_.node_rank() == 0; }
 
-  template <typename ConcreteEngine>
-  std::unique_ptr<ConcreteEngine> take_engine() {
-    CHECK(engine_storage_ != nullptr);
-    auto* concrete_engine =
-        static_cast<ConcreteEngine*>(engine_storage_.release());
-    return std::unique_ptr<ConcreteEngine>(concrete_engine);
-  }
+  runtime::Options create_runtime_options() const;
 
   Options options_;
-  EngineType engine_type_ = EngineType::INVALID;
-  // The base constructs the runtime before the derived master is initialized.
-  // Derived masters immediately take ownership with take_engine() and keep
-  // engine_ as a non-owning pointer for shared master functionality.
-  std::unique_ptr<Engine> engine_storage_;
-  Engine* engine_ = nullptr;
+  std::vector<torch::Device> devices_;
   RateLimiter rate_limiter_;
-  MasterStatus master_status_{MasterStatus::WAKEUP};
 
  private:
   static void handle_shutdown_signal(int signum);
   static std::atomic<bool> idle_running_;
   std::thread idle_thread_;
 };
-
-std::optional<std::string> validate_model_cp(const Options& options,
-                                             EngineType engine_type,
-                                             const std::string& model_type,
-                                             int32_t global_world_size);
-
-std::unique_ptr<Master> create_master(const std::string& backend,
-                                      const Options& options);
-
-std::unique_ptr<Master> fork_master(Master* master, const Options& options);
 
 }  // namespace xllm

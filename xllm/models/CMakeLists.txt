@@ -13,12 +13,14 @@ cc_library(
     models
   HDRS
     model_registry.h
+    model_cp_validation.h
     models.h
     dit/utils/lanczos_resample.h
     $<$<BOOL:${USE_NPU}>:dit/utils/dit_block_weight_manager.h>
     py_model_helper.h
   SRCS
     model_registry.cpp
+    model_cp_validation.cpp
     dit/utils/lanczos_resample.cpp
     $<$<BOOL:${USE_NPU}>:dit/utils/dit_block_weight_manager.cpp>
     vlm/utils/multimodal_utils.cpp

@@ -16,8 +16,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include "common/options.h"
-#include "distributed_runtime/master.h"
 #include "framework/config/parallel_config.h"
+#include "models/model_cp_validation.h"
 #include "models/model_registry.h"
 
 namespace xllm {

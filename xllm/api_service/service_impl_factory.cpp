@@ -57,6 +57,7 @@ void ServiceImplFactory::create(
           Master* master,
           const std::vector<std::string>& models) {
          auto* llm_master = dynamic_cast<LLMMaster*>(master);
+         CHECK(llm_master != nullptr);
          self->anthropic_service_impl_ =
              std::make_unique<AnthropicServiceImpl>(llm_master, models);
          self->completion_service_impl_ =
@@ -80,6 +81,7 @@ void ServiceImplFactory::create(
           Master* master,
           const std::vector<std::string>& models) {
          auto* vlm_master = dynamic_cast<VLMMaster*>(master);
+         CHECK(vlm_master != nullptr);
          self->mm_chat_service_impl_ =
              std::make_unique<MMChatServiceImpl>(vlm_master, models);
          self->mm_embedding_service_impl_ =
@@ -90,6 +92,7 @@ void ServiceImplFactory::create(
           Master* master,
           const std::vector<std::string>& models) {
          auto* dit_master = dynamic_cast<DiTMaster*>(master);
+         CHECK(dit_master != nullptr);
          self->image_generation_service_impl_ =
              std::make_unique<ImageGenerationServiceImpl>(dit_master, models);
          self->audio_generation_service_impl_ =
@@ -104,6 +107,7 @@ void ServiceImplFactory::create(
           Master* master,
           const std::vector<std::string>& models) {
          auto* rec_master = dynamic_cast<RecMaster*>(master);
+         CHECK(rec_master != nullptr);
          self->rec_completion_service_impl_ =
              std::make_unique<RecCompletionServiceImpl>(rec_master, models);
          self->chat_service_impl_ =
@@ -111,13 +115,13 @@ void ServiceImplFactory::create(
        }},
   };
 
-  ServingMode mode = to_serving_mode(master->engine_type());
+  ServingMode mode = to_serving_mode(master->options().backend());
   auto it = kRegistry.find(static_cast<int8_t>(mode));
   if (it != kRegistry.end()) {
     it->second(service, master, model_names);
   } else {
-    LOG(FATAL) << "Unsupported serving mode for engine type: "
-               << master->engine_type().to_string();
+    LOG(FATAL) << "Unsupported serving mode for backend: "
+               << master->options().backend();
   }
 
   CHECK_EQ(model_names.size(), model_repository_names.size())

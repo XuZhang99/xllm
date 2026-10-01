@@ -19,11 +19,11 @@ limitations under the License.
 #include <optional>
 #include <string>
 
-#include "core/distributed_runtime/master.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/util/scope_guard.h"
+#include "models/model_cp_validation.h"
 #include "models/model_registry.h"
 
 namespace xllm {

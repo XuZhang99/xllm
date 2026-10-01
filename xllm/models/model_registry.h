@@ -20,6 +20,7 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 
+#include "core/common/options.h"
 #include "core/framework/dit_model_context.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/causal_vlm.h"
@@ -171,6 +172,11 @@ bool resolve_model_registration(const std::string& model_type,
                                 std::string* effective_npu_kernel_backend,
                                 std::string* resolved_name,
                                 std::string* error_message = nullptr);
+
+// Resolve the model-specific NPU kernel backend before constructing a runtime
+// engine. This applies only to the LLM/VLM/Rec model registry; DiT has its own
+// model registry and backend selection.
+void resolve_npu_kernel_backend(Options* options);
 
 std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context);
 

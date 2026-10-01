@@ -38,6 +38,8 @@ class RecMaster : public Master {
   explicit RecMaster(const Options& options);
   ~RecMaster();
 
+  const ModelArgs* model_args() const override { return &model_args_; }
+
   // handle a request, the engine will execute the request asynchronously
   // completion/encode
   void handle_request(

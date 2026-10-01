@@ -12,6 +12,7 @@ cc_library(
   HDRS
     engine.h
     master.h
+    master_factory.h
     dit_engine.h
     dit_master.h
     llm_engine.h
@@ -31,6 +32,7 @@ cc_library(
     shm_channel.h
   SRCS
     master.cpp
+    master_factory.cpp
     dit_engine.cpp
     dit_master.cpp
     llm_engine.cpp
@@ -50,6 +52,7 @@ cc_library(
     shm_channel.cpp
   DEPS
     :api_service
+    :models
     :runtime
     :util
     glog::glog
@@ -97,11 +100,13 @@ cc_library(
   HDRS
     llm_master.h
     master.h
+    master_factory.h
     vlm_master.h
     dit_master.h
   SRCS
     llm_master.cpp
     master.cpp
+    master_factory.cpp
     vlm_master.cpp
     dit_master.cpp
   DEPS

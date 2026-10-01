@@ -37,6 +37,7 @@ namespace py = pybind11;
 #include "core/common/options.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/master.h"
+#include "core/distributed_runtime/master_factory.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/config_utils.h"
 #include "core/framework/config/disagg_pd_config.h"

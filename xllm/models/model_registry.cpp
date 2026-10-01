@@ -28,6 +28,7 @@ limitations under the License.
 #include "core/util/dit_model_discovery.h"
 #include "llm/py_causal_lm.h"
 #include "models.h"
+#include "util/model_config_utils.h"
 
 namespace {
 
@@ -193,6 +194,41 @@ bool resolve_model_registration(const std::string& model_type,
 #else
   *resolved_name = model_type;
   return true;
+#endif
+}
+
+void resolve_npu_kernel_backend(Options* options) {
+  CHECK(options != nullptr) << "options must not be null";
+
+#if defined(USE_NPU)
+  // Python model executor builds the compute graph in Python (torch/torch_npu),
+  // bypassing ATB C++ kernels entirely. Force TORCH so kernel dispatch picks
+  // pure-torch implementations for reshape_and_cache and related operators.
+  if (ModelConfig::is_python_model_impl(
+          ModelConfig::get_instance().model_impl())) {
+    options->npu_kernel_backend("TORCH");
+    KernelConfig::get_instance().npu_kernel_backend("TORCH");
+    LOG(INFO) << "Forced npu_kernel_backend=TORCH for python model_impl";
+    return;
+  }
+
+  const std::string model_type =
+      util::get_model_type(options->model_path(), options->backend());
+  std::string effective_backend;
+  std::string resolved_name;
+  std::string error_message;
+  if (!resolve_model_registration(model_type,
+                                  options->npu_kernel_backend(),
+                                  &effective_backend,
+                                  &resolved_name,
+                                  &error_message)) {
+    LOG(FATAL) << error_message;
+  }
+
+  options->npu_kernel_backend(effective_backend);
+  KernelConfig::get_instance().npu_kernel_backend(effective_backend);
+  LOG(INFO) << "Resolved npu_kernel_backend=" << effective_backend
+            << " for model_type=" << model_type;
 #endif
 }
 

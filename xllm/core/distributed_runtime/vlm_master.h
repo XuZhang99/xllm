@@ -15,20 +15,16 @@ limitations under the License.
 
 #pragma once
 
-#include <folly/Function.h>
-
-#include <functional>
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <string>
 #include <thread>
-#include <variant>
 #include <vector>
 
 #include "common/options.h"
 #include "common/types.h"
 #include "core/framework/multimodal/mm_input.h"
-#include "engine.h"
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/request/request_output.h"
 #include "framework/request/request_params.h"
@@ -44,7 +40,9 @@ namespace xllm {
 class VLMMaster : public Master {
  public:
   explicit VLMMaster(const Options& options);
-  ~VLMMaster();
+  ~VLMMaster() override;
+
+  const ModelArgs* model_args() const override { return &model_args_; }
 
   // completion
   void handle_request(std::string prompt,
@@ -83,11 +81,12 @@ class VLMMaster : public Master {
   // generate will run all requests, this is an blocking call
   void generate();
 
+  bool start_profile();
+  bool stop_profile();
+
   int get_image_limit() { return options_.limit_image_per_prompt(); }
 
  private:
-  using Task = folly::Function<void()>;
-
   // Exactly one of these owners is populated for VLM and VLM speculative
   // execution respectively.
   std::unique_ptr<VLMEngine> vlm_engine_;

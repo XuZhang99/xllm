@@ -43,6 +43,7 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/llm_master.h"
+#include "core/distributed_runtime/master_factory.h"
 #include "core/distributed_runtime/rec_master.h"
 #include "core/distributed_runtime/vlm_master.h"
 #include "core/framework/config/distributed_config.h"
@@ -111,6 +112,29 @@ void process_typed_brpc_request(std::unique_ptr<Service>& service_impl,
   std::shared_ptr<Call> call = std::make_shared<CallT>(
       ctrl, done_guard.release(), req_pb, response, arena != nullptr);
   service_impl->process_async(call);
+}
+
+bool link_p2p_master(Master* master,
+                     const std::vector<std::string>& remote_addrs) {
+  auto* llm_master = dynamic_cast<LLMMaster*>(master);
+  return llm_master != nullptr && llm_master->link_p2p(remote_addrs);
+}
+
+bool unlink_p2p_master(Master* master,
+                       const std::vector<std::string>& remote_addrs) {
+  auto* llm_master = dynamic_cast<LLMMaster*>(master);
+  return llm_master != nullptr && llm_master->unlink_p2p(remote_addrs);
+}
+
+template <typename Function>
+bool profile_master(Master* master, Function&& function) {
+  if (auto* llm_master = dynamic_cast<LLMMaster*>(master)) {
+    return function(*llm_master);
+  }
+  if (auto* vlm_master = dynamic_cast<VLMMaster*>(master)) {
+    return function(*vlm_master);
+  }
+  return false;
 }
 
 }  // namespace
@@ -1139,8 +1163,9 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
 
 bool APIService::do_fork_master(const proto::MasterInfos& request,
                                 std::string* error_message) {
-  if (to_serving_mode(master_->engine_type()) != ServingMode::LLM) {
-    *error_message = "fork master only supports LLM engine";
+  auto* llm_master = dynamic_cast<LLMMaster*>(master_);
+  if (llm_master == nullptr) {
+    *error_message = "fork master only supports LLM master";
     return false;
   }
 
@@ -1157,7 +1182,7 @@ bool APIService::do_fork_master(const proto::MasterInfos& request,
     return true;
   }
 
-  auto master = fork_master(master_, master_options);
+  auto master = fork_llm_master(llm_master, master_options);
   if (!master) {
     *error_message = "Failed to fork master: " + master_options.model_id();
     return false;
@@ -1182,10 +1207,10 @@ bool APIService::do_fork_master(const proto::MasterInfos& request,
     return true;
   }
   if (::xllm::DistributedConfig::get_instance().node_rank() == 0) {
-    auto llm_master = dynamic_cast<LLMMaster*>(master.get());
     completion_service_impl_->add_model_master(master_options.model_id(),
-                                               llm_master);
-    chat_service_impl_->add_model_master(master_options.model_id(), llm_master);
+                                               master.get());
+    chat_service_impl_->add_model_master(master_options.model_id(),
+                                         master.get());
   }
   master.release();
   return true;
@@ -1262,7 +1287,12 @@ bool APIService::do_sleep(const proto::MasterInfos& request,
     *error_message = "Master for model not found";
     return false;
   }
-  if (master->is_sleeping()) {
+  auto* llm_master = dynamic_cast<LLMMaster*>(master);
+  if (llm_master == nullptr) {
+    *error_message = "Sleep is only supported for LLM masters";
+    return false;
+  }
+  if (llm_master->is_sleeping()) {
     LOG(INFO) << "Master for model " << request.model_id()
               << " is already sleeping";
     *error_message = "Master for model is already sleeping";
@@ -1279,10 +1309,10 @@ bool APIService::do_sleep(const proto::MasterInfos& request,
     return false;
   }
 
-  auto master_status = master->get_master_status();
-  master->set_master_status(req_master_status);
-  if (!master->sleep()) {
-    master->set_master_status(master_status);
+  const MasterStatus master_status = llm_master->get_master_status();
+  llm_master->set_master_status(req_master_status);
+  if (!llm_master->sleep()) {
+    llm_master->set_master_status(master_status);
     LOG(ERROR) << "Failed to sleep model " << request.model_id();
     *error_message = "Failed to sleep model";
     return false;
@@ -1351,7 +1381,12 @@ bool APIService::do_wakeup(const proto::MasterInfos& request,
     *error_message = "Master for model not found";
     return false;
   }
-  if (!master->is_sleeping()) {
+  auto* llm_master = dynamic_cast<LLMMaster*>(master);
+  if (llm_master == nullptr) {
+    *error_message = "Wakeup is only supported for LLM masters";
+    return false;
+  }
+  if (!llm_master->is_sleeping()) {
     LOG(INFO) << "Master for model " << request.model_id()
               << " is already awake";
     *error_message = "Master for model is already awake";
@@ -1373,14 +1408,14 @@ bool APIService::do_wakeup(const proto::MasterInfos& request,
         wakeup_options.src_weight_segments.push_back(std::move(segments));
       }
     }
-    if (!master->wakeup(wakeup_options)) {
+    if (!llm_master->wakeup(wakeup_options)) {
       LOG(ERROR) << "Failed to wakeup model " << request.model_id()
                  << " with remote weight transfer";
       *error_message = "Failed to wakeup model with remote weight transfer";
       return false;
     }
   } else {
-    if (!master->wakeup()) {
+    if (!llm_master->wakeup()) {
       LOG(ERROR) << "Failed to wakeup model " << request.model_id();
       *error_message = "Failed to wakeup model";
       return false;
@@ -1395,7 +1430,7 @@ bool APIService::do_wakeup(const proto::MasterInfos& request,
     return false;
   }
 
-  master->set_master_status(MasterStatus::WAKEUP);
+  llm_master->set_master_status(MasterStatus::WAKEUP);
   return true;
 }
 
@@ -1479,7 +1514,8 @@ void APIService::StartProfileHttp(::google::protobuf::RpcController* controller,
   }
 
   LOG(INFO) << "Starting profiler.";
-  if (!master_->start_profile()) {
+  if (!profile_master(master_,
+                      [](auto& master) { return master.start_profile(); })) {
     LOG(ERROR) << "Failed to start profiler.";
     ctrl->SetFailed("Failed to start profiler.");
     return;
@@ -1515,7 +1551,8 @@ void APIService::StopProfileHttp(::google::protobuf::RpcController* controller,
   }
 
   LOG(INFO) << "Stopping profiler.";
-  if (!master_->stop_profile()) {
+  if (!profile_master(master_,
+                      [](auto& master) { return master.stop_profile(); })) {
     LOG(ERROR) << "Failed to stop profiler.";
     ctrl->SetFailed("Failed to stop profiler.");
     return;
@@ -1540,8 +1577,8 @@ void APIService::LinkP2P(::google::protobuf::RpcController* controller,
     response->set_ok(false);
     return;
   }
-  bool status = master->link_p2p(
-      {request->remote_addrs().begin(), request->remote_addrs().end()});
+  bool status = link_p2p_master(
+      master, {request->remote_addrs().begin(), request->remote_addrs().end()});
   response->set_ok(status);
 }
 
@@ -1579,8 +1616,8 @@ void APIService::LinkP2PHttp(::google::protobuf::RpcController* controller,
     ctrl->SetFailed("Master for model not found");
     return;
   }
-  bool status = master->link_p2p(
-      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
+  bool status = link_p2p_master(
+      master, {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
   resp_pb->set_ok(status);
 
   json2pb::Pb2JsonOptions json_options;
@@ -1610,8 +1647,8 @@ void APIService::UnlinkP2P(::google::protobuf::RpcController* controller,
     response->set_ok(false);
     return;
   }
-  bool status = master->unlink_p2p(
-      {request->remote_addrs().begin(), request->remote_addrs().end()});
+  bool status = unlink_p2p_master(
+      master, {request->remote_addrs().begin(), request->remote_addrs().end()});
   response->set_ok(status);
 }
 
@@ -1649,8 +1686,8 @@ void APIService::UnlinkP2PHttp(::google::protobuf::RpcController* controller,
     ctrl->SetFailed("Master for model not found");
     return;
   }
-  bool status = master->unlink_p2p(
-      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
+  bool status = unlink_p2p_master(
+      master, {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
   resp_pb->set_ok(status);
 
   json2pb::Pb2JsonOptions json_options;

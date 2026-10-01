@@ -15,11 +15,9 @@ limitations under the License.
 
 #include "dit_master.h"
 
-#include <gflags/gflags.h>
 #include <glog/logging.h>
 
 #include <atomic>
-#include <boost/algorithm/string.hpp>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -27,24 +25,37 @@ limitations under the License.
 
 #include "api_service/call.h"
 #include "common/metrics.h"
-#include "core/platform/device_name_utils.h"
 #include "dit_engine.h"
 #include "framework/request/dit_request.h"
-#include "models/model_registry.h"
+#include "models/model_cp_validation.h"
 #include "scheduler/scheduler_factory.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
 
 namespace xllm {
-DiTMaster::DiTMaster(const Options& options)
-    : Master(options, EngineType::DIT) {
-  dit_engine_ = take_engine<DiTEngine>();
-  engine_ = dit_engine_.get();
+DiTMaster::DiTMaster(const Options& options) : Master(options) {
+  const std::optional<std::string> cp_error = validate_model_cp(
+      options_, EngineType::DIT, /*model_type=*/"", options_.nnodes());
+  CHECK(!cp_error.has_value()) << cp_error.value();
+  validate_layerwise_split_size_startup_config(
+      options_, /*model_type=*/"", options_.nnodes());
+  CHECK(!options_.enable_task_pipeline())
+      << "Task pipeline is only supported by the LLM master.";
+  CHECK(options_.host_blocks_factor() <= 1.0)
+      << "Basic host KV cache offload is not supported by the DiT engine.";
+
+  runtime::Options engine_options = create_runtime_options();
+  engine_options.tp_size(options_.tp_size())
+      .sp_size(options_.sp_size())
+      .cfg_size(options_.cfg_size())
+      .vae_size(options_.vae_size())
+      .text_encoder_tp_size(options_.text_encoder_tp_size());
+  dit_engine_ = std::make_unique<DiTEngine>(engine_options);
   if (!is_leader()) {
     return;
   }
 
-  CHECK(engine_->init());
+  CHECK(dit_engine_->init());
 
   DiTScheduler::Options scheduler_options;
   scheduler_options.max_request_per_batch(options.max_requests_per_batch())

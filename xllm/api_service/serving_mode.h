@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include "core/common/types.h"
 
@@ -46,6 +47,10 @@ inline ServingMode to_serving_mode(EngineType engine_type) {
     default:
       return ServingMode::LLM;
   }
+}
+
+inline ServingMode to_serving_mode(const std::string& backend) {
+  return to_serving_mode(EngineType(backend));
 }
 
 }  // namespace xllm
