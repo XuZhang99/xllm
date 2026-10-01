@@ -17,8 +17,12 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <variant>
 
 namespace xllm {
+// Natural EOS and length termination have no additional stop reason.
+using StopReason = std::variant<std::monostate, int32_t, std::string>;
+
 class FinishReason {
  public:
   enum Value : uint8_t { NONE = 0, STOP = 1, LENGTH, FUNCTION_CALL };

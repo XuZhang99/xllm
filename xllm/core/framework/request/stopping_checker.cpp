@@ -33,13 +33,18 @@ StoppingChecker::StoppingChecker(
     int32_t eos_token,
     bool ignore_eos,
     std::unordered_set<int32_t> stop_tokens,
-    std::vector<std::vector<int32_t>> stop_sequences)
+    std::vector<std::vector<int32_t>> stop_sequences,
+    std::vector<std::string> stop_strings)
     : max_generated_tokens_(max_generated_tokens),
       max_context_len_(max_context_len),
       eos_token_(eos_token),
       ignore_eos_(ignore_eos),
       stop_tokens_(std::move(stop_tokens)),
-      stop_sequences_(std::move(stop_sequences)) {}
+      stop_sequences_(std::move(stop_sequences)),
+      stop_strings_(std::move(stop_strings)) {
+  CHECK(stop_strings_.empty() ||
+        stop_strings_.size() == stop_sequences_.size());
+}
 
 size_t StoppingChecker::get_max_stop_sequence_token_count() const {
   size_t max_token_count = 0;
@@ -51,10 +56,14 @@ size_t StoppingChecker::get_max_stop_sequence_token_count() const {
 
 FinishReason StoppingChecker::check(const Slice<int32_t>& token_ids,
                                     size_t num_prompt_tokens,
-                                    size_t* matched_stop_token_count) const {
+                                    size_t* matched_stop_token_count,
+                                    StopReason* stop_reason) const {
   CHECK(!token_ids.empty());
   if (matched_stop_token_count != nullptr) {
     *matched_stop_token_count = 0;
+  }
+  if (stop_reason != nullptr) {
+    *stop_reason = std::monostate{};
   }
 
   // if enable_schedule_overlap, there might be pre scheduled fake token -1
@@ -85,6 +94,9 @@ FinishReason StoppingChecker::check(const Slice<int32_t>& token_ids,
   // request that supplies stop_token_ids replaces this default, so pairing it
   // with ignore_eos is contradictory by construction and ignore_eos wins.
   if (!ignore_eos_ && stop_tokens_.count(last_token_id) > 0) {
+    if (stop_reason != nullptr) {
+      *stop_reason = static_cast<int32_t>(last_token_id);
+    }
     if (matched_stop_token_count != nullptr) {
       *matched_stop_token_count = 1;
     }
@@ -92,8 +104,13 @@ FinishReason StoppingChecker::check(const Slice<int32_t>& token_ids,
   }
 
   // check stop sequences
-  for (const auto& seq : stop_sequences_) {
+  for (size_t index = 0; index < stop_sequences_.size(); ++index) {
+    const auto& seq = stop_sequences_[index];
     if (seq.back() == last_token_id && util::match_suffix(token_ids, seq)) {
+      if (stop_reason != nullptr && index < stop_strings_.size() &&
+          !stop_strings_[index].empty()) {
+        *stop_reason = stop_strings_[index];
+      }
       if (matched_stop_token_count != nullptr) {
         // A stop sequence may begin in the prompt and end in generated output.
         // Never hide prompt tokens, including when prompt echo is enabled.

@@ -237,7 +237,8 @@ std::optional<StoppingChecker> LLMRequestFactory::build_stopping_checker(
                          model_args_->eos_token_id(),
                          sp.ignore_eos,
                          std::move(stop_tokens),
-                         std::move(stop_sequences));
+                         std::move(stop_sequences),
+                         sp.stop.value_or(std::vector<std::string>{}));
 }
 
 bool LLMRequestFactory::validate_prompt_not_finished(

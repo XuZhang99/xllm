@@ -347,6 +347,32 @@ TEST(OpenAIRequestTest, CallPayloadParsingHandlesInvalidLengthHeaders) {
   EXPECT_EQ(call.take_request_payload(), "binary");
 }
 
+TEST(OpenAIJsonTest, StopReasonsKeepTheirJsonTypes) {
+  for (const StopReason& reason : {StopReason{},
+                                   StopReason{int32_t{123}},
+                                   StopReason{std::string("END")}}) {
+    proto::ChatResponse chat;
+    proto::CompletionResponse completion;
+    set_proto_stop_reason(reason, chat.add_choices()->mutable_stop_reason());
+    set_proto_stop_reason(reason,
+                          completion.add_choices()->mutable_stop_reason());
+    const nlohmann::json expected =
+        std::holds_alternative<int32_t>(reason)       ? nlohmann::json(123)
+        : std::holds_alternative<std::string>(reason) ? nlohmann::json("END")
+                                                      : nlohmann::json(nullptr);
+    for (const bool stream : {false, true}) {
+      chat.set_object(stream ? "chat.completion.chunk" : "chat.completion");
+      chat.mutable_choices(0)->set_finish_reason("stop");
+      completion.mutable_choices(0)->set_finish_reason("stop");
+      EXPECT_EQ(openai_response_json(chat)["choices"][0]["stop_reason"],
+                expected);
+      EXPECT_EQ(
+          openai_response_json(completion, stream)["choices"][0]["stop_reason"],
+          expected);
+    }
+  }
+}
+
 TEST(OpenAIJsonTest, FingerprintIsStableAndAppearsOnlyOnFinalStreamMessages) {
   const std::string fingerprint = openai_system_fingerprint("model=a;tp=16");
   EXPECT_TRUE(fingerprint.starts_with("xllm-"));

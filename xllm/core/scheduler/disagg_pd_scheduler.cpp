@@ -511,14 +511,16 @@ void DisaggPDScheduler::dispatch_requests() {
             req->mutable_stop_token_ids(),
             requests[i]->state().stopping_checker.get_stop_tokens());
       }
-      if (requests[i]->state().stopping_checker.get_stop_sequences().size() >
-          0) {
-        for (auto& stop_sequence :
-             requests[i]->state().stopping_checker.get_stop_sequences()) {
-          // proto::StopSequence proto_seq;
-          auto proto_seq = req->mutable_stop_sequences()->Add();
-          ADD_VECTOR_TO_PROTO(proto_seq->mutable_seq_tokens(), stop_sequence);
-          //*req->mutable_stop_sequences()->Add() = proto_seq;
+      const auto& stop_sequences =
+          requests[i]->state().stopping_checker.get_stop_sequences();
+      const auto& stop_strings =
+          requests[i]->state().stopping_checker.get_stop_strings();
+      for (size_t index = 0; index < stop_sequences.size(); ++index) {
+        auto* proto_seq = req->add_stop_sequences();
+        ADD_VECTOR_TO_PROTO(proto_seq->mutable_seq_tokens(),
+                            stop_sequences[index]);
+        if (index < stop_strings.size()) {
+          proto_seq->set_stop_string(stop_strings[index]);
         }
       }
       req->set_n(requests[i]->state().n);

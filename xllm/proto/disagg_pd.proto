@@ -40,6 +40,7 @@ message DisaggRequests {
 
 message StopSequence {
   repeated int32 seq_tokens = 1;
+  optional string stop_string = 2;
 }
 
 message DisaggRequest {
@@ -200,6 +201,7 @@ message SequenceOutput {
   string finish_reason = 4;
   // log probabilities of the generated tokens.
   repeated LogProb logprobs = 5;
+  StopReason stop_reason = 6;
 }
 
 message GenerationStatus {

@@ -109,6 +109,58 @@ class SequenceStopOutputTest : public ::testing::Test {
   StopAwareTokenizer tokenizer_;
 };
 
+TEST_F(SequenceStopOutputTest, ExplicitStopTokenPropagatesToBothOutputModes) {
+  initialize(/*max_generated_tokens=*/8, /*stop_tokens=*/{1000});
+  append_token(1000);
+  ASSERT_TRUE(sequence_->finished());
+  EXPECT_EQ(std::get<int32_t>(sequence_->generate_output().stop_reason), 1000);
+  auto fork = sequence_->fork(/*index=*/1);
+  EXPECT_EQ(std::get<int32_t>(fork->generate_output().stop_reason), 1000);
+  EXPECT_EQ(
+      std::get<int32_t>(sequence_->generate_output(tokenizer_).stop_reason),
+      1000);
+}
+
+TEST_F(SequenceStopOutputTest, NaturalEosAndLengthHaveNoStopReason) {
+  initialize(/*max_generated_tokens=*/8,
+             /*stop_tokens=*/{1000},
+             /*stop_sequences=*/{},
+             /*prompt_tokens=*/{'P'},
+             /*include_stop_str_in_output=*/false,
+             /*eos_token=*/1000);
+  append_token(1000);
+  ASSERT_TRUE(sequence_->finished());
+  EXPECT_TRUE(std::holds_alternative<std::monostate>(
+      sequence_->generate_output().stop_reason));
+  initialize(/*max_generated_tokens=*/1, /*stop_tokens=*/{});
+  append_token('A');
+  ASSERT_TRUE(sequence_->finished());
+  EXPECT_EQ(sequence_->generate_output().finish_reason, "length");
+  EXPECT_TRUE(std::holds_alternative<std::monostate>(
+      sequence_->generate_output().stop_reason));
+}
+
+TEST_F(SequenceStopOutputTest, ExplicitStopStringPreservesOriginalText) {
+  initialize(/*max_generated_tokens=*/8, /*stop_tokens=*/{});
+  stopping_checker_ = StoppingChecker(/*max_generated_tokens=*/8,
+                                      /*max_context_len=*/0,
+                                      /*eos_token=*/-1,
+                                      /*ignore_eos=*/false,
+                                      /*stop_tokens=*/{},
+                                      /*stop_sequences=*/{{'E', 'N', 'D'}},
+                                      /*stop_strings=*/{"END"});
+  append_token('A');
+  append_token('E');
+  append_token('N');
+  append_token('D');
+  ASSERT_TRUE(sequence_->finished());
+  EXPECT_EQ(std::get<std::string>(sequence_->generate_output().stop_reason),
+            "END");
+  auto output = sequence_->generate_output(tokenizer_);
+  EXPECT_EQ(std::get<std::string>(output.stop_reason), "END");
+  EXPECT_EQ(output.text, "A");
+}
+
 TEST_F(SequenceStopOutputTest, NonStreamingExcludesStopTokenFromText) {
   initialize(/*max_generated_tokens=*/8,
              /*stop_tokens=*/{StopAwareTokenizer::kStopTokenId});

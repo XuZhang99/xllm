@@ -230,6 +230,8 @@ message ChatChoice {
 
   // the log probabilities of output tokens.
   optional ChatLogProbs logprobs = 5;
+
+  StopReason stop_reason = 6 [json_name="stop_reason"];
 }
 
 message ChatResponse {

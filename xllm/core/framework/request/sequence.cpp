@@ -198,6 +198,7 @@ Sequence::Sequence(const Sequence& other, size_t index)
       finished_(other.finished_),
       finish_status_invalidated_(other.finish_status_invalidated_),
       finish_reason_(other.finish_reason_),
+      stop_reason_(other.stop_reason_),
       matched_stop_token_count_(other.matched_stop_token_count_),
       closed_(other.closed_),
       dp_rank_(other.dp_rank_),
@@ -573,6 +574,7 @@ SequenceOutput Sequence::generate_output() {
   output.index = index_;
   if (finish_reason_ != FinishReason::NONE) {
     output.finish_reason = finish_reason_.to_string();
+    output.stop_reason = stop_reason_;
   }
 
   return output;
@@ -682,6 +684,7 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
   }
   if (finish_reason_ != FinishReason::NONE) {
     output.finish_reason = finish_reason_.to_string();
+    output.stop_reason = stop_reason_;
   }
 
   // record the start index of token ids
@@ -867,7 +870,7 @@ bool Sequence::finished() const {
 
   size_t matched_stop_token_count = 0;
   const FinishReason finish_reason = sequence_params_.stopping_checker->check(
-      tokens(), num_prompt_tokens_, &matched_stop_token_count);
+      tokens(), num_prompt_tokens_, &matched_stop_token_count, &stop_reason_);
   matched_stop_token_count_ = matched_stop_token_count;
   if (finish_reason != FinishReason::NONE) {
     finish_reason_ = finish_reason;
@@ -955,6 +958,7 @@ void Sequence::fail(Status status) {
   finished_ = true;
   finish_status_invalidated_ = false;
   finish_reason_ = FinishReason::NONE;
+  stop_reason_ = std::monostate{};
 }
 
 void Sequence::reset_finish_state_for_beam_search() {
@@ -963,6 +967,7 @@ void Sequence::reset_finish_state_for_beam_search() {
   }
   finished_ = false;
   finish_reason_ = FinishReason::NONE;
+  stop_reason_ = std::monostate{};
   matched_stop_token_count_ = 0;
   finish_status_invalidated_ = true;
   finished();

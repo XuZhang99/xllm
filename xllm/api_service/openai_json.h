@@ -21,6 +21,7 @@ limitations under the License.
 #include "chat.pb.h"
 #include "completion.pb.h"
 #include "core/common/types.h"
+#include "core/framework/request/finish_reason.h"
 #include "embedding.pb.h"
 #include "models.pb.h"
 
@@ -45,5 +46,6 @@ void set_openai_system_fingerprint(nlohmann::json& response,
                                    const std::string& fingerprint,
                                    bool stream,
                                    bool include_usage);
+void set_proto_stop_reason(const StopReason& reason, proto::StopReason* output);
 
 }  // namespace xllm::api_service
