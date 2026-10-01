@@ -649,7 +649,8 @@ std::shared_ptr<Request> RecRequestFactory::build_request_common(
                         model_args_->eos_token_id(),
                         sp.ignore_eos,
                         std::move(stop_tokens),
-                        std::move(stop_sequences));
+                        std::move(stop_sequences),
+                        sp.stop.value_or(std::vector<std::string>{}));
   }
 
   RequestState req_state(std::move(prompt),

@@ -495,6 +495,7 @@ void SequencesGroup::generate_multi_round_output(
     auto fr = base.finish_reason().to_string();
     if (fr.has_value()) {
       out.finish_reason = fr.value();
+      out.stop_reason = base.stop_reason();
     }
     outputs.push_back(std::move(out));
   }

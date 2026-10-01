@@ -122,6 +122,8 @@ bool send_delta_to_client_brpc(std::shared_ptr<CompletionCall> call,
       choice->set_index(seq_output.index);
       choice->set_text("");
       choice->set_finish_reason(seq_output.finish_reason.value());
+      api_service::set_proto_stop_reason(seq_output.stop_reason,
+                                         choice->mutable_stop_reason());
       if (!call->write(response)) {
         return false;
       }
@@ -168,6 +170,8 @@ bool send_result_to_client_brpc(std::shared_ptr<CompletionCall> call,
   for (const auto& output : req_output.outputs) {
     auto* choice = response.add_choices();
     choice->set_index(output.index);
+    api_service::set_proto_stop_reason(output.stop_reason,
+                                       choice->mutable_stop_reason());
     choice->set_text(output.text);
     set_logprobs(choice, output.logprobs);
     if (output.finish_reason.has_value()) {

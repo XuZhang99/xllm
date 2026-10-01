@@ -363,6 +363,8 @@ bool send_delta_to_client_brpc(
       auto* choice = response.add_choices();
       choice->set_index(index);
       choice->mutable_delta();
+      api_service::set_proto_stop_reason(seq_output.stop_reason,
+                                         choice->mutable_stop_reason());
 
       if (stream_parser && stream_parser->get_has_tool_call(index) &&
           seq_output.finish_reason.value() == "stop") {
@@ -419,6 +421,8 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
   for (const auto& output : req_output.outputs) {
     auto* choice = response.add_choices();
     choice->set_index(output.index);
+    api_service::set_proto_stop_reason(output.stop_reason,
+                                       choice->mutable_stop_reason());
     set_logprobs(choice, output.logprobs);
     auto* message = choice->mutable_message();
     message->set_role("assistant");

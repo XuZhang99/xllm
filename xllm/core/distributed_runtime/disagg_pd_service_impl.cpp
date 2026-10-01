@@ -106,17 +106,22 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
     stop_tokens.insert(stop_token_id);
   }
   std::vector<std::vector<int32_t>> stop_sequences;
+  std::vector<std::string> stop_strings;
+  stop_sequences.reserve(req.stop_sequences_size());
+  stop_strings.reserve(req.stop_sequences_size());
   for (auto& stop_sequence : req.stop_sequences()) {
     auto stop_seq_tokens = std::vector<int32_t>(
         stop_sequence.seq_tokens().begin(), stop_sequence.seq_tokens().end());
     stop_sequences.push_back(std::move(stop_seq_tokens));
+    stop_strings.emplace_back(stop_sequence.stop_string());
   }
   StoppingChecker stopping_checker(req.max_tokens(),
                                    req.max_context_len(),
                                    req.eos_token_id(),
                                    req.ignore_eos(),
                                    std::move(stop_tokens),
-                                   std::move(stop_sequences));
+                                   std::move(stop_sequences),
+                                   std::move(stop_strings));
 
   auto output_callback = [this](const RequestOutput& output) -> bool {
     // response to xllm service to avoid the redirect cost.

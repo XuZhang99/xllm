@@ -213,6 +213,7 @@ SequenceOutput OneRecSequence::generate_output(const Tokenizer& tokenizer) {
   }
   if (finish_reason() != FinishReason::NONE) {
     output.finish_reason = finish_reason().to_string();
+    output.stop_reason = stop_reason();
   }
   output.token_ids = generated_ids();
 

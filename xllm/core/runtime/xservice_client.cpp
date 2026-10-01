@@ -520,6 +520,12 @@ std::vector<bool> XServiceClient::generations(
       } else {
         proto_seq_out->set_finish_reason("");
       }
+      if (const auto* token = std::get_if<int32_t>(&seq_output.stop_reason)) {
+        proto_seq_out->mutable_stop_reason()->set_token_id(*token);
+      } else if (const auto* text =
+                     std::get_if<std::string>(&seq_output.stop_reason)) {
+        proto_seq_out->mutable_stop_reason()->set_stop_string(*text);
+      }
       proto_seq_out->mutable_token_ids()->Reserve(seq_output.token_ids.size());
       for (const auto& value : seq_output.token_ids) {
         *proto_seq_out->mutable_token_ids()->Add() = value;

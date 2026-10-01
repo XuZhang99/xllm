@@ -33,11 +33,13 @@ class StoppingChecker {
                   int32_t eos_token,
                   bool ignore_eos,
                   std::unordered_set<int32_t> stop_tokens,
-                  std::vector<std::vector<int32_t>> stop_sequences);
+                  std::vector<std::vector<int32_t>> stop_sequences,
+                  std::vector<std::string> stop_strings = {});
 
   FinishReason check(const Slice<int32_t>& token_ids,
                      size_t num_prompt_tokens,
-                     size_t* matched_stop_token_count = nullptr) const;
+                     size_t* matched_stop_token_count = nullptr,
+                     StopReason* stop_reason = nullptr) const;
 
   inline void set_max_generated_tokens(size_t tokens) {
     max_generated_tokens_ = tokens;
@@ -69,10 +71,15 @@ class StoppingChecker {
 
   inline void set_stop_sequences(std::vector<std::vector<int32_t>> sequences) {
     stop_sequences_ = std::move(sequences);
+    stop_strings_.clear();
   }
 
   inline std::vector<std::vector<int32_t>>& get_stop_sequences() {
     return stop_sequences_;
+  }
+
+  const std::vector<std::string>& get_stop_strings() const {
+    return stop_strings_;
   }
 
   size_t get_max_stop_sequence_token_count() const;
@@ -93,6 +100,7 @@ class StoppingChecker {
 
   // stopping sequences
   std::vector<std::vector<int32_t>> stop_sequences_;
+  std::vector<std::string> stop_strings_;
 };
 
 }  // namespace xllm

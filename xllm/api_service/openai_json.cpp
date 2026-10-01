@@ -28,6 +28,16 @@ limitations under the License.
 namespace xllm::api_service {
 namespace {
 
+nlohmann::json stop_reason_json(const proto::StopReason& reason) {
+  if (reason.has_token_id()) {
+    return reason.token_id();
+  }
+  if (reason.has_stop_string()) {
+    return reason.stop_string();
+  }
+  return nullptr;
+}
+
 nlohmann::json envelope(const std::string& id,
                         const std::string& object,
                         uint32_t created,
@@ -197,7 +207,7 @@ nlohmann::json openai_response_json(const proto::ChatResponse& response,
       item["token_ids"] = nullptr;
     }
     if (!stream || choice.has_finish_reason()) {
-      item["stop_reason"] = nullptr;
+      item["stop_reason"] = stop_reason_json(choice.stop_reason());
     }
     if (!stream) {
       item["routed_experts"] = nullptr;
@@ -244,13 +254,14 @@ nlohmann::json openai_response_json(const proto::CompletionResponse& response,
                  {"kv_transfer_params", nullptr}});
   }
   for (const auto& choice : response.choices()) {
-    nlohmann::json item = {{"index", choice.index()},
-                           {"text", choice.text()},
-                           {"logprobs", nullptr},
-                           {"finish_reason", nullptr},
-                           {"stop_reason", nullptr},
-                           {"token_ids", nullptr},
-                           {"prompt_token_ids", nullptr}};
+    nlohmann::json item = {
+        {"index", choice.index()},
+        {"text", choice.text()},
+        {"logprobs", nullptr},
+        {"finish_reason", nullptr},
+        {"stop_reason", stop_reason_json(choice.stop_reason())},
+        {"token_ids", nullptr},
+        {"prompt_token_ids", nullptr}};
     if (!stream) {
       item["prompt_logprobs"] = nullptr;
       item["routed_experts"] = nullptr;
@@ -310,6 +321,16 @@ nlohmann::json openai_embedding_json(const proto::EmbeddingResponse& response,
   json["usage"] = {{"prompt_tokens", response.usage().prompt_tokens()},
                    {"total_tokens", response.usage().total_tokens()}};
   return json;
+}
+
+void set_proto_stop_reason(const StopReason& reason,
+                           proto::StopReason* output) {
+  output->Clear();
+  if (const auto* token = std::get_if<int32_t>(&reason)) {
+    output->set_token_id(*token);
+  } else if (const auto* text = std::get_if<std::string>(&reason)) {
+    output->set_stop_string(*text);
+  }
 }
 
 std::string openai_system_fingerprint(const std::string& configuration) {

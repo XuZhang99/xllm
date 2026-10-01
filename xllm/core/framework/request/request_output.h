@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "core/common/types.h"
 #include "core/framework/multimodal/embedding_output.h"
+#include "core/framework/request/finish_reason.h"
 #include "core/framework/request/usage.h"
 
 namespace xllm {
@@ -72,6 +73,8 @@ struct SequenceOutput {
 
   // the reason the sequence finished.
   std::optional<std::string> finish_reason;
+
+  StopReason stop_reason;
 
   // log probabilities of the generated tokens.
   std::optional<std::vector<LogProb>> logprobs;

@@ -156,3 +156,11 @@ message PromptInput {
   optional string text = 1;
   repeated int32 token_ids = 2;
 }
+
+// Exact explicit stop condition; unset for natural EOS or length limits.
+message StopReason {
+  oneof value {
+    int32 token_id = 1;
+    string stop_string = 2;
+  }
+}

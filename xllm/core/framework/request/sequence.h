@@ -340,6 +340,7 @@ class Sequence {
   }
 
   FinishReason finish_reason() const { return finish_reason_; }
+  const StopReason& stop_reason() const { return stop_reason_; }
   const std::optional<Status>& error_status() const {
     return sequence_params_.request_failure_state->status;
   }
@@ -674,6 +675,7 @@ class Sequence {
 
   // the reason why the sequence is finished
   mutable FinishReason finish_reason_ = FinishReason::NONE;
+  mutable StopReason stop_reason_;
 
   // Number of trailing tokens that matched the stopping criterion. These
   // tokens remain in `tokens_` and are omitted from decoded output when
