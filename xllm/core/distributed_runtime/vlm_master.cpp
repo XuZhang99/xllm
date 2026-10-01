@@ -148,7 +148,7 @@ VLMMaster::VLMMaster(const Options& options)
     }
   }
 
-  ContinuousScheduler::Options scheduler_options;
+  SchedulerOptions scheduler_options;
   scheduler_options.max_tokens_per_batch(options.max_tokens_per_batch())
       .max_seqs_per_batch(options.max_seqs_per_batch())
       .request_queue_size(options.request_queue_size())

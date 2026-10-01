@@ -36,8 +36,7 @@ enum class SchedulerKind : int8_t {
   DISAGG_PD = 5
 };
 
-SchedulerKind select_scheduler_kind(
-    const ContinuousScheduler::Options& options);
+SchedulerKind select_scheduler_kind(const SchedulerOptions& options);
 
 template <typename TargetEngine>
   requires requires(TargetEngine* engine, BatchGroup& batch) {
@@ -45,18 +44,19 @@ template <typename TargetEngine>
     { engine->step(batch) } -> std::same_as<ForwardOutput>;
     { engine->update_last_step_result(batch) } -> std::same_as<void>;
   }
-std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
+std::unique_ptr<Scheduler> create_continuous_scheduler(
     TargetEngine* engine,
-    ContinuousScheduler::Options options) {
+    SchedulerOptions options) {
   switch (select_scheduler_kind(options)) {
     case SchedulerKind::DISAGG_PD:
       return std::make_unique<DisaggPDScheduler>(engine, options);
     case SchedulerKind::ZERO_EVICTION:
       return std::make_unique<ZeroEvictionScheduler>(engine, options);
     case SchedulerKind::CONTINUOUS:
-      return std::make_unique<ContinuousScheduler>(engine, options);
+      return std::make_unique<ContinuousScheduler<TargetEngine>>(engine,
+                                                                 options);
   }
-  return std::make_unique<ContinuousScheduler>(engine, options);
+  return std::make_unique<ContinuousScheduler<TargetEngine>>(engine, options);
 }
 
 std::unique_ptr<DiTScheduler> create_dit_scheduler(
@@ -65,6 +65,6 @@ std::unique_ptr<DiTScheduler> create_dit_scheduler(
 
 std::unique_ptr<FixedStepsScheduler> create_fixed_steps_scheduler(
     RecEngine* engine,
-    ContinuousScheduler::Options options);
+    SchedulerOptions options);
 
 }  // namespace xllm

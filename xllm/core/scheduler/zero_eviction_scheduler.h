@@ -98,7 +98,7 @@ class BlockCapacityGuard {
   uint32_t num_reserved_block_for_prefill_;
 };
 
-class ZeroEvictionScheduler final : public ContinuousScheduler {
+class ZeroEvictionScheduler final : public ContinuousScheduler<> {
  public:
   template <typename TargetEngine>
     requires requires(TargetEngine* engine, BatchGroup& batch) {
@@ -107,7 +107,7 @@ class ZeroEvictionScheduler final : public ContinuousScheduler {
       { engine->update_last_step_result(batch) } -> std::same_as<void>;
     }
   ZeroEvictionScheduler(TargetEngine* engine, const Options& options)
-      : ContinuousScheduler(engine, options) {
+      : ContinuousScheduler<>(engine, options) {
     block_capacity_guard_ =
         std::make_unique<BlockCapacityGuard>(kv_cache_manager_);
   }

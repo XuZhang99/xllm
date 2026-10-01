@@ -28,6 +28,7 @@ limitations under the License.
 
 #include "core/common/macros.h"
 #include "core/common/types.h"
+#include "core/distributed_runtime/rec_engine.h"
 #include "core/framework/batch/rec_batch_factory.h"
 #include "core/framework/batch/rec_batch_group.h"
 #include "core/framework/request/request.h"
@@ -47,16 +48,11 @@ struct ScheduleResult {
   std::vector<Sequence*> sequences;
 };
 
-class FixedStepsScheduler : public ContinuousScheduler {
+class FixedStepsScheduler : public ContinuousScheduler<RecEngine> {
  public:
-  template <typename TargetEngine>
-    requires requires(TargetEngine* engine, RecBatchGroup& batches) {
-      static_cast<Engine*>(engine);
-      { engine->step(batches) } -> std::same_as<ForwardOutput>;
-    }
-  FixedStepsScheduler(TargetEngine* engine, const Options& options)
+  explicit FixedStepsScheduler(RecEngine* engine, const Options& options)
       : FixedStepsScheduler(
-            static_cast<Engine*>(engine),
+            engine,
             [engine](RecBatchGroup& batches) { return engine->step(batches); },
             options) {}
 
@@ -73,7 +69,7 @@ class FixedStepsScheduler : public ContinuousScheduler {
  private:
   using StepCallback = std::function<ForwardOutput(RecBatchGroup&)>;
 
-  FixedStepsScheduler(Engine* engine,
+  FixedStepsScheduler(RecEngine* engine,
                       StepCallback step_callback,
                       const Options& options);
 

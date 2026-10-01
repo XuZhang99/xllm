@@ -85,7 +85,7 @@ LLMMaster::LLMMaster(const Options& options)
     }
   }
 
-  ContinuousScheduler::Options scheduler_options;
+  SchedulerOptions scheduler_options;
   scheduler_options.max_tokens_per_batch(options_.max_tokens_per_batch())
       .max_seqs_per_batch(options_.max_seqs_per_batch())
       .enable_task_pipeline(options_.enable_task_pipeline())

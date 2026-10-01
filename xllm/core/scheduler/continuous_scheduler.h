@@ -91,107 +91,96 @@ class CancelRequestQueue final {
   std::vector<std::shared_ptr<Request>> requests_;
 };
 
-class ContinuousScheduler : public Scheduler {
+struct SchedulerOptions {
+  // the maximum number of tokens per batch
+  PROPERTY(int32_t, max_tokens_per_batch) = 20000;
+
+  // the maximum number of sequences per batch
+  PROPERTY(int32_t, max_seqs_per_batch) = 256;
+  PROPERTY(bool, enable_task_pipeline) = false;
+
+  // the capacity of the request queue; requests arriving while it is full
+  // are rejected at admission.
+  PROPERTY(int32_t, request_queue_size) = 100000;
+
+  // the max tokens per chunk for request in prefill stage.
+  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill);
+
+  // the number of speculative tokens per step
+  PROPERTY(int32_t, num_speculative_tokens) = 0;
+
+  // the number of tp*dp*cp nodes
+  PROPERTY(int32_t, nnodes) = 1;
+
+  // the number of speculative tokens per step
+  PROPERTY(int32_t, dp_size) = 1;
+
+  PROPERTY(int32_t, cp_size) = 1;
+
+  // enable disaggregated PD mode.
+  PROPERTY(bool, enable_disagg_pd) = false;
+
+  // for master service, current instance name(ID).
+  PROPERTY(std::optional<std::string>, instance_name);
+
+  PROPERTY(std::optional<InstanceRole>, instance_role) = InstanceRole::DEFAULT;
+
+  PROPERTY(std::string, kv_cache_transfer_mode) = "PUSH";
+
+  // In general decode instance send a batch responses to prefill in disagg pd
+  // mode. here, we add a flag to control whether send a batch or single
+  // response once, This will help us to debug code. default value is false.
+  PROPERTY(bool, enable_batch_response) = false;
+
+  // support P send batch reqs to D.
+  // max_reqs_p2d_once represents the maximum number
+  // of requests that can be sent once.
+  // default value is 1.
+  PROPERTY(int32_t, max_reqs_p2d_once) = 1;
+
+  PROPERTY(bool, enable_schedule_overlap) = true;
+
+  PROPERTY(bool, enable_chunked_prefill) = true;
+
+  PROPERTY(bool, enable_service_routing) = false;
+
+  PROPERTY(bool, disable_log_stats) = false;
+
+  // TODO: think if distinguish prefill and decode priority strategy
+  PROPERTY(std::string,
+           priority_strategy) = "fcfs";  // priority, deadline, fcfs
+
+  PROPERTY(bool, enable_profile_step_time) = false;
+  // use predicted latency for latency aware schedule
+  PROPERTY(bool, enable_profile_token_budget) = false;
+
+  PROPERTY(bool, enable_latency_aware_schedule) = false;
+  // the max prompt length for profile
+  PROPERTY(int32_t, profile_max_prompt_length) = 2048;
+  // true if generate kv cache for profile
+  PROPERTY(bool, enable_profile_kv_blocks) = true;
+  // true if disable ttft profiling
+  PROPERTY(bool, disable_ttft_profiling) = false;
+  // all requests use single global ttft
+  PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
+  // all requests use single global tpot
+  PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
+
+  // Index ID for internal server ID, which must be set different values
+  // if the model supports multiple version or there are multiple models.
+  PROPERTY(int64_t, server_idx) = 0;
+
+  // max concurrency for rec worker
+  PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
+};
+
+class ContinuousSchedulerBase : public Scheduler {
  public:
-  struct Options {
-    // the maximum number of tokens per batch
-    PROPERTY(int32_t, max_tokens_per_batch) = 20000;
+  using Options = SchedulerOptions;
+  using StepCallback = std::function<ForwardOutput(BatchGroup&)>;
+  using ResultCallback = std::function<void(BatchGroup&)>;
 
-    // the maximum number of sequences per batch
-    PROPERTY(int32_t, max_seqs_per_batch) = 256;
-    PROPERTY(bool, enable_task_pipeline) = false;
-
-    // the capacity of the request queue; requests arriving while it is full
-    // are rejected at admission.
-    PROPERTY(int32_t, request_queue_size) = 100000;
-
-    // the max tokens per chunk for request in prefill stage.
-    PROPERTY(int32_t, max_tokens_per_chunk_for_prefill);
-
-    // the number of speculative tokens per step
-    PROPERTY(int32_t, num_speculative_tokens) = 0;
-
-    // the number of tp*dp*cp nodes
-    PROPERTY(int32_t, nnodes) = 1;
-
-    // the number of speculative tokens per step
-    PROPERTY(int32_t, dp_size) = 1;
-
-    PROPERTY(int32_t, cp_size) = 1;
-
-    // enable disaggregated PD mode.
-    PROPERTY(bool, enable_disagg_pd) = false;
-
-    // for master service, current instance name(ID).
-    PROPERTY(std::optional<std::string>, instance_name);
-
-    PROPERTY(std::optional<InstanceRole>,
-             instance_role) = InstanceRole::DEFAULT;
-
-    PROPERTY(std::string, kv_cache_transfer_mode) = "PUSH";
-
-    // In general decode instance send a batch responses to prefill in disagg pd
-    // mode. here, we add a flag to control whether send a batch or single
-    // response once, This will help us to debug code. default value is false.
-    PROPERTY(bool, enable_batch_response) = false;
-
-    // support P send batch reqs to D.
-    // max_reqs_p2d_once represents the maximum number
-    // of requests that can be sent once.
-    // default value is 1.
-    PROPERTY(int32_t, max_reqs_p2d_once) = 1;
-
-    PROPERTY(bool, enable_schedule_overlap) = true;
-
-    PROPERTY(bool, enable_chunked_prefill) = true;
-
-    PROPERTY(bool, enable_service_routing) = false;
-
-    PROPERTY(bool, disable_log_stats) = false;
-
-    // TODO: think if distinguish prefill and decode priority strategy
-    PROPERTY(std::string,
-             priority_strategy) = "fcfs";  // priority, deadline, fcfs
-
-    PROPERTY(bool, enable_profile_step_time) = false;
-    // use predicted latency for latency aware schedule
-    PROPERTY(bool, enable_profile_token_budget) = false;
-
-    PROPERTY(bool, enable_latency_aware_schedule) = false;
-    // the max prompt length for profile
-    PROPERTY(int32_t, profile_max_prompt_length) = 2048;
-    // true if generate kv cache for profile
-    PROPERTY(bool, enable_profile_kv_blocks) = true;
-    // true if disable ttft profiling
-    PROPERTY(bool, disable_ttft_profiling) = false;
-    // all requests use single global ttft
-    PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
-    // all requests use single global tpot
-    PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
-
-    // Index ID for internal server ID, which must be set different values
-    // if the model supports multiple version or there are multiple models.
-    PROPERTY(int64_t, server_idx) = 0;
-
-    // max concurrency for rec worker
-    PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
-  };
-
-  template <typename TargetEngine>
-    requires requires(TargetEngine* engine, BatchGroup& batch) {
-      static_cast<Engine*>(engine);
-      { engine->step(batch) } -> std::same_as<ForwardOutput>;
-      { engine->update_last_step_result(batch) } -> std::same_as<void>;
-    }
-  ContinuousScheduler(TargetEngine* engine, const Options& options)
-      : ContinuousScheduler(
-            static_cast<Engine*>(engine),
-            options,
-            [engine](BatchGroup& batch) { return engine->step(batch); },
-            [engine](BatchGroup& batch) {
-              engine->update_last_step_result(batch);
-            }) {}
-  ~ContinuousScheduler() override;
+  ~ContinuousSchedulerBase() override;
 
   bool add_request(std::shared_ptr<Request>& request) override;
 
@@ -230,7 +219,13 @@ class ContinuousScheduler : public Scheduler {
 
  protected:
   struct ResourceOnlyTag {};
-  ContinuousScheduler(Engine* engine, const Options& options, ResourceOnlyTag);
+  ContinuousSchedulerBase(Engine* engine,
+                          const Options& options,
+                          StepCallback step_callback,
+                          ResultCallback result_callback);
+  ContinuousSchedulerBase(Engine* engine,
+                          const Options& options,
+                          ResourceOnlyTag);
 
   void clear_mtp_bootstrap(Request* request);
   void drain_prefetch_pipeline();
@@ -255,10 +250,8 @@ class ContinuousScheduler : public Scheduler {
   std::unique_ptr<SchedulerPolicy> policy_;
 
   // the engine to run the batch
-  Engine* engine_;
+  Engine* resource_engine_;
 
-  using StepCallback = std::function<ForwardOutput(BatchGroup&)>;
-  using ResultCallback = std::function<void(BatchGroup&)>;
   StepCallback step_callback_;
   ResultCallback result_callback_;
 
@@ -346,12 +339,6 @@ class ContinuousScheduler : public Scheduler {
   std::vector<Sequence*> last_running_sequences_;
   bool is_first_step_ = true;
 
- private:
-  ContinuousScheduler(Engine* engine,
-                      const Options& options,
-                      StepCallback step_callback,
-                      ResultCallback result_callback);
-
   // Construct a SchedulerState snapshot for the policy.
   SchedulerState make_state();
 
@@ -372,6 +359,56 @@ class ContinuousScheduler : public Scheduler {
       std::vector<Sequence*>& sequences) const;
 
   void create_queues(const Options& options);
+};
+
+template <typename EngineType = Engine>
+  requires std::derived_from<EngineType, Engine>
+class ContinuousScheduler : public ContinuousSchedulerBase {
+ public:
+  using Options = SchedulerOptions;
+
+  ContinuousScheduler(EngineType* engine, const Options& options)
+    requires requires(EngineType* typed_engine, BatchGroup& batch) {
+      { typed_engine->step(batch) } -> std::same_as<ForwardOutput>;
+      { typed_engine->update_last_step_result(batch) } -> std::same_as<void>;
+    }
+      : ContinuousSchedulerBase(
+            engine,
+            options,
+            [engine](BatchGroup& batch) { return engine->step(batch); },
+            [engine](BatchGroup& batch) {
+              engine->update_last_step_result(batch);
+            }),
+        engine_(engine) {}
+
+  template <typename TargetEngine>
+    requires std::same_as<EngineType, Engine> &&
+                 requires(TargetEngine* typed_engine, BatchGroup& batch) {
+                   static_cast<Engine*>(typed_engine);
+                   { typed_engine->step(batch) } -> std::same_as<ForwardOutput>;
+                   {
+                     typed_engine->update_last_step_result(batch)
+                   } -> std::same_as<void>;
+                 }
+  ContinuousScheduler(TargetEngine* engine, const Options& options)
+      : ContinuousSchedulerBase(
+            static_cast<Engine*>(engine),
+            options,
+            [engine](BatchGroup& batch) { return engine->step(batch); },
+            [engine](BatchGroup& batch) {
+              engine->update_last_step_result(batch);
+            }),
+        engine_(static_cast<Engine*>(engine)) {}
+
+  ~ContinuousScheduler() override = default;
+
+ protected:
+  ContinuousScheduler(EngineType* engine,
+                      const Options& options,
+                      ResourceOnlyTag tag)
+      : ContinuousSchedulerBase(engine, options, tag), engine_(engine) {}
+
+  EngineType* engine_;
 };
 
 }  // namespace xllm

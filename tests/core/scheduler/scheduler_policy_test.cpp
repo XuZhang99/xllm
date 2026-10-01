@@ -362,7 +362,7 @@ class ScopedConfigValue final {
   T old_;
 };
 
-ContinuousScheduler::Options create_scheduler_options(
+SchedulerOptions create_scheduler_options(
     int32_t max_tokens_per_batch,
     int32_t max_seqs_per_batch,
     int32_t num_speculative_tokens,
@@ -373,7 +373,7 @@ ContinuousScheduler::Options create_scheduler_options(
     bool enable_latency_aware_schedule = false,
     int32_t max_global_ttft_ms = std::numeric_limits<int32_t>::max(),
     int32_t max_global_tpot_ms = std::numeric_limits<int32_t>::max()) {
-  ContinuousScheduler::Options opt;
+  SchedulerOptions opt;
   opt.num_speculative_tokens_ = num_speculative_tokens;
   opt.max_tokens_per_chunk_for_prefill_ = max_tokens_per_chunk_for_prefill;
   opt.max_tokens_per_batch_ = max_tokens_per_batch;
@@ -464,11 +464,11 @@ void update_requests(std::vector<std::shared_ptr<Request>> requests) {
   }
 }
 
-class TestableContinuousScheduler final : public ContinuousScheduler {
+class TestableContinuousScheduler final : public ContinuousScheduler<> {
  public:
   template <typename TargetEngine>
   TestableContinuousScheduler(TargetEngine* engine, const Options& options)
-      : ContinuousScheduler(engine, options) {}
+      : ContinuousScheduler<>(engine, options) {}
 
   BatchGroup prepare_batch_test() { return prepare_batch(); }
 
@@ -494,8 +494,7 @@ TEST(SchedulerPolicyTest, AddNewRequestBase) {
   std::vector<int32_t> block_size{16, 16, 16};
   std::vector<int32_t> validate_allowed_max_tokens{10, 1024, 1024};
   for (size_t idx = 0; idx < prompt_len.size(); ++idx) {
-    ContinuousScheduler::Options opt =
-        create_scheduler_options(10000, 256, 0, 1024, 1);
+    SchedulerOptions opt = create_scheduler_options(10000, 256, 0, 1024, 1);
     auto engine =
         std::make_unique<FakeEngine>(num_blocks[idx], block_size[idx]);
     auto scheduler =
@@ -528,7 +527,7 @@ TEST(SchedulerPolicyTest, UnifiedPrefixHitIncludesScheduledSuffixCapacity) {
   constexpr int32_t kPromptTokens = 2313;
   constexpr int32_t kChunkTokens = 256;
 
-  ContinuousScheduler::Options opt = create_scheduler_options(
+  SchedulerOptions opt = create_scheduler_options(
       /*max_tokens_per_batch=*/kChunkTokens,
       /*max_seqs_per_batch=*/16,
       /*num_speculative_tokens=*/0,
@@ -563,7 +562,7 @@ TEST(SchedulerPolicyTest, UnifiedPrefixHitIncludesScheduledSuffixCapacity) {
 }
 
 TEST(SchedulerPolicyTest, KvlessCompositeReprobesAfterPartialAllocation) {
-  ContinuousScheduler::Options options = create_scheduler_options(
+  SchedulerOptions options = create_scheduler_options(
       /*max_tokens_per_batch=*/16384,
       /*max_seqs_per_batch=*/16,
       /*num_speculative_tokens=*/0,
@@ -624,7 +623,7 @@ TEST(SchedulerPolicyTest, KvlessCompositeReprobesAfterPartialAllocation) {
 TEST(SchedulerPolicyTest, UnifiedRetryRefreshesHostRestoreBeforeChunkSizing) {
   constexpr size_t kPromptTokens = 34025;
   constexpr size_t kRestoreTokens = 32768;
-  ContinuousScheduler::Options options = create_scheduler_options(
+  SchedulerOptions options = create_scheduler_options(
       /*max_tokens_per_batch=*/16384,
       /*max_seqs_per_batch=*/16,
       /*num_speculative_tokens=*/0,
@@ -704,7 +703,7 @@ TEST(SchedulerPolicyTest, UnifiedRetryRefreshesHostRestoreBeforeChunkSizing) {
 }
 
 TEST(SchedulerPolicyTest, DefersWhileAsyncBlockReleaseIsPending) {
-  ContinuousScheduler::Options options = create_scheduler_options(
+  SchedulerOptions options = create_scheduler_options(
       /*max_tokens_per_batch=*/16384,
       /*max_seqs_per_batch=*/16,
       /*num_speculative_tokens=*/0,
@@ -775,7 +774,7 @@ TEST(SchedulerPolicyTest,
      RestoreWaitingDefersUntilAsyncReleaseThenSchedulesPrefill) {
   constexpr int32_t kPromptTokens = 128;
   constexpr int32_t kHostRestoreTokens = 256;
-  ContinuousScheduler::Options options = create_scheduler_options(
+  SchedulerOptions options = create_scheduler_options(
       /*max_tokens_per_batch=*/16384,
       /*max_seqs_per_batch=*/16,
       /*num_speculative_tokens=*/0,
@@ -885,7 +884,7 @@ TEST(SchedulerPolicyTest,
 TEST(SchedulerPolicyTest, PendingDecodeReleaseStopsFurtherPreemption) {
   ScopedConfigValue<double> host_blocks_factor(
       KVCacheStoreConfig::get_instance().host_blocks_factor(), 2.0);
-  ContinuousScheduler::Options options = create_scheduler_options(
+  SchedulerOptions options = create_scheduler_options(
       /*max_tokens_per_batch=*/16384,
       /*max_seqs_per_batch=*/16,
       /*num_speculative_tokens=*/0,
@@ -1005,7 +1004,7 @@ TEST(SchedulerPolicyTest, PendingDecodeReleaseStopsFurtherPreemption) {
 TEST(SchedulerPolicyTest, RetriesBlockedDecodeBeforeRestoringVictim) {
   ScopedConfigValue<double> host_blocks_factor(
       KVCacheStoreConfig::get_instance().host_blocks_factor(), 2.0);
-  ContinuousScheduler::Options options = create_scheduler_options(
+  SchedulerOptions options = create_scheduler_options(
       /*max_tokens_per_batch=*/16384,
       /*max_seqs_per_batch=*/16,
       /*num_speculative_tokens=*/0,
@@ -1107,7 +1106,7 @@ TEST(SchedulerPolicyTest,
      DecodeFirstRetriesBlockedDecodeBeforeRestoringVictim) {
   ScopedConfigValue<double> host_blocks_factor(
       KVCacheStoreConfig::get_instance().host_blocks_factor(), 2.0);
-  ContinuousScheduler::Options options = create_scheduler_options(
+  SchedulerOptions options = create_scheduler_options(
       /*max_tokens_per_batch=*/16384,
       /*max_seqs_per_batch=*/16,
       /*num_speculative_tokens=*/0,
@@ -1211,8 +1210,7 @@ TEST(SchedulerPolicyTest, ResourceNotEnough) {
   // case1: max tokens budget not enough
   {
     // max token budget: 1
-    ContinuousScheduler::Options opt =
-        create_scheduler_options(1, 256, 0, 1024, 1);
+    SchedulerOptions opt = create_scheduler_options(1, 256, 0, 1024, 1);
     auto engine = std::make_unique<FakeEngine>(16, 16);
     auto scheduler =
         std::make_unique<TestableContinuousScheduler>(engine.get(), opt);
@@ -1231,8 +1229,7 @@ TEST(SchedulerPolicyTest, ResourceNotEnough) {
 
   // case2: blocks memory not enough
   {
-    ContinuousScheduler::Options opt =
-        create_scheduler_options(1000, 256, 0, 1024, 1);
+    SchedulerOptions opt = create_scheduler_options(1000, 256, 0, 1024, 1);
     // free block slot: 1
     auto engine = std::make_unique<FakeEngine>(2, 8);
     auto scheduler =
@@ -1261,7 +1258,7 @@ TEST(SchedulerPolicyTest, NormalSchedule) {
   int block_size = 32;
   int max_tokens_per_chunk_for_prefill = 1024;
   // set chunked max_tokens budgets 10000 per step
-  ContinuousScheduler::Options opt = create_scheduler_options(
+  SchedulerOptions opt = create_scheduler_options(
       10000, 256, 0, max_tokens_per_chunk_for_prefill, 1);
   auto engine = std::make_unique<FakeEngine>(block_num, block_size);
   auto scheduler =
@@ -1349,7 +1346,7 @@ TEST(SchedulerPolicyTest, PreemptSchedule) {
   int block_size = 32;
   int max_tokens_per_chunk_for_prefill = 1024;
   // set chunked max_tokens budgets 10000 per step
-  ContinuousScheduler::Options opt = create_scheduler_options(
+  SchedulerOptions opt = create_scheduler_options(
       10000, 256, 0, max_tokens_per_chunk_for_prefill, 1);
   auto engine = std::make_unique<FakeEngine>(block_num, block_size);
   auto scheduler =
@@ -1410,7 +1407,7 @@ TEST(SchedulerPolicyTest, PrioritySchedule) {
   int block_size = 32;
   int max_tokens_per_chunk_for_prefill = 1024;
   // set chunked max_tokens budgets 10000 per step
-  ContinuousScheduler::Options opt = create_scheduler_options(
+  SchedulerOptions opt = create_scheduler_options(
       10000, 256, 0, max_tokens_per_chunk_for_prefill, 1, "priority");
   auto engine = std::make_unique<FakeEngine>(block_num, block_size);
   auto scheduler =
@@ -1472,7 +1469,7 @@ TEST(SchedulerPolicyTest, LatencySchedule) {
   int block_size = 32;
   int max_tokens_per_chunk_for_prefill = 4;
   // set chunked max_tokens budgets 10000 per step
-  ContinuousScheduler::Options opt =
+  SchedulerOptions opt =
       create_scheduler_options(10000,
                                256,
                                0,
@@ -1548,7 +1545,7 @@ TEST(SchedulerPolicyTest, FullFootprintAdmissionGate) {
   const int32_t block_size = 4;
   const int32_t max_tokens_per_chunk = 4;
 
-  ContinuousScheduler::Options opt = create_scheduler_options(
+  SchedulerOptions opt = create_scheduler_options(
       /*max_tokens_per_batch=*/100,
       /*max_seqs=*/256,
       /*spec_tokens=*/0,
@@ -1585,7 +1582,7 @@ TEST(SchedulerPolicyTest, FullFootprintAdmitsBothWhenFits) {
   const int32_t block_size = 4;
   const int32_t max_tokens_per_chunk = 4;
 
-  ContinuousScheduler::Options opt = create_scheduler_options(
+  SchedulerOptions opt = create_scheduler_options(
       /*max_tokens_per_batch=*/100,
       /*max_seqs=*/256,
       /*spec_tokens=*/0,

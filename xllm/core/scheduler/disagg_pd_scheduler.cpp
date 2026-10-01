@@ -329,7 +329,7 @@ void DisaggPDScheduler::start_rpc_server() {
 }
 
 void DisaggPDScheduler::step(const absl::Duration& timeout) {
-  ContinuousScheduler::step(timeout);
+  ContinuousSchedulerBase::step(timeout);
   // Send first generation token to decode instance.
   // Always check (not gated on last_step_prefill_) because chunked prefill
   // mode does not set that flag and a chunked prefill may complete at any step.

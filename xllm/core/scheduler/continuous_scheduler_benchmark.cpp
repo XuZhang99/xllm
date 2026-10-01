@@ -125,11 +125,11 @@ class FakeEngine final : public Engine {
 
 // Exposes the response processor so each iteration can drain the async
 // completion callbacks before the next one starts.
-class BenchContinuousScheduler final : public ContinuousScheduler {
+class BenchContinuousScheduler final : public ContinuousScheduler<> {
  public:
   template <typename TargetEngine>
   BenchContinuousScheduler(TargetEngine* engine, const Options& options)
-      : ContinuousScheduler(engine, options) {}
+      : ContinuousScheduler<>(engine, options) {}
 
   BatchGroup prepare_batch_test() { return prepare_batch(); }
 
@@ -155,8 +155,8 @@ class SchedulerFixture final {
  private:
   SchedulerFixture() : scheduler_(&engine_, make_scheduler_options()) {}
 
-  static ContinuousScheduler::Options make_scheduler_options() {
-    ContinuousScheduler::Options options;
+  static SchedulerOptions make_scheduler_options() {
+    SchedulerOptions options;
     options.max_tokens_per_batch(kMaxTokensPerBatch)
         .max_seqs_per_batch(kMaxSeqsPerBatch)
         .max_tokens_per_chunk_for_prefill(kMaxTokensPerBatch)

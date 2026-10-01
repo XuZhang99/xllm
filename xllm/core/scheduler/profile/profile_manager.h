@@ -225,7 +225,7 @@ class ProfileManager {
       int block_size) const;
 
  private:
-  friend class ContinuousScheduler;
+  friend class ContinuousSchedulerBase;
 
   ProfileManager(Engine* engine,
                  const Options& options,

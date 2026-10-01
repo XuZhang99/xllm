@@ -65,7 +65,7 @@ struct SchedulerState {
   bool& last_step_prefill;
 
   // Configuration.
-  const ContinuousScheduler::Options& options;
+  const SchedulerOptions& options;
   int32_t min_speculative_tokens_required;
   bool enable_prefix_cache;
   bool has_linear_attention_layers;
@@ -115,8 +115,7 @@ enum class SchedulerPolicyKind {
 // scheduling order and queue management strategy.
 class SchedulerPolicy {
  public:
-  SchedulerPolicy(const BatchMode& mode,
-                  const ContinuousScheduler::Options& options);
+  SchedulerPolicy(const BatchMode& mode, const SchedulerOptions& options);
   virtual ~SchedulerPolicy() = default;
 
   // The strategy-specific scheduling logic.
@@ -208,7 +207,7 @@ class SchedulerPolicy {
   void clear_mtp_bootstrap(Request* request, const SchedulerState& state);
 
   BatchMode batch_mode_;
-  const ContinuousScheduler::Options& options_;
+  const SchedulerOptions& options_;
 };
 
 // =============================================================================
@@ -299,11 +298,11 @@ class UnifiedPolicy : public SchedulerPolicy {
 
 // Builds the BatchMode that selects the scheduler policy. Constraints
 // (chunked prefill, CP/MTP, PD PREFILL) override the raw options.
-BatchMode create_batch_mode(const ContinuousScheduler::Options& options);
+BatchMode create_batch_mode(const SchedulerOptions& options);
 
 // Factory function: creates the appropriate policy based on BatchMode.
 std::unique_ptr<SchedulerPolicy> create_scheduler_policy(
     const BatchMode& mode,
-    const ContinuousScheduler::Options& options);
+    const SchedulerOptions& options);
 
 }  // namespace xllm

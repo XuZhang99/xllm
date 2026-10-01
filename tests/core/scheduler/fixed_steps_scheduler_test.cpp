@@ -120,13 +120,12 @@ class ScopedConfigValue final {
   T old_;
 };
 
-ContinuousScheduler::Options CreateOptions(
-    int32_t max_tokens_per_batch = 10000,
-    int32_t max_seqs_per_batch = 256,
-    int32_t dp_size = 1,
-    bool enable_schedule_overlap = false,
-    int32_t rec_worker_max_concurrency = 1) {
-  ContinuousScheduler::Options opt;
+SchedulerOptions CreateOptions(int32_t max_tokens_per_batch = 10000,
+                               int32_t max_seqs_per_batch = 256,
+                               int32_t dp_size = 1,
+                               bool enable_schedule_overlap = false,
+                               int32_t rec_worker_max_concurrency = 1) {
+  SchedulerOptions opt;
   opt.max_tokens_per_batch_ = max_tokens_per_batch;
   opt.max_seqs_per_batch_ = max_seqs_per_batch;
   opt.dp_size_ = dp_size;

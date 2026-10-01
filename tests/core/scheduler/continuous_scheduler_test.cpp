@@ -143,11 +143,11 @@ class PipelinePhaseEngine final : public FakeEngine {
   std::vector<std::string> calls;
 };
 
-class TestableContinuousScheduler final : public ContinuousScheduler {
+class TestableContinuousScheduler final : public ContinuousScheduler<> {
  public:
   template <typename TargetEngine>
   TestableContinuousScheduler(TargetEngine* engine, const Options& options)
-      : ContinuousScheduler(engine, options) {}
+      : ContinuousScheduler<>(engine, options) {}
 
   BatchGroup prepare_batch_test() { return prepare_batch(); }
 
@@ -198,7 +198,7 @@ class ScopedConfigValue final {
   T old_;
 };
 
-ContinuousScheduler::Options create_scheduler_options(
+SchedulerOptions create_scheduler_options(
     int32_t max_tokens_per_batch,
     int32_t max_seqs_per_batch,
     int32_t num_speculative_tokens,
@@ -209,7 +209,7 @@ ContinuousScheduler::Options create_scheduler_options(
     bool enable_latency_aware_schedule = false,
     int32_t max_global_ttft_ms = std::numeric_limits<int32_t>::max(),
     int32_t max_global_tpot_ms = std::numeric_limits<int32_t>::max()) {
-  ContinuousScheduler::Options opt;
+  SchedulerOptions opt;
   opt.num_speculative_tokens_ = num_speculative_tokens;
   opt.max_tokens_per_chunk_for_prefill_ = max_tokens_per_chunk_for_prefill;
   opt.max_tokens_per_batch_ = max_tokens_per_batch;
@@ -399,15 +399,15 @@ void set_chunk_kv(const std::shared_ptr<Request>& request, size_t kv_tokens) {
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithoutSPCreatesContinuousScheduler) {
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(10000, 256, 0, 1024, 1);
+  SchedulerOptions opt = create_scheduler_options(10000, 256, 0, 1024, 1);
   opt.enable_chunked_prefill() = true;
 
   auto engine = std::make_unique<FakeEngine>(32, 32);
   auto scheduler = create_continuous_scheduler(engine.get(), opt);
 
   // All non-PD paths now create ContinuousScheduler with BatchMode routing.
-  EXPECT_NE(dynamic_cast<ContinuousScheduler*>(scheduler.get()), nullptr);
+  EXPECT_NE(dynamic_cast<ContinuousScheduler<FakeEngine>*>(scheduler.get()),
+            nullptr);
 }
 
 TEST(ContinuousSchedulerTest,
@@ -418,8 +418,7 @@ TEST(ContinuousSchedulerTest,
     SCOPED_TRACE(enable_mix_batch);
     ScopedConfigValue<bool> mix_batch(
         SchedulerConfig::get_instance().enable_mix_batch(), enable_mix_batch);
-    ContinuousScheduler::Options options =
-        create_scheduler_options(64, 16, 0, 64, 1);
+    SchedulerOptions options = create_scheduler_options(64, 16, 0, 64, 1);
     options.enable_chunked_prefill(true)
         .enable_schedule_overlap(false)
         .disable_log_stats(true);
@@ -520,7 +519,7 @@ TEST(ContinuousSchedulerTest, EmptyOverlapOutputPreservesLatencyClock) {
       SchedulerConfig::get_instance().enable_chunked_prefill(), true);
   for (int32_t num_speculative_tokens : {0, 3}) {
     SCOPED_TRACE(num_speculative_tokens);
-    ContinuousScheduler::Options options =
+    SchedulerOptions options =
         create_scheduler_options(32, 1, num_speculative_tokens, 2, 1);
     options.enable_chunked_prefill(true).enable_schedule_overlap(true);
     FakeEngine engine(/*num_blocks=*/16, /*block_size=*/4);
@@ -595,8 +594,7 @@ TEST(ContinuousSchedulerTest, EmptyOverlapOutputPreservesLatencyClock) {
 }
 
 TEST(ContinuousSchedulerTest, PrefetchCompletesBeforeSchedulerQueueAdmission) {
-  ContinuousScheduler::Options options =
-      create_scheduler_options(64, 4, 0, 64, 1);
+  SchedulerOptions options = create_scheduler_options(64, 4, 0, 64, 1);
   auto engine = std::make_unique<FakeEngine>(64, 32);
   engine->set_prefetch_ready(false);
   auto scheduler =
@@ -636,8 +634,7 @@ TEST(ContinuousSchedulerTest, PrefetchCompletesBeforeSchedulerQueueAdmission) {
 
 TEST(ContinuousSchedulerTest,
      CancelledPendingPrefetchReleasesAdmissionWithoutEnqueue) {
-  ContinuousScheduler::Options options =
-      create_scheduler_options(64, 4, 0, 64, 1);
+  SchedulerOptions options = create_scheduler_options(64, 4, 0, 64, 1);
   auto engine = std::make_unique<FakeEngine>(64, 32);
   engine->set_prefetch_ready(false);
   auto scheduler =
@@ -675,8 +672,7 @@ TEST(ContinuousSchedulerTest,
 }
 
 TEST(ContinuousSchedulerTest, QueueCapacityRejectsBeforePrefetchStarts) {
-  ContinuousScheduler::Options options =
-      create_scheduler_options(64, 4, 0, 64, 1);
+  SchedulerOptions options = create_scheduler_options(64, 4, 0, 64, 1);
   options.request_queue_size(1);
   auto engine = std::make_unique<FakeEngine>(64, 32);
   engine->set_prefetch_ready(false);
@@ -709,8 +705,7 @@ TEST(ContinuousSchedulerTest, QueueCapacityRejectsBeforePrefetchStarts) {
 
 TEST(ContinuousSchedulerTest,
      CompletedPrefetchEntersSchedulerOnlyOnOwnerThread) {
-  ContinuousScheduler::Options options =
-      create_scheduler_options(64, 4, 0, 64, 1);
+  SchedulerOptions options = create_scheduler_options(64, 4, 0, 64, 1);
   options.request_queue_size(1);
   auto engine = std::make_unique<FakeEngine>(64, 32);
   engine->set_prefetch_ready(false);
@@ -743,33 +738,33 @@ TEST(ContinuousSchedulerTest,
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithSPCreatesContinuousScheduler) {
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(10000, 256, 0, 1024, 1);
+  SchedulerOptions opt = create_scheduler_options(10000, 256, 0, 1024, 1);
   opt.enable_chunked_prefill() = true;
 
   auto engine = std::make_unique<FakeEngine>(32, 32);
   auto scheduler = create_continuous_scheduler(engine.get(), opt);
 
   // All non-PD paths now create ContinuousScheduler with BatchMode routing.
-  EXPECT_NE(dynamic_cast<ContinuousScheduler*>(scheduler.get()), nullptr);
+  EXPECT_NE(dynamic_cast<ContinuousScheduler<FakeEngine>*>(scheduler.get()),
+            nullptr);
 }
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithSPAndSpeculativeCreatesContinuousScheduler) {
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(10000, 256, 4, 1024, 1);
+  SchedulerOptions opt = create_scheduler_options(10000, 256, 4, 1024, 1);
   opt.enable_chunked_prefill() = true;
 
   auto engine = std::make_unique<FakeEngine>(32, 32);
   auto scheduler = create_continuous_scheduler(engine.get(), opt);
 
   // All non-PD paths now create ContinuousScheduler with BatchMode routing.
-  EXPECT_NE(dynamic_cast<ContinuousScheduler*>(scheduler.get()), nullptr);
+  EXPECT_NE(dynamic_cast<ContinuousScheduler<FakeEngine>*>(scheduler.get()),
+            nullptr);
 }
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithSPDoesNotBuildMixedBatch) {
-  ContinuousScheduler::Options opt = create_scheduler_options(8, 8, 0, 4, 1);
+  SchedulerOptions opt = create_scheduler_options(8, 8, 0, 4, 1);
   opt.enable_chunked_prefill() = true;
   opt.cp_size() = 2;  // CP > 1 forces exclusive batch (no mix)
 
@@ -813,8 +808,7 @@ TEST(ContinuousSchedulerFactoryTest,
 }
 
 TEST(SchedulerFactoryTest, DisaggPDChunkedPrefillUsesDisaggPD) {
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(10000, 256, 2, 1024, 1);
+  SchedulerOptions opt = create_scheduler_options(10000, 256, 2, 1024, 1);
   opt.enable_disagg_pd() = true;
   opt.enable_chunked_prefill() = true;
 
@@ -822,8 +816,7 @@ TEST(SchedulerFactoryTest, DisaggPDChunkedPrefillUsesDisaggPD) {
 }
 
 TEST(ContinuousSchedulerTest, BeamStrictNoPartialScheduling) {
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(2, 8, 0, 1024, 1, "fcfs");
+  SchedulerOptions opt = create_scheduler_options(2, 8, 0, 1024, 1, "fcfs");
   auto engine = std::make_unique<FakeEngine>(64, 32);
   auto scheduler =
       std::make_unique<TestableContinuousScheduler>(engine.get(), opt);
@@ -913,7 +906,7 @@ TEST(ContinuousSchedulerTest,
       2.0);
   auto engine = std::make_unique<FakeEngine>(
       /*num_blocks=*/4, /*block_size=*/4);
-  ContinuousScheduler::Options options =
+  SchedulerOptions options =
       create_scheduler_options(/*max_tokens_per_batch=*/16,
                                /*max_seqs_per_batch=*/2,
                                /*num_speculative_tokens=*/0,
@@ -953,8 +946,7 @@ TEST(ContinuousSchedulerTest,
   //   3. handle_running_requests must trigger expand_sequences(true) and
   //      cache(seq[0]) so the expanded seq[1..best_of-1] can hit the
   //      shared prompt blocks via prefix cache.
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(1024, 16, 0, 1024, 1);
+  SchedulerOptions opt = create_scheduler_options(1024, 16, 0, 1024, 1);
   auto engine =
       std::make_unique<FakeEngine>(32, 4, /*enable_prefix_cache=*/true);
   auto scheduler =
@@ -1004,8 +996,7 @@ TEST(ContinuousSchedulerTest, PDDecodeBestOfOneSkipsExpansionAndShares) {
                                                /*best_of=*/1);
   Sequence* seq0 = request->sequences()[0].get();
 
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(1024, 16, 0, 1024, 1);
+  SchedulerOptions opt = create_scheduler_options(1024, 16, 0, 1024, 1);
   // Prefix cache is not under test here; disabling it avoids teardown putting
   // blocks into the prefix-cache table instead of the free list.
   auto engine =
@@ -1033,8 +1024,7 @@ TEST(ContinuousSchedulerTest, PDDecodeBestOfOneSkipsExpansionAndShares) {
 }
 
 TEST(ContinuousSchedulerTest, RejectedStreamCancelsAtSchedulingBoundary) {
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(1024, 16, 0, 1024, 1);
+  SchedulerOptions opt = create_scheduler_options(1024, 16, 0, 1024, 1);
   opt.enable_schedule_overlap() = false;
   auto engine = std::make_unique<FakeEngine>(32, 4);
   auto scheduler =
@@ -1076,8 +1066,7 @@ TEST(ContinuousSchedulerTest, RejectedStreamCancelsAtSchedulingBoundary) {
 }
 
 TEST(ContinuousSchedulerTest, FailedStreamReturnsStatusExactlyOnce) {
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(1024, 16, 0, 1024, 1);
+  SchedulerOptions opt = create_scheduler_options(1024, 16, 0, 1024, 1);
   opt.enable_schedule_overlap() = false;
   auto engine = std::make_unique<FakeEngine>(32, 4);
   auto scheduler =
@@ -1118,8 +1107,7 @@ TEST(ContinuousSchedulerTest, FailedStreamReturnsStatusExactlyOnce) {
 }
 
 TEST(ContinuousSchedulerTest, BatchRejectedStreamsCancelAtSchedulingBoundary) {
-  ContinuousScheduler::Options opt =
-      create_scheduler_options(1024, 16, 0, 1024, 1);
+  SchedulerOptions opt = create_scheduler_options(1024, 16, 0, 1024, 1);
   opt.enable_schedule_overlap() = false;
   auto engine = std::make_unique<FakeEngine>(32, 4);
   auto scheduler =
@@ -1188,8 +1176,7 @@ TEST(ContinuousSchedulerTest,
     kv_config.enable_prefix_cache(true);
     kv_config.enable_in_batch_prefix_cache(enable_in_batch_prefix_cache);
 
-    ContinuousScheduler::Options opt =
-        create_scheduler_options(1024, 16, 0, 1024, 1);
+    SchedulerOptions opt = create_scheduler_options(1024, 16, 0, 1024, 1);
     auto engine =
         std::make_unique<FakeEngine>(32, 4, /*enable_prefix_cache=*/true);
     auto scheduler =
@@ -1258,8 +1245,7 @@ TEST(ContinuousSchedulerTest, InBatchCacheReusesPartialPrefixWithinSameBatch) {
     kv_config.enable_prefix_cache(true);
     kv_config.enable_in_batch_prefix_cache(enable_in_batch_prefix_cache);
 
-    ContinuousScheduler::Options opt =
-        create_scheduler_options(1024, 16, 0, 1024, 1);
+    SchedulerOptions opt = create_scheduler_options(1024, 16, 0, 1024, 1);
     auto engine =
         std::make_unique<FakeEngine>(64, 4, /*enable_prefix_cache=*/true);
     auto scheduler =
@@ -1350,7 +1336,7 @@ TEST(ContinuousSchedulerTest,
 
   // PrefillOnly behavior: enable_chunked_prefill=true, num_speculative_tokens>0
   // gives enable_mix_batch=false + enable_chunked_prefill=true.
-  ContinuousScheduler::Options opt = create_scheduler_options(
+  SchedulerOptions opt = create_scheduler_options(
       kMaxTokensPerBatch, 256, /*num_speculative_tokens=*/5, 1024, 1);
   auto scheduler =
       std::make_unique<TestableContinuousScheduler>(engine.get(), opt);

@@ -43,10 +43,10 @@ limitations under the License.
 
 namespace xllm {
 
-FixedStepsScheduler::FixedStepsScheduler(Engine* engine,
+FixedStepsScheduler::FixedStepsScheduler(RecEngine* engine,
                                          StepCallback step_callback,
                                          const Options& options)
-    : ContinuousScheduler(engine, options, ResourceOnlyTag{}),
+    : ContinuousScheduler<RecEngine>(engine, options, ResourceOnlyTag{}),
       step_callback_(std::move(step_callback)),
       step_semaphore_(
           static_cast<std::ptrdiff_t>(options.rec_worker_max_concurrency())) {

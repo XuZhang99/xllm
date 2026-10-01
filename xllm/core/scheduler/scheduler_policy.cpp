@@ -97,7 +97,7 @@ size_t get_sequence_free_blocks_for_rank(KVCacheManager* kv_cache_manager,
 // =============================================================================
 
 SchedulerPolicy::SchedulerPolicy(const BatchMode& mode,
-                                 const ContinuousScheduler::Options& options)
+                                 const SchedulerOptions& options)
     : batch_mode_(mode), options_(options) {}
 
 bool SchedulerPolicy::should_limit_prefill_requests(
@@ -1054,7 +1054,7 @@ void SchedulerPolicy::clear_mtp_bootstrap(Request* request,
 // Factory
 // =============================================================================
 
-BatchMode create_batch_mode(const ContinuousScheduler::Options& options) {
+BatchMode create_batch_mode(const SchedulerOptions& options) {
   BatchMode mode;
   mode.priority_strategy = options.priority_strategy();
   mode.enable_chunked_prefill = options.enable_chunked_prefill();
@@ -1089,7 +1089,7 @@ BatchMode create_batch_mode(const ContinuousScheduler::Options& options) {
 
 std::unique_ptr<SchedulerPolicy> create_scheduler_policy(
     const BatchMode& mode,
-    const ContinuousScheduler::Options& options) {
+    const SchedulerOptions& options) {
   if (mode.enable_mix_batch && mode.priority_strategy == "multi_slo_and_prio") {
     return std::make_unique<UnifiedPolicy>(mode, options);
   } else if (mode.enable_mix_batch) {

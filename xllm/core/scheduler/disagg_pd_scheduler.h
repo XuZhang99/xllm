@@ -50,7 +50,7 @@ bool exceeds_decode_capacity(size_t num_prompt_tokens,
 
 bool has_rank_preserving_kv_groups(const proto::DisaggResponse& response);
 
-class DisaggPDScheduler : public ContinuousScheduler {
+class DisaggPDScheduler : public ContinuousScheduler<> {
  public:
   // Skips dispatch and RPC startup. Unit tests construct through this so they
   // do not block in initialize_rpc_server.
@@ -151,7 +151,7 @@ class DisaggPDScheduler : public ContinuousScheduler {
   DisaggPDScheduler(TargetEngine* engine,
                     const Options& options,
                     SkipRuntimeStart)
-      : ContinuousScheduler(engine, options), server_name_("DisaggPDServer") {
+      : ContinuousScheduler<>(engine, options), server_name_("DisaggPDServer") {
     if (!options_.instance_role().has_value()) {
       LOG(FATAL) << "Instance type is not set in disagg pd mode.";
     }

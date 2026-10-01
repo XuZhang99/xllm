@@ -27,8 +27,7 @@ limitations under the License.
 
 namespace xllm {
 
-SchedulerKind select_scheduler_kind(
-    const ContinuousScheduler::Options& options) {
+SchedulerKind select_scheduler_kind(const SchedulerOptions& options) {
   if (options.enable_disagg_pd()) {
     return SchedulerKind::DISAGG_PD;
   }
@@ -48,7 +47,7 @@ std::unique_ptr<DiTScheduler> create_dit_scheduler(
 
 std::unique_ptr<FixedStepsScheduler> create_fixed_steps_scheduler(
     RecEngine* engine,
-    ContinuousScheduler::Options options) {
+    SchedulerOptions options) {
   return std::make_unique<FixedStepsScheduler>(engine, options);
 }
 
