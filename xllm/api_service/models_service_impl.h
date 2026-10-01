@@ -25,9 +25,11 @@ namespace xllm {
 
 class ModelsServiceImpl final {
  public:
-  ModelsServiceImpl(const std::vector<std::string>& model_names,
-                    const std::vector<std::string>& model_repository_names,
-                    const std::vector<std::string>& model_versions);
+  ModelsServiceImpl(std::vector<std::string> model_names,
+                    std::vector<std::string> model_repository_names,
+                    std::vector<std::string> model_versions,
+                    std::string model_path = "",
+                    int64_t max_model_len = 0);
 
   bool list_models(const proto::ModelListRequest* request,
                    proto::ModelListResponse* response);
@@ -40,6 +42,8 @@ class ModelsServiceImpl final {
   std::vector<std::string> model_repository_names_;
   std::vector<std::string> model_versions_;
   uint32_t created_;
+  std::string model_path_;
+  int64_t max_model_len_;
 };
 
 }  // namespace xllm

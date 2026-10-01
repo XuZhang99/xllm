@@ -22,6 +22,7 @@ limitations under the License.
 #include "completion.pb.h"
 #include "core/common/types.h"
 #include "embedding.pb.h"
+#include "models.pb.h"
 
 namespace xllm::api_service {
 
@@ -38,5 +39,6 @@ nlohmann::json openai_response_json(const proto::CompletionResponse& response,
 nlohmann::json openai_embedding_json(const proto::EmbeddingResponse& response,
                                      const std::string& encoding_format);
 nlohmann::json openai_usage_json(const proto::Usage& usage, bool stream = true);
+nlohmann::json openai_models_json(const proto::ModelListResponse& response);
 
 }  // namespace xllm::api_service

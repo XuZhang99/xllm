@@ -45,6 +45,9 @@ class Master {
   // binary when no HTTP server is started on a non-leader rank.
   void wait();
   virtual const Options& options() const { return options_; }
+  const ModelArgs* model_args() const {
+    return engine_ ? &engine_->model_args() : nullptr;
+  }
   EngineType engine_type() const { return engine_type_; }
 
   virtual bool sleep() { return false; }

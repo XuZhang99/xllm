@@ -20,6 +20,8 @@ limitations under the License.
 #include <algorithm>
 #include <bit>
 
+#include "core/util/uuid.h"
+
 namespace xllm::api_service {
 namespace {
 
@@ -304,6 +306,39 @@ nlohmann::json openai_embedding_json(const proto::EmbeddingResponse& response,
   }
   json["usage"] = {{"prompt_tokens", response.usage().prompt_tokens()},
                    {"total_tokens", response.usage().total_tokens()}};
+  return json;
+}
+
+nlohmann::json openai_models_json(const proto::ModelListResponse& response) {
+  nlohmann::json json = {{"object", "list"}, {"data", nlohmann::json::array()}};
+  thread_local ShortUUID uuid;
+  for (const auto& model : response.data()) {
+    nlohmann::json permission = {{"id", "modelperm-" + uuid.random()},
+                                 {"object", "model_permission"},
+                                 {"created", model.created()},
+                                 {"allow_create_engine", false},
+                                 {"allow_sampling", true},
+                                 {"allow_logprobs", true},
+                                 {"allow_search_indices", false},
+                                 {"allow_view", true},
+                                 {"allow_fine_tuning", false},
+                                 {"organization", "*"},
+                                 {"group", nullptr},
+                                 {"is_blocking", false}};
+    json["data"].push_back(
+        {{"id", model.id()},
+         {"object", model.object()},
+         {"created", model.created()},
+         {"owned_by", model.owned_by()},
+         {"root",
+          model.has_root() ? nlohmann::json(model.root())
+                           : nlohmann::json(nullptr)},
+         {"parent", nullptr},
+         {"max_model_len",
+          model.has_max_model_len() ? nlohmann::json(model.max_model_len())
+                                    : nlohmann::json(nullptr)},
+         {"permission", nlohmann::json::array({std::move(permission)})}});
+  }
   return json;
 }
 
