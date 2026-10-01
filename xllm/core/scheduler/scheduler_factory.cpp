@@ -16,6 +16,7 @@ limitations under the License.
 #include "scheduler/scheduler_factory.h"
 
 #include "core/common/global_flags.h"
+#include "core/distributed_runtime/rec_engine.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "scheduler/continuous_scheduler.h"
@@ -39,29 +40,14 @@ SchedulerKind select_scheduler_kind(
   return SchedulerKind::CONTINUOUS;
 }
 
-std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
-    Engine* engine,
-    ContinuousScheduler::Options options) {
-  switch (select_scheduler_kind(options)) {
-    case SchedulerKind::DISAGG_PD:
-      return std::make_unique<DisaggPDScheduler>(engine, options);
-    case SchedulerKind::ZERO_EVICTION:
-      return std::make_unique<ZeroEvictionScheduler>(engine, options);
-    case SchedulerKind::CONTINUOUS:
-      return std::make_unique<ContinuousScheduler>(engine, options);
-  }
-
-  return std::make_unique<ContinuousScheduler>(engine, options);
-}
-
 std::unique_ptr<DiTScheduler> create_dit_scheduler(
-    Engine* engine,
+    DiTEngine* engine,
     DiTScheduler::Options options) {
   return std::make_unique<DiTDynamicBatchScheduler>(engine, options);
 }
 
 std::unique_ptr<FixedStepsScheduler> create_fixed_steps_scheduler(
-    Engine* engine,
+    RecEngine* engine,
     ContinuousScheduler::Options options) {
   return std::make_unique<FixedStepsScheduler>(engine, options);
 }

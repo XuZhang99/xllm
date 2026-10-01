@@ -100,7 +100,17 @@ class BlockCapacityGuard {
 
 class ZeroEvictionScheduler final : public ContinuousScheduler {
  public:
-  ZeroEvictionScheduler(Engine* engine, const Options& options);
+  template <typename TargetEngine>
+    requires requires(TargetEngine* engine, BatchGroup& batch) {
+      static_cast<Engine*>(engine);
+      { engine->step(batch) } -> std::same_as<ForwardOutput>;
+      { engine->update_last_step_result(batch) } -> std::same_as<void>;
+    }
+  ZeroEvictionScheduler(TargetEngine* engine, const Options& options)
+      : ContinuousScheduler(engine, options) {
+    block_capacity_guard_ =
+        std::make_unique<BlockCapacityGuard>(kv_cache_manager_);
+  }
   ~ZeroEvictionScheduler() override;
 
  private:

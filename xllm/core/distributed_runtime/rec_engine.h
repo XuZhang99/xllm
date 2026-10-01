@@ -43,7 +43,7 @@ class RecEngine : public Engine {
 
   virtual ~RecEngine() = default;
 
-  ForwardOutput step(RecBatchGroup& batch) override;
+  virtual ForwardOutput step(RecBatchGroup& batch);
 
   const runtime::Options& options() const { return options_; }
 

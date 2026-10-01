@@ -19,12 +19,14 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <vector>
 
 #include "continuous_scheduler.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/scheduler_config.h"
-#include "distributed_runtime/engine.h"
+#include "distributed_runtime/rec_engine.h"
 #include "framework/request/rec_type.h"
+#include "runtime/options.h"
 
 namespace xllm {
 
@@ -61,9 +63,10 @@ class FakeTokenizer : public Tokenizer {
   }
 };
 
-class FakeEngine : public Engine {
+class FakeEngine final : public RecEngine {
  public:
-  FakeEngine(int32_t num_blocks, int32_t block_size) {
+  FakeEngine(int32_t num_blocks, int32_t block_size)
+      : RecEngine(make_options()) {
     BlockManagerPool::Options opt;
     opt.num_blocks_ = num_blocks;
     opt.block_size_ = block_size;
@@ -71,15 +74,10 @@ class FakeEngine : public Engine {
     fake_tokenizer_ = std::make_unique<FakeTokenizer>();
     fake_block_manager_ = std::make_unique<BlockManagerPool>(opt, 1);
   }
-  ForwardOutput step(BatchGroup& batch) override {
-    (void)batch;
-    return ForwardOutput();
-  }
   ForwardOutput step(RecBatchGroup& batch) override {
     (void)batch;
     return ForwardOutput();
   }
-  void update_last_step_result(BatchGroup& batch) override { (void)batch; }
   const Tokenizer* tokenizer() const override { return fake_tokenizer_.get(); }
   BlockManagerPool* block_manager_pool() const override {
     return fake_block_manager_.get();
@@ -98,6 +96,12 @@ class FakeEngine : public Engine {
   bool init() override { return true; }
 
  private:
+  static runtime::Options make_options() {
+    runtime::Options options;
+    options.devices({torch::Device(torch::kCUDA, 0)});
+    return options;
+  }
+
   std::unique_ptr<Tokenizer> fake_tokenizer_;
   std::unique_ptr<BlockManagerPool> fake_block_manager_;
 };

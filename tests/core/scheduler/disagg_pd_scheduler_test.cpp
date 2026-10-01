@@ -79,11 +79,9 @@ class FakeEngine final : public Engine {
     block_manager_ = std::make_unique<BlockManagerPool>(options, /*dp_size=*/1);
   }
 
-  ForwardOutput step(BatchGroup& /*batch*/) override { NOT_IMPLEMENTED(); }
+  ForwardOutput step(BatchGroup& /*batch*/) { NOT_IMPLEMENTED(); }
 
-  void update_last_step_result(BatchGroup& /*batch*/) override {
-    NOT_IMPLEMENTED();
-  }
+  void update_last_step_result(BatchGroup& /*batch*/) { NOT_IMPLEMENTED(); }
 
   const Tokenizer* tokenizer() const override { return tokenizer_.get(); }
 
@@ -121,7 +119,8 @@ class FakeEngine final : public Engine {
 
 class TestDisaggPDScheduler final : public DisaggPDScheduler {
  public:
-  TestDisaggPDScheduler(Engine* engine, const Options& options)
+  template <typename TargetEngine>
+  TestDisaggPDScheduler(TargetEngine* engine, const Options& options)
       : DisaggPDScheduler(engine, options, SkipRuntimeStart{}) {}
 
   void cache_prefill_blocks_for_test(Request* request) {

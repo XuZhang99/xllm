@@ -604,7 +604,7 @@ Master::Master(const Options& options, EngineType type)
             options_.max_tokens_per_chunk_for_prefill());
 
     auto engine = std::make_unique<VLMEngine>(eng_options);
-    engine_ = std::move(engine);
+    engine_storage_ = std::move(engine);
   } else if (type == EngineType::SSM || type == EngineType::VLMSSM) {
     if (type == EngineType::VLMSSM) {
       CHECK(!options_.enable_disagg_pd())
@@ -692,13 +692,13 @@ Master::Master(const Options& options, EngineType type)
     apply_runtime_kv_cache_options(options_, spec_options);
 
     if (use_suffix_spec) {
-      engine_ = std::make_unique<SuffixSpeculativeEngine>(spec_options);
+      engine_storage_ = std::make_unique<SuffixSpeculativeEngine>(spec_options);
     } else {
       if (type == EngineType::VLMSSM) {
-        engine_ =
+        engine_storage_ =
             std::make_unique<SpeculativeEngineBase<VLMEngine>>(spec_options);
       } else {
-        engine_ =
+        engine_storage_ =
             std::make_unique<SpeculativeEngineBase<LLMEngine>>(spec_options);
       }
     }
@@ -759,7 +759,7 @@ Master::Master(const Options& options, EngineType type)
         .model_id(options_.model_id());
     apply_runtime_kv_cache_options(options_, eng_options);
 
-    engine_ = std::make_unique<LLMEngine>(eng_options);
+    engine_storage_ = std::make_unique<LLMEngine>(eng_options);
   } else if (type == EngineType::REC) {
     options_.enable_schedule_overlap(false);
     LOG(WARNING) << "Force to disable schedule overlap for REC model, not "
@@ -802,7 +802,7 @@ Master::Master(const Options& options, EngineType type)
             options_.max_tokens_per_chunk_for_prefill())
         .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
 
-    engine_ = std::make_unique<RecEngine>(eng_options);
+    engine_storage_ = std::make_unique<RecEngine>(eng_options);
   } else if (type == EngineType::DIT) {
     // construct dit engine
     runtime::Options eng_options;
@@ -834,7 +834,7 @@ Master::Master(const Options& options, EngineType type)
         .text_encoder_tp_size(options_.text_encoder_tp_size());
 
     auto dit_engine = std::make_unique<DiTEngine>(eng_options);
-    engine_ = std::move(dit_engine);
+    engine_storage_ = std::move(dit_engine);
   } else {
     LOG(WARNING) << "Not supported llm engine type: "
                  << static_cast<size_t>(type);

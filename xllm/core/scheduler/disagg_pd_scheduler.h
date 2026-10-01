@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <brpc/channel.h>
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -51,7 +52,31 @@ bool has_rank_preserving_kv_groups(const proto::DisaggResponse& response);
 
 class DisaggPDScheduler : public ContinuousScheduler {
  public:
-  DisaggPDScheduler(Engine* engine, const Options& options);
+  // Skips dispatch and RPC startup. Unit tests construct through this so they
+  // do not block in initialize_rpc_server.
+  struct SkipRuntimeStart {};
+
+  template <typename TargetEngine>
+    requires requires(TargetEngine* engine, BatchGroup& batch) {
+      static_cast<Engine*>(engine);
+      { engine->step(batch) } -> std::same_as<ForwardOutput>;
+      { engine->update_last_step_result(batch) } -> std::same_as<void>;
+    }
+  DisaggPDScheduler(TargetEngine* engine, const Options& options)
+      : DisaggPDScheduler(engine, options, SkipRuntimeStart{}) {
+    dispatch_thread_ = std::make_unique<std::thread>(
+        &DisaggPDScheduler::dispatch_requests, this);
+    server_name_.append(std::to_string(options_.server_idx()));
+    rpc_server_thread_ = std::make_unique<std::thread>(
+        &DisaggPDScheduler::start_rpc_server, this);
+    initialize_rpc_server(server_name_);
+    register_instance_info(server_name_, engine_);
+    if (!options_.disable_ttft_profiling() &&
+        options_.instance_role().value() == InstanceRole::MIX) {
+      profile_ttft();
+      profile_tpot();
+    }
+  }
 
   ~DisaggPDScheduler() override;
 
@@ -117,10 +142,20 @@ class DisaggPDScheduler : public ContinuousScheduler {
                        const int32_t src_kv_split_size);
 
  protected:
-  // Skips dispatch and RPC startup. Unit tests construct through this so they
-  // do not block in initialize_rpc_server.
-  struct SkipRuntimeStart {};
-  DisaggPDScheduler(Engine* engine, const Options& options, SkipRuntimeStart);
+  template <typename TargetEngine>
+    requires requires(TargetEngine* engine, BatchGroup& batch) {
+      static_cast<Engine*>(engine);
+      { engine->step(batch) } -> std::same_as<ForwardOutput>;
+      { engine->update_last_step_result(batch) } -> std::same_as<void>;
+    }
+  DisaggPDScheduler(TargetEngine* engine,
+                    const Options& options,
+                    SkipRuntimeStart)
+      : ContinuousScheduler(engine, options), server_name_("DisaggPDServer") {
+    if (!options_.instance_role().has_value()) {
+      LOG(FATAL) << "Instance type is not set in disagg pd mode.";
+    }
+  }
 
   void do_permanent_rejection(const std::shared_ptr<Request>& request);
 

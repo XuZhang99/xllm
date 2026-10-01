@@ -65,9 +65,18 @@ int32_t decode_warmup_token_bucket(const DecodeGraphWarmupPlan& plan,
 
 }  // namespace
 
-ProfileManager::ProfileManager(Engine* engine, const Options& options)
-    : options_(options), engine_(engine), batch_factory_(options.dp_size()) {
+ProfileManager::ProfileManager(Engine* engine,
+                               const Options& options,
+                               BatchStep batch_step,
+                               BatchResultConsumer consume_batch_result)
+    : options_(options),
+      engine_(engine),
+      batch_step_(std::move(batch_step)),
+      consume_batch_result_(std::move(consume_batch_result)),
+      batch_factory_(options.dp_size()) {
   CHECK(engine_ != nullptr);
+  CHECK(batch_step_);
+  CHECK(consume_batch_result_);
   int32_t max_decode_batch_size = options_.max_seqs_per_batch();
   const int32_t max_concurrent_requests =
       ::xllm::ServiceConfig::get_instance().max_concurrent_requests();
@@ -1004,9 +1013,9 @@ double ProfileManager::run_request(int32_t token_length,
       batch_factory_.create_batches(requests, sequences, sequences_budget);
 
   absl::Time start_time = absl::Now();
-  engine_->step(batches);
+  batch_step_(batches);
   if (options_.enable_schedule_overlap()) {
-    engine_->update_last_step_result(batches);
+    consume_batch_result_(batches);
   }
   double latency = absl::ToDoubleMilliseconds(absl::Now() - start_time);
   for (auto& request : requests) {
@@ -1046,9 +1055,9 @@ double ProfileManager::run_request(
       requests, sequences, sequences_budget, nullptr);
 
   absl::Time start_time = absl::Now();
-  engine_->step(batches);
+  batch_step_(batches);
   if (options_.enable_schedule_overlap()) {
-    engine_->update_last_step_result(batches);
+    consume_batch_result_(batches);
   }
   double latency = absl::ToDoubleMilliseconds(absl::Now() - start_time);
   for (auto& request : requests) {
@@ -1077,9 +1086,9 @@ double ProfileManager::run_decode_request(
       requests, sequences, sequences_budget, nullptr);
 
   absl::Time start_time = absl::Now();
-  engine_->step(batches);
+  batch_step_(batches);
   if (options_.enable_schedule_overlap()) {
-    engine_->update_last_step_result(batches);
+    consume_batch_result_(batches);
   }
   double latency = absl::ToDoubleMilliseconds(absl::Now() - start_time);
   for (auto& request : requests) {
@@ -1114,9 +1123,9 @@ double ProfileManager::run_graph_decode_request(
       requests, sequences, sequences_budget, nullptr);
 
   absl::Time start_time = absl::Now();
-  engine_->step(batches);
+  batch_step_(batches);
   if (options_.enable_schedule_overlap()) {
-    engine_->update_last_step_result(batches);
+    consume_batch_result_(batches);
   }
   double latency = absl::ToDoubleMilliseconds(absl::Now() - start_time);
   for (auto& request : requests) {

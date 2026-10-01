@@ -122,6 +122,13 @@ VLMMaster::VLMMaster(const Options& options)
     : Master(options,
              should_use_vlm_speculative_engine(options) ? EngineType::VLMSSM
                                                         : EngineType::VLM) {
+  if (should_use_vlm_speculative_engine(options_)) {
+    speculative_engine_ = take_engine<SpeculativeEngineBase<VLMEngine>>();
+    engine_ = speculative_engine_.get();
+  } else {
+    vlm_engine_ = take_engine<VLMEngine>();
+    engine_ = vlm_engine_.get();
+  }
   if (!is_leader()) {
     return;
   }
@@ -159,7 +166,13 @@ VLMMaster::VLMMaster(const Options& options)
       .disable_ttft_profiling(options_.disable_ttft_profiling())
       .enable_schedule_overlap(options_.enable_schedule_overlap())
       .server_idx(options_.server_idx());
-  scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
+  if (should_use_vlm_speculative_engine(options_)) {
+    scheduler_ = create_continuous_scheduler(speculative_engine_.get(),
+                                             scheduler_options);
+  } else {
+    scheduler_ =
+        create_continuous_scheduler(vlm_engine_.get(), scheduler_options);
+  }
 
   if (options_.enable_service_routing()) {
     auto& instance_info = scheduler_->get_instance_info();

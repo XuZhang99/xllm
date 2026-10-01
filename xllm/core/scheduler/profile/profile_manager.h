@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <concepts>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <tuple>
@@ -32,7 +34,6 @@ limitations under the License.
 #include "core/scheduler/profile/time_predictor.h"
 
 namespace xllm {
-class Engine;
 class ProfileManager {
  public:
   struct Options {
@@ -67,7 +68,20 @@ class ProfileManager {
     double intercept;  // milliseconds constant overhead
     std::string note;
   };
-  ProfileManager(Engine* engine, const Options& options);
+  template <typename TargetEngine>
+    requires requires(TargetEngine* engine, BatchGroup& batch) {
+      static_cast<Engine*>(engine);
+      { engine->step(batch) } -> std::same_as<ForwardOutput>;
+      { engine->update_last_step_result(batch) } -> std::same_as<void>;
+    }
+  ProfileManager(TargetEngine* engine, const Options& options)
+      : ProfileManager(
+            static_cast<Engine*>(engine),
+            options,
+            [engine](BatchGroup& batch) { return engine->step(batch); },
+            [engine](BatchGroup& batch) {
+              engine->update_last_step_result(batch);
+            }) {}
 
   int32_t get_token_budget();
 
@@ -206,6 +220,17 @@ class ProfileManager {
       const std::string& model_name,
       int block_size) const;
 
+ private:
+  using BatchStep = std::function<ForwardOutput(BatchGroup&)>;
+  using BatchResultConsumer = std::function<void(BatchGroup&)>;
+
+  friend class ContinuousScheduler;
+
+  ProfileManager(Engine* engine,
+                 const Options& options,
+                 BatchStep batch_step,
+                 BatchResultConsumer consume_batch_result);
+
   std::unique_ptr<TimePredictor> prefill_time_predictor_;
   std::unique_ptr<TimePredictor> decode_time_predictor_;
   std::unique_ptr<TimePredictor> speculative_validate_time_predictor_;
@@ -213,6 +238,8 @@ class ProfileManager {
   const Options options_;
 
   Engine* engine_;
+  BatchStep batch_step_;
+  BatchResultConsumer consume_batch_result_;
   BatchFactory batch_factory_;
 
   DecodeGraphWarmupPlan decode_graph_warmup_plan_;

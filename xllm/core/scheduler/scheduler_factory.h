@@ -15,15 +15,20 @@ limitations under the License.
 
 #pragma once
 
+#include <concepts>
 #include <cstdint>
 #include <memory>
 
 #include "runtime/xservice_client.h"
 #include "scheduler/continuous_scheduler.h"
+#include "scheduler/disagg_pd_scheduler.h"
 #include "scheduler/dit_scheduler.h"
 #include "scheduler/fixed_steps_scheduler.h"
+#include "scheduler/zero_eviction_scheduler.h"
 
 namespace xllm {
+
+class RecEngine;
 
 enum class SchedulerKind : int8_t {
   CONTINUOUS = 0,
@@ -34,16 +39,32 @@ enum class SchedulerKind : int8_t {
 SchedulerKind select_scheduler_kind(
     const ContinuousScheduler::Options& options);
 
+template <typename TargetEngine>
+  requires requires(TargetEngine* engine, BatchGroup& batch) {
+    static_cast<Engine*>(engine);
+    { engine->step(batch) } -> std::same_as<ForwardOutput>;
+    { engine->update_last_step_result(batch) } -> std::same_as<void>;
+  }
 std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
-    Engine* engine,
-    ContinuousScheduler::Options options);
+    TargetEngine* engine,
+    ContinuousScheduler::Options options) {
+  switch (select_scheduler_kind(options)) {
+    case SchedulerKind::DISAGG_PD:
+      return std::make_unique<DisaggPDScheduler>(engine, options);
+    case SchedulerKind::ZERO_EVICTION:
+      return std::make_unique<ZeroEvictionScheduler>(engine, options);
+    case SchedulerKind::CONTINUOUS:
+      return std::make_unique<ContinuousScheduler>(engine, options);
+  }
+  return std::make_unique<ContinuousScheduler>(engine, options);
+}
 
 std::unique_ptr<DiTScheduler> create_dit_scheduler(
-    Engine* engine,
+    DiTEngine* engine,
     DiTScheduler::Options options);
 
 std::unique_ptr<FixedStepsScheduler> create_fixed_steps_scheduler(
-    Engine* engine,
+    RecEngine* engine,
     ContinuousScheduler::Options options);
 
 }  // namespace xllm

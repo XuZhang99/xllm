@@ -20,15 +20,19 @@ limitations under the License.
 #include <folly/futures/Future.h>
 
 #include <atomic>
+#include <concepts>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 
 #include "core/common/macros.h"
 #include "core/common/types.h"
+#include "core/distributed_runtime/engine.h"
 #include "core/framework/batch/batch_factory.h"
 #include "core/framework/batch/batch_group.h"
 #include "core/framework/block/kv_cache_manager.h"
@@ -43,7 +47,6 @@ limitations under the License.
 #include "core/scheduler/scheduler_metrics.h"
 
 namespace xllm {
-class Engine;
 class RequestPriorityQueue;
 class SchedulerConfig;
 class SchedulerPolicy;
@@ -174,7 +177,20 @@ class ContinuousScheduler : public Scheduler {
     PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
   };
 
-  ContinuousScheduler(Engine* engine, const Options& options);
+  template <typename TargetEngine>
+    requires requires(TargetEngine* engine, BatchGroup& batch) {
+      static_cast<Engine*>(engine);
+      { engine->step(batch) } -> std::same_as<ForwardOutput>;
+      { engine->update_last_step_result(batch) } -> std::same_as<void>;
+    }
+  ContinuousScheduler(TargetEngine* engine, const Options& options)
+      : ContinuousScheduler(
+            static_cast<Engine*>(engine),
+            options,
+            [engine](BatchGroup& batch) { return engine->step(batch); },
+            [engine](BatchGroup& batch) {
+              engine->update_last_step_result(batch);
+            }) {}
   ~ContinuousScheduler() override;
 
   bool add_request(std::shared_ptr<Request>& request) override;
@@ -213,6 +229,9 @@ class ContinuousScheduler : public Scheduler {
   const InstanceInfo& get_instance_info() override { return instance_info_; }
 
  protected:
+  struct ResourceOnlyTag {};
+  ContinuousScheduler(Engine* engine, const Options& options, ResourceOnlyTag);
+
   void clear_mtp_bootstrap(Request* request);
   void drain_prefetch_pipeline();
   virtual void enqueue_ready_request(std::shared_ptr<Request> request);
@@ -237,6 +256,8 @@ class ContinuousScheduler : public Scheduler {
 
   // the engine to run the batch
   Engine* engine_;
+  BatchStep batch_step_;
+  BatchResultConsumer consume_batch_result_;
 
   KVCacheManager* kv_cache_manager_;
 
@@ -323,6 +344,14 @@ class ContinuousScheduler : public Scheduler {
   bool is_first_step_ = true;
 
  private:
+  using BatchStep = std::function<ForwardOutput(BatchGroup&)>;
+  using BatchResultConsumer = std::function<void(BatchGroup&)>;
+
+  ContinuousScheduler(Engine* engine,
+                      const Options& options,
+                      BatchStep batch_step,
+                      BatchResultConsumer consume_batch_result);
+
   // Construct a SchedulerState snapshot for the policy.
   SchedulerState make_state();
 

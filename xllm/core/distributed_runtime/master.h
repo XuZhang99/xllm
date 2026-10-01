@@ -89,9 +89,21 @@ class Master {
   // no external caller needs it.
   bool is_leader() const { return options_.node_rank() == 0; }
 
+  template <typename ConcreteEngine>
+  std::unique_ptr<ConcreteEngine> take_engine() {
+    CHECK(engine_storage_ != nullptr);
+    auto* concrete_engine =
+        static_cast<ConcreteEngine*>(engine_storage_.release());
+    return std::unique_ptr<ConcreteEngine>(concrete_engine);
+  }
+
   Options options_;
   EngineType engine_type_ = EngineType::INVALID;
-  std::unique_ptr<Engine> engine_;
+  // The base constructs the runtime before the derived master is initialized.
+  // Derived masters immediately take ownership with take_engine() and keep
+  // engine_ as a non-owning pointer for shared master functionality.
+  std::unique_ptr<Engine> engine_storage_;
+  Engine* engine_ = nullptr;
   RateLimiter rate_limiter_;
   MasterStatus master_status_{MasterStatus::WAKEUP};
 

@@ -38,6 +38,8 @@ limitations under the License.
 namespace xllm {
 DiTMaster::DiTMaster(const Options& options)
     : Master(options, EngineType::DIT) {
+  dit_engine_ = take_engine<DiTEngine>();
+  engine_ = dit_engine_.get();
   if (!is_leader()) {
     return;
   }
@@ -48,7 +50,7 @@ DiTMaster::DiTMaster(const Options& options)
   scheduler_options.max_request_per_batch(options.max_requests_per_batch())
       .disable_log_stats(options.disable_log_stats());
 
-  scheduler_ = create_dit_scheduler(engine_.get(), scheduler_options);
+  scheduler_ = create_dit_scheduler(dit_engine_.get(), scheduler_options);
   LOG(INFO) << "created dit scheduler in DiTMaster.";
 
   threadpool_ = std::make_unique<ThreadPool>(

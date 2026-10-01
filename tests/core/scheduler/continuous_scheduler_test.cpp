@@ -103,8 +103,10 @@ class FakeEngine : public Engine {
     fake_block_manager_ =
         std::make_unique<ControllablePrefetchBlockManagerPool>(opt);
   }
-  ForwardOutput step(BatchGroup& batch) { return {}; }
-  void update_last_step_result(BatchGroup& batch) { NOT_IMPLEMENTED(); }
+  virtual ForwardOutput step(BatchGroup& /*batch*/) { return {}; }
+  virtual void update_last_step_result(BatchGroup& /*batch*/) {
+    NOT_IMPLEMENTED();
+  }
   const Tokenizer* tokenizer() const { return fake_tokenizer_.get(); }
   BlockManagerPool* block_manager_pool() const {
     return fake_block_manager_.get();
@@ -131,11 +133,11 @@ class FakeEngine : public Engine {
 class PipelinePhaseEngine final : public FakeEngine {
  public:
   PipelinePhaseEngine() : FakeEngine(/*num_blocks=*/128, /*block_size=*/4) {}
-  ForwardOutput step(BatchGroup& /*batch*/) override {
+  ForwardOutput step(BatchGroup& /*batch*/) {
     calls.emplace_back("step");
     return {};
   }
-  void update_last_step_result(BatchGroup& /*batch*/) override {
+  void update_last_step_result(BatchGroup& /*batch*/) {
     calls.emplace_back("consume");
   }
   std::vector<std::string> calls;
@@ -143,7 +145,8 @@ class PipelinePhaseEngine final : public FakeEngine {
 
 class TestableContinuousScheduler final : public ContinuousScheduler {
  public:
-  TestableContinuousScheduler(Engine* engine, const Options& options)
+  template <typename TargetEngine>
+  TestableContinuousScheduler(TargetEngine* engine, const Options& options)
       : ContinuousScheduler(engine, options) {}
 
   BatchGroup prepare_batch_test() { return prepare_batch(); }

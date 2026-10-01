@@ -39,10 +39,6 @@ class FakeEngine final : public Engine {
     block_manager_ = std::make_unique<BlockManagerPool>(options, /*dp_size=*/1);
   }
 
-  ForwardOutput step(BatchGroup& /*batch*/) override { return {}; }
-
-  void update_last_step_result(BatchGroup& /*batch*/) override {}
-
   BlockManagerPool* block_manager_pool() const override {
     return block_manager_.get();
   }

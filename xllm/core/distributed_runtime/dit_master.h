@@ -23,6 +23,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "dit_engine.h"
 #include "framework/request/dit_request_params.h"
 #include "master.h"
 #include "scheduler/dit_scheduler.h"
@@ -53,6 +54,8 @@ class DiTMaster : public Master {
   void generate();
 
  private:
+  std::unique_ptr<DiTEngine> dit_engine_;
+  // Scheduler must be destroyed before the engine it references.
   std::unique_ptr<DiTScheduler> scheduler_;
 
   // thread pool for handling requests

@@ -76,7 +76,7 @@ class DiTScheduler : public SchedulerBase {
 
 class DiTDynamicBatchScheduler : public DiTScheduler {
  public:
-  DiTDynamicBatchScheduler(Engine* engine, const Options& options);
+  DiTDynamicBatchScheduler(DiTEngine* engine, const Options& options);
   ~DiTDynamicBatchScheduler() override;
 
   bool add_request(std::shared_ptr<DiTRequest>& request) override;

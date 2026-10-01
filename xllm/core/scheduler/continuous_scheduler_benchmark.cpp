@@ -106,8 +106,8 @@ class FakeEngine final : public Engine {
         std::make_unique<BlockManagerPool>(options, /*dp_size=*/1);
   }
 
-  ForwardOutput step(BatchGroup& /*batch*/) override { return {}; }
-  void update_last_step_result(BatchGroup& /*batch*/) override {}
+  virtual ForwardOutput step(BatchGroup& /*batch*/) { return {}; }
+  virtual void update_last_step_result(BatchGroup& /*batch*/) {}
   const Tokenizer* tokenizer() const override { return &fake_tokenizer_; }
   BlockManagerPool* block_manager_pool() const override {
     return block_manager_pool_.get();
@@ -127,7 +127,8 @@ class FakeEngine final : public Engine {
 // completion callbacks before the next one starts.
 class BenchContinuousScheduler final : public ContinuousScheduler {
  public:
-  BenchContinuousScheduler(Engine* engine, const Options& options)
+  template <typename TargetEngine>
+  BenchContinuousScheduler(TargetEngine* engine, const Options& options)
       : ContinuousScheduler(engine, options) {}
 
   BatchGroup prepare_batch_test() { return prepare_batch(); }

@@ -100,7 +100,7 @@ class RecordingProfileEngine final : public Engine {
         .hidden_size(8);
   }
 
-  ForwardOutput step(BatchGroup& batches) override {
+  ForwardOutput step(BatchGroup& batches) {
     EXPECT_EQ(pending_steps_, 0);
     int32_t sequence_count = 0;
     for (Batch& batch : batches) {
@@ -115,7 +115,7 @@ class RecordingProfileEngine final : public Engine {
     return ForwardOutput();
   }
 
-  void update_last_step_result(BatchGroup& batches) override {
+  void update_last_step_result(BatchGroup& batches) {
     (void)batches;
     EXPECT_EQ(pending_steps_, 1);
     EXPECT_GT(block_manager_->num_used_blocks().front(), 0);

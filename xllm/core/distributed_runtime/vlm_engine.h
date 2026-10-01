@@ -42,13 +42,13 @@ class VLMEngine : public Engine {
 
   virtual ~VLMEngine() = default;
 
-  ForwardOutput step(BatchGroup& batch) override;
+  ForwardOutput step(BatchGroup& batch);
 
   const runtime::Options& options() const { return options_; }
 
   bool init(MasterStatus master_status) override;
 
-  void update_last_step_result(BatchGroup& batch) override;
+  void update_last_step_result(BatchGroup& batch);
 
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const override;

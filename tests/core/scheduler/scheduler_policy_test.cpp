@@ -74,8 +74,10 @@ class FakeEngine : public Engine {
     fake_tokenizer_ = std::make_unique<FakeTokenizer>();
     fake_block_manager_ = std::make_unique<BlockManagerPool>(opt, 1);
   }
-  ForwardOutput step(BatchGroup& batch) { return {}; }
-  void update_last_step_result(BatchGroup& batch) { NOT_IMPLEMENTED(); }
+  virtual ForwardOutput step(BatchGroup& /*batch*/) { return {}; }
+  virtual void update_last_step_result(BatchGroup& /*batch*/) {
+    NOT_IMPLEMENTED();
+  }
   const Tokenizer* tokenizer() const { return fake_tokenizer_.get(); }
   BlockManagerPool* block_manager_pool() const {
     return fake_block_manager_.get();
@@ -464,7 +466,8 @@ void update_requests(std::vector<std::shared_ptr<Request>> requests) {
 
 class TestableContinuousScheduler final : public ContinuousScheduler {
  public:
-  TestableContinuousScheduler(Engine* engine, const Options& options)
+  template <typename TargetEngine>
+  TestableContinuousScheduler(TargetEngine* engine, const Options& options)
       : ContinuousScheduler(engine, options) {}
 
   BatchGroup prepare_batch_test() { return prepare_batch(); }

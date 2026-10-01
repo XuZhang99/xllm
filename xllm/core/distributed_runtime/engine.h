@@ -17,11 +17,15 @@ limitations under the License.
 
 #include <folly/futures/Future.h>
 
+#include <cstdint>
+#include <memory>
+#include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
+#include "core/common/macros.h"
 #include "core/framework/speculative/speculative_profile_registry.h"
-#include "framework/batch/batch_group.h"
-#include "framework/batch/rec_batch_group.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/kv_cache_transfer/prefetch_result.h"
 #include "framework/model/model_args.h"
@@ -38,19 +42,6 @@ class Engine {
   virtual bool init() { return true; };
 
   virtual bool init(MasterStatus master_status) { return true; };
-
-  // execute model with batch input
-  virtual ForwardOutput step(BatchGroup& batch) {
-    NOT_IMPLEMENTED();
-    return {};
-  }
-
-  virtual ForwardOutput step(RecBatchGroup& batch) {
-    NOT_IMPLEMENTED();
-    return {};
-  }
-
-  virtual void update_last_step_result(BatchGroup& batch) { NOT_IMPLEMENTED(); }
 
   // return the tokenizer
   virtual const Tokenizer* tokenizer() const { return tokenizer_.get(); }
@@ -211,4 +202,5 @@ class Engine {
   // tokenizer
   std::unique_ptr<Tokenizer> tokenizer_;
 };
+
 }  // namespace xllm

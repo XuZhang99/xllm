@@ -57,13 +57,13 @@ RecType get_rec_type(const ModelArgs& model_args) {
 
 RecMaster::RecMaster(const Options& options)
     : Master(options, EngineType::REC) {
+  rec_engine_ = take_engine<RecEngine>();
+  engine_ = rec_engine_.get();
   if (!is_leader()) {
     // RecEngine does not create DistManager in its constructor. LlmRec
     // starts workers in init(); skip that on non-leaders but still host
     // the local WorkerServer so rank 0 can collect the cluster.
-    auto* rec_engine = dynamic_cast<RecEngine*>(engine_.get());
-    CHECK(rec_engine != nullptr);
-    rec_engine->setup_distributed_workers();
+    rec_engine_->setup_distributed_workers();
     return;
   }
 
@@ -104,7 +104,8 @@ RecMaster::RecMaster(const Options& options)
       .enable_service_routing(options_.enable_service_routing())
       .disable_log_stats(options_.disable_log_stats())
       .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
-  scheduler_ = create_fixed_steps_scheduler(engine_.get(), scheduler_options);
+  scheduler_ =
+      create_fixed_steps_scheduler(rec_engine_.get(), scheduler_options);
 
   chat_template_ = nullptr;
   // Initialize chat template and tokenizer for LlmRec (Qwen3).

@@ -116,10 +116,6 @@ class FakePrefetchEngine final : public Engine {
   explicit FakePrefetchEngine(size_t worker_count, int64_t timeout_ms = -1)
       : worker_count_(worker_count), timeout_ms_(timeout_ms) {}
 
-  ForwardOutput step(BatchGroup& /*batch*/) override { return {}; }
-
-  void update_last_step_result(BatchGroup& /*batch*/) override {}
-
   std::vector<int64_t> get_active_activation_memory() const override {
     return {0};
   }

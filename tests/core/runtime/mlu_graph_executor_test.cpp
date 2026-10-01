@@ -63,10 +63,6 @@ class ScopedConfigSnapshot final {
 
 class CompatibilityShapeEngine final : public Engine {
  public:
-  ForwardOutput step(BatchGroup& /*batch*/) override { return {}; }
-
-  void update_last_step_result(BatchGroup& /*batch*/) override {}
-
   std::vector<int64_t> get_active_activation_memory() const override {
     return {};
   }

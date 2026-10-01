@@ -123,33 +123,6 @@ bool has_rank_preserving_kv_groups(const proto::DisaggResponse& response) {
       });
 }
 
-DisaggPDScheduler::DisaggPDScheduler(Engine* engine,
-                                     const Options& options,
-                                     SkipRuntimeStart)
-    : ContinuousScheduler(engine, options), server_name_("DisaggPDServer") {
-  if (!options_.instance_role().has_value()) {
-    LOG(FATAL) << "Instance type is not set in disagg pd mode.";
-  }
-}
-
-DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
-    : DisaggPDScheduler(engine, options, SkipRuntimeStart{}) {
-  dispatch_thread_ = std::make_unique<std::thread>(
-      &DisaggPDScheduler::dispatch_requests, this);
-
-  server_name_.append(std::to_string(options_.server_idx()));
-  rpc_server_thread_ =
-      std::make_unique<std::thread>(&DisaggPDScheduler::start_rpc_server, this);
-  initialize_rpc_server(server_name_);
-  register_instance_info(server_name_, engine_);
-
-  if (!options_.disable_ttft_profiling() &&
-      options_.instance_role().value() == InstanceRole::MIX) {
-    profile_ttft();
-    profile_tpot();
-  }
-}
-
 DisaggPDScheduler::~DisaggPDScheduler() {
   if (rpc_server_thread_ && rpc_server_thread_->joinable()) {
     rpc_server_thread_->join();

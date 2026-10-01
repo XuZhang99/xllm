@@ -75,6 +75,8 @@ class RecMaster : public Master {
                         OutputCallback callback,
                         RequestBuilder build_request);
 
+  std::unique_ptr<RecEngine> rec_engine_;
+  // Scheduler must be destroyed before the engine it references.
   std::unique_ptr<FixedStepsScheduler> scheduler_;
   // model args
   ModelArgs model_args_;

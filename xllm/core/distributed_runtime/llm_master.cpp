@@ -55,6 +55,16 @@ LLMMaster::LLMMaster(const Options& options)
     : Master(
           options,
           should_use_ssm_engine(options) ? EngineType::SSM : EngineType::LLM) {
+  if (engine_type_ == EngineType::LLM) {
+    llm_engine_ = take_engine<LLMEngine>();
+    engine_ = llm_engine_.get();
+  } else if (options_.speculative_algorithm() == "Suffix") {
+    suffix_engine_ = take_engine<SuffixSpeculativeEngine>();
+    engine_ = suffix_engine_.get();
+  } else {
+    speculative_engine_ = take_engine<SpeculativeEngineBase<LLMEngine>>();
+    engine_ = speculative_engine_.get();
+  }
   if (!is_leader()) {
     return;
   }
@@ -105,7 +115,16 @@ LLMMaster::LLMMaster(const Options& options)
       .max_global_tpot_ms(options_.max_global_tpot_ms())
       .server_idx(options_.server_idx())
       .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
-  scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
+  if (engine_type_ == EngineType::LLM) {
+    scheduler_ =
+        create_continuous_scheduler(llm_engine_.get(), scheduler_options);
+  } else if (options_.speculative_algorithm() == "Suffix") {
+    scheduler_ =
+        create_continuous_scheduler(suffix_engine_.get(), scheduler_options);
+  } else {
+    scheduler_ = create_continuous_scheduler(speculative_engine_.get(),
+                                             scheduler_options);
+  }
 
   if (options_.enable_service_routing()) {
     auto& instance_info = scheduler_->get_instance_info();

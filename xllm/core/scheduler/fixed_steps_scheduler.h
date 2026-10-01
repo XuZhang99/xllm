@@ -19,6 +19,8 @@ limitations under the License.
 #include <folly/MPMCQueue.h>
 #include <folly/futures/Future.h>
 
+#include <concepts>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <queue>
@@ -37,7 +39,6 @@ limitations under the License.
 #include "core/util/threadpool.h"
 
 namespace xllm {
-class Engine;
 
 // Return value structure for schedule_request
 struct ScheduleResult {
@@ -48,17 +49,32 @@ struct ScheduleResult {
 
 class FixedStepsScheduler : public ContinuousScheduler {
  public:
-  FixedStepsScheduler(Engine* engine, const Options& options);
-  ~FixedStepsScheduler() override = default;
+  template <typename TargetEngine>
+    requires requires(TargetEngine* engine, RecBatchGroup& batches) {
+      static_cast<Engine*>(engine);
+      { engine->step(batches) } -> std::same_as<ForwardOutput>;
+    }
+  FixedStepsScheduler(TargetEngine* engine, const Options& options)
+      : FixedStepsScheduler(
+            static_cast<Engine*>(engine),
+            [engine](RecBatchGroup& batches) { return engine->step(batches); },
+            options) {}
+
+  ~FixedStepsScheduler() override;
 
   // step the scheduler forward by one step
   // may get blocked if there are no requests to process
   void step(const absl::Duration& timeout) override;
+  void generate() override;
 
  protected:
   RecBatchGroup prepare_rec_batch();
 
  private:
+  using RecStep = std::function<ForwardOutput(RecBatchGroup&)>;
+
+  FixedStepsScheduler(Engine* engine, RecStep rec_step, const Options& options);
+
   // Scheduler pipeline for different rec types
   class SchedulerPipeline {
    public:
@@ -137,6 +153,8 @@ class FixedStepsScheduler : public ContinuousScheduler {
 
   // Scheduler thread pool for parallel execution of step()
   std::unique_ptr<ThreadPool> step_threadpool_;
+
+  RecStep rec_step_;
 
   // Semaphore to control concurrent execution of step()
   std::counting_semaphore<10000> step_semaphore_;

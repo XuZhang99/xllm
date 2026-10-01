@@ -43,14 +43,23 @@ limitations under the License.
 
 namespace xllm {
 
-FixedStepsScheduler::FixedStepsScheduler(Engine* engine, const Options& options)
-    : ContinuousScheduler(engine, options),
+FixedStepsScheduler::FixedStepsScheduler(Engine* engine,
+                                         RecStep rec_step,
+                                         const Options& options)
+    : ContinuousScheduler(engine, options, ResourceOnlyTag{}),
+      rec_step_(std::move(rec_step)),
       step_semaphore_(
           static_cast<std::ptrdiff_t>(options.rec_worker_max_concurrency())) {
   step_threadpool_ = std::make_unique<ThreadPool>(
       /*num_threads=*/static_cast<size_t>(options.rec_worker_max_concurrency()),
       /*cpu_binding=*/false,
       /*pool_name=*/"FixedStepsScheduler.step");
+}
+
+FixedStepsScheduler::~FixedStepsScheduler() {
+  // Tasks capture scheduler state and must finish before base members are
+  // destroyed.
+  step_threadpool_.reset();
 }
 
 void FixedStepsScheduler::handle_prefill_requests(
@@ -383,7 +392,7 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
                      batches = std::move(result.batches),
                      requests = std::move(result.requests),
                      sequences = std::move(result.sequences)]() mutable {
-      engine_->step(batches);
+      rec_step_(batches);
 
       // After step completes, check and process finished/cancelled requests
       std::vector<std::shared_ptr<Request>> finished_requests;
@@ -419,6 +428,14 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
     LOG(ERROR) << "FixedStepsScheduler::step() not supported with "
                   "enable_schedule_overlap";
   }
+}
+
+void FixedStepsScheduler::generate() {
+  while (num_pending_requests() > 0 || request_queue_.size() > 0 ||
+         has_pending_prefetch()) {
+    step(absl::Milliseconds(50));
+  }
+  response_processor_->wait_completion();
 }
 
 // Pipeline implementations

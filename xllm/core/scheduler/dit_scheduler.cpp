@@ -142,11 +142,9 @@ void DiTAsyncResponseProcessor::process_failed_request(
       });
 }
 
-DiTDynamicBatchScheduler::DiTDynamicBatchScheduler(Engine* engine,
+DiTDynamicBatchScheduler::DiTDynamicBatchScheduler(DiTEngine* engine,
                                                    const Options& options)
-    : options_(options),
-      engine_(dynamic_cast<DiTEngine*>(engine)),
-      request_queue_(kRequestQueueSize) {
+    : options_(options), engine_(engine), request_queue_(kRequestQueueSize) {
   CHECK(engine_ != nullptr);
 
   response_handler_ =

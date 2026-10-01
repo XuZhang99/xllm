@@ -39,7 +39,7 @@ class SpeculativeEngineBase : public Engine {
   bool init(MasterStatus master_status) override;
 
   // step the engine forward
-  ForwardOutput step(BatchGroup& batch) override;
+  ForwardOutput step(BatchGroup& batch);
 
   const Tokenizer* tokenizer() const override { return engine_->tokenizer(); }
 
@@ -60,7 +60,7 @@ class SpeculativeEngineBase : public Engine {
     return engine_->tokenizer_args();
   }
 
-  void update_last_step_result(BatchGroup& batch) override;
+  void update_last_step_result(BatchGroup& batch);
 
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const override;

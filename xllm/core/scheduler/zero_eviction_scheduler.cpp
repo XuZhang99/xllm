@@ -250,13 +250,6 @@ bool BlockCapacityGuard::if_accept_candidate_sequences(
   return simulate_is_satisfied_for_candidate_sequences();
 }
 
-ZeroEvictionScheduler::ZeroEvictionScheduler(Engine* engine,
-                                             const Options& options)
-    : ContinuousScheduler(engine, options) {
-  block_capacity_guard_ =
-      std::make_unique<BlockCapacityGuard>(kv_cache_manager_);
-}
-
 ZeroEvictionScheduler::~ZeroEvictionScheduler() {
   // release all requests in the priority queue
   while (!prefill_queue_->empty()) {

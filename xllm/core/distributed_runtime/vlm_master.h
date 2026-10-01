@@ -36,6 +36,7 @@ limitations under the License.
 #include "framework/tokenizer/tokenizer.h"
 #include "master.h"
 #include "scheduler/continuous_scheduler.h"
+#include "speculative_engine.h"
 #include "xllm/processors/multimodal_processor.h"
 
 namespace xllm {
@@ -87,6 +88,12 @@ class VLMMaster : public Master {
  private:
   using Task = folly::Function<void()>;
 
+  // Exactly one of these owners is populated for VLM and VLM speculative
+  // execution respectively.
+  std::unique_ptr<VLMEngine> vlm_engine_;
+  std::unique_ptr<SpeculativeEngineBase<VLMEngine>> speculative_engine_;
+
+  // Scheduler must be destroyed before the engine it references.
   std::unique_ptr<Scheduler> scheduler_;
 
   // model args
