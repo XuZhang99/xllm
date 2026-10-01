@@ -225,21 +225,32 @@ class StreamCall : public Call {
     }
   }
 
+  void set_system_fingerprint(std::string fingerprint) {
+    system_fingerprint_ = std::move(fingerprint);
+  }
+
   const Request& request() const { return *request_; }
   Response& response() { return *response_; }
   ::google::protobuf::Closure* done() { return done_; }
 
  private:
   nlohmann::json response_json(const Response& response) const {
+    nlohmann::json json;
     if constexpr (std::is_same_v<Response, proto::ChatResponse>) {
       const std::string& choice = request_->tool_choice();
       const bool named = !choice.empty() && choice != "none" &&
                          choice != "auto" && choice != "required";
-      return api_service::openai_response_json(
+      json = api_service::openai_response_json(
           response, named, choice == "required");
     } else {
-      return api_service::openai_response_json(response, stream_);
+      json = api_service::openai_response_json(response, stream_);
     }
+    api_service::set_openai_system_fingerprint(
+        json,
+        system_fingerprint_,
+        stream_,
+        request_->stream_options().include_usage());
+    return json;
   }
 
   static bool use_openai_json(const Response& response) {
@@ -260,6 +271,7 @@ class StreamCall : public Call {
     done_->Run();
   }
 
+  std::string system_fingerprint_;
   bool openai_http_ = false;
   bool stream_started_ = false;
   proto::Usage stream_usage_;

@@ -40,5 +40,10 @@ nlohmann::json openai_embedding_json(const proto::EmbeddingResponse& response,
                                      const std::string& encoding_format);
 nlohmann::json openai_usage_json(const proto::Usage& usage, bool stream = true);
 nlohmann::json openai_models_json(const proto::ModelListResponse& response);
+std::string openai_system_fingerprint(const std::string& configuration);
+void set_openai_system_fingerprint(nlohmann::json& response,
+                                   const std::string& fingerprint,
+                                   bool stream,
+                                   bool include_usage);
 
 }  // namespace xllm::api_service
