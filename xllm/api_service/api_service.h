@@ -245,6 +245,7 @@ class APIService : public proto::XllmAPIService {
   bool do_wakeup(const proto::MasterInfos& request, std::string* error_message);
 
   Master* master_;
+  std::string default_model_;
   ChatHttpHandler chat_completions_handler_;
   mutable std::shared_mutex masters_mutex_;
   std::unordered_map<std::string, Master*> masters_;

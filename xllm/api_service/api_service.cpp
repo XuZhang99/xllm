@@ -27,7 +27,8 @@ limitations under the License.
 
 #include "api_service/chat_json_parser.h"
 #include "api_service/chat_request_decoder.h"
-#include "api_service/completion_json_parser.h"
+#include "api_service/openai_http.h"
+#include "api_service/openai_request.h"
 #include "api_service/request_id.h"
 #include "api_service/rpc_request_metrics.h"
 #include "api_service/service_impl_factory.h"
@@ -117,7 +118,7 @@ APIService::APIService(Master* master,
                        const std::vector<std::string>& model_names,
                        const std::vector<std::string>& model_repository_names,
                        const std::vector<std::string>& model_versions)
-    : master_(master) {
+    : master_(master), default_model_(model_names[0]) {
   set_model_master(model_names[0], master);
   if (::xllm::DistributedConfig::get_instance().node_rank() != 0) {
     return;
@@ -206,10 +207,21 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   api_service::ensure_http_x_request_id(ctrl);
 
+  std::string error_param;
+  bool schema_error = false;
   auto [preprocess_status, processed_json] =
-      preprocess_completion_prompt(ctrl->request_attachment().to_string());
+      api_service::normalize_openai_request(
+          ctrl->request_attachment().to_string(),
+          api_service::OpenAIEndpoint::COMPLETION,
+          default_model_,
+          &error_param,
+          &schema_error);
   if (!preprocess_status.ok()) {
-    ctrl->SetFailed(preprocess_status.message());
+    api_service::write_openai_error(ctrl,
+                                    preprocess_status.code(),
+                                    preprocess_status.message(),
+                                    error_param,
+                                    schema_error);
     LOG(ERROR) << "completion prompt preprocessing failed: "
                << preprocess_status.message();
     return;
@@ -219,12 +231,24 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
   json2pb::Json2PbOptions options;
   auto st =
       json2pb::JsonToProtoMessage(processed_json, req_pb, options, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
+  if (!st || !error.empty()) {
+    api_service::write_openai_error(ctrl, StatusCode::INVALID_ARGUMENT, error);
     LOG(ERROR) << "parse json to proto failed: " << error;
     return;
   }
 
+  if (!completion_service_impl_ && !rec_completion_service_impl_) {
+    api_service::write_openai_error(ctrl,
+                                    StatusCode::INVALID_ARGUMENT,
+                                    "The model does not support completions.");
+    return;
+  }
+  if (rec_completion_service_impl_ && req_pb->prompts_size() > 0) {
+    api_service::write_openai_error(ctrl,
+                                    StatusCode::INVALID_ARGUMENT,
+                                    "Batched prompts require the LLM backend.");
+    return;
+  }
   std::shared_ptr<Call> call =
       std::make_shared<CompletionCall>(ctrl,
                                        done_guard.release(),
@@ -403,26 +427,43 @@ void chat_completions_http_impl(std::unique_ptr<Service>& service,
                                 brpc::Controller* ctrl,
                                 const proto::HttpRequest* request,
                                 proto::HttpResponse* response,
-                                const ChatJsonParser& chat_json_parser) {
+                                const ChatJsonParser& chat_json_parser,
+                                const std::string& default_model) {
   auto arena = GetArenaWithCheck<ChatCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ReqType>(arena);
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ResType>(arena);
 
-  auto content_len = get_json_content_length(ctrl);
-  if (content_len == (size_t)-1L) {
-    ctrl->SetFailed("Content-Length header is missing.");
+  auto [body_status, attachment] = api_service::openai_request_body(
+      *ctrl, /*binary_input=*/std::is_same_v<ChatCall, MMChatCall>);
+  if (!body_status.ok()) {
+    api_service::write_openai_error(
+        ctrl, body_status.code(), body_status.message());
+    return;
+  }
+  std::string error_param;
+  bool schema_error = false;
+  auto [normalization_status, normalized] =
+      api_service::normalize_openai_request(std::move(attachment),
+                                            api_service::OpenAIEndpoint::CHAT,
+                                            default_model,
+                                            &error_param,
+                                            &schema_error);
+  if (!normalization_status.ok()) {
+    api_service::write_openai_error(ctrl,
+                                    normalization_status.code(),
+                                    normalization_status.message(),
+                                    error_param,
+                                    schema_error);
     return;
   }
 
-  std::string attachment;
-  ctrl->request_attachment().copy_to(&attachment, content_len, 0);
-
   auto [preprocess_status, processed_json] =
-      chat_json_parser.preprocess(std::move(attachment));
+      chat_json_parser.preprocess(std::move(normalized));
   if (!preprocess_status.ok()) {
-    ctrl->SetFailed(preprocess_status.message());
+    api_service::write_openai_error(
+        ctrl, preprocess_status.code(), preprocess_status.message());
     LOG(ERROR) << "Complex message preprocessing failed: "
                << preprocess_status.message();
     return;
@@ -430,7 +471,7 @@ void chat_completions_http_impl(std::unique_ptr<Service>& service,
 
   const Status status = decode_chat_request(std::move(processed_json), req_pb);
   if (!status.ok()) {
-    ctrl->SetFailed(status.message());
+    api_service::write_openai_error(ctrl, status.code(), status.message());
     LOG(ERROR) << "parse json to proto failed: " << status.message();
     return;
   }
@@ -458,7 +499,8 @@ void APIService::register_chat_completions_handler() {
           ctrl,
           request,
           response,
-          ChatJsonParser::get(ServingMode::VLM));
+          ChatJsonParser::get(ServingMode::VLM),
+          default_model_);
     };
   } else if (chat_service_impl_) {
     chat_completions_handler_ = [this](ClosureGuard& guard,
@@ -471,7 +513,8 @@ void APIService::register_chat_completions_handler() {
           ctrl,
           request,
           response,
-          ChatJsonParser::get(ServingMode::LLM));
+          ChatJsonParser::get(ServingMode::LLM),
+          default_model_);
     };
   }
 }
@@ -518,6 +561,10 @@ void APIService::ChatCompletionsHttp(
   api_service::ensure_http_x_request_id(ctrl);
 
   if (!chat_completions_handler_) {
+    api_service::write_openai_error(
+        ctrl,
+        StatusCode::INVALID_ARGUMENT,
+        "The model does not support chat completions.");
     LOG(ERROR) << "No chat completions handler registered";
     return;
   }
@@ -568,7 +615,8 @@ void handle_embedding_request(std::unique_ptr<Service>& embedding_service_impl_,
                               ::google::protobuf::RpcController* controller,
                               const proto::HttpRequest* request,
                               proto::HttpResponse* response,
-                              ::google::protobuf::Closure* done) {
+                              ::google::protobuf::Closure* done,
+                              const std::string& default_model) {
   xllm::ClosureGuard done_guard(
       done,
       [](void* /*unused*/) { request_in_metric(nullptr); },
@@ -591,11 +639,34 @@ void handle_embedding_request(std::unique_ptr<Service>& embedding_service_impl_,
   api_service::ensure_http_x_request_id(ctrl);
   std::string error;
   json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
-  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
+  constexpr api_service::OpenAIEndpoint endpoint =
+      std::is_same_v<typename EmbeddingCall::ReqType, proto::EmbeddingRequest>
+          ? api_service::OpenAIEndpoint::EMBEDDING
+          : api_service::OpenAIEndpoint::MM_EMBEDDING;
+  auto [body_status, attachment] = api_service::openai_request_body(
+      *ctrl,
+      /*binary_input=*/endpoint == api_service::OpenAIEndpoint::MM_EMBEDDING);
+  if (!body_status.ok()) {
+    api_service::write_openai_error(
+        ctrl, body_status.code(), body_status.message());
+    return;
+  }
+  std::string error_param;
+  bool schema_error = false;
+  auto [status, body] =
+      api_service::normalize_openai_request(std::move(attachment),
+                                            endpoint,
+                                            default_model,
+                                            &error_param,
+                                            &schema_error);
+  if (!status.ok()) {
+    api_service::write_openai_error(
+        ctrl, status.code(), status.message(), error_param, schema_error);
+    return;
+  }
+  const bool st = json2pb::JsonToProtoMessage(body, req_pb, options, &error);
+  if (!st || !error.empty()) {
+    api_service::write_openai_error(ctrl, StatusCode::INVALID_ARGUMENT, error);
     LOG(ERROR) << "parse json to proto failed: " << error;
     return;
   }
@@ -622,10 +693,26 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
                                 ::google::protobuf::Closure* done) {
   if (embedding_service_impl_) {
     handle_embedding_request<EmbeddingCall, EmbeddingServiceImpl>(
-        embedding_service_impl_, controller, request, response, done);
+        embedding_service_impl_,
+        controller,
+        request,
+        response,
+        done,
+        default_model_);
   } else if (mm_embedding_service_impl_) {
     handle_embedding_request<MMEmbeddingCall, MMEmbeddingServiceImpl>(
-        mm_embedding_service_impl_, controller, request, response, done);
+        mm_embedding_service_impl_,
+        controller,
+        request,
+        response,
+        done,
+        default_model_);
+  } else {
+    brpc::ClosureGuard guard(done);
+    auto* ctrl = static_cast<brpc::Controller*>(controller);
+    api_service::write_openai_error(ctrl,
+                                    StatusCode::INVALID_ARGUMENT,
+                                    "The model does not support embeddings.");
   }
 }
 
@@ -888,6 +975,9 @@ void APIService::ModelsHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
+  auto* ctrl = static_cast<brpc::Controller*>(controller);
+  ctrl->http_response().set_content_type("application/json");
+  api_service::ensure_http_x_request_id(ctrl);
   auto arena = response->GetArena();
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<proto::ModelListResponse>(arena);
@@ -898,9 +988,9 @@ void APIService::ModelsHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   json2pb::Pb2JsonOptions json_options;
   json_options.bytes_to_base64 = false;
+  json_options.jsonify_empty_array = true;
   std::string err_msg;
   butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
   if (!json2pb::ProtoMessageToJson(

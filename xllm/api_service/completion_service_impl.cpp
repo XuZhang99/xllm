@@ -21,9 +21,12 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 
+#include "api_service/openai_batch.h"
+#include "api_service/utils.h"
 #include "common/instance_name.h"
 #include "completion.pb.h"
 #include "core/distributed_runtime/llm_master.h"
@@ -43,7 +46,8 @@ limitations under the License.
 namespace xllm {
 namespace {
 void set_logprobs(proto::Choice* choice,
-                  const std::optional<std::vector<LogProb>>& logprobs) {
+                  const std::optional<std::vector<LogProb>>& logprobs,
+                  int32_t offset = 0) {
   if (!logprobs.has_value() || logprobs.value().empty()) {
     return;
   }
@@ -58,7 +62,18 @@ void set_logprobs(proto::Choice* choice,
   for (const auto& logprob : logprobs.value()) {
     proto_logprobs->add_tokens(logprob.token);
     proto_logprobs->add_token_ids(logprob.token_id);
-    proto_logprobs->add_token_logprobs(logprob.logprob);
+    proto_logprobs->add_token_logprobs(std::max(-9999.0f, logprob.logprob));
+    proto_logprobs->add_text_offset(offset);
+    offset += static_cast<int32_t>(std::count_if(
+        logprob.token.begin(), logprob.token.end(), [](unsigned char byte) {
+          return (byte & 0xc0) != 0x80;
+        }));
+    auto* top = proto_logprobs->add_top_logprobs()->mutable_values();
+    if (logprob.top_logprobs.has_value()) {
+      for (const auto& candidate : logprob.top_logprobs.value()) {
+        (*top)[candidate.token] = std::max(-9999.0f, candidate.logprob);
+      }
+    }
   }
 }
 
@@ -67,8 +82,14 @@ bool send_delta_to_client_brpc(std::shared_ptr<CompletionCall> call,
                                const std::string& request_id,
                                int64_t created_time,
                                const std::string& model,
-                               const RequestOutput& output) {
+                               const RequestOutput& output,
+                               std::unordered_map<size_t, int32_t>* offsets) {
   auto& response = call->response();
+  if (output.usage.has_value()) {
+    proto::Usage usage;
+    api_service::set_proto_usage(&usage, output.usage.value());
+    call->set_stream_usage(usage);
+  }
 
   for (const auto& seq_output : output.outputs) {
     if (!seq_output.text.empty()) {
@@ -80,7 +101,12 @@ bool send_delta_to_client_brpc(std::shared_ptr<CompletionCall> call,
       auto* choice = response.add_choices();
       choice->set_index(seq_output.index);
       choice->set_text(seq_output.text);
-      set_logprobs(choice, seq_output.logprobs);
+      int32_t& offset = (*offsets)[seq_output.index];
+      set_logprobs(choice, seq_output.logprobs, offset);
+      offset += static_cast<int32_t>(std::count_if(
+          seq_output.text.begin(),
+          seq_output.text.end(),
+          [](unsigned char byte) { return (byte & 0xc0) != 0x80; }));
       if (!call->write(response)) {
         return false;
       }
@@ -102,7 +128,8 @@ bool send_delta_to_client_brpc(std::shared_ptr<CompletionCall> call,
     }
   }
 
-  if (include_usage && output.usage.has_value()) {
+  if (include_usage && output.usage.has_value() &&
+      (output.finished || output.cancelled)) {
     const auto& usage = output.usage.value();
     response.Clear();
     response.set_object("text_completion");
@@ -166,7 +193,9 @@ CompletionServiceImpl::CompletionServiceImpl(
     const std::vector<std::string>& models)
     : APIServiceImpl(models), master_(master) {
   CHECK(master_ != nullptr);
-  add_model_master(models[0], master);
+  for (const auto& model : models) {
+    add_model_master(model, master);
+  }
 }
 
 void CompletionServiceImpl::add_model_master(const std::string& model,
@@ -244,7 +273,9 @@ void CompletionServiceImpl::process_async_impl(
   const auto& model = rpc_request.model();
   LLMMaster* master = get_model_master(model);
   if (unlikely(master == nullptr)) {
-    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+    call->finish_with_error(StatusCode::NOT_FOUND,
+                            "The model `" + model + "` does not exist.",
+                            "model");
     return;
   }
 
@@ -278,39 +309,67 @@ void CompletionServiceImpl::process_async_impl(
     request_params.decode_address = rpc_request.routing().decode_name();
   }
 
-  auto saved_streaming = request_params.streaming;
-  auto saved_request_id = request_params.request_id;
-  // schedule the request
-  master->handle_request(
-      rpc_request.prompt(),
-      std::move(prompt_tokens),
-      std::move(request_params),
-      call.get(),
-      [call,
-       model,
-       master = master,
-       stream = std::move(saved_streaming),
-       include_usage = include_usage,
-       request_id = std::move(saved_request_id),
-       created_time = absl::ToUnixSeconds(absl::Now())](
-          const RequestOutput& req_output) -> bool {
-        req_output.log_request_status();
-        if (req_output.status.has_value()) {
-          const auto& status = req_output.status.value();
-          if (!status.ok()) {
-            return call->finish_with_error(status.code(), status.message());
-          }
+  const bool stream = request_params.streaming;
+  const std::string request_id = request_params.request_id;
+  const int64_t created_time = absl::ToUnixSeconds(absl::Now());
+  auto offsets = std::make_shared<std::unordered_map<size_t, int32_t>>();
+  OutputCallback send =
+      [call, model, stream, include_usage, request_id, created_time, offsets](
+          RequestOutput output) {
+        output.log_request_status();
+        if (output.status.has_value() && !output.status->ok()) {
+          return call->finish_with_error(output.status->code(),
+                                         output.status->message());
         }
-
         if (stream) {
-          return send_delta_to_client_brpc(
-              call, include_usage, request_id, created_time, model, req_output);
+          return send_delta_to_client_brpc(call,
+                                           include_usage,
+                                           request_id,
+                                           created_time,
+                                           model,
+                                           output,
+                                           offsets.get());
         }
-        // NOTE: maybe need to refactor along with service, currently for
-        // non-stream request in prefill instance, we send a virtual response
         return send_result_to_client_brpc(
-            call, request_id, created_time, model, req_output);
-      });
+            call, request_id, created_time, model, output);
+      };
+  if (rpc_request.prompts().empty()) {
+    master->handle_request(rpc_request.prompt(),
+                           std::move(prompt_tokens),
+                           std::move(request_params),
+                           call.get(),
+                           std::move(send));
+    return;
+  }
+  const size_t choices_per_prompt =
+      request_params.beam_width > 1
+          ? static_cast<size_t>(request_params.num_return_sequences > 0
+                                    ? request_params.num_return_sequences
+                                    : request_params.beam_width)
+          : request_params.n;
+  auto batch = std::make_shared<api_service::OpenAIBatch>(
+      rpc_request.prompts_size(), choices_per_prompt, stream);
+  for (int32_t index = 0; index < rpc_request.prompts_size(); ++index) {
+    const auto& prompt = rpc_request.prompts(index);
+    RequestParams params(
+        rpc_request, call->get_x_request_id(), call->get_x_request_time());
+    params.request_id += "-" + std::to_string(index);
+    if (rpc_request.has_routing()) {
+      params.decode_address = rpc_request.routing().decode_name();
+    }
+    std::optional<std::vector<int>> tokens;
+    if (!prompt.token_ids().empty()) {
+      tokens.emplace(prompt.token_ids().begin(), prompt.token_ids().end());
+    }
+    master->handle_request(prompt.text(),
+                           std::move(tokens),
+                           std::move(params),
+                           call.get(),
+                           [batch, index, send](RequestOutput output) {
+                             return batch->accept(
+                                 index, std::move(output), send);
+                           });
+  }
 }
 
 }  // namespace xllm

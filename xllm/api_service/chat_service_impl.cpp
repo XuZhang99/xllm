@@ -251,6 +251,11 @@ bool send_delta_to_client_brpc(
     const RequestOutput& output,
     std::shared_ptr<StreamOutputParser> stream_parser = nullptr) {
   auto& response = call->response();
+  if (output.usage.has_value()) {
+    proto::Usage usage;
+    api_service::set_proto_usage(&usage, output.usage.value());
+    call->set_stream_usage(usage);
+  }
 
   if (stream_parser && output.outputs.size() > 0) {
     stream_parser->check_resize_for_index(output.outputs.size() - 1);
@@ -288,12 +293,14 @@ bool send_delta_to_client_brpc(
           cur_text = "";
         }
         if (result.reasoning_text.has_value()) {
-          send_reasoning_text_chunk(call,
-                                    index,
-                                    result.reasoning_text.value(),
-                                    request_id,
-                                    created_time,
-                                    model);
+          if (!send_reasoning_text_chunk(call,
+                                         index,
+                                         result.reasoning_text.value(),
+                                         request_id,
+                                         created_time,
+                                         model)) {
+            return false;
+          }
         }
       }
     }
@@ -370,7 +377,8 @@ bool send_delta_to_client_brpc(
     }
   }
 
-  if (include_usage && output.usage.has_value()) {
+  if (include_usage && output.usage.has_value() &&
+      (output.finished || output.cancelled)) {
     response.Clear();
     const auto& usage = output.usage.value();
     response.set_object("chat.completion.chunk");
@@ -480,7 +488,9 @@ ChatServiceImpl::ChatServiceImpl(LLMMaster* master,
       reasoning_parser_format_(
           master_->options().reasoning_parser().value_or("")) {
   CHECK(master_ != nullptr);
-  add_model_master(models[0], master);
+  for (const auto& model : models) {
+    add_model_master(model, master);
+  }
 }
 
 ChatServiceImpl::ChatServiceImpl(RecMaster* master,
@@ -711,7 +721,9 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   // Route to RecMaster if configured
   if (rec_master_) {
     if (unlikely(!models_.contains(model))) {
-      call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+      call->finish_with_error(StatusCode::NOT_FOUND,
+                              "The model `" + model + "` does not exist.",
+                              "model");
       return;
     }
     process_rec_chat_request(call);
@@ -720,7 +732,9 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
 
   LLMMaster* master = get_model_master(model);
   if (unlikely(master == nullptr)) {
-    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+    call->finish_with_error(StatusCode::NOT_FOUND,
+                            "The model `" + model + "` does not exist.",
+                            "model");
     return;
   }
   // LLMMaster path (existing logic)
@@ -871,7 +885,9 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
   const auto& req_messages = rpc_request.messages();
   const auto& model = rpc_request.model();
   if (!models_.contains(model)) {
-    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+    call->finish_with_error(StatusCode::NOT_FOUND,
+                            "The model `" + model + "` does not exist.",
+                            "model");
     return;
   }
 

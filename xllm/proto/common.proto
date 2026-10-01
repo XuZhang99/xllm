@@ -93,6 +93,7 @@ message Usage {
 message StreamOptions{
   // if set, an additional chunk with usage will be streamed before the data: [DONE] message.
   optional bool include_usage = 1;
+  optional bool continuous_usage_stats = 2;
 }
 
 message Status {
@@ -148,4 +149,10 @@ enum MasterStatus {
   WAKEUP = 0;
   LIGHT_SLEEP = 1;
   DEEP_SLEEP = 2;
+}
+
+// One text or tokenized input, used by batched OpenAI HTTP requests.
+message PromptInput {
+  optional string text = 1;
+  repeated int32 token_ids = 2;
 }

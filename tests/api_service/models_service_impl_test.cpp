@@ -36,6 +36,7 @@ TEST(ModelsServiceImplTest, RepositoryIndexUsesRepositoryMetadata) {
   proto::ModelListRequest request;
   proto::ModelListResponse response;
   ASSERT_TRUE(service.list_models(&request, &response));
+  EXPECT_EQ(response.object(), "list");
   ASSERT_EQ(response.data_size(), static_cast<int>(model_names.size()));
 
   const nlohmann::json repository_index =

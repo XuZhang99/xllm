@@ -24,10 +24,12 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 
 #include "anthropic.pb.h"
 #include "api_service/anthropic_json.h"
 #include "api_service/call.h"
+#include "api_service/openai_http.h"
 #include "core/common/types.h"
 #include "core/util/verbose_trace_logger.h"
 
@@ -50,8 +52,11 @@ class StreamCall : public Call {
         request_(request),
         response_(response),
         use_arena_(use_arena) {
+    openai_http_ = is_http_request &&
+                   (std::is_same_v<Response, proto::ChatResponse> ||
+                    std::is_same_v<Response, proto::CompletionResponse>);
     stream_ = request_->stream();
-    if (stream_) {
+    if (stream_ && !openai_http_) {
       pa_ = controller_->CreateProgressiveAttachment();
 
       // Send the first SSE response
@@ -73,7 +78,7 @@ class StreamCall : public Call {
 
   ~StreamCall() override {
     // For non stream response, call brpc done Run
-    if (!stream_) {
+    if (!stream_ || (openai_http_ && !stream_started_)) {
       done_->Run();
     }
     if (!use_arena_) {
@@ -83,6 +88,15 @@ class StreamCall : public Call {
   }
 
   bool write_and_finish(Response& response) {
+    if constexpr (std::is_same_v<Response, proto::ChatResponse> ||
+                  std::is_same_v<Response, proto::CompletionResponse>) {
+      if (openai_http_ && use_openai_json(response)) {
+        controller_->http_response().set_content_type("application/json");
+        controller_->response_attachment().append(response_json(response).dump(
+            -1, ' ', false, nlohmann::json::error_handler_t::replace));
+        return true;
+      }
+    }
     butil::IOBufAsZeroCopyOutputStream json_output(
         &controller_->response_attachment());
     std::string err_msg;
@@ -96,9 +110,29 @@ class StreamCall : public Call {
   }
 
   bool finish_with_error(const StatusCode& code,
-                         const std::string& error_message) {
+                         const std::string& error_message,
+                         const std::string& param = "") {
     XLLM_VERBOSE_TRACE() << "event=request_error x-request-id=" << x_request_id_
                          << " message=" << error_message;
+    if (openai_http_) {
+      if (stream_finished_.load(std::memory_order_acquire)) {
+        return false;
+      }
+      if (!stream_started_) {
+        api_service::write_openai_error(
+            controller_, code, error_message, param);
+        stream_finished_.store(true, std::memory_order_release);
+      } else {
+        io_buf_.clear();
+        io_buf_.append("data: ");
+        io_buf_.append(
+            api_service::openai_error_json(code, error_message, param));
+        io_buf_.append("\n\n");
+        connection_status_ |= pa_->Write(io_buf_);
+        finish();
+      }
+      return false;
+    }
     if (!stream_) {
       controller_->SetFailed(error_message);
 
@@ -113,12 +147,34 @@ class StreamCall : public Call {
 
   // For stream response
   bool write(Response& response) {
-    if (stream_finished_.load(std::memory_order_acquire) || pa_ == nullptr) {
+    if (stream_finished_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    if (openai_http_ && !stream_started_) {
+      start_openai_stream();
+    }
+    if (pa_ == nullptr) {
       return false;
     }
 
     io_buf_.clear();
     io_buf_.append("data: ");
+    if constexpr (std::is_same_v<Response, proto::ChatResponse> ||
+                  std::is_same_v<Response, proto::CompletionResponse>) {
+      if (openai_http_ && use_openai_json(response)) {
+        auto json = response_json(response);
+        const auto& options = request_->stream_options();
+        if (options.include_usage() && options.continuous_usage_stats() &&
+            !response.has_usage()) {
+          json["usage"] = api_service::openai_usage_json(stream_usage_);
+        }
+        io_buf_.append(json.dump(
+            -1, ' ', false, nlohmann::json::error_handler_t::replace));
+        io_buf_.append("\n\n");
+        connection_status_ |= pa_->Write(io_buf_);
+        return connection_status_ == 0;
+      }
+    }
     butil::IOBufAsZeroCopyOutputStream json_output(&io_buf_);
     std::string err_msg;
     if (!json2pb::ProtoMessageToJson(
@@ -129,8 +185,10 @@ class StreamCall : public Call {
     io_buf_.append("\n\n");
 
     connection_status_ |= pa_->Write(io_buf_);
-    return true;
+    return connection_status_ == 0;
   }
+
+  void set_stream_usage(const proto::Usage& usage) { stream_usage_ = usage; }
 
   // For stream response
   bool finish() {
@@ -138,6 +196,9 @@ class StreamCall : public Call {
       return true;
     }
 
+    if (openai_http_ && !stream_started_) {
+      start_openai_stream();
+    }
     io_buf_.clear();
     io_buf_.append("data: [DONE]\n\n");
 
@@ -167,6 +228,41 @@ class StreamCall : public Call {
   const Request& request() const { return *request_; }
   Response& response() { return *response_; }
   ::google::protobuf::Closure* done() { return done_; }
+
+ private:
+  nlohmann::json response_json(const Response& response) const {
+    if constexpr (std::is_same_v<Response, proto::ChatResponse>) {
+      const std::string& choice = request_->tool_choice();
+      const bool named = !choice.empty() && choice != "none" &&
+                         choice != "auto" && choice != "required";
+      return api_service::openai_response_json(
+          response, named, choice == "required");
+    } else {
+      return api_service::openai_response_json(response, stream_);
+    }
+  }
+
+  static bool use_openai_json(const Response& response) {
+    if constexpr (std::is_same_v<Response, proto::CompletionResponse>) {
+      return response.output_tensors().empty();
+    }
+    return true;
+  }
+
+  void start_openai_stream() {
+    pa_ = controller_->CreateProgressiveAttachment();
+    controller_->http_response().set_content_type(
+        "text/event-stream; charset=utf-8");
+    controller_->http_response().set_status_code(200);
+    controller_->http_response().SetHeader("Cache-Control", "no-cache");
+    controller_->http_response().SetHeader("Connection", "keep-alive");
+    stream_started_ = true;
+    done_->Run();
+  }
+
+  bool openai_http_ = false;
+  bool stream_started_ = false;
+  proto::Usage stream_usage_;
 
  protected:
   ::google::protobuf::Closure* done_;

@@ -36,6 +36,7 @@ ModelsServiceImpl::ModelsServiceImpl(
 
 bool ModelsServiceImpl::list_models(const proto::ModelListRequest* request,
                                     proto::ModelListResponse* response) {
+  response->set_object("list");
   for (const auto& model_id : model_names_) {
     auto* model_card = response->add_data();
     model_card->set_id(model_id);

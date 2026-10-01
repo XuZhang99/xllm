@@ -134,7 +134,7 @@ struct RequestParams {
   // < 1.0 encourage the model to repeat tokens. default = 1.0
   float repetition_penalty = 1.0;
 
-  // temperature of the sampling, between [0, 2]. default = 0.0
+  // finite, non-negative sampling temperature. default = 0.0
   // higher value will make the output more random.
   float temperature = 0.0;
 
