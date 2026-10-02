@@ -25,16 +25,16 @@ limitations under the License.
 
 #include "api_service/call.h"
 #include "common/metrics.h"
+#include "core/framework/config/parallel_config_validation.h"
 #include "dit_engine.h"
 #include "framework/request/dit_request.h"
-#include "models/model_cp_validation.h"
 #include "scheduler/scheduler_factory.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
 
 namespace xllm {
 DiTMaster::DiTMaster(const Options& options) : Master(options) {
-  const std::optional<std::string> cp_error = validate_model_cp(
+  const std::optional<std::string> cp_error = validate_context_parallel_config(
       options_, EngineType::DIT, /*model_type=*/"", options_.nnodes());
   CHECK(!cp_error.has_value()) << cp_error.value();
   validate_layerwise_split_size_startup_config(

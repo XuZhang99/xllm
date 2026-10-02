@@ -53,6 +53,7 @@ cc_library(
   DEPS
     :api_service
     :models
+    :parallel_config_validation
     :runtime
     :util
     glog::glog
@@ -117,6 +118,7 @@ cc_library(
     :runtime
     :model
     :models
+    :parallel_config_validation
     $<$<BOOL:${USE_NPU}>:npu_layers>
     :chat_template
     glog::glog

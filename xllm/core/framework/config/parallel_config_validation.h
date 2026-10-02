@@ -24,10 +24,13 @@ limitations under the License.
 
 namespace xllm {
 
-std::optional<std::string> validate_model_cp(const Options& options,
-                                             EngineType engine_type,
-                                             const std::string& model_type,
-                                             int32_t global_world_size);
+// Validate startup combinations of parallel layout, runtime configuration and
+// registered model capabilities before distributed workers are initialized.
+std::optional<std::string> validate_context_parallel_config(
+    const Options& options,
+    EngineType engine_type,
+    const std::string& model_type,
+    int32_t global_world_size);
 
 void validate_layerwise_split_size_startup_config(const Options& options,
                                                   const std::string& model_type,

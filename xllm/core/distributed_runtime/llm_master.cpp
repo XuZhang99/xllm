@@ -27,10 +27,10 @@ limitations under the License.
 #include "api_service/call.h"
 #include "common/metrics.h"
 #include "core/framework/config/model_config.h"
+#include "core/framework/config/parallel_config_validation.h"
 #include "core/framework/config/speculative_config.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
-#include "models/model_cp_validation.h"
 #include "models/model_registry.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
@@ -94,8 +94,8 @@ LLMMaster::LLMMaster(const Options& options)
       use_ssm_engine ? EngineType::SSM : EngineType::LLM;
   const std::string model_type =
       util::get_model_type(options_.model_path(), options_.backend());
-  const std::optional<std::string> cp_error =
-      validate_model_cp(options_, engine_type, model_type, options_.nnodes());
+  const std::optional<std::string> cp_error = validate_context_parallel_config(
+      options_, engine_type, model_type, options_.nnodes());
   CHECK(!cp_error.has_value()) << cp_error.value();
   const std::optional<std::string> speculative_error =
       ModelConfig::validate_python_speculative_decode(

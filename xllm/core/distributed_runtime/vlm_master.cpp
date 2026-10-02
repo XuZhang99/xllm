@@ -29,11 +29,11 @@ limitations under the License.
 #include "common/metrics.h"
 #include "core/common/message.h"
 #include "core/framework/config/model_config.h"
+#include "core/framework/config/parallel_config_validation.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
-#include "models/model_cp_validation.h"
 #include "models/model_registry.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
@@ -157,7 +157,7 @@ VLMMaster::VLMMaster(const Options& options) : Master(options) {
       should_use_vlm_speculative_engine(options_);
   const std::string model_type =
       util::get_model_type(options_.model_path(), options_.backend());
-  const std::optional<std::string> cp_error = validate_model_cp(
+  const std::optional<std::string> cp_error = validate_context_parallel_config(
       options_,
       use_speculative_engine ? EngineType::VLMSSM : EngineType::VLM,
       model_type,

@@ -50,3 +50,21 @@ cc_library(
     :platform
     :util
 )
+
+# Startup validation queries registered model capabilities. Keep it separate
+# from the base config target, which the models target already depends on.
+cc_library(
+  NAME
+    parallel_config_validation
+  HDRS
+    parallel_config_validation.h
+  SRCS
+    parallel_config_validation.cpp
+  DEPS
+    :common
+    :config
+    :models
+    :platform
+    :util
+    glog::glog
+)

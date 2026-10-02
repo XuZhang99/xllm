@@ -55,6 +55,7 @@ if(USE_NPU)
       npu_cp_capability_test.cpp
     DEPS
       models
+      parallel_config_validation
       parallel_state
       GTest::gtest_main
   )
@@ -111,6 +112,7 @@ if(USE_MLU)
       mlu_cp_capability_test.cpp
     DEPS
       models
+      parallel_config_validation
       parallel_state
       GTest::gtest_main
   )

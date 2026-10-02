@@ -16,8 +16,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include "common/options.h"
+#include "core/framework/config/parallel_config_validation.h"
 #include "framework/config/parallel_config.h"
-#include "models/model_cp_validation.h"
 #include "models/model_registry.h"
 
 namespace xllm {
@@ -64,12 +64,12 @@ TEST(MluCpCapabilityTest, AcceptsOrthogonalDeepseekV4TargetAndSuffix) {
   constexpr int32_t kWorldSize = 8;
   const Options options = make_cp_options(kWorldSize);
 
-  EXPECT_FALSE(
-      validate_model_cp(options, EngineType::LLM, "deepseek_v4", kWorldSize)
-          .has_value());
-  EXPECT_FALSE(
-      validate_model_cp(options, EngineType::SSM, "deepseek_v4", kWorldSize)
-          .has_value());
+  EXPECT_FALSE(validate_context_parallel_config(
+                   options, EngineType::LLM, "deepseek_v4", kWorldSize)
+                   .has_value());
+  EXPECT_FALSE(validate_context_parallel_config(
+                   options, EngineType::SSM, "deepseek_v4", kWorldSize)
+                   .has_value());
 }
 
 TEST(MluCpCapabilityTest, SupportsGlmPcpAndRejectsDcpAndLegacyDraftTargets) {
@@ -78,53 +78,53 @@ TEST(MluCpCapabilityTest, SupportsGlmPcpAndRejectsDcpAndLegacyDraftTargets) {
   Options glm_options = options;
   glm_options.enable_schedule_overlap(false);
 
-  EXPECT_TRUE(
-      validate_model_cp(options, EngineType::LLM, "deepseek_v32", kWorldSize)
-          .has_value());
-  EXPECT_FALSE(
-      validate_model_cp(glm_options, EngineType::LLM, "glm_moe_dsa", kWorldSize)
-          .has_value());
+  EXPECT_TRUE(validate_context_parallel_config(
+                  options, EngineType::LLM, "deepseek_v32", kWorldSize)
+                  .has_value());
+  EXPECT_FALSE(validate_context_parallel_config(
+                   glm_options, EngineType::LLM, "glm_moe_dsa", kWorldSize)
+                   .has_value());
 
   ParallelConfig::get_instance().kv_split_size(kWorldSize);
-  EXPECT_TRUE(
-      validate_model_cp(glm_options, EngineType::LLM, "glm_moe_dsa", kWorldSize)
-          .has_value());
+  EXPECT_TRUE(validate_context_parallel_config(
+                  glm_options, EngineType::LLM, "glm_moe_dsa", kWorldSize)
+                  .has_value());
   ParallelConfig::get_instance().kv_split_size(2);
-  EXPECT_TRUE(
-      validate_model_cp(glm_options, EngineType::LLM, "glm_moe_dsa", kWorldSize)
-          .has_value());
+  EXPECT_TRUE(validate_context_parallel_config(
+                  glm_options, EngineType::LLM, "glm_moe_dsa", kWorldSize)
+                  .has_value());
   ParallelConfig::get_instance().kv_split_size(1);
 
-  EXPECT_TRUE(
-      validate_model_cp(options, EngineType::LLM, "deepseek_v4_mtp", kWorldSize)
-          .has_value());
+  EXPECT_TRUE(validate_context_parallel_config(
+                  options, EngineType::LLM, "deepseek_v4_mtp", kWorldSize)
+                  .has_value());
 }
 
 TEST(MluCpCapabilityTest, RejectsUnsupportedTopologyAndAcceptsMtp) {
   constexpr int32_t kWorldSize = 8;
 
   Options invalid_world = make_cp_options(kWorldSize);
-  EXPECT_TRUE(validate_model_cp(invalid_world,
-                                EngineType::LLM,
-                                "deepseek_v4",
-                                /*global_world_size=*/7)
+  EXPECT_TRUE(validate_context_parallel_config(invalid_world,
+                                               EngineType::LLM,
+                                               "deepseek_v4",
+                                               /*global_world_size=*/7)
                   .has_value());
 
   Options invalid_ep = make_cp_options(kWorldSize);
   invalid_ep.ep_size(4);
-  EXPECT_TRUE(
-      validate_model_cp(invalid_ep, EngineType::LLM, "deepseek_v4", kWorldSize)
-          .has_value());
+  EXPECT_TRUE(validate_context_parallel_config(
+                  invalid_ep, EngineType::LLM, "deepseek_v4", kWorldSize)
+                  .has_value());
 
   Options mtp_options = make_cp_options(kWorldSize);
   mtp_options.speculative_algorithm("MTP");
-  EXPECT_FALSE(
-      validate_model_cp(mtp_options, EngineType::SSM, "glm_moe_dsa", kWorldSize)
-          .has_value());
+  EXPECT_FALSE(validate_context_parallel_config(
+                   mtp_options, EngineType::SSM, "glm_moe_dsa", kWorldSize)
+                   .has_value());
 
   Options invalid_kv_split = make_cp_options(kWorldSize);
   ParallelConfig::get_instance().kv_split_size(2);
-  EXPECT_TRUE(validate_model_cp(
+  EXPECT_TRUE(validate_context_parallel_config(
                   invalid_kv_split, EngineType::LLM, "deepseek_v4", kWorldSize)
                   .has_value());
   ParallelConfig::get_instance().kv_split_size(1);

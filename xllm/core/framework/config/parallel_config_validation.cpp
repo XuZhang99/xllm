@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "models/model_cp_validation.h"
+#include "core/framework/config/parallel_config_validation.h"
 
 #include <boost/algorithm/string.hpp>
 #include <string_view>
@@ -69,10 +69,11 @@ void validate_layerwise_split_size_startup_config(const Options& options,
       << "layerwise_split_size > 1 does not support KV split.";
 }
 
-std::optional<std::string> validate_model_cp(const Options& options,
-                                             EngineType engine_type,
-                                             const std::string& model_type,
-                                             int32_t global_world_size) {
+std::optional<std::string> validate_context_parallel_config(
+    const Options& options,
+    EngineType engine_type,
+    const std::string& model_type,
+    int32_t global_world_size) {
   if (options.cp_size() < 1) {
     return "cp_size must be greater than or equal to 1";
   }

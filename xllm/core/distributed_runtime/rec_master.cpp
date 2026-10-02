@@ -27,8 +27,8 @@ limitations under the License.
 #include "common/macros.h"
 #include "common/metrics.h"
 #include "common/types.h"
+#include "core/framework/config/parallel_config_validation.h"
 #include "core/framework/multimodal/mm_data.h"
-#include "models/model_cp_validation.h"
 #include "models/model_registry.h"
 #include "rec_engine.h"
 #include "runtime/xservice_client.h"
@@ -80,7 +80,7 @@ RecMaster::RecMaster(const Options& options) : Master(options) {
   configure_disaggregated_pd_options(&options_);
   const std::string model_type =
       util::get_model_type(options_.model_path(), options_.backend());
-  const std::optional<std::string> cp_error = validate_model_cp(
+  const std::optional<std::string> cp_error = validate_context_parallel_config(
       options_, EngineType::REC, model_type, options_.nnodes());
   CHECK(!cp_error.has_value()) << cp_error.value();
   validate_layerwise_split_size_startup_config(
