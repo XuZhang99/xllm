@@ -28,6 +28,7 @@ limitations under the License.
 #include "core/framework/config/parallel_config_validation.h"
 #include "dit_engine.h"
 #include "framework/request/dit_request.h"
+#include "runtime/options.h"
 #include "scheduler/scheduler_factory.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
@@ -44,8 +45,30 @@ DiTMaster::DiTMaster(const Options& options) : Master(options) {
   CHECK(options_.host_blocks_factor() <= 1.0)
       << "Basic host KV cache offload is not supported by the DiT engine.";
 
-  runtime::Options engine_options = create_runtime_options();
-  engine_options.tp_size(options_.tp_size())
+  runtime::Options engine_options;
+  engine_options.model_path(options_.model_path())
+      .model_id(options_.model_id())
+      .devices(devices_)
+      .backend(options_.backend())
+      .max_memory_utilization(options_.max_memory_utilization())
+      .enable_prefix_cache(options_.enable_prefix_cache())
+      .task_type(options_.task_type())
+      .npu_kernel_backend(options_.npu_kernel_backend())
+      .master_node_addr(options_.master_node_addr())
+      .nnodes(options_.nnodes())
+      .node_rank(options_.node_rank())
+      .dp_size(options_.dp_size())
+      .ep_size(options_.ep_size())
+      .enable_schedule_overlap(options_.enable_schedule_overlap())
+      .enable_chunked_prefill(options_.enable_chunked_prefill())
+      .enable_offline_inference(options_.enable_offline_inference())
+      .disable_log_stats(options_.disable_log_stats())
+      .spawn_worker_path(options_.spawn_worker_path())
+      .enable_shm(options_.enable_shm())
+      .input_shm_size(options_.input_shm_size() * 1024 * 1024)
+      .output_shm_size(options_.output_shm_size() * 1024 * 1024)
+      .is_local(options_.is_local())
+      .tp_size(options_.tp_size())
       .sp_size(options_.sp_size())
       .cfg_size(options_.cfg_size())
       .vae_size(options_.vae_size())

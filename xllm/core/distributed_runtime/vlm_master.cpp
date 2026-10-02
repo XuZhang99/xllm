@@ -35,6 +35,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
 #include "models/model_registry.h"
+#include "runtime/options.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
@@ -178,8 +179,30 @@ VLMMaster::VLMMaster(const Options& options) : Master(options) {
       << "Basic host KV cache offload supports the LLM engine and "
          "model-based speculative engines only.";
 
-  runtime::Options engine_options = create_runtime_options();
-  engine_options.block_size(options_.block_size())
+  runtime::Options engine_options;
+  engine_options.model_path(options_.model_path())
+      .model_id(options_.model_id())
+      .devices(devices_)
+      .backend(options_.backend())
+      .max_memory_utilization(options_.max_memory_utilization())
+      .enable_prefix_cache(options_.enable_prefix_cache())
+      .task_type(options_.task_type())
+      .npu_kernel_backend(options_.npu_kernel_backend())
+      .master_node_addr(options_.master_node_addr())
+      .nnodes(options_.nnodes())
+      .node_rank(options_.node_rank())
+      .dp_size(options_.dp_size())
+      .ep_size(options_.ep_size())
+      .enable_schedule_overlap(options_.enable_schedule_overlap())
+      .enable_chunked_prefill(options_.enable_chunked_prefill())
+      .enable_offline_inference(options_.enable_offline_inference())
+      .disable_log_stats(options_.disable_log_stats())
+      .spawn_worker_path(options_.spawn_worker_path())
+      .enable_shm(options_.enable_shm())
+      .input_shm_size(options_.input_shm_size() * 1024 * 1024)
+      .output_shm_size(options_.output_shm_size() * 1024 * 1024)
+      .is_local(options_.is_local())
+      .block_size(options_.block_size())
       .max_cache_size(options_.max_cache_size())
       .max_encoder_cache_size(options_.max_encoder_cache_size())
       .max_processor_cache_items(options_.max_processor_cache_items())
@@ -214,8 +237,7 @@ VLMMaster::VLMMaster(const Options& options) : Master(options) {
         options_.draft_model_path().value_or("");
     CHECK(!draft_model_path.empty())
         << "draft model path is required for VLM speculative decoding";
-    engine_options.model_id(options_.model_id())
-        .draft_model_path(draft_model_path)
+    engine_options.draft_model_path(draft_model_path)
         .num_speculative_tokens(options_.num_speculative_tokens())
         .speculative_algorithm(options_.speculative_algorithm())
         .draft_sampling_mode(options_.draft_sampling_mode())

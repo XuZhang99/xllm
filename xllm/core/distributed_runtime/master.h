@@ -23,7 +23,6 @@ limitations under the License.
 
 #include "common/options.h"
 #include "common/rate_limiter.h"
-#include "runtime/options.h"
 
 namespace xllm {
 
@@ -50,8 +49,6 @@ class Master {
   // node_rank == 0. Only the base class and derived masters branch on this;
   // no external caller needs it.
   bool is_leader() const { return options_.node_rank() == 0; }
-
-  runtime::Options create_runtime_options() const;
 
   Options options_;
   std::vector<torch::Device> devices_;

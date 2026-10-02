@@ -38,7 +38,6 @@ limitations under the License.
 #endif
 #include "core/platform/device_name_utils.h"
 #include "platform/platform.h"
-#include "runtime/options.h"
 
 namespace brpc {
 DECLARE_bool(graceful_quit_on_sigterm);
@@ -98,33 +97,6 @@ void validate_rank_tablefile_backend() {
 #endif
 
 }  // namespace
-
-runtime::Options Master::create_runtime_options() const {
-  runtime::Options runtime_options;
-  runtime_options.model_path(options_.model_path())
-      .model_id(options_.model_id())
-      .devices(devices_)
-      .backend(options_.backend())
-      .max_memory_utilization(options_.max_memory_utilization())
-      .enable_prefix_cache(options_.enable_prefix_cache())
-      .task_type(options_.task_type())
-      .npu_kernel_backend(options_.npu_kernel_backend())
-      .master_node_addr(options_.master_node_addr())
-      .nnodes(options_.nnodes())
-      .node_rank(options_.node_rank())
-      .dp_size(options_.dp_size())
-      .ep_size(options_.ep_size())
-      .enable_schedule_overlap(options_.enable_schedule_overlap())
-      .enable_chunked_prefill(options_.enable_chunked_prefill())
-      .enable_offline_inference(options_.enable_offline_inference())
-      .disable_log_stats(options_.disable_log_stats())
-      .spawn_worker_path(options_.spawn_worker_path())
-      .enable_shm(options_.enable_shm())
-      .input_shm_size(options_.input_shm_size() * 1024 * 1024)
-      .output_shm_size(options_.output_shm_size() * 1024 * 1024)
-      .is_local(options_.is_local());
-  return runtime_options;
-}
 
 Master::Master(const Options& options) : options_(options) {
   // Multi-process serving runs one worker per process. Select one runtime
