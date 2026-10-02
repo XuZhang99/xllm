@@ -31,7 +31,9 @@ limitations under the License.
 #include "core/framework/config/speculative_config.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
+#if defined(USE_NPU)
 #include "models/model_registry.h"
+#endif
 #include "runtime/options.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
@@ -88,7 +90,9 @@ LLMMaster::LLMMaster(const Options& options)
     : Master(options), master_status_(options.master_status()) {
   options_.enable_mla(util::should_enable_mla(
       std::filesystem::path(options_.model_path()), options_.backend()));
+#if defined(USE_NPU)
   resolve_npu_kernel_backend(&options_);
+#endif
   configure_disaggregated_pd_options(&options_);
   const bool use_ssm_engine = should_use_ssm_engine(options_);
   const EngineType engine_type =

@@ -34,7 +34,9 @@ limitations under the License.
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
+#if defined(USE_NPU)
 #include "models/model_registry.h"
+#endif
 #include "runtime/options.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
@@ -152,7 +154,9 @@ std::optional<std::string> join_message_texts(
 VLMMaster::VLMMaster(const Options& options) : Master(options) {
   options_.enable_mla(util::should_enable_mla(
       std::filesystem::path(options_.model_path()), options_.backend()));
+#if defined(USE_NPU)
   resolve_npu_kernel_backend(&options_);
+#endif
   configure_disaggregated_pd_options(&options_);
   const bool use_speculative_engine =
       should_use_vlm_speculative_engine(options_);

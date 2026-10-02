@@ -13,24 +13,72 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "fixed_steps_scheduler.h"
+#include "core/scheduler/fixed_steps_scheduler.h"
 
 #include <absl/time/time.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <functional>
+#include <future>
+#include <thread>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
-#include "continuous_scheduler.h"
+#include "core/distributed_runtime/rec_engine.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/scheduler_config.h"
-#include "distributed_runtime/rec_engine.h"
-#include "framework/request/rec_type.h"
-#include "runtime/options.h"
+#include "core/framework/request/rec_type.h"
+#include "core/runtime/options.h"
 
 namespace xllm {
 
 namespace {
+
+static_assert(std::is_base_of_v<Scheduler, FixedStepsScheduler>);
+static_assert(std::is_constructible_v<FixedStepsScheduler,
+                                      RecEngine*,
+                                      const SchedulerOptions&>);
+static_assert(!std::is_constructible_v<FixedStepsScheduler,
+                                       Engine*,
+                                       const SchedulerOptions&>);
+
+class ControllablePrefetchBlockManagerPool final : public BlockManagerPool {
+ public:
+  ControllablePrefetchBlockManagerPool(const Options& options,
+                                       bool enable_storage_prefetch)
+      : BlockManagerPool(options, /*dp_size=*/1),
+        enable_storage_prefetch_(enable_storage_prefetch) {}
+
+  bool has_storage_prefetch() const override {
+    return enable_storage_prefetch_;
+  }
+
+  void prefetch_from_storage(std::shared_ptr<Request> request,
+                             PrefetchDoneCallback done) override {
+    ++prefetch_calls_;
+    pending_.emplace_back(std::move(request), std::move(done));
+  }
+
+  void complete_prefetches() {
+    auto pending = std::move(pending_);
+    pending_.clear();
+    for (auto& [request, done] : pending) {
+      done(std::move(request));
+    }
+  }
+
+  size_t prefetch_calls() const { return prefetch_calls_; }
+
+ private:
+  const bool enable_storage_prefetch_;
+  size_t prefetch_calls_ = 0;
+  std::vector<std::pair<std::shared_ptr<Request>, PrefetchDoneCallback>>
+      pending_;
+};
 
 class FakeTokenizer : public Tokenizer {
  public:
@@ -65,17 +113,30 @@ class FakeTokenizer : public Tokenizer {
 
 class FakeEngine final : public RecEngine {
  public:
-  FakeEngine(int32_t num_blocks, int32_t block_size)
+  FakeEngine(int32_t num_blocks,
+             int32_t block_size,
+             bool enable_storage_prefetch = false)
       : RecEngine(make_options()) {
     BlockManagerPool::Options opt;
     opt.num_blocks_ = num_blocks;
     opt.block_size_ = block_size;
     opt.enable_prefix_cache_ = false;
     fake_tokenizer_ = std::make_unique<FakeTokenizer>();
-    fake_block_manager_ = std::make_unique<BlockManagerPool>(opt, 1);
+    fake_block_manager_ =
+        std::make_unique<ControllablePrefetchBlockManagerPool>(
+            opt, enable_storage_prefetch);
   }
   ForwardOutput step(RecBatchGroup& batch) override {
-    (void)batch;
+    if (step_hook_) {
+      step_hook_();
+    }
+    last_step_had_request_.store(std::any_of(batch.begin(),
+                                             batch.end(),
+                                             [](const RecBatch& rec_batch) {
+                                               return !rec_batch.empty();
+                                             }),
+                                 std::memory_order_relaxed);
+    step_calls_.fetch_add(1, std::memory_order_relaxed);
     return ForwardOutput();
   }
   const Tokenizer* tokenizer() const override { return fake_tokenizer_.get(); }
@@ -95,6 +156,20 @@ class FakeEngine final : public RecEngine {
   }
   bool init() override { return true; }
 
+  size_t step_calls() const {
+    return step_calls_.load(std::memory_order_relaxed);
+  }
+  bool last_step_had_request() const {
+    return last_step_had_request_.load(std::memory_order_relaxed);
+  }
+  void complete_prefetches() { fake_block_manager_->complete_prefetches(); }
+  size_t prefetch_calls() const {
+    return fake_block_manager_->prefetch_calls();
+  }
+  void set_step_hook(std::function<void()> step_hook) {
+    step_hook_ = std::move(step_hook);
+  }
+
  private:
   static runtime::Options make_options() {
     runtime::Options options;
@@ -103,7 +178,10 @@ class FakeEngine final : public RecEngine {
   }
 
   std::unique_ptr<Tokenizer> fake_tokenizer_;
-  std::unique_ptr<BlockManagerPool> fake_block_manager_;
+  std::unique_ptr<ControllablePrefetchBlockManagerPool> fake_block_manager_;
+  std::atomic<size_t> step_calls_{0};
+  std::atomic<bool> last_step_had_request_{false};
+  std::function<void()> step_hook_;
 };
 
 template <typename T>
@@ -198,6 +276,107 @@ TEST(FixedStepsSchedulerTest, AddRequestSuccess) {
   EXPECT_TRUE(scheduler.add_request(req));
 }
 
+TEST(FixedStepsSchedulerTest, QueueCapacityRejectsBeforeScheduling) {
+  ScopedConfigValue<bool> prefix_cache(
+      KVCacheConfig::get_instance().enable_prefix_cache(), false);
+  ScopedConfigValue<double> memory_threshold(
+      SchedulerConfig::get_instance()
+          .prefill_scheduling_memory_usage_threshold(),
+      1.0);
+  auto engine = std::make_unique<FakeEngine>(64, 32);
+  auto options = CreateOptions();
+  options.request_queue_size(1);
+  TestableFixedStepsScheduler scheduler(engine.get(), options);
+  auto requests = GenRequests({32, 32}, {10, 10}, RecType::kOneRec);
+
+  ASSERT_TRUE(scheduler.add_request(requests[0]));
+  EXPECT_FALSE(scheduler.add_request(requests[1]));
+  scheduler.prepare_batch_test();
+  EXPECT_TRUE(scheduler.add_request(requests[1]));
+}
+
+TEST(FixedStepsSchedulerTest, PendingRequestCountTracksUpdates) {
+  auto engine = std::make_unique<FakeEngine>(32, 32);
+  FixedStepsScheduler scheduler(engine.get(), CreateOptions());
+
+  EXPECT_EQ(scheduler.num_pending_requests(), 0u);
+  scheduler.incr_pending_requests(2);
+  EXPECT_EQ(scheduler.num_pending_requests(), 2u);
+  scheduler.decr_pending_requests();
+  EXPECT_EQ(scheduler.num_pending_requests(), 1u);
+  scheduler.decr_pending_requests();
+  EXPECT_EQ(scheduler.num_pending_requests(), 0u);
+}
+
+TEST(FixedStepsSchedulerTest, PrefetchReservesAdmissionUntilCompletion) {
+  ScopedConfigValue<bool> prefix_cache(
+      KVCacheConfig::get_instance().enable_prefix_cache(), false);
+  ScopedConfigValue<double> memory_threshold(
+      SchedulerConfig::get_instance()
+          .prefill_scheduling_memory_usage_threshold(),
+      1.0);
+  auto engine = std::make_unique<FakeEngine>(
+      /*num_blocks=*/64, /*block_size=*/32, /*enable_storage_prefetch=*/true);
+  auto options = CreateOptions();
+  options.request_queue_size(1);
+  TestableFixedStepsScheduler scheduler(engine.get(), options);
+  auto requests = GenRequests({32, 32}, {10, 10}, RecType::kOneRec);
+
+  ASSERT_TRUE(scheduler.add_request(requests[0]));
+  EXPECT_TRUE(scheduler.has_pending_prefetch());
+  EXPECT_EQ(scheduler.get_waiting_requests_num(), 1u);
+  EXPECT_EQ(engine->prefetch_calls(), 0u);
+  EXPECT_FALSE(scheduler.add_request(requests[1]));
+
+  RecBatchGroup batches = scheduler.prepare_batch_test();
+  ASSERT_EQ(batches.size(), 1u);
+  EXPECT_TRUE(batches.front().empty());
+  EXPECT_EQ(engine->prefetch_calls(), 1u);
+  EXPECT_FALSE(scheduler.add_request(requests[1]));
+
+  engine->complete_prefetches();
+  EXPECT_TRUE(scheduler.has_pending_prefetch());
+  batches = scheduler.prepare_batch_test();
+  ASSERT_EQ(batches.size(), 1u);
+  EXPECT_EQ(batches.front().size(), 1u);
+  EXPECT_FALSE(scheduler.has_pending_prefetch());
+  EXPECT_EQ(scheduler.get_waiting_requests_num(), 0u);
+  EXPECT_TRUE(scheduler.add_request(requests[1]));
+}
+
+TEST(FixedStepsSchedulerTest, CancelledPrefetchReleasesReservedAdmission) {
+  auto engine = std::make_unique<FakeEngine>(
+      /*num_blocks=*/64, /*block_size=*/32, /*enable_storage_prefetch=*/true);
+  auto options = CreateOptions();
+  options.request_queue_size(1);
+  TestableFixedStepsScheduler scheduler(engine.get(), options);
+  auto requests = GenRequests({32, 32}, {10, 10}, RecType::kOneRec);
+
+  ASSERT_TRUE(scheduler.add_request(requests[0]));
+  requests[0]->set_cancel();
+  RecBatchGroup batches = scheduler.prepare_batch_test();
+  ASSERT_EQ(batches.size(), 1u);
+  EXPECT_TRUE(batches.front().empty());
+  EXPECT_EQ(engine->prefetch_calls(), 0u);
+  EXPECT_FALSE(scheduler.has_pending_prefetch());
+  EXPECT_EQ(scheduler.get_waiting_requests_num(), 0u);
+  EXPECT_TRUE(scheduler.add_request(requests[1]));
+}
+
+TEST(FixedStepsSchedulerTest, DestructionCancelsUnissuedPrefetch) {
+  auto engine = std::make_unique<FakeEngine>(
+      /*num_blocks=*/64, /*block_size=*/32, /*enable_storage_prefetch=*/true);
+  auto requests = GenRequests({32}, {10}, RecType::kOneRec);
+  {
+    FixedStepsScheduler scheduler(engine.get(), CreateOptions());
+    ASSERT_TRUE(scheduler.add_request(requests[0]));
+    EXPECT_TRUE(scheduler.has_pending_prefetch());
+  }
+
+  EXPECT_TRUE(requests[0]->cancelled());
+  EXPECT_EQ(engine->prefetch_calls(), 0u);
+}
+
 TEST(FixedStepsSchedulerTest, PrepareBatchEmptyWhenNoRequests) {
   ScopedConfigValue<bool> prefix_cache(
       KVCacheConfig::get_instance().enable_prefix_cache(), false);
@@ -254,7 +433,7 @@ TEST(FixedStepsSchedulerTest, PrepareBatchRespectsTokenBudget) {
   EXPECT_LE(scheduler.get_running_requests().size(), 1u);
 }
 
-TEST(FixedStepsSchedulerTest, StepCompletesWithRequest) {
+TEST(FixedStepsSchedulerTest, StepExecutesRecBatch) {
   ScopedConfigValue<bool> prefix_cache(
       KVCacheConfig::get_instance().enable_prefix_cache(), false);
   ScopedConfigValue<double> memory_threshold(
@@ -265,8 +444,56 @@ TEST(FixedStepsSchedulerTest, StepCompletesWithRequest) {
   auto opt = CreateOptions(10000, 256);
   FixedStepsScheduler scheduler(engine.get(), opt);
   auto requests = GenRequests({32}, {10}, RecType::kOneRec);
-  scheduler.add_request(requests[0]);
-  EXPECT_NO_THROW(scheduler.step(absl::Milliseconds(500)));
+  ASSERT_TRUE(scheduler.add_request(requests[0]));
+  scheduler.step(absl::Milliseconds(500));
+  EXPECT_EQ(engine->step_calls(), 1u);
+  EXPECT_TRUE(engine->last_step_had_request());
+}
+
+TEST(FixedStepsSchedulerTest, DestructionWaitsForAsynchronousRecExecution) {
+  ScopedConfigValue<bool> prefix_cache(
+      KVCacheConfig::get_instance().enable_prefix_cache(), false);
+  ScopedConfigValue<double> memory_threshold(
+      SchedulerConfig::get_instance()
+          .prefill_scheduling_memory_usage_threshold(),
+      1.0);
+  auto engine = std::make_unique<FakeEngine>(64, 32);
+  auto options = CreateOptions();
+  options.rec_worker_max_concurrency(2);
+  auto requests = GenRequests({32}, {10}, RecType::kOneRec);
+  std::promise<void> step_started;
+  auto started = step_started.get_future();
+  std::promise<void> release_step;
+  auto release = release_step.get_future();
+  engine->set_step_hook([&step_started, &release] {
+    step_started.set_value();
+    release.wait_for(std::chrono::seconds(2));
+  });
+  auto scheduler = std::make_unique<FixedStepsScheduler>(engine.get(), options);
+  ASSERT_TRUE(scheduler->add_request(requests[0]));
+  scheduler->step(absl::Milliseconds(500));
+  ASSERT_EQ(started.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+
+  std::promise<void> destruction_started;
+  auto destroying = destruction_started.get_future();
+  std::promise<void> destruction_finished;
+  auto destroyed = destruction_finished.get_future();
+  std::thread destroy(
+      [&scheduler, &destruction_started, &destruction_finished] {
+        destruction_started.set_value();
+        scheduler.reset();
+        destruction_finished.set_value();
+      });
+  EXPECT_EQ(destroying.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+  EXPECT_EQ(destroyed.wait_for(std::chrono::milliseconds(20)),
+            std::future_status::timeout);
+  release_step.set_value();
+  destroy.join();
+
+  EXPECT_EQ(engine->step_calls(), 1u);
+  EXPECT_TRUE(engine->last_step_had_request());
 }
 
 }  // namespace xllm

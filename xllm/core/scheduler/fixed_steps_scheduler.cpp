@@ -17,8 +17,6 @@ limitations under the License.
 
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
-#include <folly/MPMCQueue.h>
-#include <folly/Unit.h>
 #include <glog/logging.h>
 
 #include <algorithm>
@@ -27,29 +25,65 @@ limitations under the License.
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <utility>
 
-#include "core/common/global_flags.h"
 #include "core/common/metrics.h"
 #include "core/common/types.h"
-#include "core/distributed_runtime/engine.h"
 #include "core/framework/batch/rec_batch.h"
 #include "core/framework/batch/rec_batch_factory.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/config/rec_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "core/framework/request/priority_comparator.h"
 #include "core/framework/request/rec_type.h"
 #include "core/framework/request/request.h"
 #include "core/framework/request/sequence.h"
 #include "core/util/rec_model_utils.h"
+#include "core/util/timer.h"
 
 namespace xllm {
 
 FixedStepsScheduler::FixedStepsScheduler(RecEngine* engine,
-                                         StepCallback step_callback,
                                          const Options& options)
-    : ContinuousScheduler<RecEngine>(engine, options, ResourceOnlyTag{}),
-      step_callback_(std::move(step_callback)),
+    : options_(options),
+      engine_(engine),
+      request_queue_(options.request_queue_size()),
       step_semaphore_(
           static_cast<std::ptrdiff_t>(options.rec_worker_max_concurrency())) {
+  CHECK(engine_ != nullptr);
+  kv_cache_manager_ = engine_->block_manager_pool();
+  CHECK(kv_cache_manager_ != nullptr);
+
+  enable_prefix_cache_ =
+      ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
+
+  cancel_request_queue_ = std::make_shared<CancelRequestQueue>();
+  response_processor_ = std::make_unique<AsyncResponseProcessor>(
+      engine_->tokenizer(),
+      options_.instance_role(),
+      options_.enable_service_routing(),
+      options_.disable_log_stats(),
+      [cancel_request_queue =
+           cancel_request_queue_](std::shared_ptr<Request> request) {
+        cancel_request_queue->submit(std::move(request));
+      });
+
+  if (options_.priority_strategy() == "multi_slo_and_prio" ||
+      options_.priority_strategy() == "fcfs") {
+    prefill_queue_ = std::make_unique<DequeQueue>();
+  } else {
+    auto comparator = create_comparator(options_.priority_strategy(),
+                                        /*reverse=*/false);
+    prefill_queue_ = std::make_unique<HeapQueue>(std::move(comparator));
+  }
+
+  instance_info_.name = options_.instance_name().value_or("");
+  instance_info_.type = options_.instance_role().value().to_string();
+  instance_info_.dp_size = options_.dp_size();
+  instance_info_.kv_split_size =
+      ::xllm::ParallelConfig::get_instance().kv_split_size_effective();
+
   step_threadpool_ = std::make_unique<ThreadPool>(
       /*num_threads=*/static_cast<size_t>(options.rec_worker_max_concurrency()),
       /*cpu_binding=*/false,
@@ -57,9 +91,117 @@ FixedStepsScheduler::FixedStepsScheduler(RecEngine* engine,
 }
 
 FixedStepsScheduler::~FixedStepsScheduler() {
-  // Tasks capture scheduler state and must finish before base members are
-  // destroyed.
+  // Tasks capture scheduler state and must finish before it is destroyed.
   step_threadpool_.reset();
+
+  // Unissued admissions have no asynchronous callback and can be cancelled
+  // directly, including an offline scheduler that never started.
+  {
+    std::lock_guard<std::mutex> lock(prefetch_admission_mutex_);
+    for (const std::shared_ptr<Request>& request : prefetch_admissions_) {
+      request->set_cancel();
+    }
+    const size_t unissued = prefetch_admissions_.size();
+    prefetch_admissions_.clear();
+    const size_t previous =
+        prefetching_requests_.fetch_sub(unissued, std::memory_order_acq_rel);
+    CHECK_GE(previous, unissued);
+  }
+  kv_cache_manager_->drain_prefetch_completions();
+  drain_completed_prefetches();
+  CHECK_EQ(prefetching_requests_.load(std::memory_order_acquire), 0u)
+      << "FixedStepsScheduler destroyed with pending prefetch callbacks";
+  running_requests_.clear();
+  response_processor_.reset();
+}
+
+bool FixedStepsScheduler::add_request(std::shared_ptr<Request>& request) {
+  CHECK(request != nullptr);
+  CHECK(!request->sequences().empty());
+
+  std::lock_guard<std::mutex> lock(prefetch_admission_mutex_);
+  const size_t pending_before_reservation =
+      prefetching_requests_.load(std::memory_order_relaxed);
+  const size_t queued_requests =
+      static_cast<size_t>(std::max<ssize_t>(request_queue_.size(), 0));
+  if (queued_requests + pending_before_reservation >=
+      request_queue_.capacity()) {
+    return false;
+  }
+
+  if (!kv_cache_manager_->has_storage_prefetch()) {
+    return request_queue_.write(request);
+  }
+
+  prefetching_requests_.fetch_add(1, std::memory_order_relaxed);
+  prefetch_admissions_.emplace_back(request);
+  VLOG(1) << "[Mooncake][AdmissionPending] request=" << request->request_id();
+  return true;
+}
+
+void FixedStepsScheduler::drain_prefetch_admissions() {
+  std::deque<std::shared_ptr<Request>> requests;
+  {
+    std::lock_guard<std::mutex> lock(prefetch_admission_mutex_);
+    requests.swap(prefetch_admissions_);
+  }
+
+  for (std::shared_ptr<Request>& request : requests) {
+    if (request->finished() || request->cancelled()) {
+      const size_t previous =
+          prefetching_requests_.fetch_sub(1, std::memory_order_relaxed);
+      CHECK_GT(previous, 0u);
+      continue;
+    }
+
+    kv_cache_manager_->prefetch_from_storage(
+        request, [this](std::shared_ptr<Request> completed) {
+          std::lock_guard<std::mutex> lock(prefetch_admission_mutex_);
+          completed_prefetches_.emplace_back(std::move(completed));
+        });
+  }
+}
+
+void FixedStepsScheduler::drain_completed_prefetches() {
+  std::deque<std::shared_ptr<Request>> completed;
+  {
+    std::lock_guard<std::mutex> lock(prefetch_admission_mutex_);
+    completed.swap(completed_prefetches_);
+  }
+
+  for (std::shared_ptr<Request>& request : completed) {
+    const bool cancelled = request->finished() || request->cancelled();
+    {
+      // Admission observes the queue size and reservation count together.
+      std::lock_guard<std::mutex> lock(prefetch_admission_mutex_);
+      if (!cancelled) {
+        CHECK(request_queue_.write(request))
+            << "Reserved request queue slot disappeared before prefetch "
+               "completed.";
+      }
+      const size_t previous =
+          prefetching_requests_.fetch_sub(1, std::memory_order_relaxed);
+      CHECK_GT(previous, 0u);
+    }
+    VLOG(1) << (cancelled ? "[Mooncake][AdmissionCancelled] request="
+                          : "[Mooncake][AdmissionReady] request=")
+            << request->request_id();
+  }
+}
+
+void FixedStepsScheduler::drain_prefetch_pipeline() {
+  kv_cache_manager_->drain_prefetch_completions();
+  drain_prefetch_admissions();
+  kv_cache_manager_->drain_prefetch_completions();
+  drain_completed_prefetches();
+}
+
+void FixedStepsScheduler::apply_cancel_requests() {
+  std::vector<std::shared_ptr<Request>> requests =
+      cancel_request_queue_->take_all();
+  for (const std::shared_ptr<Request>& request : requests) {
+    request->set_cancel();
+  }
 }
 
 void FixedStepsScheduler::handle_prefill_requests(
@@ -170,8 +312,7 @@ void FixedStepsScheduler::handle_prefill_requests(
                                       prefill_sequences_budget.end());
   }
 
-  if (running_sequences_.empty() && !prefill_queue_->empty() &&
-      decode_queue_->empty()) {
+  if (running_sequences_.empty() && !prefill_queue_->empty()) {
     LOG(ERROR)
         << "Request prompt is too long, no enough budget/memory to schedule "
            "a single sequence.";
@@ -188,6 +329,7 @@ void FixedStepsScheduler::handle_prefill_requests(
 
 RecBatchGroup FixedStepsScheduler::prepare_rec_batch() {
   Timer timer;
+  apply_cancel_requests();
   drain_prefetch_pipeline();
   // propagate new requests to prefill_queue_
   // Include those requests that are preempted by others.
@@ -315,8 +457,7 @@ RecBatchGroup FixedStepsScheduler::prepare_rec_batch() {
   GAUGE_SET(num_pending_requests,
             pending_requests_.load(std::memory_order_relaxed));
   GAUGE_SET(num_running_requests, running_requests_.size());
-  GAUGE_SET(num_waiting_requests,
-            prefill_queue_->size() + decode_queue_->size());
+  GAUGE_SET(num_waiting_requests, prefill_queue_->size());
 
   GAUGE_ADD(num_preempted_requests, num_preempted_requests);
 
@@ -392,7 +533,7 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
                      batches = std::move(result.batches),
                      requests = std::move(result.requests),
                      sequences = std::move(result.sequences)]() mutable {
-      step_callback_(batches);
+      engine_->step(batches);
 
       // After step completes, check and process finished/cancelled requests
       std::vector<std::shared_ptr<Request>> finished_requests;

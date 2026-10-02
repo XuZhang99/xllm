@@ -29,7 +29,9 @@ limitations under the License.
 #include "common/types.h"
 #include "core/framework/config/parallel_config_validation.h"
 #include "core/framework/multimodal/mm_data.h"
+#if defined(USE_NPU)
 #include "models/model_registry.h"
+#endif
 #include "rec_engine.h"
 #include "runtime/options.h"
 #include "runtime/xservice_client.h"
@@ -63,7 +65,9 @@ RecType get_rec_type(const ModelArgs& model_args) {
 RecMaster::RecMaster(const Options& options) : Master(options) {
   options_.enable_mla(util::should_enable_mla(
       std::filesystem::path(options_.model_path()), options_.backend()));
+#if defined(USE_NPU)
   resolve_npu_kernel_backend(&options_);
+#endif
   CHECK(!options_.enable_disagg_pd())
       << "Disaggregated PD is not supported by the Rec engine.";
   const std::string model_type =

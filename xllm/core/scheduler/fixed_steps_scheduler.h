@@ -17,25 +17,26 @@ limitations under the License.
 
 #include <absl/time/time.h>
 #include <folly/MPMCQueue.h>
-#include <folly/futures/Future.h>
 
-#include <concepts>
-#include <functional>
-#include <limits>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
 #include <memory>
-#include <queue>
+#include <mutex>
 #include <semaphore>
+#include <vector>
 
 #include "core/common/macros.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/rec_engine.h"
 #include "core/framework/batch/rec_batch_factory.h"
 #include "core/framework/batch/rec_batch_group.h"
+#include "core/framework/block/kv_cache_manager.h"
 #include "core/framework/request/request.h"
 #include "core/framework/request/sequence.h"
-#include "core/runtime/xservice_client.h"
 #include "core/scheduler/async_response_processor.h"
-#include "core/scheduler/continuous_scheduler.h"
+#include "core/scheduler/request_priority_queue.h"
 #include "core/scheduler/scheduler.h"
 #include "core/util/threadpool.h"
 
@@ -48,13 +49,11 @@ struct ScheduleResult {
   std::vector<Sequence*> sequences;
 };
 
-class FixedStepsScheduler : public ContinuousScheduler<RecEngine> {
+class FixedStepsScheduler : public Scheduler {
  public:
-  explicit FixedStepsScheduler(RecEngine* engine, const Options& options)
-      : FixedStepsScheduler(
-            engine,
-            [engine](RecBatchGroup& batches) { return engine->step(batches); },
-            options) {}
+  using Options = SchedulerOptions;
+
+  FixedStepsScheduler(RecEngine* engine, const Options& options);
 
   ~FixedStepsScheduler() override;
 
@@ -63,16 +62,43 @@ class FixedStepsScheduler : public ContinuousScheduler<RecEngine> {
   void step(const absl::Duration& timeout) override;
   void generate() override;
 
+  bool add_request(std::shared_ptr<Request>& request) override;
+
+  void incr_pending_requests(size_t count) override {
+    pending_requests_.fetch_add(count, std::memory_order_relaxed);
+  }
+
+  void decr_pending_requests() override {
+    const size_t old_value =
+        pending_requests_.fetch_sub(1, std::memory_order_relaxed);
+    CHECK_GT(old_value, 0) << "pending requests underflow";
+  }
+
+  size_t num_pending_requests() override {
+    return pending_requests_.load(std::memory_order_relaxed);
+  }
+
+  bool has_pending_prefetch() const override {
+    return prefetching_requests_.load(std::memory_order_relaxed) > 0;
+  }
+
+  uint32_t get_waiting_requests_num() const override {
+    return static_cast<uint32_t>(
+        prefill_queue_->size() +
+        prefetching_requests_.load(std::memory_order_relaxed));
+  }
+
+  void get_latency_metrics(std::vector<int64_t>& /*ttft*/,
+                           std::vector<int64_t>& /*tbt*/) override {}
+
+  const InstanceInfo& get_instance_info() override { return instance_info_; }
+
  protected:
   RecBatchGroup prepare_rec_batch();
 
+  std::vector<std::shared_ptr<Request>> running_requests_;
+
  private:
-  using StepCallback = std::function<ForwardOutput(RecBatchGroup&)>;
-
-  FixedStepsScheduler(RecEngine* engine,
-                      StepCallback step_callback,
-                      const Options& options);
-
   // Scheduler pipeline for different rec types
   class SchedulerPipeline {
    public:
@@ -140,6 +166,34 @@ class FixedStepsScheduler : public ContinuousScheduler<RecEngine> {
       size_t& remaining_seq_budget,
       std::vector<std::shared_ptr<Request>>& finished_requests);
 
+  void drain_prefetch_admissions();
+  void drain_completed_prefetches();
+  void drain_prefetch_pipeline();
+  void apply_cancel_requests();
+
+  const Options options_;
+
+  // RecMaster owns the engine and destroys the scheduler first.
+  RecEngine* engine_;
+  KVCacheManager* kv_cache_manager_;
+
+  folly::MPMCQueue<std::shared_ptr<Request>> request_queue_;
+  std::atomic<size_t> prefetching_requests_{0};
+  std::mutex prefetch_admission_mutex_;
+  std::deque<std::shared_ptr<Request>> prefetch_admissions_;
+  std::deque<std::shared_ptr<Request>> completed_prefetches_;
+
+  std::vector<Sequence*> running_sequences_;
+  std::vector<size_t> running_sequences_budgets_;
+
+  std::shared_ptr<CancelRequestQueue> cancel_request_queue_;
+  std::unique_ptr<AsyncResponseProcessor> response_processor_;
+
+  bool enable_prefix_cache_ = false;
+  std::atomic<size_t> pending_requests_{0};
+  std::unique_ptr<RequestPriorityQueue> prefill_queue_;
+  InstanceInfo instance_info_;
+
   // Lazy-initialized pipeline
   std::unique_ptr<SchedulerPipeline> scheduler_pipeline_;
   std::unique_ptr<RecBatchFactory> rec_batch_factory_;
@@ -151,8 +205,6 @@ class FixedStepsScheduler : public ContinuousScheduler<RecEngine> {
 
   // Scheduler thread pool for parallel execution of step()
   std::unique_ptr<ThreadPool> step_threadpool_;
-
-  StepCallback step_callback_;
 
   // Semaphore to control concurrent execution of step()
   std::counting_semaphore<10000> step_semaphore_;

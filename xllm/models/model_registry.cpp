@@ -197,10 +197,10 @@ bool resolve_model_registration(const std::string& model_type,
 #endif
 }
 
+#if defined(USE_NPU)
 void resolve_npu_kernel_backend(Options* options) {
   CHECK(options != nullptr) << "options must not be null";
 
-#if defined(USE_NPU)
   // Python model executor builds the compute graph in Python (torch/torch_npu),
   // bypassing ATB C++ kernels entirely. Force TORCH so kernel dispatch picks
   // pure-torch implementations for reshape_and_cache and related operators.
@@ -229,8 +229,8 @@ void resolve_npu_kernel_backend(Options* options) {
   KernelConfig::get_instance().npu_kernel_backend(effective_backend);
   LOG(INFO) << "Resolved npu_kernel_backend=" << effective_backend
             << " for model_type=" << model_type;
-#endif
 }
+#endif
 
 bool resolve_model_registration_name(const std::string& model_type,
                                      std::string* resolved_name,

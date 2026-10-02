@@ -173,10 +173,12 @@ bool resolve_model_registration(const std::string& model_type,
                                 std::string* resolved_name,
                                 std::string* error_message = nullptr);
 
+#if defined(USE_NPU)
 // Resolve the model-specific NPU kernel backend before constructing a runtime
 // engine. This applies only to the LLM/VLM/Rec model registry; DiT has its own
 // model registry and backend selection.
 void resolve_npu_kernel_backend(Options* options);
+#endif
 
 std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context);
 

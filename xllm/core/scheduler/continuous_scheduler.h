@@ -23,7 +23,6 @@ limitations under the License.
 #include <concepts>
 #include <deque>
 #include <functional>
-#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -81,99 +80,6 @@ struct BatchMode {
   std::string priority_strategy = "fcfs";
 };
 
-class CancelRequestQueue final {
- public:
-  void submit(std::shared_ptr<Request> request);
-  std::vector<std::shared_ptr<Request>> take_all();
-
- private:
-  std::mutex mutex_;
-  std::vector<std::shared_ptr<Request>> requests_;
-};
-
-struct SchedulerOptions {
-  // the maximum number of tokens per batch
-  PROPERTY(int32_t, max_tokens_per_batch) = 20000;
-
-  // the maximum number of sequences per batch
-  PROPERTY(int32_t, max_seqs_per_batch) = 256;
-  PROPERTY(bool, enable_task_pipeline) = false;
-
-  // the capacity of the request queue; requests arriving while it is full
-  // are rejected at admission.
-  PROPERTY(int32_t, request_queue_size) = 100000;
-
-  // the max tokens per chunk for request in prefill stage.
-  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill);
-
-  // the number of speculative tokens per step
-  PROPERTY(int32_t, num_speculative_tokens) = 0;
-
-  // the number of tp*dp*cp nodes
-  PROPERTY(int32_t, nnodes) = 1;
-
-  // the number of speculative tokens per step
-  PROPERTY(int32_t, dp_size) = 1;
-
-  PROPERTY(int32_t, cp_size) = 1;
-
-  // enable disaggregated PD mode.
-  PROPERTY(bool, enable_disagg_pd) = false;
-
-  // for master service, current instance name(ID).
-  PROPERTY(std::optional<std::string>, instance_name);
-
-  PROPERTY(std::optional<InstanceRole>, instance_role) = InstanceRole::DEFAULT;
-
-  PROPERTY(std::string, kv_cache_transfer_mode) = "PUSH";
-
-  // In general decode instance send a batch responses to prefill in disagg pd
-  // mode. here, we add a flag to control whether send a batch or single
-  // response once, This will help us to debug code. default value is false.
-  PROPERTY(bool, enable_batch_response) = false;
-
-  // support P send batch reqs to D.
-  // max_reqs_p2d_once represents the maximum number
-  // of requests that can be sent once.
-  // default value is 1.
-  PROPERTY(int32_t, max_reqs_p2d_once) = 1;
-
-  PROPERTY(bool, enable_schedule_overlap) = true;
-
-  PROPERTY(bool, enable_chunked_prefill) = true;
-
-  PROPERTY(bool, enable_service_routing) = false;
-
-  PROPERTY(bool, disable_log_stats) = false;
-
-  // TODO: think if distinguish prefill and decode priority strategy
-  PROPERTY(std::string,
-           priority_strategy) = "fcfs";  // priority, deadline, fcfs
-
-  PROPERTY(bool, enable_profile_step_time) = false;
-  // use predicted latency for latency aware schedule
-  PROPERTY(bool, enable_profile_token_budget) = false;
-
-  PROPERTY(bool, enable_latency_aware_schedule) = false;
-  // the max prompt length for profile
-  PROPERTY(int32_t, profile_max_prompt_length) = 2048;
-  // true if generate kv cache for profile
-  PROPERTY(bool, enable_profile_kv_blocks) = true;
-  // true if disable ttft profiling
-  PROPERTY(bool, disable_ttft_profiling) = false;
-  // all requests use single global ttft
-  PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
-  // all requests use single global tpot
-  PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
-
-  // Index ID for internal server ID, which must be set different values
-  // if the model supports multiple version or there are multiple models.
-  PROPERTY(int64_t, server_idx) = 0;
-
-  // max concurrency for rec worker
-  PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
-};
-
 class ContinuousSchedulerBase : public Scheduler {
  public:
   using Options = SchedulerOptions;
@@ -218,14 +124,10 @@ class ContinuousSchedulerBase : public Scheduler {
   const InstanceInfo& get_instance_info() override { return instance_info_; }
 
  protected:
-  struct ResourceOnlyTag {};
   ContinuousSchedulerBase(Engine* engine,
                           const Options& options,
                           StepCallback step_callback,
                           ResultCallback result_callback);
-  ContinuousSchedulerBase(Engine* engine,
-                          const Options& options,
-                          ResourceOnlyTag);
 
   void clear_mtp_bootstrap(Request* request);
   void drain_prefetch_pipeline();
@@ -403,11 +305,6 @@ class ContinuousScheduler : public ContinuousSchedulerBase {
   ~ContinuousScheduler() override = default;
 
  protected:
-  ContinuousScheduler(EngineType* engine,
-                      const Options& options,
-                      ResourceOnlyTag tag)
-      : ContinuousSchedulerBase(engine, options, tag), engine_(engine) {}
-
   EngineType* engine_;
 };
 
