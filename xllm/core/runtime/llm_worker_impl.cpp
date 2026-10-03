@@ -15,10 +15,6 @@ limitations under the License.
 
 #include "llm_worker_impl.h"
 
-#if defined(USE_NPU)
-#include "core/platform/npu/npu_cpu_binding.h"
-#endif
-
 #include <c10/core/StreamGuard.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
@@ -34,6 +30,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/model_config.h"
+#include "core/platform/platform.h"
 #include "framework/kv_cache/linear_state_restore.h"
 #include "framework/kv_cache_transfer/kv_transfer_completion.h"
 #include "framework/model/model_args.h"
@@ -282,9 +279,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   ModelInputParams execution_params(input.input_params);
   auto model_output = model_executor_->forward(
       input.token_ids, input.positions, kv_caches_, execution_params);
-#if defined(USE_NPU)
-  npu::NpuCpuBinding::get_instance().refresh_after_first_forward();
-#endif
+  Platform::refresh_cpu_binding_after_first_forward();
   if (eplb_executor_ != nullptr) {
     eplb_executor_->finish_eplb_step();
   }

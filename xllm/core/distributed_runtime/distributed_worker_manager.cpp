@@ -30,6 +30,7 @@ limitations under the License.
 #include "core/distributed_runtime/worker_server.h"
 #include "core/framework/config/service_config.h"
 #include "core/framework/parallel_state/parallel_args.h"
+#include "core/platform/platform.h"
 #if defined(USE_CUDA) || defined(USE_MLU) || defined(USE_DCU)
 #include "core/platform/numa_utils.h"
 #endif
@@ -135,7 +136,8 @@ void setup_numa_affinity_and_isolation(
   }
 
   if (engine_numa_node >= 0) {
-    if (numa::bind_process_to_numa_node(engine_numa_node) != 0) {
+    if (!Platform::has_cpu_binding() &&
+        numa::bind_process_to_numa_node(engine_numa_node) != 0) {
       LOG(WARNING) << "Failed to pin engine process to NUMA node "
                    << engine_numa_node
                    << ", fallback to per-worker affinity only";

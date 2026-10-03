@@ -11,19 +11,28 @@ if(USE_NPU OR USE_CUDA OR USE_MUSA OR USE_MLU OR USE_DCU)
       :numa_utils
       GTest::gtest_main
   )
+  cc_test(
+    NAME
+      cpu_binding_test
+    NO_NPU_RUNTIME
+    SRCS
+      cpu_binding_test.cpp
+    DEPS
+      :cpu_binding
+      GTest::gtest_main
+  )
 endif()
 
 if(USE_NPU)
   cc_test(
     NAME
-      npu_cpu_binding_test
+      npu_cpu_topology_test
     NO_NPU_RUNTIME
     SRCS
-      npu_cpu_binding_test.cpp
-      ${PROJECT_SOURCE_DIR}/xllm/core/platform/npu/npu_cpu_binding_plan.cpp
-      ${PROJECT_SOURCE_DIR}/xllm/core/platform/npu/npu_cpu_binding.cpp
+      npu_cpu_topology_test.cpp
+      ${PROJECT_SOURCE_DIR}/xllm/core/platform/npu/npu_cpu_topology.cpp
     DEPS
-      :numa_utils
+      :cpu_binding
       GTest::gtest_main
       glog::glog
   )

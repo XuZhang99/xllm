@@ -19,6 +19,18 @@ if(USE_NPU OR USE_CUDA OR USE_MUSA OR USE_MLU OR USE_DCU)
       $<$<BOOL:${USE_MLU}>:cnrt>
       $<$<BOOL:${USE_DCU}>:hip::host>
   )
+  cc_library(
+    NAME
+      cpu_binding
+    HDRS
+      cpu_binding.h
+    SRCS
+      cpu_binding.cpp
+      cpu_binding_plan.cpp
+    DEPS
+      :numa_utils
+      glog::glog
+  )
 endif()
 
 if(USE_NPU)
@@ -72,7 +84,7 @@ cc_library(
     torch
     glog::glog
     :util
-    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MUSA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:numa_utils>
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MUSA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:cpu_binding>
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:ascendcl>
     $<$<BOOL:${USE_MLU}>:torch_mlu>
