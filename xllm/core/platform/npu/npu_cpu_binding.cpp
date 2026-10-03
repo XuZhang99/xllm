@@ -17,12 +17,10 @@ limitations under the License.
 
 #include <fcntl.h>
 #include <glog/logging.h>
-#include <linux/mempolicy.h>
 #include <poll.h>
 #include <sched.h>
 #include <signal.h>
 #include <spawn.h>
-#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -30,14 +28,14 @@ limitations under the License.
 #include <array>
 #include <cctype>
 #include <cerrno>
-#include <charconv>
 #include <chrono>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <utility>
+
+#include "core/platform/numa_utils.h"
 
 extern char** environ;
 
@@ -123,149 +121,6 @@ std::string cpu_list(const std::vector<int32_t>& cpus) {
     result += std::to_string(cpu);
   }
   return result;
-}
-
-cpu_set_t make_mask(const std::vector<int32_t>& cpus) {
-  cpu_set_t mask;
-  CPU_ZERO(&mask);
-  for (int32_t cpu : cpus) {
-    CPU_SET(cpu, &mask);
-  }
-  return mask;
-}
-
-bool apply_threads(const CpuBindingPlan& plan) {
-  struct ThreadAffinity {
-    pid_t tid;
-    cpu_set_t previous;
-    cpu_set_t requested;
-  };
-  std::vector<ThreadAffinity> threads;
-  std::error_code error;
-  auto directory =
-      std::filesystem::directory_iterator("/proc/self/task", error);
-  if (error) {
-    return false;
-  }
-  threads.reserve(256);
-  const cpu_set_t worker_mask = make_mask(plan.worker_cpus);
-  const cpu_set_t acl_mask = make_mask({plan.acl_cpu});
-  const cpu_set_t release_mask = make_mask({plan.release_cpu});
-  int32_t acl_threads = 0;
-  int32_t release_threads = 0;
-  const std::filesystem::directory_iterator end;
-  for (; directory != end; directory.increment(error)) {
-    if (error) {
-      return false;
-    }
-    const auto& entry = *directory;
-    const std::string name = entry.path().filename().string();
-    pid_t tid = -1;
-    const auto parsed =
-        std::from_chars(name.data(), name.data() + name.size(), tid);
-    if (parsed.ec != std::errc() || tid <= 0) {
-      continue;
-    }
-    cpu_set_t old_mask;
-    if (sched_getaffinity(tid, sizeof(old_mask), &old_mask) != 0) {
-      if (errno == ESRCH) {
-        continue;
-      }
-      return false;
-    }
-    std::string thread_name;
-    std::ifstream comm(entry.path() / "comm");
-    std::getline(comm, thread_name);
-    cpu_set_t target = worker_mask;
-    if (thread_name == "acl_thread") {
-      target = acl_mask;
-      ++acl_threads;
-    } else if (thread_name == "release_thread") {
-      target = release_mask;
-      ++release_threads;
-    }
-    threads.emplace_back(ThreadAffinity{tid, old_mask, target});
-  }
-  if (error) {
-    return false;
-  }
-  for (const auto& thread : threads) {
-    int32_t status = sched_setaffinity(
-        thread.tid, sizeof(thread.requested), &thread.requested);
-    if (status != 0 && errno == ESRCH) {
-      continue;
-    }
-    cpu_set_t actual;
-    if (status == 0) {
-      status = sched_getaffinity(thread.tid, sizeof(actual), &actual);
-      if ((status == 0 && CPU_EQUAL(&actual, &thread.requested)) ||
-          (status != 0 && errno == ESRCH)) {
-        continue;
-      }
-    }
-    LOG(WARNING) << "NPU CPU binding could not set/verify affinity for tid="
-                 << thread.tid << "; restoring the previous affinity";
-    for (const auto& restore : threads) {
-      if (sched_setaffinity(
-              restore.tid, sizeof(restore.previous), &restore.previous) != 0 &&
-          errno != ESRCH) {
-        LOG(WARNING) << "Failed to restore CPU affinity for tid="
-                     << restore.tid;
-      }
-    }
-    return false;
-  }
-  LOG(INFO) << "NPU CPU binding applied: logical_npu=" << plan.logical_id
-            << " mode=" << plan.mode
-            << " worker_cpus=" << cpu_list(plan.worker_cpus)
-            << " acl_cpu=" << plan.acl_cpu
-            << " release_cpu=" << plan.release_cpu
-            << " threads=" << threads.size() << " acl_threads=" << acl_threads
-            << " release_threads=" << release_threads;
-  return true;
-}
-
-void apply_memory_policy(
-    const CpuBindingPlan& plan,
-    const std::unordered_map<int32_t, int32_t>& cpu_nodes) {
-  if (plan.memory_node < 0) {
-    LOG(INFO) << "NPU CPU binding: no NUMA node available for memory placement";
-    return;
-  }
-  int32_t max_node = plan.memory_node;
-  for (const auto& entry : cpu_nodes) {
-    max_node = std::max(max_node, entry.second);
-  }
-  constexpr size_t kBits = sizeof(unsigned long) * 8;
-  std::vector<unsigned long> source(static_cast<size_t>(max_node) / kBits + 1,
-                                    0);
-  std::vector<unsigned long> target(source.size(), 0);
-  for (const auto& entry : cpu_nodes) {
-    if (entry.second >= 0) {
-      source[entry.second / kBits] |= 1UL << (entry.second % kBits);
-    }
-  }
-  target[plan.memory_node / kBits] |= 1UL << (plan.memory_node % kBits);
-  // Linux get_nodes() decrements maxnode before copying the bitmap. Pass the
-  // allocated bit capacity plus one, as libnuma does, so the highest node is
-  // not silently discarded (an empty MPOL_PREFERRED mask means local memory).
-  const unsigned long maxnode = source.size() * kBits + 1;
-  // Prefer local memory without imposing a strict, potentially OOM-inducing
-  // membind. Done on the startup thread before model/pinned host allocations.
-  if (syscall(SYS_set_mempolicy, MPOL_PREFERRED, target.data(), maxnode) != 0) {
-    LOG(WARNING) << "NPU CPU binding: memory policy unavailable: "
-                 << strerror(errno);
-    return;
-  }
-  const long remaining = syscall(
-      SYS_migrate_pages, getpid(), maxnode, source.data(), target.data());
-  if (remaining != 0) {
-    LOG(WARNING) << "NPU CPU binding: memory migration incomplete: result="
-                 << remaining
-                 << (remaining < 0 ? std::string(" error=") + strerror(errno)
-                                   : "");
-  }
-  LOG(INFO) << "NPU CPU binding: preferred memory node=" << plan.memory_node;
 }
 
 void apply_irq_affinity(const CpuBindingPlan& plan, const NpuIdentity& device) {
@@ -372,7 +227,18 @@ bool apply_cpu_binding_plan(const CpuBindingPlan& plan) {
       return false;
     }
   }
-  return apply_threads(plan);
+  if (numa::bind_process_to_cpus(plan.worker_cpus,
+                                 {{"acl_thread", {plan.acl_cpu}},
+                                  {"release_thread", {plan.release_cpu}}}) !=
+      0) {
+    return false;
+  }
+  LOG(INFO) << "NPU CPU binding applied: logical_npu=" << plan.logical_id
+            << " mode=" << plan.mode
+            << " worker_cpus=" << cpu_list(plan.worker_cpus)
+            << " acl_cpu=" << plan.acl_cpu
+            << " release_cpu=" << plan.release_cpu;
+  return true;
 }
 
 NpuCpuBinding& NpuCpuBinding::get_instance() {
@@ -398,18 +264,11 @@ void NpuCpuBinding::initialize(int32_t device_index,
         << "NPU CPU binding: Ascend 950 cluster placement is not supported";
     return;
   }
-  cpu_set_t allowed;
-  if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) {
-    LOG(WARNING) << "NPU CPU binding: cannot read startup cpuset: "
-                 << strerror(errno);
-    return;
-  }
   CpuBindingTopology topology;
-  topology.allowed_cpus.reserve(CPU_COUNT(&allowed));
-  for (int32_t cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
-    if (CPU_ISSET(cpu, &allowed)) {
-      topology.allowed_cpus.emplace_back(cpu);
-    }
+  topology.allowed_cpus = numa::get_thread_cpus();
+  if (topology.allowed_cpus.empty()) {
+    LOG(WARNING) << "NPU CPU binding: cannot read startup cpuset";
+    return;
   }
   const auto inventory = run_command({"npu-smi", "info", "-m"});
   if (!inventory) {
@@ -437,19 +296,7 @@ void NpuCpuBinding::initialize(int32_t device_index,
                    "global_slice";
     }
   }
-  const auto numa = run_command({"lscpu", "-e=CPU,NODE"});
-  if (numa) {
-    std::istringstream lines(*numa);
-    std::string line;
-    while (std::getline(lines, line)) {
-      std::istringstream fields(line);
-      int32_t cpu = -1;
-      int32_t node = -1;
-      if (fields >> cpu >> node && cpu >= 0 && node >= 0) {
-        topology.cpu_nodes.emplace(cpu, node);
-      }
-    }
-  }
+  topology.cpu_nodes = numa::get_cpu_numa_nodes();
   std::string error;
   auto plan =
       make_cpu_binding_plan(topology, *id, global_slice, bind_irq, &error);
@@ -457,7 +304,10 @@ void NpuCpuBinding::initialize(int32_t device_index,
     LOG(WARNING) << "NPU CPU binding skipped: " << error;
     return;
   }
-  apply_memory_policy(*plan, topology.cpu_nodes);
+  if (numa::bind_memory_to_numa_node(plan->memory_node,
+                                     numa::MemoryPolicy::PREFERRED) == 0) {
+    LOG(INFO) << "NPU CPU binding: preferred memory node=" << plan->memory_node;
+  }
   const auto device =
       std::find_if(topology.devices.begin(),
                    topology.devices.end(),
