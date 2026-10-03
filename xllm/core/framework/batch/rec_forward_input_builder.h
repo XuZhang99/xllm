@@ -20,7 +20,7 @@ limitations under the License.
 
 #include "core/framework/batch/batch_input_data.h"
 #include "core/framework/model/model_args.h"
-#include "core/runtime/forward_params.h"
+#include "core/runtime/rec_forward_params.h"
 #include "core/util/threadpool.h"
 
 namespace xllm {
@@ -29,7 +29,7 @@ class RecForwardInputBuilder {
  public:
   virtual ~RecForwardInputBuilder() = default;
 
-  virtual ForwardInput build_rec_forward_input(
+  virtual RecForwardInput build_rec_forward_input(
       uint32_t num_decoding_tokens,
       uint32_t min_decoding_batch_size) = 0;
 

@@ -439,7 +439,15 @@ ForwardInput ForwardInputBuilder::build_forward_input(
   process_sequences();
   padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
 
-  return state_to_forward_input();
+  return state_to_forward_input<ForwardInput>();
+}
+
+RecForwardInput ForwardInputBuilder::build_rec_forward_input(
+    uint32_t num_decoding_tokens,
+    uint32_t min_decoding_batch_size) {
+  process_sequences();
+  padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
+  return state_to_forward_input<RecForwardInput>();
 }
 
 void ForwardInputBuilder::process_sequences() {
@@ -1179,12 +1187,13 @@ void ForwardInputBuilder::padding_decode_batch_size(
   }
 }
 
-ForwardInput ForwardInputBuilder::state_to_forward_input() {
+template <typename Input>
+Input ForwardInputBuilder::state_to_forward_input() {
   if (state_.flatten_tokens_vec.empty()) {
     return {};
   }
 
-  ForwardInput forward_input;
+  Input forward_input;
 
   // Create tensors
   forward_input.token_ids =
@@ -1265,9 +1274,10 @@ ForwardInput ForwardInputBuilder::state_to_forward_input() {
       input_params.attention.device.block_tables;
 
   // Setup grouped cache block tables.
+  input_params.multi_block_tables.reserve(state_.multi_block_tables.size());
   for (auto& mgr_tables : state_.multi_block_tables) {
     util::pad_2d_vector(mgr_tables, /*pad_value=*/-1);
-    input_params.multi_block_tables.push_back(
+    input_params.multi_block_tables.emplace_back(
         create_2d_tensor(mgr_tables, torch::kInt));
   }
 
@@ -1382,8 +1392,8 @@ ForwardInput ForwardInputBuilder::state_to_forward_input() {
   return forward_input;
 }
 
-void ForwardInputBuilder::process_swap_block_infos(
-    ForwardInput& forward_input) {
+template <typename Input>
+void ForwardInputBuilder::process_swap_block_infos(Input& forward_input) {
   if (swap_block_transfer_infos_ == nullptr ||
       swap_block_transfer_infos_->empty()) {
     return;

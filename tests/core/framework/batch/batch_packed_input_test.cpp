@@ -34,6 +34,7 @@ limitations under the License.
 #include "core/runtime/forward_params.h"
 #include "core/runtime/forward_shared_memory_manager.h"
 #include "core/runtime/params_utils.h"
+#include "core/runtime/rec_forward_params.h"
 
 namespace xllm {
 
@@ -115,6 +116,59 @@ uint64_t read_packed_uint64(const std::string& payload, size_t offset) {
         << (index * 8);
   }
   return value;
+}
+
+RecForwardInput make_rec_transport_input() {
+  RecForwardInput input;
+  input.token_ids = torch::tensor({11, 23}, torch::kInt32);
+  input.positions = torch::tensor({0, 1}, torch::kInt32);
+  input.input_params.meta.num_sequences = 1;
+  input.input_params.meta.batch_id = 31;
+  input.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
+  input.input_params.attention.host.q_seq_lens = {2};
+  input.input_params.attention.host.q_cu_seq_lens = {0, 2};
+  input.input_params.attention.host.kv_seq_lens = {2};
+  input.input_params.attention.host.new_cache_slots = {3, 4};
+  input.input_params.attention.host.block_tables =
+      torch::tensor({{7, 9}}, torch::kInt32);
+  input.input_params.multimodal.mm_data.batch({MMData(
+      MMType::EMBEDDING,
+      MMDict{{"MULTI_MODAL_VALUES", torch::tensor({{1.5F, 2.5F}})},
+             {"MULTI_MODAL_INDICES", torch::tensor({1}, torch::kInt64)}})});
+  input.sampling_params.selected_token_idxes =
+      torch::tensor({1}, torch::kInt32);
+  input.sampling_params.sample_idxes = torch::tensor({0}, torch::kInt32);
+  input.sample_sequence_ids = {"rec#0"};
+  input.sample_prior_output_rows = {-1};
+  return input;
+}
+
+void expect_rec_transport_input(const RecForwardInput& input) {
+  EXPECT_TRUE(
+      torch::equal(input.token_ids, torch::tensor({11, 23}, torch::kInt32)));
+  EXPECT_TRUE(torch::equal(input.positions,
+                           torch::tensor({0, 1}, input.positions.options())));
+  EXPECT_EQ(input.input_params.meta.batch_id, 31);
+  EXPECT_EQ(input.input_params.attention.host.kv_seq_lens,
+            (std::vector<int32_t>{2}));
+  EXPECT_TRUE(torch::equal(input.sampling_params.selected_token_idxes,
+                           torch::tensor({1}, torch::kInt32)));
+  EXPECT_TRUE(torch::equal(input.sampling_params.sample_idxes,
+                           torch::tensor({0}, torch::kInt32)));
+  EXPECT_EQ(input.sample_sequence_ids, (std::vector<std::string>{"rec#0"}));
+  EXPECT_EQ(input.sample_prior_output_rows, (std::vector<int32_t>{-1}));
+  const auto values = input.input_params.multimodal.mm_data.get<torch::Tensor>(
+      "MULTI_MODAL_VALUES");
+  const auto indices = input.input_params.multimodal.mm_data.get<torch::Tensor>(
+      "MULTI_MODAL_INDICES");
+  ASSERT_TRUE(values.has_value());
+  ASSERT_TRUE(indices.has_value());
+  EXPECT_TRUE(torch::equal(*values, torch::tensor({{1.5F, 2.5F}})));
+  EXPECT_TRUE(torch::equal(*indices, torch::tensor({1}, torch::kInt64)));
+  EXPECT_EQ(indices->scalar_type(), torch::kInt64);
+  EXPECT_FALSE(input.has_step_meta());
+  EXPECT_FALSE(input.input_params.has_onerec_params());
+  EXPECT_FALSE(input.input_params.has_llmrec_params());
 }
 
 }  // namespace
@@ -517,6 +571,102 @@ TEST(BatchPackedInputTest, PackedTokenDecoderRejectsNativeDiTDomain) {
   EXPECT_FALSE(packed_proto_to_forward_input(
       packed_input, token_input, torch::Device(torch::kCPU), nullptr));
   EXPECT_FALSE(token_input.runtime.input_host_buffer.defined());
+}
+
+TEST(BatchPackedInputTest,
+     NativeRecPackedCopyPreservesPayloadAfterSourceRelease) {
+  ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
+  RecForwardInput lazy_input;
+  {
+    auto input = make_rec_transport_input();
+    proto::PackedForwardInput packed_input;
+    ASSERT_TRUE(rec_forward_input_to_packed_proto(input, &packed_input));
+    ASSERT_GE(packed_input.payload().size(), 40u);
+    EXPECT_EQ(static_cast<uint8_t>(packed_input.payload()[10]), 3u);
+    ASSERT_TRUE(packed_proto_to_rec_forward_input(
+        packed_input, lazy_input, torch::Device(torch::kCPU), nullptr));
+    ForwardInput token_input;
+    EXPECT_FALSE(packed_proto_to_forward_input(
+        packed_input, token_input, torch::Device(torch::kCPU), nullptr));
+    DiTForwardInput dit_input;
+    EXPECT_FALSE(packed_proto_to_dit_forward_input(packed_input, dit_input));
+  }
+  ASSERT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
+  RecForwardInput copied_input = lazy_input;
+  lazy_input = RecForwardInput();
+  const auto input =
+      copied_input.to(torch::Device(torch::kCPU), torch::kFloat32);
+  copied_input = RecForwardInput();
+  EXPECT_TRUE(input.runtime.device_tensors_ready);
+  EXPECT_FALSE(input.runtime.input_host_buffer_has_layout);
+  expect_rec_transport_input(input);
+}
+
+TEST(BatchPackedInputTest, NativeRecSharedMemoryRetainsPayloadAfterOverwrite) {
+  ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
+  RecForwardInput lazy_input;
+  {
+    const std::string shm_name =
+        ForwardSharedMemoryManager::create_unique_name("batch_test_native_rec",
+                                                       /*dp_group=*/0,
+                                                       ForwardType::RAW_INPUT,
+                                                       /*rank=*/0);
+    bool is_creator = false;
+    ForwardSharedMemoryManager writer(
+        shm_name, /*size=*/1 << 20, is_creator, ForwardType::RAW_INPUT);
+    bool is_reader_creator = false;
+    ForwardSharedMemoryManager reader(
+        shm_name, /*size=*/1 << 20, is_reader_creator, ForwardType::RAW_INPUT);
+    auto source = make_rec_transport_input();
+    ASSERT_TRUE(writer.input_write(source));
+    reader.input_read(
+        lazy_input,
+        torch::Device(torch::kCPU),
+        InputDeviceMaterializationPolicy::DEFER_TO_WORKER_PREPARE);
+    ASSERT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
+    source.token_ids = torch::tensor({91, 92}, torch::kInt32);
+    ASSERT_TRUE(writer.input_write(source));
+  }
+  const auto input = lazy_input.to(torch::Device(torch::kCPU), torch::kFloat32);
+  expect_rec_transport_input(input);
+}
+
+TEST(BatchPackedInputTest, NativeRecDecoderRejectsTokenAndDiTPayloads) {
+  ForwardInput token_input;
+  token_input.token_ids = torch::tensor({11}, torch::kInt32);
+  token_input.positions = torch::tensor({0}, torch::kInt32);
+  proto::PackedForwardInput token_payload;
+  ASSERT_TRUE(forward_input_to_packed_proto(token_input, &token_payload));
+  RecForwardInput input;
+  EXPECT_FALSE(packed_proto_to_rec_forward_input(
+      token_payload, input, torch::Device(torch::kCPU), nullptr));
+  EXPECT_FALSE(input.runtime.input_host_buffer.defined());
+  DiTForwardInput dit_input;
+  dit_input.batch_size = 1;
+  dit_input.prompts = {"prompt"};
+  proto::PackedForwardInput dit_payload;
+  ASSERT_TRUE(dit_forward_input_to_packed_proto(dit_input, &dit_payload));
+  EXPECT_FALSE(packed_proto_to_rec_forward_input(
+      dit_payload, input, torch::Device(torch::kCPU), nullptr));
+  EXPECT_FALSE(input.runtime.input_host_buffer.defined());
+}
+
+TEST(BatchPackedInputTest, NativeRecTransportRejectsLocalDecodeStrategies) {
+  proto::PackedForwardInput packed_input;
+  auto input = make_rec_transport_input();
+  input.input_params.mutable_onerec_params();
+  EXPECT_FALSE(rec_forward_input_to_packed_proto(input, &packed_input));
+  input.input_params.mutable_onerec_xattention_params();
+  EXPECT_FALSE(rec_forward_input_to_packed_proto(input, &packed_input));
+  input.input_params.mutable_llmrec_params();
+  EXPECT_FALSE(rec_forward_input_to_packed_proto(input, &packed_input));
+  input = make_rec_transport_input();
+  input.step_decode = StepDecodeMeta{};
+  EXPECT_FALSE(rec_forward_input_to_packed_proto(input, &packed_input));
+  input = make_rec_transport_input();
+  input.decoder_sampling_params.selected_token_idxes =
+      torch::tensor({0}, torch::kInt32);
+  EXPECT_FALSE(rec_forward_input_to_packed_proto(input, &packed_input));
 }
 
 TEST(BatchPackedInputTest,

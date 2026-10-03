@@ -229,8 +229,19 @@ ForwardInput Worker::prepare_inputs(Batch& batch) {
   return impl_->prepare_inputs(batch);
 }
 
-ForwardInput Worker::prepare_inputs(RecBatch& batch) {
+RecForwardInput Worker::prepare_inputs(RecBatch& batch) {
   return impl_->prepare_inputs(batch);
+}
+
+std::optional<ForwardOutput> Worker::step(const RecForwardInput& inputs) {
+  CHECK(!enable_task_pipeline_) << "Rec does not support the LLM task pipeline";
+  return impl_->step(inputs);
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>> Worker::step_async(
+    const RecForwardInput& inputs) {
+  CHECK(!enable_task_pipeline_) << "Rec does not support the LLM task pipeline";
+  return impl_->step_async(inputs);
 }
 
 std::optional<ForwardOutput> Worker::step(const ForwardInput& inputs) {

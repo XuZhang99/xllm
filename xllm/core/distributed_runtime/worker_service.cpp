@@ -27,6 +27,8 @@ limitations under the License.
 #include <mutex>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 #include "common/device_monitor.h"
@@ -42,13 +44,15 @@ limitations under the License.
 #include "framework/sampling/sampling_params.h"
 #include "runtime/forward_params.h"
 #include "runtime/params_utils.h"
+#include "runtime/rec_forward_params.h"
 #include "runtime/speculative_worker_impl.h"
 #include "util/timer.h"
 
 namespace xllm {
 namespace {
 
-int32_t get_num_decode_seqs_for_schedule_overlap(const ForwardInput& input) {
+template <typename Input>
+int32_t get_num_decode_seqs_for_schedule_overlap(const Input& input) {
   if (input.sampling_params.sample_idxes.defined()) {
     return static_cast<int32_t>(input.sampling_params.sample_idxes.size(0));
   }
@@ -57,9 +61,13 @@ int32_t get_num_decode_seqs_for_schedule_overlap(const ForwardInput& input) {
     return 0;
   }
 
-  ForwardInput unpacked_input;
-  const bool unpacked = detail::unpack_from_input_host_buffer(
-      input, torch::Device(torch::kCPU), unpacked_input);
+  Input unpacked_input;
+  const bool unpacked =
+      detail::unpack_from_input_host_buffer(input,
+                                            torch::Device(torch::kCPU),
+                                            torch::kFloat32,
+                                            unpacked_input,
+                                            false);
   if (!unpacked || !unpacked_input.sampling_params.sample_idxes.defined()) {
     return 0;
   }
@@ -75,7 +83,8 @@ torch::Tensor clone_cpu_tensor_view(const torch::Tensor& tensor) {
   return tensor.contiguous().clone();
 }
 
-void stabilize_schedule_overlap_host_views(ForwardInput& input) {
+template <typename Input>
+void stabilize_schedule_overlap_host_views(Input& input) {
   input.token_ids_host = clone_cpu_tensor_view(input.token_ids_host);
   input.positions_host = clone_cpu_tensor_view(input.positions_host);
   input.input_params.attention.host.block_tables =
@@ -435,8 +444,9 @@ void WorkerService::step(const DiTForwardInput& input,
   stream_->synchronize();
 }
 
+template <typename Input>
 void WorkerService::step(
-    ForwardInput& fwd_input,
+    Input& fwd_input,
     torch::Tensor& next_tokens,
     torch::Tensor& logprobs,
     torch::Tensor& top_tokens,
@@ -599,8 +609,12 @@ void WorkerService::create_polling_shm_thread(
         device_.set_device();
         Timer timer;
         while (true) {
-          ForwardInput fwd_input;
-          DiTForwardInput dit_input;
+          std::variant<ForwardInput, RecForwardInput, DiTForwardInput> input;
+          if (options_.backend() == "dit") {
+            input.emplace<DiTForwardInput>();
+          } else if (options_.backend() == "rec") {
+            input.emplace<RecForwardInput>();
+          }
           // NPU graph task updates cannot safely overlap an H2D enqueue from
           // the SHM polling thread. Keep scheduler overlap, but defer device
           // materialization to WorkerImpl's ordered prepare stream.
@@ -610,12 +624,17 @@ void WorkerService::create_polling_shm_thread(
                        options_.enable_graph())
                   ? InputDeviceMaterializationPolicy::DEFER_TO_WORKER_PREPARE
                   : InputDeviceMaterializationPolicy::MATERIALIZE_ON_READ;
-          if (options_.backend() == "dit") {
-            input_shm_manager->input_read(dit_input);
-          } else {
-            input_shm_manager->input_read(
-                fwd_input, device_, materialization_policy);
-          }
+          std::visit(
+              [&](auto& typed_input) {
+                using Input = std::decay_t<decltype(typed_input)>;
+                if constexpr (std::is_same_v<Input, DiTForwardInput>) {
+                  input_shm_manager->input_read(typed_input);
+                } else {
+                  input_shm_manager->input_read(
+                      typed_input, device_, materialization_policy);
+                }
+              },
+              input);
           timer.reset();
           // model output variables
           torch::Tensor next_tokens;
@@ -636,26 +655,31 @@ void WorkerService::create_polling_shm_thread(
           torch::Tensor out_logprobs;
           std::vector<JsonObjectOutputError> json_object_errors;
 
-          if (options_.backend() == "dit") {
-            step(dit_input, dit_images, dit_text_output);
-          } else {
-            step(fwd_input,
-                 next_tokens,
-                 logprobs,
-                 top_tokens,
-                 top_logprobs,
-                 embeddings,
-                 mm_embeddings,
-                 speculative_token_stats,
-                 dit_images,
-                 dit_text_output,
-                 expert_load_data,
-                 prepared_token,
-                 src_seq_idxes,
-                 out_tokens,
-                 out_logprobs,
-                 json_object_errors);
-          }
+          std::visit(
+              [&](auto& typed_input) {
+                using Input = std::decay_t<decltype(typed_input)>;
+                if constexpr (std::is_same_v<Input, DiTForwardInput>) {
+                  step(typed_input, dit_images, dit_text_output);
+                } else {
+                  step(typed_input,
+                       next_tokens,
+                       logprobs,
+                       top_tokens,
+                       top_logprobs,
+                       embeddings,
+                       mm_embeddings,
+                       speculative_token_stats,
+                       dit_images,
+                       dit_text_output,
+                       expert_load_data,
+                       prepared_token,
+                       src_seq_idxes,
+                       out_tokens,
+                       out_logprobs,
+                       json_object_errors);
+                }
+              },
+              input);
 
           const bool shm_write_ok =
               output_shm_manager->raw_output_write(next_tokens,
@@ -1022,8 +1046,12 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
         // convert proto::ForwardInput to ForwardInput
 
         Timer timer;
-        ForwardInput forward_input;
-        DiTForwardInput dit_input;
+        std::variant<ForwardInput, RecForwardInput, DiTForwardInput> input;
+        if (options_.backend() == "dit") {
+          input.emplace<DiTForwardInput>();
+        } else if (options_.backend() == "rec") {
+          input.emplace<RecForwardInput>();
+        }
         if (!pb_forward_input->has_packed_input()) {
           controller->SetFailed("ForwardInput requires a packed input payload");
           return;
@@ -1032,11 +1060,21 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
             pb_forward_input->packed_input();
         // Dispatch follows the configured domain, including token-only VLM
         // decode. A mismatched domain is rejected before tensor preparation.
-        const bool valid_input =
-            options_.backend() == "dit"
-                ? packed_proto_to_dit_forward_input(packed_input, dit_input)
-                : packed_proto_to_forward_input(
-                      packed_input, forward_input, device_, stream_.get());
+        const bool valid_input = std::visit(
+            [&](auto& typed_input) {
+              using Input = std::decay_t<decltype(typed_input)>;
+              if constexpr (std::is_same_v<Input, DiTForwardInput>) {
+                return packed_proto_to_dit_forward_input(packed_input,
+                                                         typed_input);
+              } else if constexpr (std::is_same_v<Input, RecForwardInput>) {
+                return packed_proto_to_rec_forward_input(
+                    packed_input, typed_input, device_, stream_.get());
+              } else {
+                return packed_proto_to_forward_input(
+                    packed_input, typed_input, device_, stream_.get());
+              }
+            },
+            input);
         if (!valid_input) {
           controller->SetFailed(
               "Invalid forward input domain, schema, or layout");
@@ -1061,26 +1099,31 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
         torch::Tensor out_logprobs;
         std::vector<JsonObjectOutputError> json_object_errors;
 
-        if (options_.backend() == "dit") {
-          step(dit_input, dit_images, dit_text_output);
-        } else {
-          step(forward_input,
-               next_tokens,
-               logprobs,
-               top_tokens,
-               top_logprobs,
-               embeddings,
-               mm_embeddings,
-               speculative_token_stats,
-               dit_images,
-               dit_text_output,
-               expert_load_data,
-               prepared_token,
-               src_seq_idxes,
-               out_tokens,
-               out_logprobs,
-               json_object_errors);
-        }
+        std::visit(
+            [&](auto& typed_input) {
+              using Input = std::decay_t<decltype(typed_input)>;
+              if constexpr (std::is_same_v<Input, DiTForwardInput>) {
+                step(typed_input, dit_images, dit_text_output);
+              } else {
+                step(typed_input,
+                     next_tokens,
+                     logprobs,
+                     top_tokens,
+                     top_logprobs,
+                     embeddings,
+                     mm_embeddings,
+                     speculative_token_stats,
+                     dit_images,
+                     dit_text_output,
+                     expert_load_data,
+                     prepared_token,
+                     src_seq_idxes,
+                     out_tokens,
+                     out_logprobs,
+                     json_object_errors);
+              }
+            },
+            input);
         // convert to proto output
         forward_output_to_proto(next_tokens,
                                 logprobs,

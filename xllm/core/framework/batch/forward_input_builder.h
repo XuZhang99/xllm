@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/framework/multimodal/mm_data.h"
 #include "core/framework/request/sequence.h"
 #include "core/runtime/forward_params.h"
+#include "core/runtime/rec_forward_params.h"
 #include "core/util/threadpool.h"
 
 namespace xllm {
@@ -60,6 +61,8 @@ class ForwardInputBuilder final {
 
   ForwardInput build_forward_input(uint32_t num_decoding_tokens,
                                    uint32_t min_decoding_batch_size);
+  RecForwardInput build_rec_forward_input(uint32_t num_decoding_tokens,
+                                          uint32_t min_decoding_batch_size);
 
   std::vector<Block> take_linear_restore_src_blocks() {
     return std::move(state_.linear_restore_src_blocks);
@@ -71,7 +74,8 @@ class ForwardInputBuilder final {
   // Core building methods
   void process_sequences();
   void process_sequences_multithreaded();
-  ForwardInput state_to_forward_input();
+  template <typename Input>
+  Input state_to_forward_input();
   void padding_decode_batch_size(uint32_t num_decoding_tokens,
                                  uint32_t min_decoding_batch_size);
 
@@ -81,7 +85,8 @@ class ForwardInputBuilder final {
       uint32_t seq_len,
       uint32_t kv_split_size);
 
-  void process_swap_block_infos(ForwardInput& forward_input);
+  template <typename Input>
+  void process_swap_block_infos(Input& forward_input);
 
   // State management
   struct BuilderState {

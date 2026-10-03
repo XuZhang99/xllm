@@ -30,7 +30,7 @@ limitations under the License.
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/model/model_args.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/rec_model_params.h"
 #include "core/framework/request/sequence.h"
 #include "core/framework/request/sequences_group.h"
 #include "core/framework/sampling/sampling_params.h"
@@ -163,7 +163,7 @@ void RecMultiRoundForwardInputBuilder::process_single_sequence(
   }
 }
 
-ForwardInput RecMultiRoundForwardInputBuilder::build_rec_forward_input(
+RecForwardInput RecMultiRoundForwardInputBuilder::build_rec_forward_input(
     uint32_t /*num_decoding_tokens*/,
     uint32_t /*min_decoding_batch_size*/) {
   // Rec multi-round mode doesn't use num_decoding_tokens and
@@ -172,7 +172,7 @@ ForwardInput RecMultiRoundForwardInputBuilder::build_rec_forward_input(
   return build_forward_input();
 }
 
-ForwardInput RecMultiRoundForwardInputBuilder::build_forward_input() {
+RecForwardInput RecMultiRoundForwardInputBuilder::build_forward_input() {
   // Reset Rec multi-round state for this build.
   rec_multi_round_state_.total_steps = get_rec_multi_round_decode_rounds();
 
@@ -289,13 +289,13 @@ void RecMultiRoundForwardInputBuilder::setup_kv_cache_info(
 #endif
 }
 
-ForwardInput RecMultiRoundForwardInputBuilder::state_to_forward_input() {
+RecForwardInput RecMultiRoundForwardInputBuilder::state_to_forward_input() {
   BuilderState& state = rec_multi_round_state_.base_state;
   if (state.flatten_tokens_vec.empty()) {
     return {};
   }
 
-  ForwardInput forward_input;
+  RecForwardInput forward_input;
 
   // Create tensors (same as ForwardInputBuilder)
   forward_input.token_ids =

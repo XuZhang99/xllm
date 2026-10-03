@@ -128,6 +128,12 @@ class RemoteWorker : public WorkerClient {
   folly::SemiFuture<std::optional<RawForwardOutput>> step_remote_async(
       const DiTForwardInput& inputs) override;
 
+  folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const RecForwardInput& inputs) override;
+
+  folly::SemiFuture<std::optional<RawForwardOutput>> step_remote_async(
+      const RecForwardInput& inputs) override;
+
   folly::SemiFuture<folly::Unit> process_group_test_async() override;
 
   const torch::Device& device() const override;

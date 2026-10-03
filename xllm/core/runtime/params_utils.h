@@ -25,6 +25,7 @@ limitations under the License.
 #include "worker.pb.h"
 
 namespace xllm {
+class RecForwardInput;
 
 class Stream;
 
@@ -52,6 +53,16 @@ bool dit_forward_input_to_packed_proto(
 bool packed_proto_to_dit_forward_input(
     const proto::PackedForwardInput& packed_forward_input,
     DiTForwardInput& input);
+
+bool rec_forward_input_to_packed_proto(
+    const RecForwardInput& input,
+    proto::PackedForwardInput* packed_forward_input);
+
+bool packed_proto_to_rec_forward_input(
+    const proto::PackedForwardInput& packed_forward_input,
+    RecForwardInput& input,
+    const torch::Device& device,
+    Stream* stream);
 
 void proto_to_forward_output(const proto::ForwardOutput& pb_output,
                              RawForwardOutput& raw_forward_output);

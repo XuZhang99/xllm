@@ -37,7 +37,7 @@ int32_t get_onerec_xattention_decode_position(const Sequence& sequence) {
 
 }  // namespace
 
-ForwardInput OneRecXAttentionForwardInputBuilder::build_rec_forward_input(
+RecForwardInput OneRecXAttentionForwardInputBuilder::build_rec_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
   auto input = OneRecForwardInputBuilder::build_rec_forward_input(

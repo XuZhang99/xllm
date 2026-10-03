@@ -43,6 +43,7 @@ limitations under the License.
 #include "framework/xtensor/xtensor.h"
 #include "options.h"
 #include "platform/device.h"
+#include "runtime/rec_forward_params.h"
 #include "util/threadpool.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/mooncake_weight_transfer.h"
@@ -124,7 +125,7 @@ class WorkerImpl {
 
   // prepare input for execution
   virtual ForwardInput prepare_inputs(Batch& batch);
-  virtual ForwardInput prepare_inputs(RecBatch& batch);
+  virtual RecForwardInput prepare_inputs(RecBatch& batch);
 
   // prepare work before model execution
   virtual void prepare_work_before_execute(const ForwardInput& inputs,
@@ -160,6 +161,11 @@ class WorkerImpl {
   virtual void apply_kv_block_swaps(const ModelInputParams& input_params);
 
   virtual std::optional<ForwardOutput> step(const DiTForwardInput& inputs);
+
+  virtual std::optional<ForwardOutput> step(const RecForwardInput& inputs);
+
+  virtual void prepare_work_before_execute(const RecForwardInput& inputs,
+                                           RecForwardInput& processed_inputs);
 
   virtual std::optional<ForwardOutput> step(const ForwardInput& inputs) = 0;
 
@@ -247,6 +253,9 @@ class WorkerImpl {
 
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const DiTForwardInput& inputs);
+
+  virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const RecForwardInput& inputs);
 
   virtual folly::SemiFuture<folly::Unit> process_group_test_async();
 

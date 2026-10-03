@@ -159,7 +159,8 @@ class WorkerService : public proto::DistributeWorker {
             std::vector<torch::Tensor>& tensors,
             std::vector<std::string>& text_output);
 
-  void step(ForwardInput& fwd_input,
+  template <typename Input>
+  void step(Input& fwd_input,
             torch::Tensor& next_tokens,
             torch::Tensor& logprobs,
             torch::Tensor& top_tokens,

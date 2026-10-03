@@ -30,7 +30,7 @@ class OneRecXAttentionForwardInputBuilder final
         sequence_groups_(data.sequence_groups),
         args_(args) {}
 
-  ForwardInput build_rec_forward_input(
+  RecForwardInput build_rec_forward_input(
       uint32_t num_decoding_tokens,
       uint32_t min_decoding_batch_size) override;
 

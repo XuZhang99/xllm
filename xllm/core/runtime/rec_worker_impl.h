@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "framework/batch/rec_batch.h"
 #include "runtime/llm_worker_impl.h"
+#include "runtime/rec_forward_params.h"
 #include "util/blockingconcurrentqueue.h"
 #include "util/rec_model_utils.h"
 #include "util/threadpool.h"
@@ -53,10 +54,15 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   void load_model(std::unique_ptr<ModelLoader> loader) override;
 
-  ForwardInput prepare_inputs(RecBatch& batch) override;
+  RecForwardInput prepare_inputs(RecBatch& batch) override;
 
-  void prepare_work_before_execute(const ForwardInput& inputs,
-                                   ForwardInput& processed_inputs) override;
+  void prepare_work_before_execute(const RecForwardInput& inputs,
+                                   RecForwardInput& processed_inputs) override;
+
+  std::optional<ForwardOutput> step(const RecForwardInput& input) override;
+
+  folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const RecForwardInput& input) override;
 
   std::optional<ForwardOutput> step(const ForwardInput& input) override;
 
@@ -93,12 +99,12 @@ class RecWorkerImpl : public LLMWorkerImpl {
         : runtime_(std::move(runtime)) {}
     virtual ~RecWorkPipeline() = default;
 
-    virtual ForwardInput prepare_inputs(RecBatch& batch);
+    virtual RecForwardInput prepare_inputs(RecBatch& batch);
 
-    virtual void prepare_work_before_execute(const ForwardInput& inputs,
-                                             ForwardInput& processed_inputs);
+    virtual void prepare_work_before_execute(const RecForwardInput& inputs,
+                                             RecForwardInput& processed_inputs);
 
-    virtual std::optional<ForwardOutput> step(const ForwardInput& input);
+    virtual std::optional<ForwardOutput> step(const RecForwardInput& input);
 
     RecPipelineRuntime& runtime() { return runtime_; }
 
@@ -111,8 +117,9 @@ class RecWorkerImpl : public LLMWorkerImpl {
     explicit LlmRecWorkPipeline(RecPipelineRuntime& runtime)
         : RecWorkPipeline(runtime) {}
 
-    void prepare_work_before_execute(const ForwardInput& inputs,
-                                     ForwardInput& processed_inputs) override;
+    void prepare_work_before_execute(
+        const RecForwardInput& inputs,
+        RecForwardInput& processed_inputs) override;
   };
 
   class OneRecWorkPipeline : public RecWorkPipeline {
@@ -121,12 +128,13 @@ class RecWorkerImpl : public LLMWorkerImpl {
         RecPipelineRuntime& runtime,
         RecPipelineType pipeline_type = RecPipelineType::kOneRecDefault);
 
-    ForwardInput prepare_inputs(RecBatch& batch) override;
+    RecForwardInput prepare_inputs(RecBatch& batch) override;
 
-    void prepare_work_before_execute(const ForwardInput& inputs,
-                                     ForwardInput& processed_inputs) override;
+    void prepare_work_before_execute(
+        const RecForwardInput& inputs,
+        RecForwardInput& processed_inputs) override;
 
-    std::optional<ForwardOutput> step(const ForwardInput& input) override;
+    std::optional<ForwardOutput> step(const RecForwardInput& input) override;
 
    private:
     folly::SemiFuture<torch::Tensor> prepare_filter_mask_async(
@@ -141,12 +149,13 @@ class RecWorkerImpl : public LLMWorkerImpl {
    public:
     explicit OneRecXAttentionWorkPipeline(RecPipelineRuntime& runtime);
 
-    ForwardInput prepare_inputs(RecBatch& batch) override;
+    RecForwardInput prepare_inputs(RecBatch& batch) override;
 
-    void prepare_work_before_execute(const ForwardInput& inputs,
-                                     ForwardInput& processed_inputs) override;
+    void prepare_work_before_execute(
+        const RecForwardInput& inputs,
+        RecForwardInput& processed_inputs) override;
 
-    std::optional<ForwardOutput> step(const ForwardInput& input) override;
+    std::optional<ForwardOutput> step(const RecForwardInput& input) override;
 
    private:
     struct RecConstraintDeviceTensors {
@@ -180,7 +189,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
     void allocate_unshared_kv_caches();
 
     void prepare_unshared_kv_caches_for_input(
-        const ForwardInput& inputs,
+        const RecForwardInput& inputs,
         OneRecXAttentionParams& onerec_params);
 
     void execute_cache_select(const torch::Tensor& out_token_index,
@@ -206,12 +215,13 @@ class RecWorkerImpl : public LLMWorkerImpl {
    public:
     explicit LlmRecMultiRoundPipeline(RecPipelineRuntime& runtime);
 
-    ForwardInput prepare_inputs(RecBatch& batch) override;
+    RecForwardInput prepare_inputs(RecBatch& batch) override;
 
-    void prepare_work_before_execute(const ForwardInput& inputs,
-                                     ForwardInput& processed_inputs) override;
+    void prepare_work_before_execute(
+        const RecForwardInput& inputs,
+        RecForwardInput& processed_inputs) override;
 
-    std::optional<ForwardOutput> step(const ForwardInput& input) override;
+    std::optional<ForwardOutput> step(const RecForwardInput& input) override;
 
    private:
     // Beam search related tensors
@@ -250,7 +260,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
     // Execute cache select kernel
     void execute_cache_select(const BeamSearchTensors& beam_tensors,
-                              ForwardInput& input,
+                              RecForwardInput& input,
                               int32_t round,
                               int32_t beam_width,
                               int32_t layer_num);
@@ -282,18 +292,18 @@ class RecWorkerImpl : public LLMWorkerImpl {
         int32_t max_decode_step);
 
     // Apply async result to prepare decode input for current round
-    void prepare_input_for_current_round(ForwardInput& input,
+    void prepare_input_for_current_round(RecForwardInput& input,
                                          const NextRoundInputResults& results,
                                          int32_t round,
                                          const torch::Tensor& top_tokens,
                                          const BeamSearchTensors& beam_tensors);
 
-    void prepare_round_input_for_npu(ForwardInput& input,
+    void prepare_round_input_for_npu(RecForwardInput& input,
                                      int32_t round,
                                      const torch::Tensor& top_tokens,
                                      const BeamSearchTensors& beam_tensors);
 
-    void prepare_two_stage_round_input(ForwardInput& input,
+    void prepare_two_stage_round_input(RecForwardInput& input,
                                        int32_t round,
                                        const torch::Tensor& top_tokens,
                                        const BeamSearchTensors& beam_tensors);
@@ -301,7 +311,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
     // Consume async result for current round and schedule async computation for
     // next round.
     void prepare_round_input_and_schedule_next(
-        ForwardInput& input,
+        RecForwardInput& input,
         int32_t round,
         int32_t total_rounds,
         int32_t batch_size,
@@ -313,8 +323,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
             next_round_async_result);
 
     void allocate_kv_caches_related();
-    void prepare_kv_caches_related_for_input(const ForwardInput& inputs,
-                                             ForwardInput& processed_inputs);
+    void prepare_kv_caches_related_for_input(const RecForwardInput& inputs,
+                                             RecForwardInput& processed_inputs);
 
     struct FullKvCacheOffsets {
       explicit FullKvCacheOffsets(
@@ -364,7 +374,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
       RecPipelineType type,
       RecPipelineRuntime& runtime);
 
-  void prepare_multi_modal_data(ForwardInput& processed_inputs);
+  void prepare_multi_modal_data(RecForwardInput& processed_inputs);
 
   void initialize_xattention_workspace();
 

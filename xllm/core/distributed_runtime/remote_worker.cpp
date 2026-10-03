@@ -33,6 +33,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/params_utils.h"
+#include "runtime/rec_forward_params.h"
 #include "util/hash_util.h"
 
 namespace xllm {
@@ -188,6 +189,23 @@ folly::SemiFuture<std::optional<ForwardOutput>> RemoteWorker::step_async(
 
 folly::SemiFuture<std::optional<RawForwardOutput>>
 RemoteWorker::step_remote_async(const DiTForwardInput& input) {
+  folly::Promise<std::optional<RawForwardOutput>> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule(
+      [this, input = input, promise = std::move(promise)]() mutable {
+        channel_->execute_model_async(input, promise);
+      });
+  return future;
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>> RemoteWorker::step_async(
+    const RecForwardInput& /*input*/) {
+  LOG(FATAL) << "Native Rec remote execution requires step_remote_async";
+  return folly::makeSemiFuture(std::optional<ForwardOutput>{});
+}
+
+folly::SemiFuture<std::optional<RawForwardOutput>>
+RemoteWorker::step_remote_async(const RecForwardInput& input) {
   folly::Promise<std::optional<RawForwardOutput>> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(

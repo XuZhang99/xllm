@@ -33,6 +33,7 @@ limitations under the License.
 #include "layers/common/attention_metadata.h"
 #endif
 #include "platform/stream.h"
+#include "runtime/rec_forward_params.h"
 #if defined(USE_MUSA)
 #include <musa_runtime.h>
 #endif
@@ -96,7 +97,15 @@ inline bool is_aligned_for_cuda_zero_copy(const void* ptr) {
 // Domain values are stable across later forward-input migrations. TOKEN is the
 // temporary token contract; VLM=2 and REC=3 are reserved until their codecs
 // land.
-enum class PackedInputDomain : uint8_t { TOKEN = 1, DIT = 4 };
+enum class PackedInputDomain : uint8_t { TOKEN = 1, REC = 3, DIT = 4 };
+
+template <typename Input>
+constexpr PackedInputDomain packed_input_domain() {
+  if constexpr (std::is_same_v<Input, RecForwardInput>) {
+    return PackedInputDomain::REC;
+  }
+  return PackedInputDomain::TOKEN;
+}
 constexpr uint64_t kPackedInputMagic = 0x584c4c4d494e5032;
 constexpr uint16_t kPackedInputSchemaVersion = 2;
 constexpr uint32_t kPackedInputHeaderBytes = 40;
@@ -162,7 +171,8 @@ bool read_input_layout(const char* payload,
       layout.tensor_arena_offset % kRawInputTensorArenaAlignment != 0) {
     return false;
   }
-  if (expected_domain == PackedInputDomain::TOKEN) {
+  if (expected_domain == PackedInputDomain::TOKEN ||
+      expected_domain == PackedInputDomain::REC) {
     // The removed DiT tail remains false in the temporary token descriptor so
     // legacy token payloads remain readable without reintroducing DiT
     // ownership.
@@ -2483,8 +2493,9 @@ inline void read_dit_forward_output(const char*& buffer,
   read_string_vector(buffer, output.text_output);
 }
 
+template <typename Input>
 inline void initialize_device_buffer_session(ReadContext& context,
-                                             ForwardInput& forward_input,
+                                             Input& forward_input,
                                              const torch::Device& device,
                                              const char* payload_base,
                                              const uint64_t payload_size,
@@ -2591,17 +2602,18 @@ inline void finalize_device_buffer_session(DeviceBufferSession& session,
 #endif
 }
 
+template <typename Input>
 inline void deserialize_forward_input_payload(
     const char*& buffer,
     const uint64_t buffer_size,
-    ForwardInput& forward_input,
+    Input& forward_input,
     const torch::Device& device,
     Stream* stream,
     bool materialize_device_buffer = true) {
   const char* payload_base = buffer;
   RawInputLayoutHeader layout;
   CHECK(read_input_layout(
-      payload_base, buffer_size, PackedInputDomain::TOKEN, layout))
+      payload_base, buffer_size, packed_input_domain<Input>(), layout))
       << "Invalid token input domain, schema, or layout";
   buffer = payload_base + layout.header_bytes;
 
@@ -2811,17 +2823,20 @@ inline uint64_t get_input_layout_size(const RawInputLayoutHeader& layout) {
   return layout.tensor_arena_offset + layout.tensor_arena_bytes;
 }
 
+template <typename Input>
 bool packed_proto_to_forward_input_impl(
     const proto::PackedForwardInput& packed_forward_input,
-    ForwardInput& forward_input,
+    Input& forward_input,
     const torch::Device& device,
     Stream* stream) {
   (void)device;
   (void)stream;
   const std::string& payload = packed_forward_input.payload();
   RawInputLayoutHeader layout;
-  if (!read_input_layout(
-          payload.data(), payload.size(), PackedInputDomain::TOKEN, layout)) {
+  if (!read_input_layout(payload.data(),
+                         payload.size(),
+                         packed_input_domain<Input>(),
+                         layout)) {
     return false;
   }
 
@@ -3067,8 +3082,9 @@ void write_host_vector_or_tensor(RawInputSerializeContext& context,
   write_tensor(context, tensor);
 }
 
+template <typename Input>
 inline void serialize_forward_input_sections(
-    const ForwardInput& input,
+    const Input& input,
     RawInputSerializeContext& context) {
   const torch::Tensor host_token_ids =
       to_cpu_contiguous(input.host_token_ids());
@@ -3235,8 +3251,8 @@ inline void write_input_layout(char*& buffer,
   write_data(buffer, layout.tensor_arena_bytes);
 }
 
-inline RawInputLayoutHeader calculate_forward_input_layout(
-    const ForwardInput& input) {
+template <typename Input>
+inline RawInputLayoutHeader calculate_forward_input_layout(const Input& input) {
   RawInputSerializeContext context;
   serialize_forward_input_sections(input, context);
   const uint64_t tensor_arena_offset =
@@ -3246,11 +3262,12 @@ inline RawInputLayoutHeader calculate_forward_input_layout(
       context.descriptor.size, tensor_arena_offset, context.tensor_arena.size};
 }
 
-inline void serialize_forward_input(const ForwardInput& input,
+template <typename Input>
+inline void serialize_forward_input(const Input& input,
                                     const RawInputLayoutHeader& layout,
                                     char*& buffer) {
   char* payload_base = buffer;
-  write_input_layout(buffer, layout, PackedInputDomain::TOKEN);
+  write_input_layout(buffer, layout, packed_input_domain<Input>());
 
   RawInputSerializeContext context{
       {buffer, 0}, {payload_base + layout.tensor_arena_offset, 0}};
@@ -3438,11 +3455,12 @@ void convert_tensor_to_raw_output(
 
 namespace detail {
 
-bool unpack_from_input_host_buffer(const ForwardInput& input,
-                                   const torch::Device& device,
-                                   torch::ScalarType dtype,
-                                   ForwardInput& output,
-                                   bool materialize_device_buffer) {
+template <typename Input>
+bool unpack_native_input_host_buffer(const Input& input,
+                                     const torch::Device& device,
+                                     torch::ScalarType dtype,
+                                     Input& output,
+                                     bool materialize_device_buffer) {
   if (!input.runtime.input_host_buffer.defined() ||
       !input.runtime.input_host_buffer.device().is_cpu() ||
       input.runtime.input_host_buffer.numel() == 0) {
@@ -3453,7 +3471,7 @@ bool unpack_from_input_host_buffer(const ForwardInput& input,
   if (!read_input_layout(
           static_cast<const char*>(input.runtime.input_host_buffer.data_ptr()),
           input.runtime.input_host_buffer.numel(),
-          PackedInputDomain::TOKEN,
+          packed_input_domain<Input>(),
           layout)) {
     return false;
   }
@@ -3497,6 +3515,24 @@ bool unpack_from_input_host_buffer(const ForwardInput& input,
 
 bool unpack_from_input_host_buffer(const ForwardInput& input,
                                    const torch::Device& device,
+                                   torch::ScalarType dtype,
+                                   ForwardInput& output,
+                                   bool materialize_device_buffer) {
+  return unpack_native_input_host_buffer(
+      input, device, dtype, output, materialize_device_buffer);
+}
+
+bool unpack_from_input_host_buffer(const RecForwardInput& input,
+                                   const torch::Device& device,
+                                   torch::ScalarType dtype,
+                                   RecForwardInput& output,
+                                   bool materialize_device_buffer) {
+  return unpack_native_input_host_buffer(
+      input, device, dtype, output, materialize_device_buffer);
+}
+
+bool unpack_from_input_host_buffer(const ForwardInput& input,
+                                   const torch::Device& device,
                                    ForwardInput& output) {
   return unpack_from_input_host_buffer(input,
                                        device,
@@ -3515,8 +3551,9 @@ bool try_to_device_from_input_host_buffer(const ForwardInput& input,
 
 }  // namespace detail
 
-bool forward_input_to_packed_proto(
-    const ForwardInput& input,
+template <typename Input>
+bool token_input_to_packed_proto(
+    const Input& input,
     proto::PackedForwardInput* packed_forward_input) {
   CHECK(packed_forward_input != nullptr);
   if (!std::holds_alternative<std::monostate>(input.input_params.rec_params) ||
@@ -3536,6 +3573,31 @@ bool forward_input_to_packed_proto(
 
   packed_forward_input->mutable_payload()->swap(payload);
   return true;
+}
+
+bool forward_input_to_packed_proto(
+    const ForwardInput& input,
+    proto::PackedForwardInput* packed_forward_input) {
+  return token_input_to_packed_proto(input, packed_forward_input);
+}
+
+bool rec_forward_input_to_packed_proto(
+    const RecForwardInput& input,
+    proto::PackedForwardInput* packed_forward_input) {
+  if (input.decoder_sampling_params.selected_token_idxes.defined()) {
+    LOG(ERROR) << "Decoder sampling requires local Rec execution";
+    return false;
+  }
+  return token_input_to_packed_proto(input, packed_forward_input);
+}
+
+bool packed_proto_to_rec_forward_input(
+    const proto::PackedForwardInput& packed_forward_input,
+    RecForwardInput& input,
+    const torch::Device& device,
+    Stream* stream) {
+  return packed_proto_to_forward_input_impl(
+      packed_forward_input, input, device, stream);
 }
 
 bool packed_proto_to_forward_input(
@@ -3634,7 +3696,8 @@ void ForwardSharedMemoryManager::input_read(DiTForwardInput& input) {
       << "Invalid native DiT input domain, schema, or layout";
 }
 
-bool ForwardSharedMemoryManager::input_write(const ForwardInput& input) {
+template <typename Input>
+bool ForwardSharedMemoryManager::write_token_input(const Input& input) {
   if (!std::holds_alternative<std::monostate>(input.input_params.rec_params) ||
       input.step_decode.has_value()) {
     LOG(ERROR) << "Rec input transport is not supported";
@@ -3662,8 +3725,9 @@ bool ForwardSharedMemoryManager::input_write(const ForwardInput& input) {
   return true;
 }
 
-void ForwardSharedMemoryManager::input_read(
-    ForwardInput& input,
+template <typename Input>
+void ForwardSharedMemoryManager::read_token_input(
+    Input& input,
     const torch::Device& device,
     InputDeviceMaterializationPolicy policy) {
   while (true) {
@@ -3682,8 +3746,8 @@ void ForwardSharedMemoryManager::input_read(
   CHECK_LE(total_size, size() - sizeof(ControlMetadata) - sizeof(uint64_t))
       << "Shared memory input payload exceeds the segment";
   RawInputLayoutHeader layout;
-  CHECK(
-      read_input_layout(data_ptr, total_size, PackedInputDomain::TOKEN, layout))
+  CHECK(read_input_layout(
+      data_ptr, total_size, packed_input_domain<Input>(), layout))
       << "Invalid token input domain, schema, or layout";
   bool materialize_device_buffer = false;
 #if defined(USE_NPU)
@@ -3718,6 +3782,32 @@ void ForwardSharedMemoryManager::input_read(
                                     materialize_device_buffer);
 
   return;
+}
+
+bool ForwardSharedMemoryManager::input_write(const ForwardInput& input) {
+  return write_token_input(input);
+}
+
+bool ForwardSharedMemoryManager::input_write(const RecForwardInput& input) {
+  if (input.decoder_sampling_params.selected_token_idxes.defined()) {
+    LOG(ERROR) << "Decoder sampling requires local Rec execution";
+    return false;
+  }
+  return write_token_input(input);
+}
+
+void ForwardSharedMemoryManager::input_read(
+    ForwardInput& input,
+    const torch::Device& device,
+    InputDeviceMaterializationPolicy policy) {
+  read_token_input(input, device, policy);
+}
+
+void ForwardSharedMemoryManager::input_read(
+    RecForwardInput& input,
+    const torch::Device& device,
+    InputDeviceMaterializationPolicy policy) {
+  read_token_input(input, device, policy);
 }
 
 bool ForwardSharedMemoryManager::raw_output_write(

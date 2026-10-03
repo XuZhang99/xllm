@@ -68,7 +68,7 @@ void RecBatchState::refresh_sequences_from_groups() {
   }
 }
 
-ForwardInput RecBatchState::prepare_forward_input(
+RecForwardInput RecBatchState::prepare_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size,
     const ModelArgs& args,
@@ -76,7 +76,7 @@ ForwardInput RecBatchState::prepare_forward_input(
   if (input_type_ == BatchInputType::SEQUENCE) {
     const auto data = sequence_state_.prepare_sequence_input_data();
     output_handler_.prepare(data);
-    return sequence_state_.build_sequence_input(
+    return sequence_state_.build_rec_sequence_input(
         data, num_decoding_tokens, min_decoding_batch_size, args, cp_size);
   }
   return prepare_rec_forward_input(num_decoding_tokens,
@@ -85,18 +85,18 @@ ForwardInput RecBatchState::prepare_forward_input(
                                    /*thread_pool=*/nullptr);
 }
 
-ForwardInput RecBatchState::prepare_forward_input(const ModelArgs& args,
-                                                  ThreadPool* thread_pool,
-                                                  int32_t cp_size) {
+RecForwardInput RecBatchState::prepare_forward_input(const ModelArgs& args,
+                                                     ThreadPool* thread_pool,
+                                                     int32_t cp_size) {
   CHECK(input_type_ == BatchInputType::SEQUENCE)
-      << "Distributed input transport requires a sequence batch";
+      << "Sequence packing requires a sequence batch";
   const auto data = sequence_state_.prepare_distributed_input_data();
   output_handler_.prepare(data);
-  return sequence_state_.build_distributed_input(
+  return sequence_state_.build_rec_sequence_input(
       data, args, thread_pool, cp_size);
 }
 
-ForwardInput RecBatchState::prepare_rec_forward_input(
+RecForwardInput RecBatchState::prepare_rec_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size,
     const ModelArgs& args,

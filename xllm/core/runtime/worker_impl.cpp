@@ -708,9 +708,27 @@ ForwardInput WorkerImpl::prepare_inputs(Batch& batch) {
   return model_executor_->prepare_inputs(batch);
 }
 
-ForwardInput WorkerImpl::prepare_inputs(RecBatch& batch) {
+RecForwardInput WorkerImpl::prepare_inputs(RecBatch& batch) {
   LOG(FATAL) << "Rec batch input requires a Rec worker";
   return {};
+}
+
+std::optional<ForwardOutput> WorkerImpl::step(
+    const RecForwardInput& /*inputs*/) {
+  LOG(FATAL) << "Rec input requires a Rec worker";
+  return std::nullopt;
+}
+
+void WorkerImpl::prepare_work_before_execute(
+    const RecForwardInput& /*inputs*/,
+    RecForwardInput& /*processed_inputs*/) {
+  LOG(FATAL) << "Rec input preparation requires a Rec worker";
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
+    const RecForwardInput& /*inputs*/) {
+  LOG(FATAL) << "Rec input requires a Rec worker";
+  return folly::makeSemiFuture(std::optional<ForwardOutput>{});
 }
 
 bool WorkerImpl::can_prepare_npu_graph_decode_input(

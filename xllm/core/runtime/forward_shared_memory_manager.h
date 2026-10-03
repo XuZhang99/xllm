@@ -22,6 +22,7 @@ limitations under the License.
 #include "util/shared_memory_manager.h"
 
 namespace xllm {
+class RecForwardInput;
 
 class Stream;
 
@@ -110,6 +111,12 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
   bool input_write(const DiTForwardInput& input);
   void input_read(DiTForwardInput& input);
 
+  bool input_write(const RecForwardInput& input);
+  void input_read(RecForwardInput& input,
+                  const torch::Device& device,
+                  InputDeviceMaterializationPolicy policy =
+                      InputDeviceMaterializationPolicy::MATERIALIZE_ON_READ);
+
   bool input_write(const ForwardInput& input);
   void input_read(ForwardInput& input,
                   const torch::Device& device,
@@ -136,6 +143,14 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
   void clear();
 
  private:
+  template <typename Input>
+  bool write_token_input(const Input& input);
+
+  template <typename Input>
+  void read_token_input(Input& input,
+                        const torch::Device& device,
+                        InputDeviceMaterializationPolicy policy);
+
   ForwardType forward_type_;
   uint64_t last_version_ = 0;
   void* metadata_addr_ = nullptr;

@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/framework/batch/batch_input_data.h"
 #include "core/framework/batch/batch_sequence_plan.h"
 #include "core/runtime/forward_params.h"
+#include "core/runtime/rec_forward_params.h"
 #include "core/util/threadpool.h"
 
 namespace xllm {
@@ -71,6 +72,15 @@ class BatchState final {
                                        const ModelArgs& args,
                                        ThreadPool* thread_pool,
                                        int32_t cp_size);
+  RecForwardInput build_rec_sequence_input(const BatchInputData& data,
+                                           uint32_t num_decoding_tokens,
+                                           uint32_t min_decoding_batch_size,
+                                           const ModelArgs& args,
+                                           int32_t cp_size);
+  RecForwardInput build_rec_sequence_input(const BatchInputData& data,
+                                           const ModelArgs& args,
+                                           ThreadPool* thread_pool,
+                                           int32_t cp_size);
   static std::unordered_map<uint32_t, uint32_t> cal_seq_exchange_index(
       std::vector<uint32_t>& kv_cache_tokens_num);
 

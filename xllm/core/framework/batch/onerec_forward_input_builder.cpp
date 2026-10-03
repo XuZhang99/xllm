@@ -26,7 +26,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/rec_model_params.h"
 #include "core/framework/request/onerec_sequence.h"
 #include "core/framework/sampling/sampling_params.h"
 #include "core/util/tensor_helper.h"
@@ -90,7 +90,7 @@ OneRecForwardInputBuilder::OneRecForwardInputBuilder(
   perf_cache.memory_pool.reset();
 }
 
-ForwardInput OneRecForwardInputBuilder::build_rec_forward_input(
+RecForwardInput OneRecForwardInputBuilder::build_rec_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
   auto& perf_cache = get_perf_cache();
@@ -108,7 +108,7 @@ ForwardInput OneRecForwardInputBuilder::build_rec_forward_input(
           : 0;
   // const int32_t THREADPOOL_THRESHOLD = 16;
   if (num_sequences == 0) {
-    return ForwardInput{};
+    return RecForwardInput{};
   }
 
   // Get basic information of first sequence - optimize pointer access
@@ -118,7 +118,7 @@ ForwardInput OneRecForwardInputBuilder::build_rec_forward_input(
   }
 
   if (!first_sequence) {
-    return ForwardInput{};
+    return RecForwardInput{};
   }
 
   const uint32_t seq_len = first_sequence->num_tokens();
@@ -370,8 +370,8 @@ ForwardInput OneRecForwardInputBuilder::build_rec_forward_input(
 
   const auto& encoder_tokens = *encoder_tokens_ptr;
 
-  // ========== High-performance ForwardInput construction ==========
-  ForwardInput forward_input;
+  // ========== High-performance RecForwardInput construction ==========
+  RecForwardInput forward_input;
   auto& input_params = forward_input.input_params;
   auto& onerec_params = input_params.mutable_onerec_params();
   auto& cache_data = perf_cache.cache_data;

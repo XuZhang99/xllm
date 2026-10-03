@@ -27,7 +27,7 @@ limitations under the License.
 #include "core/framework/multimodal/mm_data.h"
 #include "core/framework/request/sequence.h"
 #include "core/framework/request/sequences_group.h"
-#include "core/runtime/forward_params.h"
+#include "core/runtime/rec_forward_params.h"
 #include "core/util/threadpool.h"
 
 namespace xllm {
@@ -44,14 +44,14 @@ class RecMultiRoundForwardInputBuilder final : public RecForwardInputBuilder {
   ~RecMultiRoundForwardInputBuilder() override = default;
 
   // Override base class method
-  ForwardInput build_rec_forward_input(
+  RecForwardInput build_rec_forward_input(
       uint32_t num_decoding_tokens,
       uint32_t min_decoding_batch_size) override;
 
  private:
   // Build Rec multi-round forward input for the whole batch (internal
   // implementation).
-  ForwardInput build_forward_input();
+  RecForwardInput build_forward_input();
 
   // Multi-round token/cache layout; sampling metadata is a shared component.
   struct BuilderState {
@@ -137,7 +137,7 @@ class RecMultiRoundForwardInputBuilder final : public RecForwardInputBuilder {
                                     RecMultiRoundBuilderState* state_ptr);
 
   // Rec multi-round specific forward input conversion functions
-  ForwardInput state_to_forward_input();
+  RecForwardInput state_to_forward_input();
 
   void setup_kv_cache_info(Sequence* sequence,
                            uint32_t n_kv_cache_tokens,

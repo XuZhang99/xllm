@@ -34,12 +34,16 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model/rec_model_params.h"
+#include "core/framework/multimodal/mm_batch_data.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "core/framework/multimodal/mm_type.h"
 #include "core/framework/request/onerec_sequence.h"
 #include "core/framework/request/rec_sequence.h"
 #include "core/framework/request/request.h"
 #include "core/framework/request/stopping_checker.h"
+#include "core/layers/common/attention_metadata.h"
+#include "core/runtime/rec_forward_params.h"
 #include "core/util/hash_util.h"
 
 namespace xllm {
@@ -153,7 +157,153 @@ TEST(BatchFactoryTest, FactoriesKeepDomainsSeparateForTheSameInputContract) {
   ModelArgs args;
   const auto input =
       rec_batches[0].prepare_forward_input(args, /*thread_pool=*/nullptr);
+  static_assert(std::is_same_v<std::decay_t<decltype(input)>, RecForwardInput>);
+  static_assert(std::is_same_v<decltype(input.input_params), RecModelParams>);
+  static_assert(!std::is_base_of_v<ForwardInput, RecForwardInput>);
+  static_assert(!std::is_base_of_v<ModelInputParams, RecModelParams>);
+  static_assert(!std::is_convertible_v<RecForwardInput, ForwardInput>);
+  static_assert(!std::is_convertible_v<RecModelParams, ModelInputParams>);
   EXPECT_FALSE(input.token_ids.defined());
+}
+
+TEST(RecForwardInputTest, DeviceConversionPreservesRecPayloadAndSampling) {
+  RecForwardInput source;
+  source.token_ids = torch::tensor({7, 8}, torch::kInt32);
+  source.positions = torch::tensor({2, 3}, torch::kInt32);
+  source.input_params.meta.num_sequences = 1;
+  source.input_params.meta.batch_id = 17;
+  source.input_params.embedding.linear_state_ids = {4};
+  const auto values = torch::tensor({{1.0F, 2.0F}, {3.0F, 4.0F}});
+  const auto indices = torch::tensor({0, 2}, torch::kInt64);
+  source.input_params.multimodal.mm_data = MMBatchData(
+      MMType::EMBEDDING,
+      {{"MULTI_MODAL_VALUES", values}, {"MULTI_MODAL_INDICES", indices}});
+  auto& xattention = source.input_params.mutable_onerec_xattention_params();
+  xattention.encoder_seq_lens = {3};
+  xattention.encoder_token_ids = torch::tensor({1, 2, 3}, torch::kInt32);
+  xattention.decoder_context_embedding = values;
+  xattention.beam_width_tensor = torch::tensor({2}, torch::kInt32);
+  source.sampling_params.selected_token_idxes =
+      torch::tensor({1}, torch::kInt32);
+  source.decoder_sampling_params.selected_token_idxes =
+      torch::tensor({0, 1}, torch::kInt32);
+  source.decoder_sampling_params.temperatures = torch::tensor({0.5F, 0.75F});
+  source.step_decode = StepDecodeMeta{.batch_size = 1,
+                                      .beam_width = 2,
+                                      .current_round = 1,
+                                      .total_round = 3,
+                                      .full_kv_shape = {6, 2, 4},
+                                      .decode_positions_vec = {3}};
+
+  const auto input = source.to(torch::Device(torch::kCPU), torch::kFloat32);
+  EXPECT_TRUE(input.runtime.device_tensors_ready);
+  EXPECT_TRUE(torch::equal(input.token_ids, source.token_ids));
+  EXPECT_TRUE(torch::equal(input.host_token_ids(), source.token_ids));
+  EXPECT_TRUE(torch::equal(input.host_positions(), source.positions));
+  EXPECT_EQ(input.input_params.meta.batch_id, 17);
+  EXPECT_TRUE(torch::equal(input.input_params.embedding.linear_state_indices,
+                           torch::tensor({4}, torch::kInt32)));
+  const auto converted_values =
+      input.input_params.multimodal.mm_data.get<torch::Tensor>(
+          "MULTI_MODAL_VALUES");
+  const auto converted_indices =
+      input.input_params.multimodal.mm_data.get<torch::Tensor>(
+          "MULTI_MODAL_INDICES");
+  ASSERT_TRUE(converted_values.has_value());
+  ASSERT_TRUE(converted_indices.has_value());
+  EXPECT_TRUE(torch::equal(*converted_values, values));
+  EXPECT_TRUE(torch::equal(*converted_indices, indices));
+  EXPECT_EQ(converted_indices->scalar_type(), torch::kInt64);
+  const auto* converted_xattention =
+      input.input_params.onerec_xattention_params();
+  ASSERT_NE(converted_xattention, nullptr);
+  EXPECT_EQ(converted_xattention->encoder_seq_lens, (std::vector<int32_t>{3}));
+  EXPECT_TRUE(torch::equal(converted_xattention->encoder_token_ids,
+                           xattention.encoder_token_ids));
+  EXPECT_TRUE(
+      torch::equal(converted_xattention->decoder_context_embedding, values));
+  EXPECT_TRUE(torch::equal(input.sampling_params.selected_token_idxes,
+                           source.sampling_params.selected_token_idxes));
+  EXPECT_TRUE(
+      torch::equal(input.decoder_sampling_params.selected_token_idxes,
+                   source.decoder_sampling_params.selected_token_idxes));
+  EXPECT_TRUE(torch::equal(input.decoder_sampling_params.temperatures,
+                           source.decoder_sampling_params.temperatures));
+  ASSERT_TRUE(input.has_step_meta());
+  EXPECT_EQ(input.step_meta()->batch_size, 1);
+  EXPECT_EQ(input.step_meta()->beam_width, 2);
+  EXPECT_EQ(input.step_meta()->current_round, 1);
+  EXPECT_EQ(input.step_meta()->total_round, 3);
+  EXPECT_EQ(input.step_meta()->full_kv_shape, (std::vector<int64_t>{6, 2, 4}));
+  EXPECT_EQ(input.step_meta()->decode_positions_vec, (std::vector<int32_t>{3}));
+}
+
+TEST(RecModelParamsTest, DeviceConversionPreservesMultiRoundStrategy) {
+  RecModelParams source;
+  auto& multi_round = source.mutable_llmrec_params();
+  multi_round.batch_size = 1;
+  multi_round.beam_width = 2;
+  multi_round.total_round = 3;
+  multi_round.current_round_tensor = torch::tensor({1}, torch::kInt32);
+  multi_round.full_k_caches = {torch::ones({2, 3, 4})};
+  multi_round.full_v_caches = {torch::zeros({2, 3, 4})};
+  multi_round.decode_positions_tensor_list = {
+      torch::tensor({2, 2}, torch::kInt32)};
+
+  const auto input = source.to(torch::Device(torch::kCPU));
+  const auto* converted = input.llmrec_params();
+  ASSERT_NE(converted, nullptr);
+  EXPECT_FALSE(input.has_onerec_params());
+  EXPECT_EQ(converted->batch_size, 1);
+  EXPECT_EQ(converted->beam_width, 2);
+  EXPECT_EQ(converted->total_round, 3);
+  EXPECT_TRUE(torch::equal(converted->current_round_tensor,
+                           multi_round.current_round_tensor));
+  ASSERT_EQ(converted->full_k_caches.size(), 1);
+  ASSERT_EQ(converted->full_v_caches.size(), 1);
+  ASSERT_EQ(converted->decode_positions_tensor_list.size(), 1);
+  EXPECT_TRUE(
+      torch::equal(converted->full_k_caches[0], multi_round.full_k_caches[0]));
+  EXPECT_TRUE(
+      torch::equal(converted->full_v_caches[0], multi_round.full_v_caches[0]));
+  EXPECT_TRUE(torch::equal(converted->decode_positions_tensor_list[0],
+                           multi_round.decode_positions_tensor_list[0]));
+}
+
+TEST(RecModelParamsTest, ExecutorProjectionRestoresMutatedOwnedState) {
+  RecModelParams owner;
+  owner.attention.host.kv_seq_lens = {2, 3};
+  owner.embedding.request_ids = {"first", "second"};
+  owner.embedding.input_embedding = torch::ones({2, 4});
+  auto& strategy = owner.mutable_llmrec_params();
+  strategy.full_k_caches = {torch::ones({2, 3, 4})};
+  const auto* original_lengths = owner.attention.host.kv_seq_lens.data();
+  const auto* original_request_ids = owner.embedding.request_ids.data();
+  const void* original_embedding = owner.embedding.input_embedding.data_ptr();
+  const void* original_cache = strategy.full_k_caches[0].data_ptr();
+  {
+    RecLegacyExecutionProjection projection(owner);
+    auto& params = projection.params();
+    EXPECT_EQ(params.attention.host.kv_seq_lens.data(), original_lengths);
+    EXPECT_EQ(params.embedding.request_ids.data(), original_request_ids);
+    EXPECT_EQ(params.embedding.input_embedding.data_ptr(), original_embedding);
+    EXPECT_EQ(params.llmrec_params()->full_k_caches[0].data_ptr(),
+              original_cache);
+    params.attention.host.kv_seq_lens[1] = 4;
+    params.mutable_llmrec_params().current_round_tensor =
+        torch::tensor({2}, torch::kInt32);
+    params.attn_metadata = std::make_shared<layer::AttentionMetadata>();
+    params.enable_graph = true;
+  }
+  EXPECT_EQ(owner.attention.host.kv_seq_lens, (std::vector<int32_t>{2, 4}));
+  EXPECT_EQ(owner.attention.host.kv_seq_lens.data(), original_lengths);
+  EXPECT_EQ(owner.embedding.request_ids.data(), original_request_ids);
+  EXPECT_EQ(owner.embedding.input_embedding.data_ptr(), original_embedding);
+  EXPECT_EQ(owner.llmrec_params()->full_k_caches[0].data_ptr(), original_cache);
+  EXPECT_TRUE(torch::equal(owner.llmrec_params()->current_round_tensor,
+                           torch::tensor({2}, torch::kInt32)));
+  EXPECT_NE(owner.attn_metadata, nullptr);
+  EXPECT_TRUE(owner.enable_graph);
 }
 
 TEST(BatchFactoryTest, RecBatchFinishesSequenceAndGroupInputs) {
@@ -193,8 +343,16 @@ TEST(BatchFactoryTest, RecOutputsRefreshSamplingTargetsAcrossForwards) {
   ModelArgs args;
 
   // Only the second sequence completes prefill and owns an output row.
-  (void)batch.prepare_forward_input(
+  const auto prefill_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, args);
+  static_assert(
+      std::is_same_v<std::decay_t<decltype(prefill_input)>, RecForwardInput>);
+  EXPECT_TRUE(torch::equal(prefill_input.token_ids,
+                           torch::tensor({1, 2, 1, 2, 3}, torch::kInt32)));
+  EXPECT_TRUE(torch::equal(prefill_input.sampling_params.selected_token_idxes,
+                           torch::tensor({4}, torch::kInt32)));
+  EXPECT_EQ(prefill_input.input_params.meta.batch_id, batch_id);
+  EXPECT_FALSE(prefill_input.has_step_meta());
   SampleOutput sample_output;
   sample_output.next_tokens = torch::tensor({42}, torch::kInt);
   batch.process_sample_output(sample_output,
@@ -499,6 +657,7 @@ TEST(BatchFactoryTest, RecMultiRoundBuilderUsesScheduledSequencesAndBudgets) {
   auto input = batches[0].prepare_forward_input(/*num_decoding_tokens=*/1,
                                                 /*min_decoding_batch_size=*/0,
                                                 args);
+  static_assert(std::is_same_v<decltype(input), RecForwardInput>);
 
   EXPECT_TRUE(
       torch::equal(input.token_ids, torch::tensor({1, 1, 2}, torch::kInt32)));
@@ -512,8 +671,61 @@ TEST(BatchFactoryTest, RecMultiRoundBuilderUsesScheduledSequencesAndBudgets) {
   EXPECT_EQ(input.step_decode->batch_size, 2);
   EXPECT_EQ(input.step_decode->beam_width, 2);
   EXPECT_EQ(input.step_decode->total_round, 3);
+  EXPECT_EQ(input.step_decode->decode_positions_vec,
+            (std::vector<int32_t>{3, 3}));
+  EXPECT_TRUE(torch::equal(input.decoder_sampling_params.selected_token_idxes,
+                           torch::tensor({0, 1, 2, 3}, torch::kInt32)));
   EXPECT_EQ(batches[0].get_allowed_max_tokens(), (std::vector<uint32_t>{1, 2}));
 }
+
+#if defined(USE_CUDA) || defined(USE_NPU) || defined(USE_MLU) || \
+    defined(USE_MUSA)
+TEST(BatchFactoryTest, OneRecBuildersPreserveEncoderAndDecoderContracts) {
+  ScopedConfigValue<int32_t> decode_rounds(
+      RecConfig::get_instance().max_decode_rounds(), 3);
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  for (BatchInputType type :
+       {BatchInputType::ONEREC, BatchInputType::ONEREC_XATTENTION}) {
+    RecBatchFactory factory(/*dp_size=*/1, type);
+    auto request = make_request(/*rank=*/0, RecType::kOneRec, /*beam_width=*/2);
+    auto* sequence = request->sequences()[0].get();
+    sequence->add_blocks(BlockType::KV, manager.allocate(/*num_blocks=*/1));
+    auto batches = factory.create_batches({request}, {sequence}, {1});
+    ModelArgs args;
+    const auto input = batches[0].prepare_forward_input(
+        /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, args);
+    static_assert(
+        std::is_same_v<std::decay_t<decltype(input)>, RecForwardInput>);
+    const auto* onerec = input.input_params.onerec_params();
+    ASSERT_NE(onerec, nullptr);
+    EXPECT_EQ(onerec->encoder_seq_lens, (std::vector<int32_t>{3}));
+    EXPECT_EQ(onerec->bs, 1);
+    EXPECT_EQ(onerec->group_width, 1);
+    EXPECT_TRUE(onerec->has_encoder_output);
+    EXPECT_TRUE(onerec->is_first_prefill);
+    EXPECT_EQ(input.input_params.meta.batch_id, batches[0].batch_id());
+    EXPECT_EQ(input.token_ids.numel(), 1);
+    EXPECT_TRUE(torch::equal(input.sampling_params.selected_token_idxes,
+                             torch::tensor({0}, torch::kInt32)));
+    if (type == BatchInputType::ONEREC) {
+      EXPECT_FALSE(input.has_step_meta());
+      EXPECT_FALSE(input.input_params.has_onerec_xattention_params());
+      continue;
+    }
+    EXPECT_TRUE(input.input_params.has_onerec_xattention_params());
+    ASSERT_TRUE(input.has_step_meta());
+    EXPECT_EQ(input.step_meta()->batch_size, 1);
+    EXPECT_EQ(input.step_meta()->beam_width, 2);
+    EXPECT_EQ(input.step_meta()->total_round, 3);
+    EXPECT_EQ(input.step_meta()->decode_positions_vec,
+              (std::vector<int32_t>{1}));
+    EXPECT_TRUE(torch::equal(input.decoder_sampling_params.selected_token_idxes,
+                             torch::tensor({0, 1}, torch::kInt32)));
+  }
+}
+#endif
 
 TEST(BatchFactoryTest, RecMultiRoundOutputsFollowRankLocalRequestOrder) {
   RecBatchFactory factory(/*dp_size=*/2, BatchInputType::REC_MULTI_ROUND);
@@ -629,7 +841,8 @@ TEST(BatchSequencePlanDeathTest, RejectsInvalidPermutation) {
 
 TEST(BatchFactoryTest, EmptyRecRanksPrepareEmptyInputs) {
   ModelArgs args;
-  for (BatchInputType type : {BatchInputType::ONEREC,
+  for (BatchInputType type : {BatchInputType::SEQUENCE,
+                              BatchInputType::ONEREC,
                               BatchInputType::ONEREC_XATTENTION,
                               BatchInputType::REC_MULTI_ROUND}) {
     RecBatchFactory factory(/*dp_size=*/2, type);

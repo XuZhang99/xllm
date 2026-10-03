@@ -395,9 +395,9 @@ size_t RecEngine::LlmRecEnginePipeline::num_workers() const {
   return engine_.worker_clients_.size();
 }
 
-std::vector<ForwardInput> RecEngine::LlmRecEnginePipeline::prepare_inputs(
+std::vector<RecForwardInput> RecEngine::LlmRecEnginePipeline::prepare_inputs(
     RecBatchGroup& batch) {
-  std::vector<ForwardInput> batched_inputs;
+  std::vector<RecForwardInput> batched_inputs;
   batched_inputs.reserve(engine_.dp_size_);
 
   // some dp related variables
@@ -465,7 +465,7 @@ ForwardOutput RecEngine::LlmRecEnginePipeline::step(RecBatchGroup& batches) {
 
     const bool all_empty = std::all_of(forward_inputs.begin(),
                                        forward_inputs.end(),
-                                       [](const ForwardInput& input) {
+                                       [](const RecForwardInput& input) {
                                          return !input.token_ids.defined() ||
                                                 input.token_ids.numel() == 0;
                                        });
@@ -805,7 +805,7 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
 }
 
 ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::get_model_output(
-    const ForwardInput& model_inputs) {
+    const RecForwardInput& model_inputs) {
   std::vector<folly::SemiFuture<std::optional<ForwardOutput>>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
@@ -925,7 +925,7 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
 }
 
 ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::get_model_output(
-    const ForwardInput& model_inputs) {
+    const RecForwardInput& model_inputs) {
   const bool trace_engine_output =
       util::get_bool_env("XLLM_DEBUG_ONEREC_ENGINE_TRACE", false);
   const bool trace_stage_timing =
@@ -1215,7 +1215,7 @@ ForwardOutput RecEngine::RecMultiRoundEnginePipeline::step(
 }
 
 ForwardOutput RecEngine::RecMultiRoundEnginePipeline::get_model_output(
-    const ForwardInput& model_inputs) {
+    const RecForwardInput& model_inputs) {
   std::vector<folly::SemiFuture<std::optional<ForwardOutput>>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {

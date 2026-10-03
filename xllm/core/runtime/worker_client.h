@@ -139,6 +139,12 @@ class WorkerClient {
   virtual folly::SemiFuture<std::optional<RawForwardOutput>> step_remote_async(
       const DiTForwardInput& inputs);
 
+  virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const RecForwardInput& inputs);
+
+  virtual folly::SemiFuture<std::optional<RawForwardOutput>> step_remote_async(
+      const RecForwardInput& inputs);
+
   virtual folly::SemiFuture<folly::Unit> process_group_test_async();
 
   virtual const torch::Device& device() const;

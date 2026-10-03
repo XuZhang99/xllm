@@ -22,11 +22,11 @@ limitations under the License.
 
 #include "core/framework/batch/rec_forward_input_builder.h"
 #include "core/framework/model/model_args.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/rec_model_params.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "core/framework/request/sequence.h"
 #include "core/framework/request/sequences_group.h"
-#include "core/runtime/forward_params.h"
+#include "core/runtime/rec_forward_params.h"
 #include "core/util/threadpool.h"
 
 namespace xllm {
@@ -38,7 +38,7 @@ class OneRecForwardInputBuilder : public RecForwardInputBuilder {
                                      MPMCThreadPool* thread_pool = nullptr);
 
  public:
-  ForwardInput build_rec_forward_input(
+  RecForwardInput build_rec_forward_input(
       uint32_t num_decoding_tokens,
       uint32_t min_decoding_batch_size) override;
 
