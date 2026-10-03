@@ -16,11 +16,13 @@ limitations under the License.
 
 #include "models_service_impl.h"
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #include <string>
 
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "core/distributed_runtime/master_manager.h"
 #include "models.pb.h"
 
 namespace xllm {
@@ -30,18 +32,29 @@ ModelsServiceImpl::ModelsServiceImpl(
     std::vector<std::string> model_repository_names,
     std::vector<std::string> model_versions,
     std::string model_path,
-    int64_t max_model_len)
+    int64_t max_model_len,
+    std::shared_ptr<MasterManager> master_manager)
     : model_names_(std::move(model_names)),
       model_repository_names_(std::move(model_repository_names)),
       model_versions_(std::move(model_versions)),
       created_(absl::ToUnixSeconds(absl::Now())),
       model_path_(std::move(model_path)),
-      max_model_len_(max_model_len) {}
+      max_model_len_(max_model_len),
+      master_manager_(std::move(master_manager)) {}
 
 bool ModelsServiceImpl::list_models(const proto::ModelListRequest* request,
                                     proto::ModelListResponse* response) {
   response->set_object("list");
-  for (const auto& model_id : model_names_) {
+  std::vector<std::string> model_ids = model_names_;
+  if (master_manager_ != nullptr) {
+    for (const auto& model_id : master_manager_->model_ids()) {
+      if (std::find(model_ids.begin(), model_ids.end(), model_id) ==
+          model_ids.end()) {
+        model_ids.push_back(model_id);
+      }
+    }
+  }
+  for (const auto& model_id : model_ids) {
     auto* model_card = response->add_data();
     model_card->set_id(model_id);
     model_card->set_created(created_);

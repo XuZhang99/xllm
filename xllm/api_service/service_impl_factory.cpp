@@ -31,17 +31,6 @@ limitations under the License.
 
 namespace xllm {
 
-namespace {
-
-template <typename T, typename MasterT>
-std::unique_ptr<T> create_service_impl(
-    MasterT* master,
-    const std::vector<std::string>& model_names) {
-  return std::make_unique<T>(master, model_names);
-}
-
-}  // namespace
-
 void ServiceImplFactory::create(
     APIService* service,
     Master* master,
@@ -58,22 +47,24 @@ void ServiceImplFactory::create(
           const std::vector<std::string>& models) {
          auto* llm_master = dynamic_cast<LLMMaster*>(master);
          CHECK(llm_master != nullptr);
-         self->anthropic_service_impl_ =
-             std::make_unique<AnthropicServiceImpl>(llm_master, models);
+         self->anthropic_service_impl_ = std::make_unique<AnthropicServiceImpl>(
+             llm_master, models, self->master_manager_);
          self->completion_service_impl_ =
-             create_service_impl<CompletionServiceImpl>(llm_master, models);
-         self->sample_service_impl_ =
-             create_service_impl<SampleServiceImpl>(llm_master, models);
-         self->chat_service_impl_ =
-             create_service_impl<ChatServiceImpl>(llm_master, models);
-         self->embedding_service_impl_ =
-             create_service_impl<EmbeddingServiceImpl>(llm_master, models);
+             std::make_unique<CompletionServiceImpl>(
+                 llm_master, models, self->master_manager_);
+         self->sample_service_impl_ = std::make_unique<SampleServiceImpl>(
+             llm_master, models, self->master_manager_);
+         self->chat_service_impl_ = std::make_unique<ChatServiceImpl>(
+             llm_master, models, self->master_manager_);
+         self->embedding_service_impl_ = std::make_unique<EmbeddingServiceImpl>(
+             llm_master, models, self->master_manager_);
          if (::xllm::ModelConfig::get_instance().enable_qwen3_reranker()) {
            self->rerank_service_impl_ =
-               create_service_impl<Qwen3RerankServiceImpl>(llm_master, models);
+               std::make_unique<Qwen3RerankServiceImpl>(
+                   llm_master, models, self->master_manager_);
          } else {
-           self->rerank_service_impl_ =
-               create_service_impl<RerankServiceImpl>(llm_master, models);
+           self->rerank_service_impl_ = std::make_unique<RerankServiceImpl>(
+               llm_master, models, self->master_manager_);
          }
        }},
       {static_cast<int8_t>(ServingMode::VLM),
@@ -139,7 +130,8 @@ void ServiceImplFactory::create(
       model_versions,
       master->options().model_path(),
       master->model_args() ? master->model_args()->max_position_embeddings()
-                           : 0);
+                           : 0,
+      service->master_manager_);
 }
 
 }  // namespace xllm

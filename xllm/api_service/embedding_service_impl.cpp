@@ -23,6 +23,7 @@ limitations under the License.
 #include "api_service/openai_batch.h"
 #include "common/instance_name.h"
 #include "distributed_runtime/llm_master.h"
+#include "distributed_runtime/master_manager.h"
 #include "embedding_output_builder.h"
 #include "framework/config/model_config.h"
 #include "framework/request/request_params.h"
@@ -88,9 +89,11 @@ bool send_result_to_client_brpc(std::shared_ptr<EmbeddingCall> call,
 
 EmbeddingServiceImpl::EmbeddingServiceImpl(
     LLMMaster* master,
-    const std::vector<std::string>& models)
-    : APIServiceImpl(models), master_(master) {
-  CHECK(master_ != nullptr);
+    const std::vector<std::string>& models,
+    std::shared_ptr<MasterManager> master_manager)
+    : APIServiceImpl(models), master_manager_(std::move(master_manager)) {
+  CHECK(master != nullptr);
+  CHECK(master_manager_ != nullptr);
 }
 
 // embedding_async for brpc
@@ -99,7 +102,9 @@ void EmbeddingServiceImpl::process_async_impl(
   const auto& rpc_request = call->request();
   // check if model is supported
   const auto& model = rpc_request.model();
-  if (!models_.contains(model)) {
+  auto master =
+      std::dynamic_pointer_cast<LLMMaster>(master_manager_->find_master(model));
+  if (master == nullptr) {
     call->finish_with_error(StatusCode::NOT_FOUND,
                             "The model `" + model + "` does not exist.",
                             "model");
@@ -130,11 +135,11 @@ void EmbeddingServiceImpl::process_async_impl(
             call, request_id, created_time, model, output);
       };
   if (rpc_request.inputs().empty()) {
-    master_->handle_request(rpc_request.input(),
-                            std::nullopt,
-                            std::move(request_params),
-                            call.get(),
-                            std::move(send));
+    master->handle_request(rpc_request.input(),
+                           std::nullopt,
+                           std::move(request_params),
+                           call.get(),
+                           std::move(send));
     return;
   }
   auto batch = std::make_shared<api_service::OpenAIBatch>(
@@ -148,14 +153,14 @@ void EmbeddingServiceImpl::process_async_impl(
     if (!input.token_ids().empty()) {
       tokens.emplace(input.token_ids().begin(), input.token_ids().end());
     }
-    master_->handle_request(input.text(),
-                            std::move(tokens),
-                            std::move(params),
-                            call.get(),
-                            [batch, index, send](RequestOutput output) {
-                              return batch->accept(
-                                  index, std::move(output), send);
-                            });
+    master->handle_request(input.text(),
+                           std::move(tokens),
+                           std::move(params),
+                           call.get(),
+                           [batch, index, send](RequestOutput output) {
+                             return batch->accept(
+                                 index, std::move(output), send);
+                           });
   }
 }
 

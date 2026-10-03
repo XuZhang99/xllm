@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "api_service/api_service_impl.h"
@@ -25,6 +26,8 @@ limitations under the License.
 #include "sample.pb.h"
 
 namespace xllm {
+
+class MasterManager;
 
 using SampleCall = NonStreamCall<proto::SampleRequest, proto::SampleResponse>;
 
@@ -57,7 +60,9 @@ bool build_response(const std::string& request_id,
 
 class SampleServiceImpl final : public APIServiceImpl<SampleCall> {
  public:
-  SampleServiceImpl(LLMMaster* master, const std::vector<std::string>& models);
+  SampleServiceImpl(LLMMaster* master,
+                    const std::vector<std::string>& models,
+                    std::shared_ptr<MasterManager> master_manager);
 
   bool process_request(const proto::SampleRequest& request,
                        proto::SampleResponse* response,
@@ -68,7 +73,7 @@ class SampleServiceImpl final : public APIServiceImpl<SampleCall> {
  private:
   DISALLOW_COPY_AND_ASSIGN(SampleServiceImpl);
 
-  LLMMaster* master_ = nullptr;
+  std::shared_ptr<MasterManager> master_manager_;
 };
 
 }  // namespace xllm

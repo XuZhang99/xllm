@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
 #include <type_traits>
 
 #include "anthropic.pb.h"
@@ -23,6 +24,8 @@ limitations under the License.
 
 namespace xllm {
 
+class MasterManager;
+
 // Specialize is_stream_call for AnthropicCall to recognize it as a stream call
 template <>
 struct is_stream_call<AnthropicCall> : std::true_type {};
@@ -30,7 +33,8 @@ struct is_stream_call<AnthropicCall> : std::true_type {};
 class AnthropicServiceImpl final : public APIServiceImpl<AnthropicCall> {
  public:
   AnthropicServiceImpl(LLMMaster* master,
-                       const std::vector<std::string>& models);
+                       const std::vector<std::string>& models,
+                       std::shared_ptr<MasterManager> master_manager);
 
   void process_async_impl(std::shared_ptr<AnthropicCall> call) override;
   void count_tokens(std::shared_ptr<AnthropicCall> call);
@@ -41,7 +45,7 @@ class AnthropicServiceImpl final : public APIServiceImpl<AnthropicCall> {
  private:
   DISALLOW_COPY_AND_ASSIGN(AnthropicServiceImpl);
 
-  LLMMaster* master_ = nullptr;
+  std::shared_ptr<MasterManager> master_manager_;
   const std::string tool_call_parser_format_;
   const std::string reasoning_parser_format_;
 };

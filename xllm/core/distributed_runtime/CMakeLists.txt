@@ -101,12 +101,14 @@ cc_library(
   HDRS
     llm_master.h
     master.h
+    master_manager.h
     master_factory.h
     vlm_master.h
     dit_master.h
   SRCS
     llm_master.cpp
     master.cpp
+    master_manager.cpp
     master_factory.cpp
     vlm_master.cpp
     dit_master.cpp

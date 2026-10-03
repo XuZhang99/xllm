@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -58,7 +59,7 @@ std::unique_ptr<LLMMaster> fork_llm_master(LLMMaster* master,
     return nullptr;
   }
 
-  static uint64_t server_idx = 1;
+  static std::atomic<int64_t> server_idx{1};
   CHECK(master != nullptr);
 
   Options new_options = master->options();
@@ -70,7 +71,7 @@ std::unique_ptr<LLMMaster> fork_llm_master(LLMMaster* master,
     new_options.model_path() = options.model_path();
   }
   new_options.master_node_addr() = options.master_node_addr();
-  new_options.server_idx() = server_idx++;
+  new_options.server_idx() = server_idx.fetch_add(1, std::memory_order_relaxed);
   new_options.master_status() = options.master_status();
   // Set nnodes and dp_size from fork request (tp_size * dp_size = nnodes)
   if (options.nnodes() > 0 && new_options.nnodes() >= options.nnodes()) {

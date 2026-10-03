@@ -28,12 +28,14 @@ limitations under the License.
 #include <functional>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 #include "api_service/stream_output_parser.h"
 #include "api_service/utils.h"
 #include "core/common/instance_name.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"
+#include "core/distributed_runtime/master_manager.h"
 #include "core/distributed_runtime/rec_master.h"
 #include "core/distributed_runtime/vlm_master.h"
 #include "core/framework/request/rec_type.h"
@@ -481,20 +483,24 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
   return call->write_and_finish(response);
 }
 
+LLMMaster* check_master(LLMMaster* master) {
+  CHECK(master != nullptr);
+  return master;
+}
+
 }  // namespace
 
 ChatServiceImpl::ChatServiceImpl(LLMMaster* master,
-                                 const std::vector<std::string>& models)
+                                 const std::vector<std::string>& models,
+                                 std::shared_ptr<MasterManager> master_manager)
     : APIServiceImpl(models),
-      master_(master),
+      master_manager_(std::move(master_manager)),
       tool_call_parser_format_(
-          master_->options().tool_call_parser().value_or("")),
+          check_master(master)->options().tool_call_parser().value_or("")),
       reasoning_parser_format_(
-          master_->options().reasoning_parser().value_or("")) {
-  CHECK(master_ != nullptr);
-  for (const auto& model : models) {
-    add_model_master(model, master);
-  }
+          check_master(master)->options().reasoning_parser().value_or("")) {
+  CHECK(master != nullptr);
+  CHECK(master_manager_ != nullptr);
 }
 
 ChatServiceImpl::ChatServiceImpl(RecMaster* master,
@@ -508,21 +514,10 @@ ChatServiceImpl::ChatServiceImpl(RecMaster* master,
   CHECK(rec_master_ != nullptr);
 }
 
-void ChatServiceImpl::add_model_master(const std::string& model,
-                                       LLMMaster* master) {
-  CHECK(master != nullptr);
-  std::unique_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);
-  llm_model_to_master_.insert_or_assign(model, master);
-  models_.insert(model);
-}
-
-LLMMaster* ChatServiceImpl::get_model_master(const std::string& model) const {
-  std::shared_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);
-  auto it = llm_model_to_master_.find(model);
-  if (it == llm_model_to_master_.end()) {
-    return nullptr;
-  }
-  return it->second;
+std::shared_ptr<LLMMaster> ChatServiceImpl::get_model_master(
+    const std::string& model) const {
+  return std::dynamic_pointer_cast<LLMMaster>(
+      master_manager_->find_master(model));
 }
 
 void ChatServiceImpl::process_rec_chat_request(std::shared_ptr<ChatCall> call) {
@@ -635,15 +630,36 @@ void ChatServiceImpl::process_async_rpc_impl(
     const proto::ChatRequest* request) {
   const auto& service_request_id = request->service_request_id();
   const auto& target_xservice_addr = request->source_xservice_addr();
-  auto callback = [master = master_](const RequestOutput& req_output) -> bool {
+  if (rec_master_ != nullptr) {
+    CALLBACK_WITH_ERROR(StatusCode::UNKNOWN,
+                        "RPC chat is not supported for RecMaster",
+                        service_request_id,
+                        target_xservice_addr);
+    return;
+  }
+  const auto& rpc_request = *request;
+  const auto& model = rpc_request.model();
+  auto master = get_model_master(model);
+  if (unlikely(master == nullptr)) {
+    CALLBACK_WITH_ERROR(StatusCode::UNKNOWN,
+                        "Model not supported",
+                        service_request_id,
+                        target_xservice_addr);
+    return;
+  }
+  const std::weak_ptr<LLMMaster> weak_master = master;
+  auto callback = [weak_master](const RequestOutput& req_output) -> bool {
+    const auto master = weak_master.lock();
+    if (master == nullptr) {
+      return false;
+    }
     req_output.log_request_status();
     return master->handle_rpc_response(req_output);
   };
 
   // LLMMaster path (existing logic)
   // Check if the request is being rate-limited.
-  CHECK(master_ != nullptr);
-  if (master_->get_rate_limiter()->is_limited()) {
+  if (master->get_rate_limiter()->is_limited()) {
     CALLBACK_WITH_ERROR(
         StatusCode::RESOURCE_EXHAUSTED,
         "The number of concurrent requests has reached the limit.",
@@ -653,16 +669,6 @@ void ChatServiceImpl::process_async_rpc_impl(
   }
 
   // check if model is supported
-  const auto& rpc_request = *request;
-  const auto& model = rpc_request.model();
-  if (unlikely(!models_.contains(model))) {
-    CALLBACK_WITH_ERROR(StatusCode::UNKNOWN,
-                        "Model not supported",
-                        service_request_id,
-                        target_xservice_addr);
-    return;
-  }
-
   RequestParams request_params(rpc_request, "", "");
   std::vector<Message> messages;
   messages.reserve(rpc_request.messages_size());
@@ -710,11 +716,11 @@ void ChatServiceImpl::process_async_rpc_impl(
     request_params.skip_special_tokens = false;
   }
 
-  master_->handle_request(std::move(messages),
-                          std::move(prompt_tokens),
-                          std::move(request_params),
-                          std::nullopt,
-                          callback);
+  master->handle_request(std::move(messages),
+                         std::move(prompt_tokens),
+                         std::move(request_params),
+                         std::nullopt,
+                         callback);
 }
 
 // chat_async for brpc
@@ -734,7 +740,7 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
     return;
   }
 
-  LLMMaster* master = get_model_master(model);
+  std::shared_ptr<LLMMaster> master = get_model_master(model);
   if (unlikely(master == nullptr)) {
     call->finish_with_error(StatusCode::NOT_FOUND,
                             "The model `" + model + "` does not exist.",
@@ -831,7 +837,6 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
       call.get(),
       [call,
        model,
-       master = master,
        stream = std::move(saved_streaming),
        include_usage = include_usage,
        first_message_sent = std::unordered_set<size_t>(),

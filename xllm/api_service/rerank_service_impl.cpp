@@ -18,9 +18,11 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <string>
+#include <utility>
 
 #include "common/instance_name.h"
 #include "distributed_runtime/llm_master.h"
+#include "distributed_runtime/master_manager.h"
 #include "framework/request/request_params.h"
 #include "util/utils.h"
 #include "util/uuid.h"
@@ -76,16 +78,26 @@ void RerankContext::finalize() {
   call->write_and_finish(response);
 }
 
-RerankServiceImpl::RerankServiceImpl(LLMMaster* master,
-                                     const std::vector<std::string>& models)
-    : APIServiceImpl(models), master_(master) {
-  CHECK(master_ != nullptr);
+RerankServiceImpl::RerankServiceImpl(
+    LLMMaster* master,
+    const std::vector<std::string>& models,
+    std::shared_ptr<MasterManager> master_manager)
+    : APIServiceImpl(models), master_manager_(std::move(master_manager)) {
+  CHECK(master != nullptr);
+  CHECK(master_manager_ != nullptr);
+}
+
+std::shared_ptr<LLMMaster> RerankServiceImpl::get_model_master(
+    const std::string& model) const {
+  return std::dynamic_pointer_cast<LLMMaster>(
+      master_manager_->find_master(model));
 }
 
 void RerankServiceImpl::process_async_impl(std::shared_ptr<RerankCall> call) {
   const auto& rpc_request = call->request();
   const auto& model = rpc_request.model();
-  if (!models_.contains(model)) {
+  auto master = get_model_master(model);
+  if (master == nullptr) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
@@ -153,7 +165,7 @@ void RerankServiceImpl::process_async_impl(std::shared_ptr<RerankCall> call) {
     return true;
   };
 
-  master_->handle_batch_request(ctx->documents, sps, batch_callback);
+  master->handle_batch_request(ctx->documents, sps, batch_callback);
 }
 
 }  // namespace xllm

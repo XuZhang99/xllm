@@ -24,12 +24,14 @@ limitations under the License.
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include "api_service/openai_batch.h"
 #include "api_service/utils.h"
 #include "common/instance_name.h"
 #include "completion.pb.h"
 #include "core/distributed_runtime/llm_master.h"
+#include "core/distributed_runtime/master_manager.h"
 #include "core/framework/request/request_output.h"
 #include "core/util/utils.h"
 
@@ -194,30 +196,17 @@ bool send_result_to_client_brpc(std::shared_ptr<CompletionCall> call,
 
 CompletionServiceImpl::CompletionServiceImpl(
     LLMMaster* master,
-    const std::vector<std::string>& models)
-    : APIServiceImpl(models), master_(master) {
-  CHECK(master_ != nullptr);
-  for (const auto& model : models) {
-    add_model_master(model, master);
-  }
-}
-
-void CompletionServiceImpl::add_model_master(const std::string& model,
-                                             LLMMaster* master) {
+    const std::vector<std::string>& models,
+    std::shared_ptr<MasterManager> master_manager)
+    : APIServiceImpl(models), master_manager_(std::move(master_manager)) {
   CHECK(master != nullptr);
-  std::unique_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);
-  llm_model_to_master_.insert_or_assign(model, master);
-  models_.insert(model);
+  CHECK(master_manager_ != nullptr);
 }
 
-LLMMaster* CompletionServiceImpl::get_model_master(
+std::shared_ptr<LLMMaster> CompletionServiceImpl::get_model_master(
     const std::string& model) const {
-  std::shared_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);
-  auto it = llm_model_to_master_.find(model);
-  if (it == llm_model_to_master_.end()) {
-    return nullptr;
-  }
-  return it->second;
+  return std::dynamic_pointer_cast<LLMMaster>(
+      master_manager_->find_master(model));
 }
 
 // complete_async for brpc from xllm_service
@@ -225,13 +214,28 @@ void CompletionServiceImpl::process_async_rpc_impl(
     const proto::CompletionRequest* request) {
   const auto& service_request_id = request->service_request_id();
   const auto& target_xservice_addr = request->source_xservice_addr();
-  auto callback = [master = master_](const RequestOutput& req_output) -> bool {
+  const auto& rpc_request = *request;
+  const auto& model = rpc_request.model();
+  auto master = get_model_master(model);
+  if (unlikely(master == nullptr)) {
+    CALLBACK_WITH_ERROR(StatusCode::UNKNOWN,
+                        "Model not supported",
+                        service_request_id,
+                        target_xservice_addr);
+    return;
+  }
+  const std::weak_ptr<LLMMaster> weak_master = master;
+  auto callback = [weak_master](const RequestOutput& req_output) -> bool {
+    const auto master = weak_master.lock();
+    if (master == nullptr) {
+      return false;
+    }
     req_output.log_request_status();
     return master->handle_rpc_response(req_output);
   };
 
   // Check if the request is being rate-limited.
-  if (unlikely(master_->get_rate_limiter()->is_limited())) {
+  if (unlikely(master->get_rate_limiter()->is_limited())) {
     CALLBACK_WITH_ERROR(
         StatusCode::RESOURCE_EXHAUSTED,
         "The number of concurrent requests has reached the limit.",
@@ -241,16 +245,6 @@ void CompletionServiceImpl::process_async_rpc_impl(
   }
 
   // check if model is supported
-  const auto& rpc_request = *request;
-  const auto& model = rpc_request.model();
-  if (unlikely(!models_.contains(model))) {
-    CALLBACK_WITH_ERROR(StatusCode::UNKNOWN,
-                        "Model not supported",
-                        service_request_id,
-                        target_xservice_addr);
-    return;
-  }
-
   RequestParams request_params(rpc_request, "", "");
 
   std::optional<std::vector<int>> prompt_tokens = std::nullopt;
@@ -263,11 +257,11 @@ void CompletionServiceImpl::process_async_rpc_impl(
   }
 
   // schedule the request
-  master_->handle_request(rpc_request.prompt(),
-                          std::move(prompt_tokens),
-                          std::move(request_params),
-                          std::nullopt,
-                          callback);
+  master->handle_request(rpc_request.prompt(),
+                         std::move(prompt_tokens),
+                         std::move(request_params),
+                         std::nullopt,
+                         callback);
 }
 
 // complete_async for brpc
@@ -275,7 +269,7 @@ void CompletionServiceImpl::process_async_impl(
     std::shared_ptr<CompletionCall> call) {
   const auto& rpc_request = call->request();
   const auto& model = rpc_request.model();
-  LLMMaster* master = get_model_master(model);
+  std::shared_ptr<LLMMaster> master = get_model_master(model);
   if (unlikely(master == nullptr)) {
     call->finish_with_error(StatusCode::NOT_FOUND,
                             "The model `" + model + "` does not exist.",

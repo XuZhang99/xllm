@@ -15,14 +15,19 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
+
 #include "api_service/rerank_service_impl.h"
 
 namespace xllm {
 
+class MasterManager;
+
 class Qwen3RerankServiceImpl final : public RerankServiceImpl {
  public:
   Qwen3RerankServiceImpl(LLMMaster* master,
-                         const std::vector<std::string>& models);
+                         const std::vector<std::string>& models,
+                         std::shared_ptr<MasterManager> master_manager);
 
   void process_async_impl(std::shared_ptr<RerankCall> call) override;
 

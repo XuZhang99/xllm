@@ -16,14 +16,16 @@ limitations under the License.
 #pragma once
 
 #include <functional>
-#include <shared_mutex>
+#include <memory>
+#include <mutex>
 #include <string>
-#include <unordered_map>
+#include <vector>
 
 #include "anthropic_service_impl.h"
 #include "audio_generation_service_impl.h"
 #include "chat_service_impl.h"
 #include "completion_service_impl.h"
+#include "core/distributed_runtime/master_manager.h"
 #include "embedding_service_impl.h"
 #include "image_generation_service_impl.h"
 #include "models_service_impl.h"
@@ -235,10 +237,11 @@ class APIService : public proto::XllmAPIService {
 
   bool ParseForkMasterRequest(const proto::MasterInfos* request,
                               Options& options);
-  void set_model_master(const std::string& model_id, Master* master);
   bool has_model_master(const std::string& model_id) const;
-  bool add_model_master_if_absent(const std::string& model_id, Master* master);
-  Master* get_model_master(const std::string& model_id) const;
+  bool add_model_master_if_absent(const std::string& model_id,
+                                  std::unique_ptr<Master> master);
+  MasterManager::MasterHandle get_model_master(
+      const std::string& model_id) const;
 
   // Core action helpers shared between brpc-typed and Http variants.
   // Each returns true on success. On failure, the human readable reason is
@@ -249,12 +252,11 @@ class APIService : public proto::XllmAPIService {
   bool do_sleep(const proto::MasterInfos& request, std::string* error_message);
   bool do_wakeup(const proto::MasterInfos& request, std::string* error_message);
 
-  Master* master_;
+  std::shared_ptr<MasterManager> master_manager_;
   std::string default_model_;
   std::string system_fingerprint_;
   ChatHttpHandler chat_completions_handler_;
-  mutable std::shared_mutex masters_mutex_;
-  std::unordered_map<std::string, Master*> masters_;
+  std::mutex fork_master_mutex_;
   std::unique_ptr<AnthropicServiceImpl> anthropic_service_impl_;
   std::unique_ptr<CompletionServiceImpl> completion_service_impl_;
   std::unique_ptr<SampleServiceImpl> sample_service_impl_;

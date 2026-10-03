@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include "core/common/macros.h"
@@ -23,13 +24,16 @@ limitations under the License.
 
 namespace xllm {
 
+class MasterManager;
+
 class ModelsServiceImpl final {
  public:
   ModelsServiceImpl(std::vector<std::string> model_names,
                     std::vector<std::string> model_repository_names,
                     std::vector<std::string> model_versions,
                     std::string model_path = "",
-                    int64_t max_model_len = 0);
+                    int64_t max_model_len = 0,
+                    std::shared_ptr<MasterManager> master_manager = nullptr);
 
   bool list_models(const proto::ModelListRequest* request,
                    proto::ModelListResponse* response);
@@ -44,6 +48,7 @@ class ModelsServiceImpl final {
   uint32_t created_;
   std::string model_path_;
   int64_t max_model_len_;
+  std::shared_ptr<MasterManager> master_manager_;
 };
 
 }  // namespace xllm

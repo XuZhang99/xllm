@@ -21,6 +21,8 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_set>
+#include <utility>
 
 #include "api_service/anthropic_request_utils.h"
 #include "api_service/anthropic_stream_utils.h"
@@ -28,6 +30,7 @@ limitations under the License.
 #include "api_service/utils.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"
+#include "core/distributed_runtime/master_manager.h"
 #include "core/framework/request/request_params.h"
 #include "core/util/uuid.h"
 #include "function_call/function_call.h"
@@ -484,13 +487,16 @@ bool send_delta_to_client(std::shared_ptr<AnthropicCall> call,
 
 AnthropicServiceImpl::AnthropicServiceImpl(
     LLMMaster* master,
-    const std::vector<std::string>& models)
+    const std::vector<std::string>& models,
+    std::shared_ptr<MasterManager> master_manager)
     : APIServiceImpl(models),
-      master_(check_master(master)),
+      master_manager_(std::move(master_manager)),
       tool_call_parser_format_(
-          master->options().tool_call_parser().value_or("")),
+          check_master(master)->options().tool_call_parser().value_or("")),
       reasoning_parser_format_(
-          master->options().reasoning_parser().value_or("")) {}
+          check_master(master)->options().reasoning_parser().value_or("")) {
+  CHECK(master_manager_ != nullptr);
+}
 
 void AnthropicServiceImpl::count_tokens(std::shared_ptr<AnthropicCall> call) {
   if (master_->get_rate_limiter()->is_limited()) {
@@ -522,14 +528,15 @@ void AnthropicServiceImpl::process_async_impl(
     std::shared_ptr<AnthropicCall> call) {
   const auto& rpc_request = call->request();
   const auto& model = rpc_request.model();
-  // Check if model is supported
-  if (!models_.contains(model)) {
+  auto model_master =
+      std::dynamic_pointer_cast<LLMMaster>(master_manager_->find_master(model));
+  if (model_master == nullptr) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
 
   // Check rate limit
-  if (master_->get_rate_limiter()->is_limited()) {
+  if (model_master->get_rate_limiter()->is_limited()) {
     call->finish_with_error(
         StatusCode::RESOURCE_EXHAUSTED,
         "The number of concurrent requests has reached the limit.");
@@ -606,7 +613,7 @@ void AnthropicServiceImpl::process_async_impl(
                                 : 0;
 
   // Handle request
-  master_->handle_request(
+  model_master->handle_request(
       std::move(messages),
       std::move(prompt_tokens),
       std::move(request_params),

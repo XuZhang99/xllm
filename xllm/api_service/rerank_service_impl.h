@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include "api_service/api_service_impl.h"
@@ -26,6 +27,8 @@ limitations under the License.
 #include "rerank.pb.h"
 
 namespace xllm {
+
+class MasterManager;
 
 using RerankCall = NonStreamCall<proto::RerankRequest, proto::RerankResponse>;
 
@@ -88,13 +91,17 @@ struct RerankContext {
 
 class RerankServiceImpl : public APIServiceImpl<RerankCall> {
  public:
-  RerankServiceImpl(LLMMaster* master, const std::vector<std::string>& models);
+  RerankServiceImpl(LLMMaster* master,
+                    const std::vector<std::string>& models,
+                    std::shared_ptr<MasterManager> master_manager);
 
   virtual void process_async_impl(std::shared_ptr<RerankCall> call);
 
  protected:
+  std::shared_ptr<LLMMaster> get_model_master(const std::string& model) const;
+
   DISALLOW_COPY_AND_ASSIGN(RerankServiceImpl);
-  LLMMaster* master_ = nullptr;
+  std::shared_ptr<MasterManager> master_manager_;
 };
 
 }  // namespace xllm

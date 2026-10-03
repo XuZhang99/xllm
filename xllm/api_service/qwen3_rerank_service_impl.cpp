@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "api_service/qwen3_rerank_service_impl.h"
 
+#include <utility>
+
 #include "distributed_runtime/llm_master.h"
 #include "framework/request/request_params.h"
 
@@ -22,14 +24,16 @@ namespace xllm {
 
 Qwen3RerankServiceImpl::Qwen3RerankServiceImpl(
     LLMMaster* master,
-    const std::vector<std::string>& models)
-    : RerankServiceImpl(master, models) {}
+    const std::vector<std::string>& models,
+    std::shared_ptr<MasterManager> master_manager)
+    : RerankServiceImpl(master, models, std::move(master_manager)) {}
 
 void Qwen3RerankServiceImpl::process_async_impl(
     std::shared_ptr<RerankCall> call) {
   const auto& rpc_request = call->request();
   const auto& model = rpc_request.model();
-  if (!models_.contains(model)) {
+  auto master = get_model_master(model);
+  if (master == nullptr) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
@@ -86,7 +90,7 @@ void Qwen3RerankServiceImpl::process_async_impl(
     return true;
   };
 
-  master_->handle_batch_request(reqs, sps, batch_callback);
+  master->handle_batch_request(reqs, sps, batch_callback);
 }
 
 }  // namespace xllm

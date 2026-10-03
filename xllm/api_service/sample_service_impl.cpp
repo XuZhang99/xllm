@@ -22,9 +22,11 @@ limitations under the License.
 #include <algorithm>
 #include <condition_variable>
 #include <mutex>
+#include <utility>
 
 #include "common/instance_name.h"
 #include "core/distributed_runtime/llm_master.h"
+#include "core/distributed_runtime/master_manager.h"
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
 #include "core/framework/request/sample_slot.h"
@@ -270,10 +272,13 @@ bool build_response(const std::string& request_id,
 
 }  // namespace sample_service_internal
 
-SampleServiceImpl::SampleServiceImpl(LLMMaster* master,
-                                     const std::vector<std::string>& models)
-    : APIServiceImpl(models), master_(master) {
-  CHECK(master_ != nullptr);
+SampleServiceImpl::SampleServiceImpl(
+    LLMMaster* master,
+    const std::vector<std::string>& models,
+    std::shared_ptr<MasterManager> master_manager)
+    : APIServiceImpl(models), master_manager_(std::move(master_manager)) {
+  CHECK(master != nullptr);
+  CHECK(master_manager_ != nullptr);
 }
 
 bool SampleServiceImpl::process_request(const proto::SampleRequest& request,
@@ -288,20 +293,22 @@ bool SampleServiceImpl::process_request(const proto::SampleRequest& request,
     return false;
   }
 
-  if (!models_.contains(request.model())) {
+  auto master = std::dynamic_pointer_cast<LLMMaster>(
+      master_manager_->find_master(request.model()));
+  if (master == nullptr) {
     *status = Status(StatusCode::UNKNOWN, "Model not supported");
     return false;
   }
 
   *status = sample_service_internal::validate_runtime_config(
-      master_->options().enable_schedule_overlap());
+      master->options().enable_schedule_overlap());
   if (!status->ok()) {
     return false;
   }
 
   RequestParams request_params;
   if (!sample_service_internal::build_request_params(
-          request, master_->tokenizer(), &request_params)) {
+          request, master->tokenizer(), &request_params)) {
     *status = Status(StatusCode::UNKNOWN,
                      "Failed to build sample selector runtime mapping");
     return false;
@@ -310,7 +317,7 @@ bool SampleServiceImpl::process_request(const proto::SampleRequest& request,
   if (request_params.sample_slots.empty()) {
     if (!sample_service_internal::build_empty_response(
             request,
-            master_->tokenizer(),
+            master->tokenizer(),
             request_params.request_id,
             response)) {
       *status = Status(StatusCode::UNKNOWN,
@@ -321,7 +328,7 @@ bool SampleServiceImpl::process_request(const proto::SampleRequest& request,
     return true;
   }
 
-  *status = get_rate_limit_status(master_);
+  *status = get_rate_limit_status(master.get());
   if (!status->ok()) {
     return false;
   }
@@ -335,7 +342,7 @@ bool SampleServiceImpl::process_request(const proto::SampleRequest& request,
   const auto created_time =
       static_cast<uint32_t>(absl::ToUnixSeconds(absl::Now()));
 
-  master_->handle_request(
+  master->handle_request(
       request.prompt(),
       std::nullopt,
       std::move(request_params),
@@ -390,13 +397,15 @@ void SampleServiceImpl::process_async_impl(std::shared_ptr<SampleCall> call) {
     return;
   }
 
-  if (!models_.contains(request.model())) {
+  auto master = std::dynamic_pointer_cast<LLMMaster>(
+      master_manager_->find_master(request.model()));
+  if (master == nullptr) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
 
   status = sample_service_internal::validate_runtime_config(
-      master_->options().enable_schedule_overlap());
+      master->options().enable_schedule_overlap());
   if (!status.ok()) {
     call->finish_with_error(status.code(), status.message());
     return;
@@ -404,7 +413,7 @@ void SampleServiceImpl::process_async_impl(std::shared_ptr<SampleCall> call) {
 
   RequestParams request_params;
   if (!sample_service_internal::build_request_params(
-          request, master_->tokenizer(), &request_params)) {
+          request, master->tokenizer(), &request_params)) {
     call->finish_with_error(StatusCode::UNKNOWN,
                             "Failed to build sample selector runtime mapping");
     return;
@@ -414,7 +423,7 @@ void SampleServiceImpl::process_async_impl(std::shared_ptr<SampleCall> call) {
   if (request_params.sample_slots.empty()) {
     if (!sample_service_internal::build_empty_response(
             request,
-            master_->tokenizer(),
+            master->tokenizer(),
             request_params.request_id,
             &call->response())) {
       call->finish_with_error(StatusCode::UNKNOWN,
@@ -425,7 +434,7 @@ void SampleServiceImpl::process_async_impl(std::shared_ptr<SampleCall> call) {
     return;
   }
 
-  status = get_rate_limit_status(master_);
+  status = get_rate_limit_status(master.get());
   if (!status.ok()) {
     call->finish_with_error(status.code(), status.message());
     return;
@@ -436,17 +445,13 @@ void SampleServiceImpl::process_async_impl(std::shared_ptr<SampleCall> call) {
   const auto created_time =
       static_cast<uint32_t>(absl::ToUnixSeconds(absl::Now()));
 
-  master_->handle_request(
+  master->handle_request(
       request.prompt(),
       std::nullopt,
       std::move(request_params),
       call.get(),
-      [call,
-       master = master_,
-       model = request.model(),
-       request_id,
-       match_count,
-       created_time](const RequestOutput& req_output) -> bool {
+      [call, model = request.model(), request_id, match_count, created_time](
+          const RequestOutput& req_output) -> bool {
         req_output.log_request_status();
         if (req_output.status.has_value()) {
           const auto& output_status = req_output.status.value();

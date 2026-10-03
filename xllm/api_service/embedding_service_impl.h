@@ -16,6 +16,8 @@ limitations under the License.
 #pragma once
 #include <absl/container/flat_hash_set.h>
 
+#include <memory>
+
 #include "api_service/api_service_impl.h"
 #include "api_service/call.h"
 #include "api_service/non_stream_call.h"
@@ -24,6 +26,8 @@ limitations under the License.
 
 namespace xllm {
 
+class MasterManager;
+
 using EmbeddingCall =
     NonStreamCall<proto::EmbeddingRequest, proto::EmbeddingResponse>;
 
@@ -31,14 +35,15 @@ using EmbeddingCall =
 class EmbeddingServiceImpl final : public APIServiceImpl<EmbeddingCall> {
  public:
   EmbeddingServiceImpl(LLMMaster* master,
-                       const std::vector<std::string>& models);
+                       const std::vector<std::string>& models,
+                       std::shared_ptr<MasterManager> master_manager);
 
   // brpc call_data needs to use shared_ptr
   void process_async_impl(std::shared_ptr<EmbeddingCall> call);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(EmbeddingServiceImpl);
-  LLMMaster* master_ = nullptr;
+  std::shared_ptr<MasterManager> master_manager_;
 };
 
 using MMEmbeddingCall =
