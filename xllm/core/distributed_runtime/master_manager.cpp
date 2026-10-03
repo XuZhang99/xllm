@@ -15,10 +15,10 @@ limitations under the License.
 
 #include "core/distributed_runtime/master_manager.h"
 
+#include <glog/logging.h>
+
 #include <mutex>
 #include <utility>
-
-#include <glog/logging.h>
 
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/master.h"
@@ -194,8 +194,7 @@ bool MasterManager::fork_master(const Options& options,
     return false;
   }
   if (!masters_.emplace(options.model_id(), std::move(handle)).second) {
-    LOG(INFO) << "Master for model " << options.model_id()
-              << " already exists";
+    LOG(INFO) << "Master for model " << options.model_id() << " already exists";
   }
   return true;
 }
@@ -239,10 +238,9 @@ bool MasterManager::sleep(const std::string& model_id,
 
   RateLimiter* rate_limiter = master->get_rate_limiter();
   if (!rate_limiter->try_set_sleeping()) {
-    const int32_t num_requests =
-        rate_limiter->get_num_concurrent_requests();
-    LOG(ERROR) << "Cannot sleep model " << model_id << " with "
-               << num_requests << " in-flight requests";
+    const int32_t num_requests = rate_limiter->get_num_concurrent_requests();
+    LOG(ERROR) << "Cannot sleep model " << model_id << " with " << num_requests
+               << " in-flight requests";
     if (error_message != nullptr) {
       *error_message = "Cannot sleep model with in-flight requests";
     }
@@ -256,6 +254,10 @@ bool MasterManager::sleep(const std::string& model_id,
   }
 
   llm_master->set_master_status(previous_status);
+  if (!rate_limiter->try_wakeup()) {
+    LOG(ERROR) << "Failed to restore rate limiter for model " << model_id
+               << " after sleep failure";
+  }
   LOG(ERROR) << "Failed to sleep model " << model_id << " from status "
              << previous_status.to_proto();
   if (error_message != nullptr) {
@@ -303,16 +305,16 @@ bool MasterManager::wakeup(const std::string& model_id,
   }
 
   const bool has_remote_weights = !options.remote_addrs.empty();
-  const bool wakeup_succeeded = has_remote_weights
-                                    ? llm_master->wakeup(options)
-                                    : llm_master->wakeup();
+  const bool wakeup_succeeded =
+      has_remote_weights ? llm_master->wakeup(options) : llm_master->wakeup();
   if (!wakeup_succeeded) {
     LOG(ERROR) << "Failed to wakeup model " << model_id
                << (has_remote_weights ? " with remote weight transfer" : "");
     if (error_message != nullptr) {
-      *error_message = has_remote_weights
-                           ? "Failed to wakeup model with remote weight transfer"
-                           : "Failed to wakeup model";
+      *error_message =
+          has_remote_weights
+              ? "Failed to wakeup model with remote weight transfer"
+              : "Failed to wakeup model";
     }
     return false;
   }
@@ -329,10 +331,9 @@ bool MasterManager::wakeup(const std::string& model_id,
   return true;
 }
 
-bool MasterManager::link_p2p(
-    const std::string& model_id,
-    const std::vector<std::string>& remote_addrs,
-    std::string* error_message) {
+bool MasterManager::link_p2p(const std::string& model_id,
+                             const std::vector<std::string>& remote_addrs,
+                             std::string* error_message) {
   std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
   const MasterHandle master = find_master(model_id);
   if (master == nullptr) {
@@ -358,10 +359,9 @@ bool MasterManager::link_p2p(
   return true;
 }
 
-bool MasterManager::unlink_p2p(
-    const std::string& model_id,
-    const std::vector<std::string>& remote_addrs,
-    std::string* error_message) {
+bool MasterManager::unlink_p2p(const std::string& model_id,
+                               const std::vector<std::string>& remote_addrs,
+                               std::string* error_message) {
   std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
   const MasterHandle master = find_master(model_id);
   if (master == nullptr) {

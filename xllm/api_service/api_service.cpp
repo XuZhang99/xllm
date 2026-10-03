@@ -1273,8 +1273,8 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
 bool APIService::do_sleep(const proto::MasterInfos& request,
                           std::string* error_message) {
   const auto req_master_status = MasterStatus(request.master_status());
-  return master_manager_->sleep(request.model_id(), req_master_status,
-                                error_message);
+  return master_manager_->sleep(
+      request.model_id(), req_master_status, error_message);
 }
 
 void APIService::Sleep(::google::protobuf::RpcController* controller,
@@ -1349,8 +1349,8 @@ bool APIService::do_wakeup(const proto::MasterInfos& request,
       }
     }
   }
-  return master_manager_->wakeup(request.model_id(), wakeup_options,
-                                 error_message);
+  return master_manager_->wakeup(
+      request.model_id(), wakeup_options, error_message);
 }
 
 void APIService::Wakeup(::google::protobuf::RpcController* controller,
@@ -1517,6 +1517,12 @@ void APIService::LinkP2PHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
+  if (!master_manager_->has_master(req_pb->model_id())) {
+    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
+    ctrl->SetFailed("Master for model not found");
+    return;
+  }
+
   std::string error_message;
   const bool ok = master_manager_->link_p2p(
       req_pb->model_id(),
@@ -1584,6 +1590,12 @@ void APIService::UnlinkP2PHttp(::google::protobuf::RpcController* controller,
   if (!st) {
     ctrl->SetFailed(error);
     LOG(ERROR) << "parse json to proto failed: " << error;
+    return;
+  }
+
+  if (!master_manager_->has_master(req_pb->model_id())) {
+    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
+    ctrl->SetFailed("Master for model not found");
     return;
   }
 
