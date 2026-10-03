@@ -3,6 +3,19 @@ include(cc_test)
 if(USE_NPU)
   cc_test(
     NAME
+      npu_cpu_binding_test
+    NO_NPU_RUNTIME
+    SRCS
+      npu_cpu_binding_test.cpp
+      ${PROJECT_SOURCE_DIR}/xllm/core/platform/npu/npu_cpu_binding_plan.cpp
+      ${PROJECT_SOURCE_DIR}/xllm/core/platform/npu/npu_cpu_binding.cpp
+    DEPS
+      GTest::gtest_main
+      glog::glog
+  )
+
+  cc_test(
+    NAME
       npu_torch_profiler_test
     SRCS
       npu_torch_profiler_test.cpp

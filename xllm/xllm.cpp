@@ -22,6 +22,8 @@ namespace py = pybind11;
 
 #if defined(USE_NPU)
 #include <acl/acl.h>
+
+#include "core/platform/npu/npu_cpu_binding.h"
 #endif
 
 #include <csignal>
@@ -298,6 +300,14 @@ void init_npu_python_runtime() {
   CHECK(acl_ret == ACL_SUCCESS || acl_ret == ACL_ERROR_INTERNAL_ERROR)
       << "aclInit failed with error " << acl_ret;
 
+  if (ExecutionConfig::get_instance().enable_cpu_binding()) {
+    const char* soc_name = aclrtGetSocName();
+    npu::NpuCpuBinding::get_instance().initialize(
+        device_index,
+        soc_name == nullptr ? "" : soc_name,
+        ExecutionConfig::get_instance().enable_npu_irq_binding());
+  }
+
   // We own ACL initialization, so torch_npu will skip aclFinalize. Register
   // before importing torch_npu: Python runs exit hooks in reverse order,
   // releasing its groups, streams and devices before we finalize CANN.
@@ -332,6 +342,7 @@ void init_npu_python_runtime() {
         "_npu_mod._original_pid = os.getpid()\n"
         "torch_npu._C._npu_setDevice(" +
         std::to_string(device_index) + ")\n");
+    npu::NpuCpuBinding::get_instance().refresh_threads();
   }
 }
 }  // namespace
