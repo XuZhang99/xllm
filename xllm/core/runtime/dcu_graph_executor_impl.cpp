@@ -836,7 +836,7 @@ DcuGraphExecutorImpl::~DcuGraphExecutorImpl() {
   graphs_.clear();
 }
 
-ForwardInput DcuGraphExecutorImpl::prepare_inputs(Batch& batch) {
+LlmForwardInput DcuGraphExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }

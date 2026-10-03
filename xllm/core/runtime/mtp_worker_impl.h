@@ -80,45 +80,49 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
       const KVCacheShape& kv_cache_shape) override;
 #endif
 
-  ForwardInput update_input_by_last_step_output(ForwardInput& inputs) override;
-  ForwardInput update_input_by_last_step_output_for_schedule_overlap(
-      ForwardInput& inputs) override;
-  void prepare_work_before_execute(const ForwardInput& inputs,
-                                   ForwardInput& processed_inputs) override;
+  LlmForwardInput update_input_by_last_step_output(
+      LlmForwardInput& inputs) override;
+  LlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
+      LlmForwardInput& inputs) override;
+  void prepare_work_before_execute(const LlmForwardInput& inputs,
+                                   LlmForwardInput& processed_inputs) override;
 
  protected:
   // MTP composite: leaves own model-specific NPU input preparation.
   bool owns_npu_parallel_input_prepare() const override;
 
-  std::optional<ForwardOutput> step_prefill(const ForwardInput& input) override;
-  std::optional<ForwardOutput> step_decode(const ForwardInput& inputs) override;
-  std::optional<ForwardOutput> step_empty(const ForwardInput& inputs) override;
+  std::optional<ForwardOutput> step_prefill(
+      const LlmForwardInput& input) override;
+  std::optional<ForwardOutput> step_decode(
+      const LlmForwardInput& inputs) override;
+  std::optional<ForwardOutput> step_empty(
+      const LlmForwardInput& inputs) override;
 
   void fill_validate_input_from_draft_outputs(
-      const ForwardInput& input,
+      const LlmForwardInput& input,
       const std::vector<ForwardOutput>& draft_outputs,
-      ForwardInput& validate_input,
+      LlmForwardInput& validate_input,
       const std::vector<int32_t>& per_seq_val_tokens,
       const detail::JsonDraftValidationScratch* json_scratch,
       Stream& compute_stream);
   // Adaptive pruning path: compute per-seq prefix lengths, truncate draft
   // outputs, and run variable-length validate.
   std::optional<ForwardOutput> run_adaptive_validate(
-      const ForwardInput& input,
+      const LlmForwardInput& input,
       const std::vector<ForwardOutput>& draft_outputs,
-      ForwardInput& validate_input,
+      LlmForwardInput& validate_input,
       int32_t num_speculative_tokens);
   std::optional<ForwardOutput> run_validate(
-      const ForwardInput& input,
+      const LlmForwardInput& input,
       const std::vector<ForwardOutput>& draft_outputs,
-      ForwardInput& validate_input,
+      LlmForwardInput& validate_input,
       int32_t num_speculative_tokens,
       const std::vector<int32_t>* pruned_prefix_lengths,
       const detail::JsonDraftValidationScratch* json_scratch);
   std::optional<ForwardOutput> run_validate(
-      const ForwardInput& input,
+      const LlmForwardInput& input,
       const std::vector<ForwardOutput>& draft_outputs,
-      ForwardInput& validate_input,
+      LlmForwardInput& validate_input,
       int32_t num_speculative_tokens,
       const std::vector<int32_t>& per_seq_val_tokens,
       const std::vector<int32_t>* pruned_prefix_lengths,
@@ -164,12 +168,12 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
       const KVCacheShape& target_kv_cache_shape) const override;
 
   // prepare inputs for draft model at Prefill phase.
-  void prepare_prefill_inputs(const ForwardInput& inputs,
-                              ForwardInput& prefill_inputs);
+  void prepare_prefill_inputs(const LlmForwardInput& inputs,
+                              LlmForwardInput& prefill_inputs);
   void prepare_draft_sampling(SamplingParameters& sampling_params) const;
   bool supports_explicit_spec_verify_replay_update() const;
   bool should_use_explicit_spec_verify_replay_update(
-      const ForwardInput& input) const;
+      const LlmForwardInput& input) const;
   // Returns true when the target model's spec-verify kernel requires the
   // validate width (val_tokens) to be identical across every sequence in the
   // batch. Currently Qwen3.5 GDN's FusedRecurrentGatedDeltaRule spec-verify
@@ -195,32 +199,32 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
   void synchronize_embedded_eagle3_forward();
   std::optional<ForwardOutput> run_worker_no_sync(
       WorkerImpl& worker,
-      const ForwardInput& input,
-      ForwardInput& processed_input);
+      const LlmForwardInput& input,
+      LlmForwardInput& processed_input);
   // Prepare target validate input from cached target context.
-  void prepare_validate_inputs(const ForwardInput& inputs,
-                               ForwardInput& validate_inputs,
+  void prepare_validate_inputs(const LlmForwardInput& inputs,
+                               LlmForwardInput& validate_inputs,
                                bool static_graph_tasks_prepared = false,
                                bool record_ready_event = true);
-  void prepare_validate_inputs(const ForwardInput& inputs,
-                               ForwardInput& validate_inputs,
+  void prepare_validate_inputs(const LlmForwardInput& inputs,
+                               LlmForwardInput& validate_inputs,
                                const std::vector<int32_t>& per_seq_val_tokens);
   bool prepare_static_mtp_graph_tasks_before_final_draft(
-      const ForwardInput& input);
+      const LlmForwardInput& input);
 
   // prepare inputs for draft model at Decode phase.
-  void prepare_draft_inputs(const ForwardInput& inputs,
-                            ForwardInput& draft_inputs,
+  void prepare_draft_inputs(const LlmForwardInput& inputs,
+                            LlmForwardInput& draft_inputs,
                             int32_t position_offset);
   void update_decode_step_input(
-      ForwardInput& input,
+      LlmForwardInput& input,
       const std::vector<EmbeddingCache::DecodeState>& last_states) const;
 
   // Build draft-side input from cached target context at decode step start.
   void prepare_draft_extend_inputs(
-      const ForwardInput& base_input,
+      const LlmForwardInput& base_input,
       const std::vector<EmbeddingCache::DecodeState>& last_states,
-      ForwardInput& extend_input,
+      LlmForwardInput& extend_input,
       bool force_two_rows = false,
       bool wait_for_compute_stream = true);
 
@@ -249,10 +253,10 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
     std::vector<int32_t> raw_dp_global_token_nums;
     std::vector<uint64_t> dp_global_batch_generations;
     std::optional<ForwardOutput> output;
-    ForwardInput prepared_input;
+    LlmForwardInput prepared_input;
   };
 
-  void stage_target_context_write(const ForwardInput& input,
+  void stage_target_context_write(const LlmForwardInput& input,
                                   const SampleOutput& validate_output,
                                   torch::Tensor base_positions,
                                   torch::Tensor base_kv_seq_lens,
@@ -261,24 +265,25 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                                   std::vector<size_t> failed_rows);
   torch::Tensor acquire_accepted_tokens_host_buffer(
       const torch::Tensor& accepted_tokens);
-  bool pending_target_context_matches(const ForwardInput& input) const;
-  bool device_target_context_ready_for_batch(const ForwardInput& input) const;
+  bool pending_target_context_matches(const LlmForwardInput& input) const;
+  bool device_target_context_ready_for_batch(
+      const LlmForwardInput& input) const;
   void flush_pending_target_context();
   bool supports_combined_first_draft_execution() const;
   bool can_use_combined_first_draft() const;
-  bool can_prelaunch_next_first_draft(const ForwardInput& input) const;
-  void prepare_next_first_draft_template(const ForwardInput& input,
-                                         ForwardInput& combined_input);
-  void enqueue_next_first_draft(const ForwardInput& input,
+  bool can_prelaunch_next_first_draft(const LlmForwardInput& input) const;
+  void prepare_next_first_draft_template(const LlmForwardInput& input,
+                                         LlmForwardInput& combined_input);
+  void enqueue_next_first_draft(const LlmForwardInput& input,
                                 const SampleOutput& validate_output,
                                 const torch::Tensor& base_positions,
                                 const torch::Tensor& base_kv_seq_lens,
-                                ForwardInput combined_input);
-  void submit_pending_first_draft(const ForwardInput& batch_identity_input,
-                                  ForwardInput draft_input);
-  bool pending_draft_context_matches(const ForwardInput& input) const;
+                                LlmForwardInput combined_input);
+  void submit_pending_first_draft(const LlmForwardInput& batch_identity_input,
+                                  LlmForwardInput draft_input);
+  bool pending_draft_context_matches(const LlmForwardInput& input) const;
 
-  void write_target_context_to_cache(const ForwardInput& input,
+  void write_target_context_to_cache(const LlmForwardInput& input,
                                      const SampleOutput& validate_output,
                                      int32_t num_speculative_tokens);
   void record_validate_metrics(

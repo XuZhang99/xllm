@@ -42,7 +42,7 @@ class VlmExecutorImpl : public ExecutorImpl {
 
   ~VlmExecutorImpl() override = default;
 
-  ForwardInput prepare_inputs(Batch& batch) override;
+  LlmForwardInput prepare_inputs(Batch& batch) override;
 
   ModelOutput run(const torch::Tensor& tokens,
                   const torch::Tensor& positions,

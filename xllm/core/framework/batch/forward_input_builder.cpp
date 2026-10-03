@@ -433,13 +433,13 @@ TransferKVInfo ForwardInputBuilder::build_step_transfer_info(
   return info;
 }
 
-ForwardInput ForwardInputBuilder::build_forward_input(
+LlmForwardInput ForwardInputBuilder::build_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
   process_sequences();
   padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
 
-  return state_to_forward_input<ForwardInput>();
+  return state_to_forward_input<LlmForwardInput>();
 }
 
 RecForwardInput ForwardInputBuilder::build_rec_forward_input(

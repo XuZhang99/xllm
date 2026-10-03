@@ -294,11 +294,12 @@ BatchInputData BatchState::prepare_distributed_input_data() {
   return input_data(sequence_plan_);
 }
 
-ForwardInput BatchState::build_sequence_input(const BatchInputData& data,
-                                              uint32_t num_decoding_tokens,
-                                              uint32_t min_decoding_batch_size,
-                                              const ModelArgs& args,
-                                              int32_t cp_size) {
+LlmForwardInput BatchState::build_sequence_input(
+    const BatchInputData& data,
+    uint32_t num_decoding_tokens,
+    uint32_t min_decoding_batch_size,
+    const ModelArgs& args,
+    int32_t cp_size) {
   ForwardInputBuilder builder(data, &args, cp_size);
   auto input =
       builder.build_forward_input(num_decoding_tokens, min_decoding_batch_size);
@@ -306,10 +307,10 @@ ForwardInput BatchState::build_sequence_input(const BatchInputData& data,
   return input;
 }
 
-ForwardInput BatchState::build_distributed_input(const BatchInputData& data,
-                                                 const ModelArgs& args,
-                                                 ThreadPool* thread_pool,
-                                                 int32_t cp_size) {
+LlmForwardInput BatchState::build_distributed_input(const BatchInputData& data,
+                                                    const ModelArgs& args,
+                                                    ThreadPool* thread_pool,
+                                                    int32_t cp_size) {
   ForwardInputBuilder builder(data, &args, cp_size, thread_pool);
   auto input = builder.build_forward_input(/*num_decoding_tokens=*/0,
                                            /*min_decoding_batch_size=*/0);

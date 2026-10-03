@@ -220,7 +220,7 @@ PyExecutorImpl::~PyExecutorImpl() {
   clear_python_object(py_executor_);
 }
 
-ForwardInput PyExecutorImpl::prepare_inputs(Batch& batch) {
+LlmForwardInput PyExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(options_.num_decoding_tokens(),
                                      /*min_decoding_batch_size=*/0,
                                      args_,

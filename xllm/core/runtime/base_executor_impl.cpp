@@ -27,7 +27,7 @@ BaseExecutorImpl::BaseExecutorImpl(CausalLM* model,
                                    const runtime::Options& options)
     : model_(model), args_(args), device_(device), options_(options) {}
 
-ForwardInput BaseExecutorImpl::prepare_inputs(Batch& batch) {
+LlmForwardInput BaseExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }

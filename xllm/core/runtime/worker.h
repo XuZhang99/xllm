@@ -89,13 +89,13 @@ class Worker {
   const bool is_driver();
 
   // prepare input for execution
-  ForwardInput prepare_inputs(Batch& batch);
+  LlmForwardInput prepare_inputs(Batch& batch);
   RecForwardInput prepare_inputs(RecBatch& batch);
   std::optional<ForwardOutput> step(const RecForwardInput& inputs);
 
   std::optional<ForwardOutput> step(const DiTForwardInput& inputs);
 
-  std::optional<ForwardOutput> step(const ForwardInput& inputs);
+  std::optional<ForwardOutput> step(const LlmForwardInput& inputs);
 
   // initialize model, cache manager. async call
   folly::SemiFuture<bool> init_model_async(
@@ -134,7 +134,7 @@ class Worker {
   // empty PrepareAck; without overlap, successful completion returns
   // independent CPU results that are ready to read.
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
-      const ForwardInput& inputs);
+      const LlmForwardInput& inputs);
 
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const DiTForwardInput& inputs);

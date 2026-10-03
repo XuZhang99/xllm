@@ -63,15 +63,15 @@ class BatchState final {
   // their targets. Build methods may then advance KV state.
   BatchInputData prepare_sequence_input_data();
   BatchInputData prepare_distributed_input_data();
-  ForwardInput build_sequence_input(const BatchInputData& data,
-                                    uint32_t num_decoding_tokens,
-                                    uint32_t min_decoding_batch_size,
-                                    const ModelArgs& args,
-                                    int32_t cp_size);
-  ForwardInput build_distributed_input(const BatchInputData& data,
+  LlmForwardInput build_sequence_input(const BatchInputData& data,
+                                       uint32_t num_decoding_tokens,
+                                       uint32_t min_decoding_batch_size,
                                        const ModelArgs& args,
-                                       ThreadPool* thread_pool,
                                        int32_t cp_size);
+  LlmForwardInput build_distributed_input(const BatchInputData& data,
+                                          const ModelArgs& args,
+                                          ThreadPool* thread_pool,
+                                          int32_t cp_size);
   RecForwardInput build_rec_sequence_input(const BatchInputData& data,
                                            uint32_t num_decoding_tokens,
                                            uint32_t min_decoding_batch_size,

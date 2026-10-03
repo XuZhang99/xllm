@@ -225,7 +225,7 @@ std::tuple<int64_t, int64_t> Worker::estimate_kv_cache_capacity() {
   return impl_->estimate_kv_cache_capacity();
 }
 
-ForwardInput Worker::prepare_inputs(Batch& batch) {
+LlmForwardInput Worker::prepare_inputs(Batch& batch) {
   return impl_->prepare_inputs(batch);
 }
 
@@ -244,7 +244,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> Worker::step_async(
   return impl_->step_async(inputs);
 }
 
-std::optional<ForwardOutput> Worker::step(const ForwardInput& inputs) {
+std::optional<ForwardOutput> Worker::step(const LlmForwardInput& inputs) {
   if (enable_task_pipeline_) {
     return std::move(step_async(inputs)).get();
   }
@@ -270,7 +270,7 @@ Worker::estimate_kv_cache_capacity_async() {
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> Worker::step_async(
-    const ForwardInput& inputs) {
+    const LlmForwardInput& inputs) {
   if (enable_task_pipeline_) {
     CHECK(task_pipeline_ != nullptr);
     const TaskSubmission submission = task_pipeline_->submit(inputs);

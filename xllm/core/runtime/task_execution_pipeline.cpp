@@ -136,7 +136,7 @@ void TaskExecutionPipeline::check_external_thread() const {
   CHECK(std::this_thread::get_id() != launch_thread_.get_id());
 }
 
-Status TaskExecutionPipeline::validate_input(const ForwardInput& source,
+Status TaskExecutionPipeline::validate_input(const LlmForwardInput& source,
                                              const LlmTaskCapacity& capacity,
                                              bool speculative) {
   const auto& params = source.input_params;
@@ -292,7 +292,7 @@ std::vector<int64_t> TaskExecutionPipeline::graph_batch_sizes(
 }
 
 uint32_t TaskExecutionPipeline::graph_batch_size(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     std::span<const int64_t> batch_sizes) {
   const auto& parallel = input.input_params.parallel;
   int64_t rows = 0;
@@ -320,7 +320,7 @@ uint32_t TaskExecutionPipeline::graph_batch_size(
   return bucket == batch_sizes.end() ? 0 : static_cast<uint32_t>(*bucket);
 }
 
-Status TaskExecutionPipeline::warmup_slot_graphs(const ForwardInput& input,
+Status TaskExecutionPipeline::warmup_slot_graphs(const LlmForwardInput& input,
                                                  uint32_t padded_batch_size) {
   CHECK(input.input_params.meta.is_graph_warmup);
   const auto bucket = std::lower_bound(captured_graph_batch_sizes_.begin(),
@@ -358,10 +358,10 @@ Status TaskExecutionPipeline::warmup_slot_graphs(const ForwardInput& input,
   return Status();
 }
 
-TaskSubmission TaskExecutionPipeline::submit(const ForwardInput& input) {
+TaskSubmission TaskExecutionPipeline::submit(const LlmForwardInput& input) {
   check_external_thread();
-  ForwardInput unpacked;
-  const ForwardInput* source = &input;
+  LlmForwardInput unpacked;
+  const LlmForwardInput* source = &input;
   if (input.runtime.input_host_buffer_has_layout) {
     CHECK(detail::unpack_from_input_host_buffer(
         input, device_.unwrap(), unpacked));
@@ -484,7 +484,7 @@ TaskExecutionPipeline::~TaskExecutionPipeline() {
 }
 
 Status TaskExecutionPipeline::validate(const Slot& slot,
-                                       const ForwardInput& input) const {
+                                       const LlmForwardInput& input) const {
   Status status = slot.buffer->validate(
       input,
       capacity_.slot_count == 2 ? accepted_tail_.sample_rows : 0,
@@ -552,7 +552,7 @@ Status TaskExecutionPipeline::validate(const Slot& slot,
 }
 
 Status TaskExecutionPipeline::prepare(uint32_t slot_id,
-                                      const ForwardInput& input) {
+                                      const LlmForwardInput& input) {
   if (speculative_capacity_) {
     if (input.input_params.meta.is_graph_warmup) {
       if (!accepted_.empty()) {

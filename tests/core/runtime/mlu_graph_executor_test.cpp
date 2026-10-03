@@ -185,7 +185,7 @@ class MluGraphExecutorTest : public ::testing::Test {
     rebuild_impl();
   }
 
-  ForwardInput prepare_inputs(int32_t batch_size, uint64_t seed) {
+  LlmForwardInput prepare_inputs(int32_t batch_size, uint64_t seed) {
     Device device(tensor_options_.device());
     device.set_seed(seed);
     const int64_t max_seq_len = model_args_.max_position_embeddings();
@@ -226,7 +226,7 @@ class MluGraphExecutorTest : public ::testing::Test {
     input_params.embedding.input_embedding = input_embedding;
 
     kv_caches_.resize(batch_size);
-    ForwardInput input;
+    LlmForwardInput input;
     input.token_ids = token_ids;
     input.positions = positions;
     input.input_params = input_params;
@@ -574,7 +574,7 @@ TEST_F(MluGraphExecutorTest, LinearStatePaddingTailUsesPaddingId) {
   ::xllm::mlu::GraphPersistentParam param(
       model_args_, tensor_options_.device(), options_);
 
-  ForwardInput first_input = prepare_inputs(/*batch_size=*/4, /*seed=*/83);
+  LlmForwardInput first_input = prepare_inputs(/*batch_size=*/4, /*seed=*/83);
   first_input.input_params.embedding.linear_state_ids = {10, 20, 30, 40};
   first_input.input_params.embedding.linear_state_indices =
       torch::tensor(first_input.input_params.embedding.linear_state_ids,
@@ -588,7 +588,7 @@ TEST_F(MluGraphExecutorTest, LinearStatePaddingTailUsesPaddingId) {
                             first_input.input_params,
                             /*padding_needed=*/0);
 
-  ForwardInput second_input = prepare_inputs(/*batch_size=*/3, /*seed=*/89);
+  LlmForwardInput second_input = prepare_inputs(/*batch_size=*/3, /*seed=*/89);
   second_input.input_params.embedding.linear_state_ids = {11, 21, 31};
   second_input.input_params.embedding.linear_state_indices =
       torch::tensor(second_input.input_params.embedding.linear_state_ids,

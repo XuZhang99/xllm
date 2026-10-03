@@ -126,7 +126,7 @@ class TaskExecutionPipeline final {
   // borrowed, including unpacked transport storage. Negative tokens encode
   // -(previous sampling output row + 1) with scheduler overlap.
   // Backpressure and validation return before accepting a Task.
-  TaskSubmission submit(const ForwardInput& input);
+  TaskSubmission submit(const LlmForwardInput& input);
   // Only the oldest accepted TaskId may be consumed. Other IDs are rejected
   // without removing a completion. Slot retirement precedes
   // Future completion; successful outputs own independent, ready CPU values.
@@ -185,14 +185,14 @@ class TaskExecutionPipeline final {
                                    std::unique_ptr<MtpContextStorage>& output);
   static uint64_t mtp_context_bytes(const MtpContextStorage& cache);
   friend class TaskExecutionPipelineInputTest;
-  static Status validate_input(const ForwardInput& input,
+  static Status validate_input(const LlmForwardInput& input,
                                const LlmTaskCapacity& capacity,
                                bool speculative = false);
   static std::vector<int64_t> graph_batch_sizes(
       const LlmTaskCapacity& capacity);
-  static uint32_t graph_batch_size(const ForwardInput& input,
+  static uint32_t graph_batch_size(const LlmForwardInput& input,
                                    std::span<const int64_t> batch_sizes);
-  Status warmup_slot_graphs(const ForwardInput& input,
+  Status warmup_slot_graphs(const LlmForwardInput& input,
                             uint32_t padded_batch_size);
 
   struct Step {
@@ -231,8 +231,8 @@ class TaskExecutionPipeline final {
                         Executor& executor,
                         std::vector<KVCache>& kv_caches,
                         LlmTaskCapacity capacity);
-  Status validate(const Slot& slot, const ForwardInput& input) const;
-  Status prepare(uint32_t slot_id, const ForwardInput& input);
+  Status validate(const Slot& slot, const LlmForwardInput& input) const;
+  Status prepare(uint32_t slot_id, const LlmForwardInput& input);
   void launch(uint32_t slot_id);
   ForwardOutput consume(uint32_t slot_id);
   void discard(uint32_t slot_id);
@@ -245,20 +245,20 @@ class TaskExecutionPipeline final {
   void check_external_thread() const;
 
   Status initialize_speculative();
-  Status warmup_speculative_graphs(const ForwardInput& input);
-  Status prepare_speculative(uint32_t slot_id, const ForwardInput& input);
+  Status warmup_speculative_graphs(const LlmForwardInput& input);
+  Status prepare_speculative(uint32_t slot_id, const LlmForwardInput& input);
   void launch_speculative(uint32_t slot_id);
   ForwardOutput consume_speculative(uint32_t slot_id);
   void discard_speculative(uint32_t slot_id);
   uint64_t speculative_pinned_bytes() const;
   uint64_t speculative_device_bytes() const;
   const SampleOutput& sample(Sampling& sampling, torch::Tensor& logits);
-  Status validate_input(SpeculativeSlot& slot, const ForwardInput& input);
-  Status plan_sampling(SpeculativeSlot& slot, const ForwardInput& input);
-  Status validate_bootstrap(const ForwardInput& input) const;
-  void prepare_bootstrap(SpeculativeSlot& slot, const ForwardInput& input);
+  Status validate_input(SpeculativeSlot& slot, const LlmForwardInput& input);
+  Status plan_sampling(SpeculativeSlot& slot, const LlmForwardInput& input);
+  Status validate_bootstrap(const LlmForwardInput& input) const;
+  void prepare_bootstrap(SpeculativeSlot& slot, const LlmForwardInput& input);
   void apply_bootstrap(SpeculativeSlot& slot);
-  void warmup_draft_graphs(const ForwardInput& input);
+  void warmup_draft_graphs(const LlmForwardInput& input);
   void prepare_draft_state(SpeculativeSlot& slot, uint32_t step, bool warmup);
   void prepare_empty_shard(SpeculativeSlot& slot, uint64_t batch_id);
   void launch_empty_shard(SpeculativeSlot& slot);

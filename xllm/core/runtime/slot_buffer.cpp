@@ -281,7 +281,7 @@ bool overlaps_host(std::span<const int32_t> source,
                        : base - start < source.size_bytes();
 }
 
-BatchInputMeta batch_input_meta(const ForwardInput& input) {
+BatchInputMeta batch_input_meta(const LlmForwardInput& input) {
   BatchInputMeta batch = input.input_params.meta;
   // The builder leaves actual_num_sequences unset before Worker prepare.
   if (batch.actual_num_sequences == 0) {
@@ -781,7 +781,7 @@ Status SlotBuffer::validate_previous_tokens(const ModelInputHostView& model,
   return Status();
 }
 
-ModelInputHostView SlotBuffer::model_input_view(const ForwardInput& input) {
+ModelInputHostView SlotBuffer::model_input_view(const LlmForwardInput& input) {
   const auto& host = input.input_params.attention.host;
   const auto tokens = int_span(input.host_token_ids());
   return {tokens,
@@ -798,7 +798,7 @@ ModelInputHostView SlotBuffer::model_input_view(const ForwardInput& input) {
               : static_cast<uint32_t>(host.block_tables.size(/*dim=*/1))};
 }
 
-Status SlotBuffer::validate(const ForwardInput& input,
+Status SlotBuffer::validate(const LlmForwardInput& input,
                             uint32_t previous_rows,
                             const Stream& stream) const {
   if (copy_submitted_) {
@@ -824,7 +824,7 @@ Status SlotBuffer::validate(const ForwardInput& input,
   return validate_previous_tokens(model, previous_rows);
 }
 
-void SlotBuffer::prepare(const ForwardInput& input,
+void SlotBuffer::prepare(const LlmForwardInput& input,
                          const Stream& stream,
                          uint32_t padded_batch_size) {
   CHECK(!copy_submitted_) << "Pending result prevents Slot reuse.";

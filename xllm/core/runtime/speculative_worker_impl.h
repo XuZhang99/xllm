@@ -129,19 +129,20 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   };
 
   // prepare input for execution
-  ForwardInput prepare_inputs(Batch& batch) override {
+  LlmForwardInput prepare_inputs(Batch& batch) override {
     return impl_->prepare_inputs(batch);
   };
 
   // prepare work before model execution
-  void prepare_work_before_execute(const ForwardInput& input,
-                                   ForwardInput& new_input) override;
-  void restore_json_object_states(ForwardInput& input) override;
+  void prepare_work_before_execute(const LlmForwardInput& input,
+                                   LlmForwardInput& new_input) override;
+  void restore_json_object_states(LlmForwardInput& input) override;
 
   // Common step dispatch: prefill / decode / empty
-  std::optional<ForwardOutput> step(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step(const LlmForwardInput& input) override;
 
-  ForwardInput update_input_by_last_step_output(ForwardInput& inputs) override;
+  LlmForwardInput update_input_by_last_step_output(
+      LlmForwardInput& inputs) override;
 
   folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,
@@ -153,11 +154,11 @@ class SpeculativeWorkerImpl : public WorkerImpl {
  protected:
   // Algorithm-specific virtual methods for subclasses to implement
   virtual std::optional<ForwardOutput> step_prefill(
-      const ForwardInput& input) = 0;
+      const LlmForwardInput& input) = 0;
   virtual std::optional<ForwardOutput> step_decode(
-      const ForwardInput& inputs) = 0;
+      const LlmForwardInput& inputs) = 0;
   virtual std::optional<ForwardOutput> step_empty(
-      const ForwardInput& inputs) = 0;
+      const LlmForwardInput& inputs) = 0;
 
   // Common helper: update sampling params for validation
   void update_sampling_params(SamplingParameters& sampling_params,
@@ -170,14 +171,14 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   static void force_greedy_draft_sampling(SamplingParameters& sampling_params);
 
   // prepare inputs for target model at Decode phase (validation).
-  void prepare_validate_inputs(const ForwardInput& inputs,
-                               ForwardInput& validate_inputs);
+  void prepare_validate_inputs(const LlmForwardInput& inputs,
+                               LlmForwardInput& validate_inputs);
   // Per-seq variant used by adaptive-speculative pruning: each sequence's
   // validate row width equals per_seq_val_tokens[i] (must be in [1, N+1]).
   // The dense meta/token/position/kv-slot buffers are rebuilt as varlen with
   // total_tokens = Σ per_seq_val_tokens.
-  void prepare_validate_inputs(const ForwardInput& inputs,
-                               ForwardInput& validate_inputs,
+  void prepare_validate_inputs(const LlmForwardInput& inputs,
+                               LlmForwardInput& validate_inputs,
                                const std::vector<int32_t>& per_seq_val_tokens);
 
   // Overwrite dp_global_token_nums / raw_dp_global_token_nums with the true

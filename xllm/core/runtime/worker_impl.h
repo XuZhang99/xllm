@@ -124,15 +124,15 @@ class WorkerImpl {
   virtual bool unlink_p2p(const std::string& remote_addr);
 
   // prepare input for execution
-  virtual ForwardInput prepare_inputs(Batch& batch);
+  virtual LlmForwardInput prepare_inputs(Batch& batch);
   virtual RecForwardInput prepare_inputs(RecBatch& batch);
 
   // prepare work before model execution
-  virtual void prepare_work_before_execute(const ForwardInput& inputs,
-                                           ForwardInput& processed_inputs);
-  virtual void restore_json_object_states(ForwardInput& input);
-  void prepare_work_before_execute_on_stream(const ForwardInput& input,
-                                             ForwardInput& processed_input,
+  virtual void prepare_work_before_execute(const LlmForwardInput& inputs,
+                                           LlmForwardInput& processed_inputs);
+  virtual void restore_json_object_states(LlmForwardInput& input);
+  void prepare_work_before_execute_on_stream(const LlmForwardInput& input,
+                                             LlmForwardInput& processed_input,
                                              Stream& prepare_stream,
                                              bool record_ready_event = true,
                                              bool restore_linear_state = true);
@@ -167,19 +167,20 @@ class WorkerImpl {
   virtual void prepare_work_before_execute(const RecForwardInput& inputs,
                                            RecForwardInput& processed_inputs);
 
-  virtual std::optional<ForwardOutput> step(const ForwardInput& inputs) = 0;
+  virtual std::optional<ForwardOutput> step(const LlmForwardInput& inputs) = 0;
 
   // Optional no-sync execution hook used by speculative LLM/VLM workers.
   // Other worker types do not support this execution mode.
   virtual std::optional<ForwardOutput> execute_no_sync_on_stream(
-      const ForwardInput& input,
+      const LlmForwardInput& input,
       Stream& compute_stream);
 
   virtual void process_group_test();
 
-  virtual ForwardInput update_input_by_last_step_output(ForwardInput& inputs);
-  void update_json_object_states_by_last_step_output(ForwardInput& inputs);
-  void sanitize_json_object_error_inputs(ForwardInput& inputs);
+  virtual LlmForwardInput update_input_by_last_step_output(
+      LlmForwardInput& inputs);
+  void update_json_object_states_by_last_step_output(LlmForwardInput& inputs);
+  void sanitize_json_object_error_inputs(LlmForwardInput& inputs);
 
   // initialize model, cache manager. async call
   virtual folly::SemiFuture<bool> init_model_async(
@@ -249,7 +250,7 @@ class WorkerImpl {
   // Run the model on the given input. async call
   // the future returns a successful status with no meaningful value
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
-      const ForwardInput& inputs);
+      const LlmForwardInput& inputs);
 
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const DiTForwardInput& inputs);
@@ -340,11 +341,11 @@ class WorkerImpl {
       const std::vector<std::string>& request_ids,
       const std::vector<std::string>& sample_sequence_ids);
   bool can_use_last_step_output_for_schedule_overlap(
-      const ForwardInput& input) const;
+      const LlmForwardInput& input) const;
   virtual std::optional<ForwardOutput> step_for_schedule_overlap(
-      const ForwardInput& input);
-  virtual ForwardInput update_input_by_last_step_output_for_schedule_overlap(
-      ForwardInput& input);
+      const LlmForwardInput& input);
+  virtual LlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
+      LlmForwardInput& input);
   // Only used for deepseek chunked prefill ops on npu device
   void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);
 

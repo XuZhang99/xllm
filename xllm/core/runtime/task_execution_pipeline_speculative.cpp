@@ -41,7 +41,7 @@ uint32_t TaskExecutionPipeline::context_hidden_size() const {
 
 namespace {
 
-ModelInputBatch model_batch(const ForwardInput& input) {
+ModelInputBatch model_batch(const LlmForwardInput& input) {
   const auto& meta = input.input_params.meta;
   const uint32_t rows = input.input_params.attention.host.q_seq_lens.size();
   return {rows == 0 ? BatchForwardType::EMPTY : meta.batch_forward_type,
@@ -481,7 +481,7 @@ Status TaskExecutionPipeline::plan_parallel(const ParallelInput& input,
 }
 
 Status TaskExecutionPipeline::validate_bootstrap(
-    const ForwardInput& input) const {
+    const LlmForwardInput& input) const {
   const auto host = SlotBuffer::model_input_view(input);
   const auto batch = model_batch(input);
   const auto& rows = input.input_params.embedding.mtp_bootstrap_row_idxes;
@@ -512,7 +512,7 @@ Status TaskExecutionPipeline::validate_bootstrap(
 }
 
 Status TaskExecutionPipeline::validate_input(SpeculativeSlot& slot,
-                                             const ForwardInput& input) {
+                                             const LlmForwardInput& input) {
   const auto host = SlotBuffer::model_input_view(input);
   const auto batch = model_batch(input);
   Status status = slot.target_prefill->validate(host, batch);
@@ -699,7 +699,7 @@ Status TaskExecutionPipeline::validate_input(SpeculativeSlot& slot,
 }
 
 Status TaskExecutionPipeline::plan_sampling(SpeculativeSlot& slot,
-                                            const ForwardInput& input) {
+                                            const LlmForwardInput& input) {
   const auto& base = input.sampling_params;
   slot.samples = base.sample_idxes.defined() ? base.sample_idxes.numel() : 0;
   if (slot.rows == 0 || !slot.decode) {
@@ -739,7 +739,7 @@ Status TaskExecutionPipeline::plan_sampling(SpeculativeSlot& slot,
 }
 
 void TaskExecutionPipeline::prepare_bootstrap(SpeculativeSlot& slot,
-                                              const ForwardInput& input) {
+                                              const LlmForwardInput& input) {
   const auto host = SlotBuffer::model_input_view(input);
   auto& b = slot.bootstrap;
   const int64_t count =
@@ -801,7 +801,7 @@ void TaskExecutionPipeline::apply_bootstrap(SpeculativeSlot& slot) {
 }
 
 Status TaskExecutionPipeline::warmup_speculative_graphs(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   const auto host = SlotBuffer::model_input_view(input);
   const auto batch = model_batch(input);
   CHECK(input.input_params.meta.is_graph_warmup);
@@ -868,7 +868,7 @@ Status TaskExecutionPipeline::warmup_speculative_graphs(
   return Status();
 }
 
-void TaskExecutionPipeline::warmup_draft_graphs(const ForwardInput& input) {
+void TaskExecutionPipeline::warmup_draft_graphs(const LlmForwardInput& input) {
   const auto host = SlotBuffer::model_input_view(input);
   const auto batch = model_batch(input);
   for (auto& task_slot : slots_) {
@@ -955,8 +955,9 @@ void TaskExecutionPipeline::prepare_draft_state(SpeculativeSlot& slot,
   }
 }
 
-Status TaskExecutionPipeline::prepare_speculative(uint32_t slot_id,
-                                                  const ForwardInput& input) {
+Status TaskExecutionPipeline::prepare_speculative(
+    uint32_t slot_id,
+    const LlmForwardInput& input) {
   const auto host = SlotBuffer::model_input_view(input);
   const auto batch = model_batch(input);
   if (slot_id >= slots_.size()) {

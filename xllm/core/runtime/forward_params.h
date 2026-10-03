@@ -45,7 +45,7 @@ limitations under the License.
 
 namespace xllm {
 
-struct ForwardInput;
+class LlmForwardInput;
 
 namespace detail {
 
@@ -73,20 +73,20 @@ inline bool supports_contiguous_forward_input_buffer(
 #endif
 }
 
-bool try_to_device_from_input_host_buffer(const ForwardInput& input,
+bool try_to_device_from_input_host_buffer(const LlmForwardInput& input,
                                           const torch::Device& device,
                                           torch::ScalarType dtype,
-                                          ForwardInput& output);
+                                          LlmForwardInput& output);
 
-bool unpack_from_input_host_buffer(const ForwardInput& input,
+bool unpack_from_input_host_buffer(const LlmForwardInput& input,
                                    const torch::Device& device,
                                    torch::ScalarType dtype,
-                                   ForwardInput& output,
+                                   LlmForwardInput& output,
                                    bool materialize_device_buffer);
 
-bool unpack_from_input_host_buffer(const ForwardInput& input,
+bool unpack_from_input_host_buffer(const LlmForwardInput& input,
                                    const torch::Device& device,
-                                   ForwardInput& output);
+                                   LlmForwardInput& output);
 
 struct ForwardInputBufferEntry {
   torch::Tensor host_tensor;
@@ -390,14 +390,16 @@ struct StepDecodeMeta {
 };
 
 // Inputs for forward execution
-struct ForwardInput {
-  ForwardInput to(const torch::Device& device, torch::ScalarType dtype) const {
+class LlmForwardInput final {
+ public:
+  LlmForwardInput to(const torch::Device& device,
+                     torch::ScalarType dtype) const {
     if (runtime.device_tensors_ready) {
       return *this;
     }
 
     if (runtime.input_host_buffer_has_layout) {
-      ForwardInput buffer_inputs;
+      LlmForwardInput buffer_inputs;
       const bool materialize_device_buffer =
           ::xllm::ExecutionConfig::get_instance()
               .use_contiguous_input_buffer() &&
@@ -413,13 +415,13 @@ struct ForwardInput {
 
     if (::xllm::ExecutionConfig::get_instance().use_contiguous_input_buffer() &&
         detail::supports_contiguous_forward_input_buffer(device)) {
-      ForwardInput contiguous_inputs;
+      LlmForwardInput contiguous_inputs;
       if (to_contiguous_input_buffer(device, contiguous_inputs)) {
         return contiguous_inputs;
       }
     }
 
-    ForwardInput inputs;
+    LlmForwardInput inputs;
     set_host_views(inputs);
     const torch::Tensor& source_token_ids =
         inputs.token_ids_host.defined() ? inputs.token_ids_host : token_ids;
@@ -442,7 +444,7 @@ struct ForwardInput {
   }
 
   bool to_contiguous_input_buffer(const torch::Device& device,
-                                  ForwardInput& inputs) const {
+                                  LlmForwardInput& inputs) const {
     copy_metadata_to(inputs);
     set_host_views(inputs);
 
@@ -496,7 +498,7 @@ struct ForwardInput {
     return true;
   }
 
-  void copy_metadata_to(ForwardInput& inputs) const {
+  void copy_metadata_to(LlmForwardInput& inputs) const {
     inputs.transfer_kv_infos = transfer_kv_infos;
     inputs.step_decode = step_decode;
     inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
@@ -510,14 +512,14 @@ struct ForwardInput {
     inputs.json_object_state_snapshots = json_object_state_snapshots;
   }
 
-  void set_host_views(ForwardInput& inputs) const {
+  void set_host_views(LlmForwardInput& inputs) const {
     inputs.token_ids_host =
         token_ids_host.defined() ? token_ids_host : cpu_view(token_ids);
     inputs.positions_host =
         positions_host.defined() ? positions_host : cpu_view(positions);
   }
 
-  bool missing_required_host_views(const ForwardInput& inputs) const {
+  bool missing_required_host_views(const LlmForwardInput& inputs) const {
     return (token_ids.defined() && !inputs.token_ids_host.defined()) ||
            (positions.defined() && !inputs.positions_host.defined());
   }
@@ -606,7 +608,7 @@ struct ForwardOutput {
   // Keep no-sync input tensor handles alive until downstream consumers finish
   // using outputs on the same compute stream. Composite workers append child
   // outputs' retained inputs here. Local runtime handles; not in proto/shm.
-  std::vector<std::shared_ptr<ForwardInput>> retained_inputs;
+  std::vector<std::shared_ptr<LlmForwardInput>> retained_inputs;
   // Device-side readiness dependency for no-sync outputs. This local runtime
   // handle is intentionally not included in proto or shared-memory transport.
   StreamEventPtr ready_event;
@@ -651,7 +653,7 @@ inline void transfer_retained_inputs(ForwardOutput& destination,
   source.retained_inputs.clear();
 }
 
-inline std::vector<std::shared_ptr<ForwardInput>> take_retained_inputs(
+inline std::vector<std::shared_ptr<LlmForwardInput>> take_retained_inputs(
     ForwardOutput& source) {
   return std::exchange(source.retained_inputs, {});
 }
@@ -680,7 +682,7 @@ struct RawForwardOutput {
 };
 
 struct BatchedForwardInputs {
-  std::vector<ForwardInput> micro_inputs;
+  std::vector<LlmForwardInput> micro_inputs;
   SamplingParameters concated_sampling_params;
 };
 

@@ -141,11 +141,11 @@ void repeat_sampling_params(SamplingParameters& sampling_params,
   repeat_sampling_tensor(sampling_params.do_sample, repeats);
 }
 
-void record_metadata_ready_event(Stream& stream, ForwardInput& input) {
+void record_metadata_ready_event(Stream& stream, LlmForwardInput& input) {
   input.runtime.metadata_ready_event = stream.record_event_or_sync();
 }
 
-void wait_metadata_ready_event(const ForwardInput& input, Stream& stream) {
+void wait_metadata_ready_event(const LlmForwardInput& input, Stream& stream) {
   CHECK(stream.wait_event(input.runtime.metadata_ready_event))
       << "failed to wait DFlash metadata ready event";
 }
@@ -205,11 +205,11 @@ void build_dflash_expanded_spec_verify_graph_input(
 
 std::optional<ForwardOutput> run_worker_no_sync_impl(
     WorkerImpl& worker,
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     Stream& prepare_stream,
     Stream& compute_stream,
-    ForwardInput* processed_output = nullptr) {
-  ForwardInput processed_input;
+    LlmForwardInput* processed_output = nullptr) {
+  LlmForwardInput processed_input;
   worker.prepare_work_before_execute_on_stream(
       input, processed_input, prepare_stream);
   std::optional<ForwardOutput> output =
@@ -220,7 +220,7 @@ std::optional<ForwardOutput> run_worker_no_sync_impl(
   return output;
 }
 
-void build_query_rows(const ForwardInput& input,
+void build_query_rows(const LlmForwardInput& input,
                       int32_t mask_token_id,
                       int32_t num_speculative_tokens,
                       int32_t block_size,
@@ -303,7 +303,7 @@ void build_query_rows(const ForwardInput& input,
 }
 
 std::vector<int64_t> build_accepted_context_rows(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     const torch::Tensor& accepted_tokens_cpu,
     int32_t block_size,
     specBuilder::DecodeBuildBuffers& buf) {
@@ -684,13 +684,13 @@ bool DFlashWorkerImpl::allocate_kv_cache_with_transfer(
 }
 #endif
 
-ForwardInput DFlashWorkerImpl::update_input_by_last_step_output(
-    ForwardInput& inputs) {
+LlmForwardInput DFlashWorkerImpl::update_input_by_last_step_output(
+    LlmForwardInput& inputs) {
   return inputs;
 }
 
 std::optional<ForwardOutput> DFlashWorkerImpl::step_empty(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   if (!input.input_params.meta.batch_forward_type.is_decode()) {
     std::optional<ForwardOutput> output = run_worker_no_sync_impl(
         *impl_, input, *prepare_stream_, *compute_stream_);
@@ -711,7 +711,7 @@ std::optional<ForwardOutput> DFlashWorkerImpl::step_empty(
   const int32_t draft_width = dflash_detail::decode_draft_width(
       options_.num_speculative_tokens(), sample_from_anchor());
   const bool use_block_parallel_rows = draft_use_block_parallel_rows();
-  ForwardInput query_input = input;
+  LlmForwardInput query_input = input;
   dflash_detail::invalidate_draft_model_geometry(query_input.input_params);
   query_input.input_params.meta.batch_forward_type = draft_batch_forward_type();
   query_input.input_params.meta.q_max_seq_len =
@@ -727,7 +727,7 @@ std::optional<ForwardOutput> DFlashWorkerImpl::step_empty(
   std::optional<ForwardOutput> draft_output = run_worker_no_sync_impl(
       *draft_impl_, query_input, *prepare_stream_, *compute_stream_);
 
-  ForwardInput validate_input = input;
+  LlmForwardInput validate_input = input;
   // DSpark's N-wide draft geometry must be rescaled to (N+1) for the target's
   // anchor + drafts forward.
   scale_speculative_parallel_token_counts(
@@ -749,9 +749,9 @@ std::optional<ForwardOutput> DFlashWorkerImpl::step_empty(
 }
 
 std::optional<ForwardOutput> DFlashWorkerImpl::step_prefill(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   Timer timer;
-  ForwardInput processed_target_input;
+  LlmForwardInput processed_target_input;
   ForwardOutput output = run_worker_no_sync_impl(*impl_,
                                                  input,
                                                  *prepare_stream_,
@@ -806,9 +806,9 @@ std::optional<ForwardOutput> DFlashWorkerImpl::step_prefill(
 }
 
 std::optional<ForwardOutput> DFlashWorkerImpl::step_decode(
-    const ForwardInput& raw_input) {
-  ForwardInput input = raw_input;
-  ForwardInput validate_input;
+    const LlmForwardInput& raw_input) {
+  LlmForwardInput input = raw_input;
+  LlmForwardInput validate_input;
 
   CHECK(embedding_cache_ != nullptr)
       << "DFlash embedding cache is not allocated";
@@ -865,11 +865,11 @@ std::optional<ForwardOutput> DFlashWorkerImpl::step_decode(
 }
 
 DFlashWorkerImpl::DraftBlock DFlashWorkerImpl::run_decode_draft(
-    const ForwardInput& input,
-    ForwardInput& validate_input) {
+    const LlmForwardInput& input,
+    LlmForwardInput& validate_input) {
   Timer timer;
 
-  ForwardInput query_input;
+  LlmForwardInput query_input;
   prepare_query_inputs(input, query_input);
 
   ForwardOutput draft_output =
@@ -906,7 +906,7 @@ DFlashWorkerImpl::DraftBlock DFlashWorkerImpl::run_decode_draft(
 
 void DFlashWorkerImpl::fill_validate_input_from_draft_outputs(
     const DraftBlock& draft_block,
-    ForwardInput& validate_input,
+    LlmForwardInput& validate_input,
     Stream& compute_stream,
     int32_t effective_val_tokens) {
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
@@ -964,7 +964,7 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs(
 
 void DFlashWorkerImpl::fill_validate_input_from_draft_outputs_varlen(
     const DraftBlock& draft_block,
-    ForwardInput& validate_input,
+    LlmForwardInput& validate_input,
     Stream& compute_stream,
     const std::vector<int32_t>& per_seq_val_tokens) {
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
@@ -1030,9 +1030,9 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs_varlen(
 }
 
 std::optional<ForwardOutput> DFlashWorkerImpl::run_validate(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     const DraftBlock& draft_block_in,
-    ForwardInput& validate_input) {
+    LlmForwardInput& validate_input) {
   Timer timer;
   // Adaptive-speculative per-seq varlen validate:
   // 1. controller decides per-seq prefix_lengths from confidence/proposal
@@ -1279,7 +1279,7 @@ void DFlashWorkerImpl::maybe_broadcast_spec_tokens(torch::Tensor& tokens) {
 }
 
 void DFlashWorkerImpl::update_decode_step_input(
-    ForwardInput& input,
+    LlmForwardInput& input,
     const std::vector<EmbeddingCache::DecodeState>& last_states) const {
   const int32_t num_sequences = input.input_params.meta.num_sequences;
   CHECK_EQ(last_states.size(), static_cast<size_t>(num_sequences))
@@ -1343,10 +1343,11 @@ void DFlashWorkerImpl::update_decode_step_input(
   input.runtime.device_tensors_ready = false;
 }
 
-void DFlashWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
-                                               ForwardInput& validate_input) {
+void DFlashWorkerImpl::prepare_validate_inputs(
+    const LlmForwardInput& input,
+    LlmForwardInput& validate_input) {
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
-  ForwardInput prepared_input = input;
+  LlmForwardInput prepared_input = input;
   prepared_input.runtime.metadata_ready_event.reset();
   const bool use_linear_spec_verify = target_is_hybrid_recurrent_;
   prepared_input.input_params.is_spec_verify = use_linear_spec_verify;
@@ -1389,8 +1390,8 @@ void DFlashWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
   record_metadata_ready_event(*prepare_stream_, validate_input);
 }
 
-void DFlashWorkerImpl::prepare_query_inputs(const ForwardInput& input,
-                                            ForwardInput& query_input) {
+void DFlashWorkerImpl::prepare_query_inputs(const LlmForwardInput& input,
+                                            LlmForwardInput& query_input) {
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   query_input = input;
   query_input.runtime.device_tensors_ready = false;
@@ -1459,7 +1460,7 @@ void DFlashWorkerImpl::prepare_query_inputs(const ForwardInput& input,
 }
 
 void DFlashWorkerImpl::write_context_kv(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     const torch::Tensor& context_hidden,
     const torch::Tensor& positions_device,
     const torch::Tensor& new_cache_slots_device) {
@@ -1532,7 +1533,7 @@ void DFlashWorkerImpl::write_context_kv(
 }
 
 void DFlashWorkerImpl::write_target_context_to_cache(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     const SampleOutput& validate_output) {
   const torch::Tensor& accepted_embeddings = validate_output.embeddings;
   CHECK(accepted_embeddings.defined())
@@ -1613,7 +1614,7 @@ void DFlashWorkerImpl::write_target_context_to_cache(
 
 std::vector<int32_t> DFlashWorkerImpl::compute_adaptive_prefix_lengths(
     const DraftBlock& draft_block,
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   // The current Qwen3.8 GDN spec-verify kernel requires a uniform validation
   // width.  Keep DFlash adaptive pruning off for hybrid targets until the
   // generic varlen builder carries the same recurrent checkpoint contract as
@@ -1677,15 +1678,15 @@ std::vector<int32_t> DFlashWorkerImpl::compute_adaptive_prefix_lengths(
 }
 
 void DFlashWorkerImpl::apply_per_seq_varlen_prune(
-    const ForwardInput& input,
-    ForwardInput& validate_input,
+    const LlmForwardInput& input,
+    LlmForwardInput& validate_input,
     const std::vector<int32_t>& per_seq_val_tokens) {
   const int32_t num_sequences = input.input_params.meta.num_sequences;
   CHECK_EQ(static_cast<int32_t>(per_seq_val_tokens.size()), num_sequences);
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
-  ForwardInput prepared_input = input;
+  LlmForwardInput prepared_input = input;
   prepared_input.runtime.metadata_ready_event.reset();
-  ForwardInput new_validate;
+  LlmForwardInput new_validate;
   SpeculativeWorkerImpl::prepare_validate_inputs(
       prepared_input, new_validate, per_seq_val_tokens);
   new_validate.input_params.embedding.input_embedding = torch::Tensor();

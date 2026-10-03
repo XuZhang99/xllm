@@ -64,10 +64,10 @@ class RecWorkerImpl : public LLMWorkerImpl {
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const RecForwardInput& input) override;
 
-  std::optional<ForwardOutput> step(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step(const LlmForwardInput& input) override;
 
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
-      const ForwardInput& input) override;
+      const LlmForwardInput& input) override;
 
  protected:
   std::shared_ptr<MPMCThreadPool> input_builder_thread_pool_;

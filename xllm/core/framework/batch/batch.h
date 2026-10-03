@@ -82,15 +82,15 @@ class Batch final {
   Sequence* operator[](size_t index) const;
 
   // prepare forward inputs
-  ForwardInput prepare_forward_input(uint32_t num_decoding_tokens,
-                                     uint32_t min_decoding_bach_size,
-                                     const ModelArgs& args,
-                                     int32_t cp_size = 1);
+  LlmForwardInput prepare_forward_input(uint32_t num_decoding_tokens,
+                                        uint32_t min_decoding_bach_size,
+                                        const ModelArgs& args,
+                                        int32_t cp_size = 1);
 
-  // Prepare ForwardInput for distributed transport.
-  ForwardInput prepare_forward_input(const ModelArgs& args,
-                                     ThreadPool* thread_pool,
-                                     int32_t cp_size = 1);
+  // Prepare LlmForwardInput for distributed transport.
+  LlmForwardInput prepare_forward_input(const ModelArgs& args,
+                                        ThreadPool* thread_pool,
+                                        int32_t cp_size = 1);
 
   // process output
   //

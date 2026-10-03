@@ -39,13 +39,13 @@ class DecodeMetadataTestWorker final : public MTPWorkerImpl {
         mtp_async::TargetSpecVerifyMode::DEEPSEEK_V32_EXPANDED_VERIFY;
   }
 
-  void resolve_decode_context(ForwardInput& input) const {
+  void resolve_decode_context(LlmForwardInput& input) const {
     update_decode_step_input(input,
                              std::vector<EmbeddingCache::DecodeState>(1));
   }
 
-  ForwardInput build_verify(const ForwardInput& input, bool adaptive) {
-    ForwardInput verify_input;
+  LlmForwardInput build_verify(const LlmForwardInput& input, bool adaptive) {
+    LlmForwardInput verify_input;
     if (adaptive) {
       prepare_validate_inputs(input, verify_input, std::vector<int32_t>{2});
     } else {
@@ -55,9 +55,9 @@ class DecodeMetadataTestWorker final : public MTPWorkerImpl {
     return verify_input;
   }
 
-  ForwardInput build_verify(const ForwardInput& input,
-                            const std::vector<int32_t>& verify_widths) {
-    ForwardInput verify_input;
+  LlmForwardInput build_verify(const LlmForwardInput& input,
+                               const std::vector<int32_t>& verify_widths) {
+    LlmForwardInput verify_input;
     prepare_validate_inputs(input, verify_input, verify_widths);
     CHECK_EQ(prepare_stream_->synchronize(), 0);
     return verify_input;
@@ -90,9 +90,9 @@ class MtpDecodeMetadataTest : public ::testing::TestWithParam<int32_t> {
     return options;
   }
 
-  ForwardInput make_input(int32_t position,
-                          const torch::Tensor& block_tables) const {
-    ForwardInput input;
+  LlmForwardInput make_input(int32_t position,
+                             const torch::Tensor& block_tables) const {
+    LlmForwardInput input;
     input.token_ids_host = torch::tensor({42}, torch::kInt);
     input.positions_host = torch::tensor({position}, torch::kInt);
     input.token_ids = input.token_ids_host.to(torch::Device("npu:0"));
@@ -109,11 +109,11 @@ class MtpDecodeMetadataTest : public ::testing::TestWithParam<int32_t> {
     DecodeMetadataTestWorker worker(
         parallel_args(), torch::Device("npu:0"), options());
     const int32_t page_size = GetParam() == 1 ? 128 : 256;
-    ForwardInput input =
+    LlmForwardInput input =
         make_input(page_size - 1, torch::tensor({{10, 11}}, torch::kInt));
     worker.resolve_decode_context(input);
     ASSERT_EQ(input.positions_host.item<int32_t>(), page_size - 1);
-    const ForwardInput verify_input = worker.build_verify(input, adaptive);
+    const LlmForwardInput verify_input = worker.build_verify(input, adaptive);
     const auto& params = verify_input.input_params;
 
     EXPECT_TRUE(
@@ -135,7 +135,7 @@ class MtpDecodeMetadataTest : public ::testing::TestWithParam<int32_t> {
   void check_linear_state_rows(bool adaptive) {
     DecodeMetadataTestWorker worker(
         parallel_args(), torch::Device("npu:0"), options());
-    ForwardInput input;
+    LlmForwardInput input;
     input.token_ids_host = torch::tensor({42, 43}, torch::kInt);
     input.positions_host = torch::tensor({5, 9}, torch::kInt);
     input.token_ids = input.token_ids_host.to(torch::Device("npu:0"));
@@ -151,7 +151,7 @@ class MtpDecodeMetadataTest : public ::testing::TestWithParam<int32_t> {
     input.input_params.embedding.linear_state_indices =
         torch::tensor({7, -1}, torch::kInt).to(torch::Device("npu:0"));
 
-    const ForwardInput verify_input =
+    const LlmForwardInput verify_input =
         adaptive ? worker.build_verify(input, std::vector<int32_t>{1, 2})
                  : worker.build_verify(input, /*adaptive=*/false);
     const torch::Tensor expected =
@@ -175,7 +175,7 @@ TEST_P(MtpDecodeMetadataTest, Keeps305TokenContextWithinAllocatedPages) {
   const torch::Tensor block_tables =
       GetParam() == 1 ? torch::tensor({{10, 11, 12}}, torch::kInt)
                       : torch::tensor({{10, 11}}, torch::kInt);
-  ForwardInput input = make_input(/*position=*/305, block_tables);
+  LlmForwardInput input = make_input(/*position=*/305, block_tables);
 
   worker.resolve_decode_context(input);
 

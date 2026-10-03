@@ -491,7 +491,7 @@ bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
 #endif
 
 std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   ModelInputParams& mutable_params =
       const_cast<ModelInputParams&>(input.input_params);
   set_hierarchy_layer_synchronizer(mutable_params);
@@ -501,7 +501,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
       input.token_ids.numel() == 0) {
     if (input.input_params.meta.batch_forward_type.is_decode() &&
         !run_speculative_decode) {
-      ForwardInput aligned_input = input;
+      LlmForwardInput aligned_input = input;
       aligned_input.input_params.meta.batch_forward_type =
           BatchForwardType::EMPTY;
       return step_empty(aligned_input);
@@ -515,10 +515,10 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
   return step_prefill(input);
 }
 
-ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
-    ForwardInput& inputs) {
+LlmForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
+    LlmForwardInput& inputs) {
   // only process decode batch, so prepare draft input here.
-  ForwardInput& new_inputs = inputs;
+  LlmForwardInput& new_inputs = inputs;
 
   auto& input_params = new_inputs.input_params;
   const int32_t num_sequences = input_params.meta.num_sequences;
@@ -647,8 +647,8 @@ void SpeculativeWorkerImpl::update_sampling_params(
 }
 
 void SpeculativeWorkerImpl::prepare_validate_inputs(
-    const ForwardInput& input,
-    ForwardInput& validate_input) {
+    const LlmForwardInput& input,
+    LlmForwardInput& validate_input) {
   validate_input = input.to(device_, dtype_);
   validate_input.runtime.device_tensors_ready = false;
   auto& input_params = validate_input.input_params;
@@ -764,8 +764,8 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
 }
 
 void SpeculativeWorkerImpl::prepare_work_before_execute(
-    const ForwardInput& input,
-    ForwardInput& processed_input) {
+    const LlmForwardInput& input,
+    LlmForwardInput& processed_input) {
   // The composite owns no KV cache. Preserve linear-state metadata for the
   // target leaf, which prepares and restores its own recurrent cache before
   // execution.
@@ -781,8 +781,8 @@ void SpeculativeWorkerImpl::prepare_work_before_execute(
 // chunked-prefill (non-atb_spec_kernel) path since DFlash/DSpark require
 // --enable_chunked_prefill=true anyway.
 void SpeculativeWorkerImpl::prepare_validate_inputs(
-    const ForwardInput& input,
-    ForwardInput& validate_input,
+    const LlmForwardInput& input,
+    LlmForwardInput& validate_input,
     const std::vector<int32_t>& per_seq_val_tokens) {
   validate_input = input.to(device_, dtype_);
   validate_input.runtime.device_tensors_ready = false;
@@ -952,7 +952,7 @@ void SpeculativeWorkerImpl::sync_dp_global_token_nums_for_idle_rank(
       input_params, token_nums[static_cast<size_t>(dp_rank)]);
 }
 
-void SpeculativeWorkerImpl::restore_json_object_states(ForwardInput& input) {
+void SpeculativeWorkerImpl::restore_json_object_states(LlmForwardInput& input) {
   impl_->restore_json_object_states(input);
 }
 }  // namespace xllm

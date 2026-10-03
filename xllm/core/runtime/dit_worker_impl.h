@@ -51,7 +51,7 @@ class DiTWorkerImpl : public WorkerImpl {
 
   bool init_model(ModelContext& context) override;
 
-  std::optional<ForwardOutput> step(const ForwardInput& inputs) override;
+  std::optional<ForwardOutput> step(const LlmForwardInput& inputs) override;
 
   std::optional<ForwardOutput> step(const DiTForwardInput& inputs) override;
 

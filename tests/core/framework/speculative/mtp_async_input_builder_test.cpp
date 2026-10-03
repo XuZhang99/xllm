@@ -42,8 +42,8 @@ namespace {
 
 constexpr int32_t kBlockSize = 4;
 
-ForwardInput make_draft_input(int64_t batch_size, int64_t hidden_size) {
-  ForwardInput input;
+LlmForwardInput make_draft_input(int64_t batch_size, int64_t hidden_size) {
+  LlmForwardInput input;
   input.token_ids = torch::zeros({batch_size * 2}, torch::kInt);
   input.positions = torch::zeros({batch_size * 2}, torch::kInt);
   input.input_params.embedding.input_embedding =
@@ -53,9 +53,9 @@ ForwardInput make_draft_input(int64_t batch_size, int64_t hidden_size) {
   return input;
 }
 
-ForwardInput make_block_table_source(const torch::Tensor& block_tables,
-                                     std::vector<int32_t> kv_seq_lens) {
-  ForwardInput input;
+LlmForwardInput make_block_table_source(const torch::Tensor& block_tables,
+                                        std::vector<int32_t> kv_seq_lens) {
+  LlmForwardInput input;
   input.input_params.attention.device.block_tables = block_tables;
   input.input_params.attention.host.block_tables = block_tables;
   input.input_params.attention.host.kv_seq_lens = std::move(kv_seq_lens);
@@ -63,8 +63,8 @@ ForwardInput make_block_table_source(const torch::Tensor& block_tables,
   return input;
 }
 
-void prepare_single_sequence(ForwardInput& draft_input,
-                             const ForwardInput& block_table_source,
+void prepare_single_sequence(LlmForwardInput& draft_input,
+                             const LlmForwardInput& block_table_source,
                              int32_t base_kv_seq_len,
                              bool rebuild_expanded_decode_metadata = true) {
   const torch::Tensor accepted_tokens = torch::tensor({{42, -1}}, torch::kLong);
@@ -98,10 +98,11 @@ void prepend_python_model_path() {
 }
 
 TEST(MtpAsyncInputBuilderTest, BuildsExpandedMetadataAcrossBlockBoundary) {
-  ForwardInput draft_input = make_draft_input(/*batch_size=*/1,
-                                              /*hidden_size=*/2);
+  LlmForwardInput draft_input = make_draft_input(/*batch_size=*/1,
+                                                 /*hidden_size=*/2);
   const torch::Tensor block_tables = torch::tensor({{10, 11}}, torch::kInt);
-  ForwardInput block_table_source = make_block_table_source(block_tables, {5});
+  LlmForwardInput block_table_source =
+      make_block_table_source(block_tables, {5});
 
   prepare_single_sequence(
       draft_input, block_table_source, /*base_kv_seq_len=*/5);
@@ -120,14 +121,15 @@ TEST(MtpAsyncInputBuilderTest, BuildsExpandedMetadataAcrossBlockBoundary) {
 }
 
 TEST(MtpAsyncInputBuilderTest, CanSkipExpandedMetadataRebuild) {
-  ForwardInput draft_input = make_draft_input(/*batch_size=*/1,
-                                              /*hidden_size=*/2);
+  LlmForwardInput draft_input = make_draft_input(/*batch_size=*/1,
+                                                 /*hidden_size=*/2);
   const torch::Tensor template_block_tables =
       torch::tensor({{90, 91}, {90, 91}}, torch::kInt);
   draft_input.input_params.attention.device.block_tables =
       template_block_tables;
   const torch::Tensor block_tables = torch::tensor({{10, 11}}, torch::kInt);
-  ForwardInput block_table_source = make_block_table_source(block_tables, {5});
+  LlmForwardInput block_table_source =
+      make_block_table_source(block_tables, {5});
 
   prepare_single_sequence(draft_input,
                           block_table_source,
@@ -171,10 +173,11 @@ TEST(MtpAsyncInputBuilderTest, KeepsGenericPagedMetadataSeparate) {
 }
 
 TEST(MtpAsyncInputBuilderTest, SupportsMaximumBlockTableWidth) {
-  ForwardInput draft_input = make_draft_input(/*batch_size=*/1,
-                                              /*hidden_size=*/2);
+  LlmForwardInput draft_input = make_draft_input(/*batch_size=*/1,
+                                                 /*hidden_size=*/2);
   const torch::Tensor block_tables = torch::tensor({{10, 11}}, torch::kInt);
-  ForwardInput block_table_source = make_block_table_source(block_tables, {8});
+  LlmForwardInput block_table_source =
+      make_block_table_source(block_tables, {8});
 
   prepare_single_sequence(
       draft_input, block_table_source, /*base_kv_seq_len=*/8);
@@ -189,10 +192,11 @@ TEST(MtpAsyncInputBuilderTest, SupportsMaximumBlockTableWidth) {
 }
 
 TEST(MtpAsyncInputBuilderTest, RejectsPageCountBeyondBlockTableWidth) {
-  ForwardInput draft_input = make_draft_input(/*batch_size=*/1,
-                                              /*hidden_size=*/2);
+  LlmForwardInput draft_input = make_draft_input(/*batch_size=*/1,
+                                                 /*hidden_size=*/2);
   const torch::Tensor block_tables = torch::tensor({{10, 11}}, torch::kInt);
-  ForwardInput block_table_source = make_block_table_source(block_tables, {9});
+  LlmForwardInput block_table_source =
+      make_block_table_source(block_tables, {9});
 
   EXPECT_DEATH(prepare_single_sequence(
                    draft_input, block_table_source, /*base_kv_seq_len=*/9),

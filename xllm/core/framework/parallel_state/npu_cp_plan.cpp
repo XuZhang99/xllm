@@ -954,10 +954,10 @@ torch::Tensor map_cache_slots_to_kv_shard(
 
 }  // namespace
 
-// Extracts the global-real CpPlanInput from a ForwardInput: positions and
+// Extracts the global-real CpPlanInput from a LlmForwardInput: positions and
 // per-seq lengths come from the host view (or the device fallback), prefix
 // counts and block tables from the attention metadata.
-CpPlanInput make_plan_input(const ForwardInput& processed_input,
+CpPlanInput make_plan_input(const LlmForwardInput& processed_input,
                             const CpPlanRuntimeConfig& runtime_config) {
   auto tensor_to_int32_vec = [](const torch::Tensor& tensor) {
     std::vector<int32_t> values;
@@ -1210,7 +1210,7 @@ void NpuCpPlan::set_process_group(ProcessGroup* process_group) {
   cp_group_ = process_group;
 }
 
-void NpuCpPlan::prepare(ForwardInput& processed_input,
+void NpuCpPlan::prepare(LlmForwardInput& processed_input,
                         const CpPlanRuntimeConfig& runtime_config) {
   if (!runtime_config.enabled ||
       processed_input.input_params.meta.batch_forward_type.is_decode()) {

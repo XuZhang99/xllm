@@ -633,7 +633,7 @@ class AclGraphTaskUpdateTest : public ::testing::Test {
         << (eager_real - graph_real).abs().max().item<float>();
   }
 
-  void setup_spec_verify_input(ForwardInput& fi,
+  void setup_spec_verify_input(LlmForwardInput& fi,
                                int32_t num_sequences,
                                int32_t num_spec_tokens) {
     int32_t total_tokens = num_sequences * num_spec_tokens;

@@ -1029,7 +1029,7 @@ struct GraphInput {
 
 struct ModelInputParams {
   // Drops every recurrent (linear attention) state field.  Pure full-attention
-  // drafts (DFlash2, MTP) reuse a hybrid target's ForwardInput and must call
+  // drafts (DFlash2, MTP) reuse a hybrid target's LlmForwardInput and must call
   // this so target-only slot ids do not classify their rows as recurrent,
   // which would enter a stateful path the draft has no cache for.
   void clear_linear_attention_state() {

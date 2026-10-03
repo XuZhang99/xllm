@@ -135,12 +135,12 @@ bool RemoteWorker::pull_kv_blocks(
   return channel_->pull_kv_blocks(src_cluster_id, src_addr, mappings);
 }
 
-ForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
+LlmForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
   NOT_IMPLEMENTED();
   return {};
 }
 
-std::optional<ForwardOutput> RemoteWorker::step(const ForwardInput& inputs) {
+std::optional<ForwardOutput> RemoteWorker::step(const LlmForwardInput& inputs) {
   NOT_IMPLEMENTED();
   return std::nullopt;
 }
@@ -164,14 +164,14 @@ RemoteWorker::estimate_kv_cache_capacity_async() {
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> RemoteWorker::step_async(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   LOG(FATAL) << "RemoteWorker Method step_async with "
-                "ForwardInput param is UnImplemented.";
+                "LlmForwardInput param is UnImplemented.";
   return folly::makeSemiFuture(std::optional<ForwardOutput>(std::nullopt));
 }
 
 folly::SemiFuture<std::optional<RawForwardOutput>>
-RemoteWorker::step_remote_async(const ForwardInput& input) {
+RemoteWorker::step_remote_async(const LlmForwardInput& input) {
   folly::Promise<std::optional<RawForwardOutput>> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(

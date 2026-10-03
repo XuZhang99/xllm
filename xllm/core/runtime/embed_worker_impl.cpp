@@ -53,7 +53,8 @@ bool EmbedWorkerImpl::init_model(ModelContext& context) {
   return true;
 }
 
-std::optional<ForwardOutput> EmbedWorkerImpl::step(const ForwardInput& input) {
+std::optional<ForwardOutput> EmbedWorkerImpl::step(
+    const LlmForwardInput& input) {
   torch::DeviceGuard device_guard(device_);
 
   Timer timer;

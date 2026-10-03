@@ -59,8 +59,8 @@ class ForwardInputBuilder final {
       int32_t cp_size = 1,
       ThreadPool* thread_pool = nullptr);
 
-  ForwardInput build_forward_input(uint32_t num_decoding_tokens,
-                                   uint32_t min_decoding_batch_size);
+  LlmForwardInput build_forward_input(uint32_t num_decoding_tokens,
+                                      uint32_t min_decoding_batch_size);
   RecForwardInput build_rec_forward_input(uint32_t num_decoding_tokens,
                                           uint32_t min_decoding_batch_size);
 

@@ -60,11 +60,11 @@ void expect_position_ids(const DecodeBuildBuffers& buf,
   EXPECT_EQ(buf.out_positions, expected);
 }
 
-ForwardInput make_forward_input(const torch::Tensor& token_ids,
-                                const torch::Tensor& positions,
-                                const torch::Tensor& block_tables,
-                                const std::vector<int32_t>& kv_seq_lens) {
-  ForwardInput input;
+LlmForwardInput make_forward_input(const torch::Tensor& token_ids,
+                                   const torch::Tensor& positions,
+                                   const torch::Tensor& block_tables,
+                                   const std::vector<int32_t>& kv_seq_lens) {
+  LlmForwardInput input;
   input.input_params.meta.num_sequences =
       static_cast<int32_t>(positions.numel());
   input.token_ids_host = token_ids;
@@ -74,12 +74,12 @@ ForwardInput make_forward_input(const torch::Tensor& token_ids,
   return input;
 }
 
-ForwardInput make_multiblock_forward_input(
+LlmForwardInput make_multiblock_forward_input(
     const torch::Tensor& token_ids,
     const torch::Tensor& positions,
     const std::vector<torch::Tensor>& multi_block_tables,
     const std::vector<int32_t>& kv_seq_lens) {
-  ForwardInput input;
+  LlmForwardInput input;
   input.input_params.meta.num_sequences =
       static_cast<int32_t>(positions.numel());
   input.token_ids_host = token_ids;
@@ -97,7 +97,7 @@ TEST(SpecDecodeInputBuilderTest, DraftInputsSingleRowPerSeq) {
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  ForwardInput input =
+  LlmForwardInput input =
       make_forward_input(torch::Tensor(), positions, block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -127,7 +127,7 @@ TEST(SpecDecodeInputBuilderTest, ValidateInputsNonAtbExpansion) {
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  ForwardInput input =
+  LlmForwardInput input =
       make_forward_input(token_ids, positions, block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -164,7 +164,7 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowTokenKinds) {
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  ForwardInput input =
+  LlmForwardInput input =
       make_forward_input(token_ids, positions, block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -192,7 +192,7 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowUsesInputBlockTableLayout) {
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2, 0}, {3, 4, 5, 0}}, torch::kInt);
-  ForwardInput input =
+  LlmForwardInput input =
       make_forward_input(token_ids, positions, block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -214,7 +214,7 @@ TEST(SpecDecodeInputBuilderTest, ValidateRowsStartFromCorrectedCurrentView) {
   std::vector<int32_t> positions = {6, 9};
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({7, 10});
 
-  ForwardInput input = make_forward_input(
+  LlmForwardInput input = make_forward_input(
       torch::tensor(token_ids, torch::kInt),
       torch::tensor(positions, torch::kInt),
       torch::tensor({{0, 1, 2, 0}, {3, 4, 5, 0}}, torch::kInt),
@@ -273,7 +273,7 @@ TEST(SpecDecodeInputBuilderTest, FirstDecodeInputsFixAndNonFixMix) {
   torch::Tensor positions = torch::tensor({5, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  ForwardInput input =
+  LlmForwardInput input =
       make_forward_input(token_ids, positions, block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -316,7 +316,7 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowWithInputTokenSource) {
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  ForwardInput input =
+  LlmForwardInput input =
       make_forward_input(token_ids, positions, block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -386,7 +386,7 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowFromLastStep) {
   torch::Tensor positions = torch::tensor({5, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  ForwardInput input =
+  LlmForwardInput input =
       make_forward_input(token_ids, positions, block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -456,7 +456,7 @@ TEST(SpecDecodeInputBuilderTest, MultiBlockDraftSingleRowPerSeq) {
   std::vector<torch::Tensor> multi_block_tables = {
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt),
       torch::tensor({{10, 11, 12}, {13, 14, 15}}, torch::kInt)};
-  ForwardInput input = make_multiblock_forward_input(
+  LlmForwardInput input = make_multiblock_forward_input(
       torch::Tensor(), positions, multi_block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -493,7 +493,7 @@ TEST(SpecDecodeInputBuilderTest, MultiBlockDraftSingleRowPerSeq) {
 }
 
 TEST(SpecDecodeInputBuilderTest, GroupedPrefillBuildsSwaRingSlots) {
-  ForwardInput input;
+  LlmForwardInput input;
   input.input_params.meta.num_sequences = 2;
   input.positions_host = torch::tensor({2, 3, 4, 6, 7}, torch::kInt);
   input.input_params.attention.host.q_seq_lens = to_layout_seq_lens({3, 2});
@@ -506,7 +506,7 @@ TEST(SpecDecodeInputBuilderTest, GroupedPrefillBuildsSwaRingSlots) {
 }
 
 TEST(SpecDecodeInputBuilderTest, GroupedPrefillSwaSlotsWrapRing) {
-  ForwardInput input;
+  LlmForwardInput input;
   input.input_params.meta.num_sequences = 1;
   input.positions_host = torch::tensor({8, 9, 10}, torch::kInt);
   input.input_params.attention.host.q_seq_lens = to_layout_seq_lens({3});
@@ -523,7 +523,7 @@ TEST(SpecDecodeInputBuilderTest, MultiBlockKeepsSparseAbsoluteRows) {
   torch::Tensor positions = torch::tensor({23, 19}, torch::kInt);
   std::vector<torch::Tensor> multi_block_tables = {torch::tensor(
       {{-1, -1, -1, -1, -1, 50}, {-1, -1, -1, -1, 60, -1}}, torch::kInt)};
-  ForwardInput input = make_multiblock_forward_input(
+  LlmForwardInput input = make_multiblock_forward_input(
       torch::Tensor(), positions, multi_block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -552,7 +552,7 @@ TEST(SpecDecodeInputBuilderTest, MultiBlockParallelRowsShareFullKvLength) {
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   std::vector<torch::Tensor> multi_block_tables = {
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt)};
-  ForwardInput input = make_multiblock_forward_input(
+  LlmForwardInput input = make_multiblock_forward_input(
       token_ids, positions, multi_block_tables, kv_seq_lens);
   DecodeRowContext ctx = make_decode_row_context(input);
 
@@ -598,7 +598,7 @@ TEST(SpecDecodeInputBuilderTest, MultiBlockParallelRowsShareFullKvLength) {
 TEST(SpecDecodeInputBuilderTest, MakeDecodeRowContextRejectsEmptyBlockTables) {
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
-  ForwardInput input;
+  LlmForwardInput input;
   input.input_params.meta.num_sequences =
       static_cast<int32_t>(positions.numel());
   input.positions_host = positions;

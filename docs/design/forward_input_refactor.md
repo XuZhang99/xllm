@@ -95,8 +95,9 @@ not count as validation of this branch.
 | Plan | `7d35c13d` | Documentation only; no executable behavior changed. |
 | 1 | `f50c5cae` | All 11 affected targets built; 221 ordinary tests passed across 12 invocations. 17 death-containing cases were excluded from this run. Results: `validation/step1-status.tsv` in the isolated remote worktree. |
 | 2 | `f9700d37` | All 269 build tasks succeeded; 95 ordinary tests passed (packed 12, Batch 79, DiT 4). Results: `validation/step2-status.tsv`. The tested patch SHA256 is `5dd4d11dc2c1a8916e2140f7ba061bc542108bb570028bde02fe34e05daa60bd`. |
-| 3 | This commit | Affected targets built; 99 ordinary tests passed (packed 16, Batch 83). All build/test exit codes were zero. Results: `validation/step3-status.tsv`; the initial missing-header build failure is preserved in `validation/step3-build-initial-failed.log`. The tested patch SHA256 is `8f2fff3e2f3427285b684448911396942b7eaedb9fa00793963a86d5a4614206`, plus the factory test include fix (file SHA256 `88afbd7ac79480185d71792772acd7acd09ea4d627fc02007749d32b062a5208`). |
-| 4-6 | Pending | Pending. |
+| 3 | `43d782f6` | Affected targets built; 99 ordinary tests passed (packed 16, Batch 83). All build/test exit codes were zero. Results: `validation/step3-status.tsv`; the initial missing-header build failure is preserved in `validation/step3-build-initial-failed.log`. The tested patch SHA256 is `8f2fff3e2f3427285b684448911396942b7eaedb9fa00793963a86d5a4614206`, plus the factory test include fix (file SHA256 `88afbd7ac79480185d71792772acd7acd09ea4d627fc02007749d32b062a5208`). |
+| 4 | This commit | All 279 build tasks succeeded; 257 ordinary tests passed across 13 targets and 14 invocations, with every exit code zero. Results: `validation/step4-status.tsv`. Temporary-index comparison confirmed the tested source trees match this commit: `tests` = `c3fc8335db075bcff0eaf5c66397c509ee3c4153`, `xllm` = `fbe2d319b73853fed57f4af281ac54ae5471ae76`; evidence: `validation/step4-source-trees.log`. |
+| 5-6 | Pending | Pending. |
 
 Remote builds use the NPU configuration in
 `build/cmake.linux-aarch64-cpython-311` and device 15. The baseline at

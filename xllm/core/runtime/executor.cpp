@@ -42,7 +42,7 @@ Executor::Executor(CausalLM* model,
       model, args, device, options, backend);
 }
 
-ForwardInput Executor::prepare_inputs(Batch& batch) {
+LlmForwardInput Executor::prepare_inputs(Batch& batch) {
   return impl_->prepare_inputs(batch);
 }
 

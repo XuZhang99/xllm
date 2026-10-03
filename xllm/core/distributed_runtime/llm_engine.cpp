@@ -69,9 +69,9 @@ limitations under the License.
 namespace xllm {
 namespace {
 
-bool contains_graph_warmup(const std::vector<ForwardInput>& inputs) {
+bool contains_graph_warmup(const std::vector<LlmForwardInput>& inputs) {
   return std::any_of(
-      inputs.begin(), inputs.end(), [](const ForwardInput& input) {
+      inputs.begin(), inputs.end(), [](const LlmForwardInput& input) {
         return input.input_params.meta.is_graph_warmup;
       });
 }
@@ -1151,7 +1151,7 @@ ForwardOutput LLMEngine::step(BatchGroup& batch) {
     CHECK(!forward_inputs.empty());
     dispatched_activation_token =
         forward_inputs.front().input_params.expert.eplb_info.activation_token;
-    for (const ForwardInput& input : forward_inputs) {
+    for (const LlmForwardInput& input : forward_inputs) {
       CHECK_EQ(input.input_params.expert.eplb_info.activation_token,
                dispatched_activation_token)
           << "EPLB activation token must be identical across DP inputs.";
@@ -1353,8 +1353,8 @@ void LLMEngine::process_eplb_data(
   eplb_manager_->update_expert_load(tensors, completed_activation_token);
 }
 
-std::vector<ForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
-  std::vector<ForwardInput> batched_inputs;
+std::vector<LlmForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
+  std::vector<LlmForwardInput> batched_inputs;
   batched_inputs.reserve(dp_size_ * cp_size_);
   // some dp related variables
   std::vector<int32_t> dp_global_token_nums(dp_size_);
@@ -1437,7 +1437,7 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
         !contains_graph_warmup(batched_inputs));
     std::vector<torch::Tensor> decode_masks;
     decode_masks.reserve(batched_inputs.size());
-    for (const ForwardInput& input : batched_inputs) {
+    for (const LlmForwardInput& input : batched_inputs) {
       const torch::Tensor& local_mask =
           input.input_params.expert.eplb_decode_token_mask;
       if (!local_mask.defined()) {
@@ -1451,7 +1451,7 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
     const torch::Tensor global_decode_mask =
         eplb::build_global_decode_token_mask(decode_masks,
                                              dp_global_token_nums);
-    for (ForwardInput& input : batched_inputs) {
+    for (LlmForwardInput& input : batched_inputs) {
       input.input_params.expert.eplb_decode_token_mask = global_decode_mask;
     }
   }

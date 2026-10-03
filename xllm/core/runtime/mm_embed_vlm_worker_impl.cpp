@@ -50,7 +50,7 @@ bool MMEmbedVLMWorkerImpl::init_model(ModelContext& context) {
 }
 
 std::optional<ForwardOutput> MMEmbedVLMWorkerImpl::step(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   torch::DeviceGuard device_guard(device_);
   auto ret = device_.synchronize_default_stream();
 

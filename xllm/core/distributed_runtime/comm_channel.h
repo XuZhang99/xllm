@@ -81,7 +81,7 @@ class CommChannel {
                               const std::vector<KVTransferMapping>& mappings);
 
   virtual void execute_model_async(
-      const ForwardInput& input,
+      const LlmForwardInput& input,
       folly::Promise<std::optional<RawForwardOutput>>& promise);
 
   virtual void execute_model_async(
@@ -130,7 +130,7 @@ class CommChannel {
 
  protected:
   bool execute_model_with_brpc(
-      const ForwardInput& input,
+      const LlmForwardInput& input,
       folly::Promise<std::optional<RawForwardOutput>>& promise);
 
   bool execute_model_with_brpc(

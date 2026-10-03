@@ -234,7 +234,7 @@ class DcuGraphExecutorImpl final : public ExecutorImpl {
 
   ~DcuGraphExecutorImpl() override;
 
-  ForwardInput prepare_inputs(Batch& batch) override;
+  LlmForwardInput prepare_inputs(Batch& batch) override;
 
   ModelOutput run(const torch::Tensor& tokens,
                   const torch::Tensor& positions,

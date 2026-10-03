@@ -77,13 +77,13 @@ SuffixWorkerImpl::SuffixWorkerImpl(const ParallelArgs& parallel_args,
 }
 
 std::optional<ForwardOutput> SuffixWorkerImpl::step_empty(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   if (!input.input_params.meta.batch_forward_type.is_decode()) {
     auto output = impl_->step(input);
     output->sample_output.embeddings = torch::Tensor();
     return output;
   } else {
-    ForwardInput new_input = input;
+    LlmForwardInput new_input = input;
     scale_speculative_parallel_token_counts(
         new_input.input_params, options_.num_speculative_tokens() + 1);
 
@@ -95,7 +95,7 @@ std::optional<ForwardOutput> SuffixWorkerImpl::step_empty(
 }
 
 std::optional<ForwardOutput> SuffixWorkerImpl::step_prefill(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   Timer timer;
   // run the target model to get first token and hidden states
   auto future = impl_->step_async(input);
@@ -169,7 +169,7 @@ std::optional<ForwardOutput> SuffixWorkerImpl::step_prefill(
 }
 
 std::optional<ForwardOutput> SuffixWorkerImpl::step_decode(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
   const int32_t num_sequences = input.input_params.meta.num_sequences;
   const int32_t num_val_tokens = num_speculative_tokens + 1;
@@ -258,7 +258,7 @@ std::optional<ForwardOutput> SuffixWorkerImpl::step_decode(
     }
   }
 
-  ForwardInput validate_input;
+  LlmForwardInput validate_input;
   prepare_validate_inputs(input, validate_input);
   validate_input.skip_sampling_for_logits_only = true;
 

@@ -117,8 +117,8 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
                   InputDeviceMaterializationPolicy policy =
                       InputDeviceMaterializationPolicy::MATERIALIZE_ON_READ);
 
-  bool input_write(const ForwardInput& input);
-  void input_read(ForwardInput& input,
+  bool input_write(const LlmForwardInput& input);
+  void input_read(LlmForwardInput& input,
                   const torch::Device& device,
                   InputDeviceMaterializationPolicy policy =
                       InputDeviceMaterializationPolicy::MATERIALIZE_ON_READ);

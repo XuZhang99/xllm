@@ -1089,7 +1089,7 @@ size_t AclGraphExecutorImpl::get_graph_capture_stream_count() const {
   return stream_ids.size();
 }
 
-ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
+LlmForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
   // Prepare inputs for workers
   return batch.prepare_forward_input(
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());

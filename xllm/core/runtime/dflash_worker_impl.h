@@ -86,18 +86,22 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
       const KVCacheShape& kv_cache_shape) override;
 #endif
 
-  ForwardInput update_input_by_last_step_output(ForwardInput& inputs) override;
+  LlmForwardInput update_input_by_last_step_output(
+      LlmForwardInput& inputs) override;
 
   bool task_models_loaded() const override;
   ::xllm::Status create_task_pipeline(
       std::unique_ptr<TaskExecutionPipeline>& output) override;
 
  protected:
-  std::optional<ForwardOutput> step_prefill(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step_prefill(
+      const LlmForwardInput& input) override;
 
-  std::optional<ForwardOutput> step_decode(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step_decode(
+      const LlmForwardInput& input) override;
 
-  std::optional<ForwardOutput> step_empty(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step_empty(
+      const LlmForwardInput& input) override;
 
   // Draft produces all speculative tokens of a block in one forward, so its
   // output is a single [batch, num_speculative_tokens] block rather than the
@@ -107,13 +111,13 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
     // DSpark ConfidenceHead output for adaptive pruning; empty otherwise.
     torch::Tensor confidence_probs;
     // No-sync draft inputs must outlive validation's stream sync.
-    std::vector<std::shared_ptr<ForwardInput>> retained_inputs;
+    std::vector<std::shared_ptr<LlmForwardInput>> retained_inputs;
   };
 
   // virtual: DSpark overrides the draft sampling (parallel block sample ->
   // one forward + sequential Markov-head sampling loop).
-  virtual DraftBlock run_decode_draft(const ForwardInput& input,
-                                      ForwardInput& validate_input);
+  virtual DraftBlock run_decode_draft(const LlmForwardInput& input,
+                                      LlmForwardInput& validate_input);
 
   // Block layout hook: false (DFlash) -> query_width N+1, slot 0 is the
   // un-selected anchor; true (DSpark) -> query_width N, every position predicts
@@ -125,10 +129,10 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
   // Shared with subclasses (DSpark): build the N/N+1-wide draft query block and
   // the target validate input. A DSpark override of run_decode_draft calls both
   // before its draft forward.
-  void prepare_query_inputs(const ForwardInput& input,
-                            ForwardInput& query_input);
-  void prepare_validate_inputs(const ForwardInput& input,
-                               ForwardInput& validate_input);
+  void prepare_query_inputs(const LlmForwardInput& input,
+                            LlmForwardInput& query_input);
+  void prepare_validate_inputs(const LlmForwardInput& input,
+                               LlmForwardInput& validate_input);
 
  private:
   bool draft_use_block_parallel_rows() const {
@@ -141,7 +145,7 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
   }
 
   void fill_validate_input_from_draft_outputs(const DraftBlock& draft_block,
-                                              ForwardInput& validate_input,
+                                              LlmForwardInput& validate_input,
                                               Stream& compute_stream,
                                               int32_t effective_val_tokens);
 
@@ -150,13 +154,13 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
   // produced it), copying draft tokens into the varlen slots per seq.
   void fill_validate_input_from_draft_outputs_varlen(
       const DraftBlock& draft_block,
-      ForwardInput& validate_input,
+      LlmForwardInput& validate_input,
       Stream& compute_stream,
       const std::vector<int32_t>& per_seq_val_tokens);
 
-  std::optional<ForwardOutput> run_validate(const ForwardInput& input,
+  std::optional<ForwardOutput> run_validate(const LlmForwardInput& input,
                                             const DraftBlock& draft_block,
-                                            ForwardInput& validate_input);
+                                            LlmForwardInput& validate_input);
 
   // `per_seq_val_tokens` (optional): when non-empty, the target output was
   // scattered from a per-seq varlen batch and each seq's bonus lives at
@@ -182,7 +186,7 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
   // in which case the caller keeps the full draft block.
   std::vector<int32_t> compute_adaptive_prefix_lengths(
       const DraftBlock& draft_block,
-      const ForwardInput& input);
+      const LlmForwardInput& input);
 
   // Zero out draft probs beyond each sequence's prefix_len so the rejection
   // Per-seq varlen prune: rebuild validate_input as a true varlen
@@ -190,8 +194,8 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
   // compute on tokens each seq's prefix_len actually needs. Reuses the base
   // SpeculativeWorkerImpl per-seq builder.
   void apply_per_seq_varlen_prune(
-      const ForwardInput& input,
-      ForwardInput& validate_input,
+      const LlmForwardInput& input,
+      LlmForwardInput& validate_input,
       const std::vector<int32_t>& per_seq_val_tokens);
 
   // Record precise (draft, accepted) counters. Padded -1 slots at positions
@@ -210,15 +214,15 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
   void maybe_broadcast_spec_tokens(torch::Tensor& tokens);
 
   void update_decode_step_input(
-      ForwardInput& input,
+      LlmForwardInput& input,
       const std::vector<EmbeddingCache::DecodeState>& last_states) const;
 
-  void write_context_kv(const ForwardInput& input,
+  void write_context_kv(const LlmForwardInput& input,
                         const torch::Tensor& context_hidden,
                         const torch::Tensor& positions_device,
                         const torch::Tensor& new_cache_slots_device);
 
-  void write_target_context_to_cache(const ForwardInput& input,
+  void write_target_context_to_cache(const LlmForwardInput& input,
                                      const SampleOutput& validate_output);
 
  protected:

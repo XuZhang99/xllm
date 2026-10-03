@@ -25,7 +25,7 @@ limitations under the License.
 
 namespace xllm {
 
-struct ForwardInput;
+class LlmForwardInput;
 struct MtpContextView;
 
 struct ModelInputCapacity {
@@ -131,7 +131,7 @@ class SlotBuffer final {
 
   // The owner supplies unpacked CPU input with checked transport types/layouts.
   // Validate before staging writes; the owner may then add model/KV checks.
-  Status validate(const ForwardInput& input,
+  Status validate(const LlmForwardInput& input,
                   uint32_t previous_rows,
                   const Stream& stream) const;
   // An empty shard with an inherited nonempty forward type gets one reserved
@@ -141,7 +141,7 @@ class SlotBuffer final {
   // Nonzero padded_batch_size pads ordinary decode to a common captured bucket.
   // Zero keeps the eager input shape.
   // Sampling and previous-token mappings retain their logical row counts.
-  void prepare(const ForwardInput& input,
+  void prepare(const LlmForwardInput& input,
                const Stream& stream,
                uint32_t padded_batch_size = 0);
   bool has_previous_tokens() const { return gather_count_ != 0; }
@@ -313,7 +313,7 @@ class SlotBuffer final {
                                   const Region& region);
   static ModelTensors bind_views(const torch::Tensor& buffer,
                                  const Layout& layout);
-  static ModelInputHostView model_input_view(const ForwardInput& input);
+  static ModelInputHostView model_input_view(const LlmForwardInput& input);
   static Status validate_batch(const ModelInputHostView& model,
                                const BatchInputMeta& batch);
   Status validate_model(const ModelInputHostView& model) const;

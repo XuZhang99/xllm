@@ -3145,13 +3145,13 @@ folly::SemiFuture<std::optional<ForwardOutput>> RecWorkerImpl::step_async(
 }
 
 std::optional<ForwardOutput> RecWorkerImpl::step(
-    const ForwardInput& /*input*/) {
+    const LlmForwardInput& /*input*/) {
   LOG(FATAL) << "RecWorkerImpl requires native RecForwardInput.";
   return std::nullopt;
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> RecWorkerImpl::step_async(
-    const ForwardInput& /*input*/) {
+    const LlmForwardInput& /*input*/) {
   LOG(FATAL) << "RecWorkerImpl requires native RecForwardInput.";
   return folly::makeSemiFuture(std::optional<ForwardOutput>());
 }

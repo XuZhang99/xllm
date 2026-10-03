@@ -46,7 +46,7 @@ VlmExecutorImpl::VlmExecutorImpl(CausalLM* model,
   }
 }
 
-ForwardInput VlmExecutorImpl::prepare_inputs(Batch& batch) {
+LlmForwardInput VlmExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }

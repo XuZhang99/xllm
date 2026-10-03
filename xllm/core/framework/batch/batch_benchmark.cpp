@@ -13,10 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-// Hop 4 of the request path: Batch -> ForwardInput -> worker -> output.
+// Hop 4 of the request path: Batch -> LlmForwardInput -> worker -> output.
 //
 // Once the scheduler has built a Batch, LLMEngine::step turns it into a
-// ForwardInput (ForwardInputBuilder), serialises that for the remote worker
+// LlmForwardInput (ForwardInputBuilder), serialises that for the remote worker
 // (packed proto), the worker unpacks it before the H2D copy, and after the
 // model + sampler have run the worker serialises the sampled tokens back
 // (proto::ForwardOutput), which the engine turns into a RawForwardOutput and
@@ -31,8 +31,8 @@ limitations under the License.
 //                                            swept over prompt length.
 //   * BM_Batch_PrepareForwardInput_Decode  - ForwardInputBuilder for N decode
 //                                            sequences.
-//   * BM_ForwardInput_ToPackedProto   - engine side: ForwardInput -> proto.
-//   * BM_ForwardInput_FromPackedProto - worker side: proto -> ForwardInput
+//   * BM_ForwardInput_ToPackedProto   - engine side: LlmForwardInput -> proto.
+//   * BM_ForwardInput_FromPackedProto - worker side: proto -> LlmForwardInput
 //                                       (lazy) -> unpacked host tensors.
 //   * BM_ForwardOutput_ToProto        - worker side: sampled tensors -> proto.
 //   * BM_ForwardOutput_FromProto      - engine side: proto -> RawForwardOutput.
@@ -223,7 +223,7 @@ class DecodeBatchFixture final {
   Batch batch_;
 };
 
-ForwardInput build_decode_forward_input(size_t batch_size) {
+LlmForwardInput build_decode_forward_input(size_t batch_size) {
   SequenceFixture sequence_fixture;
   BlockManagerPool& pool = shared_block_manager_pool();
   DecodeBatchFixture fixture(sequence_fixture, &pool, batch_size);
@@ -275,7 +275,7 @@ void BM_BlockManagerPool_AllocateRelease(benchmark::State& state) {
 }
 
 // --------------------------------------------------------------------------
-// Engine side: Batch -> ForwardInput -> packed proto
+// Engine side: Batch -> LlmForwardInput -> packed proto
 // --------------------------------------------------------------------------
 
 void BM_Batch_PrepareForwardInput_Prefill(benchmark::State& state) {
@@ -293,7 +293,7 @@ void BM_Batch_PrepareForwardInput_Prefill(benchmark::State& state) {
     // iteration builds the same full prefill.
     sequence->kv_state().set_kv_cache_tokens_num(0);
     Batch batch(sequence.get());
-    ForwardInput forward_input =
+    LlmForwardInput forward_input =
         batch.prepare_forward_input(args, &thread_pool);
     do_not_optimize(forward_input.token_ids.data_ptr());
   }
@@ -313,7 +313,7 @@ void BM_Batch_PrepareForwardInput_Decode(benchmark::State& state) {
 
   for (auto _ : state) {
     fixture.rewind_kv_cache();
-    ForwardInput forward_input =
+    LlmForwardInput forward_input =
         fixture.batch().prepare_forward_input(args, &thread_pool);
     do_not_optimize(forward_input.token_ids.data_ptr());
   }
@@ -323,7 +323,7 @@ void BM_Batch_PrepareForwardInput_Decode(benchmark::State& state) {
 
 void BM_ForwardInput_ToPackedProto(benchmark::State& state) {
   const size_t batch_size = static_cast<size_t>(state.range(0));
-  const ForwardInput forward_input = build_decode_forward_input(batch_size);
+  const LlmForwardInput forward_input = build_decode_forward_input(batch_size);
   proto::PackedForwardInput packed_input;
 
   for (auto _ : state) {
@@ -337,23 +337,23 @@ void BM_ForwardInput_ToPackedProto(benchmark::State& state) {
 }
 
 // --------------------------------------------------------------------------
-// Worker side: packed proto -> ForwardInput (host tensors)
+// Worker side: packed proto -> LlmForwardInput (host tensors)
 // --------------------------------------------------------------------------
 
 void BM_ForwardInput_FromPackedProto(benchmark::State& state) {
   const size_t batch_size = static_cast<size_t>(state.range(0));
-  const ForwardInput forward_input = build_decode_forward_input(batch_size);
+  const LlmForwardInput forward_input = build_decode_forward_input(batch_size);
   proto::PackedForwardInput packed_input;
   CHECK(forward_input_to_packed_proto(forward_input, &packed_input));
   const torch::Device cpu(torch::kCPU);
 
   for (auto _ : state) {
-    // WorkerService::ExecuteModel: proto -> lazily unpacked ForwardInput ...
-    ForwardInput lazy_input;
+    // WorkerService::ExecuteModel: proto -> lazily unpacked LlmForwardInput ...
+    LlmForwardInput lazy_input;
     packed_proto_to_forward_input(packed_input, lazy_input, cpu, nullptr);
     // ... which the worker materialises into individual host tensors before
     // the (device-only, not benchmarked) H2D copy.
-    ForwardInput unpacked_input;
+    LlmForwardInput unpacked_input;
     const bool ok = detail::unpack_from_input_host_buffer(
         lazy_input,
         cpu,

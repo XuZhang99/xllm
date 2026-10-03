@@ -199,10 +199,10 @@ void move_tensor_to_device_if_needed(torch::Tensor& tensor,
   }
 }
 
-// ForwardInput::to(device) returns early when device_tensors_ready is set.
+// LlmForwardInput::to(device) returns early when device_tensors_ready is set.
 // Nested step_async (e.g. MTP target/draft) can leave CP-remapped control
 // tensors on CPU while model tensors are already on NPU.
-void ensure_forward_input_device_tensors(ForwardInput& input,
+void ensure_forward_input_device_tensors(LlmForwardInput& input,
                                          const torch::Device& device) {
   move_tensor_to_device_if_needed(input.token_ids, device);
   move_tensor_to_device_if_needed(input.positions, device);
@@ -704,7 +704,7 @@ void WorkerImpl::process_group_test() {
   parallel_state::gather(tensor, parallel_args_.process_group_);
 }
 
-ForwardInput WorkerImpl::prepare_inputs(Batch& batch) {
+LlmForwardInput WorkerImpl::prepare_inputs(Batch& batch) {
   return model_executor_->prepare_inputs(batch);
 }
 
@@ -805,7 +805,7 @@ void WorkerImpl::update_last_step_output(
 }
 
 bool WorkerImpl::can_use_last_step_output_for_schedule_overlap(
-    const ForwardInput& input) const {
+    const LlmForwardInput& input) const {
   if (!last_step_output_valid_) {
     return false;
   }
@@ -816,8 +816,8 @@ bool WorkerImpl::can_use_last_step_output_for_schedule_overlap(
   return detail::has_request_id_overlap(request_ids, last_step_request_ids_);
 }
 
-ForwardInput WorkerImpl::update_input_by_last_step_output(
-    ForwardInput& inputs) {
+LlmForwardInput WorkerImpl::update_input_by_last_step_output(
+    LlmForwardInput& inputs) {
 #if defined(USE_NPU)
   if (can_prepare_npu_graph_decode_input(inputs.input_params)) {
     xllm::kernel::npu::replace_token(
@@ -846,7 +846,7 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
 }
 
 std::optional<ForwardOutput> WorkerImpl::step_for_schedule_overlap(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   // No linear-state restore here on purpose. LLMWorkerImpl overrides this to
   // copy checkpoints on compute_stream_; speculative/MTP workers keep this base
   // version but run every forward through an inner LLMWorkerImpl built with
@@ -856,15 +856,16 @@ std::optional<ForwardOutput> WorkerImpl::step_for_schedule_overlap(
   return step(input);
 }
 
-ForwardInput WorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
-    ForwardInput& input) {
+LlmForwardInput
+WorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
+    LlmForwardInput& input) {
   update_json_object_states_by_last_step_output(input);
   sanitize_json_object_error_inputs(input);
   return update_input_by_last_step_output(input);
 }
 
 void WorkerImpl::update_json_object_states_by_last_step_output(
-    ForwardInput& input) {
+    LlmForwardInput& input) {
   if (input.json_object_states.empty()) {
     return;
   }
@@ -1004,7 +1005,7 @@ void WorkerImpl::update_json_object_states_by_last_step_output(
   input.sampling_params.filter_mask = torch::Tensor();
 }
 
-void WorkerImpl::sanitize_json_object_error_inputs(ForwardInput& input) {
+void WorkerImpl::sanitize_json_object_error_inputs(LlmForwardInput& input) {
   std::string error;
   CHECK(detail::sanitize_json_object_error_token_ids(
       &input.token_ids,
@@ -1182,8 +1183,8 @@ void WorkerImpl::prepare_dp_ep_padding_on_stream(ModelInputParams& input_params,
 }
 #endif
 
-void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
-                                             ForwardInput& processed_input) {
+void WorkerImpl::prepare_work_before_execute(const LlmForwardInput& input,
+                                             LlmForwardInput& processed_input) {
   prepare_work_before_execute_on_stream(
       input, processed_input, *prepare_stream_);
 }
@@ -1201,20 +1202,20 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
 }
 
 std::optional<ForwardOutput> WorkerImpl::execute_no_sync_on_stream(
-    const ForwardInput& /*input*/,
+    const LlmForwardInput& /*input*/,
     Stream& /*compute_stream*/) {
   LOG(FATAL) << "execute_no_sync_on_stream is not supported by this worker";
   return std::nullopt;
 }
 
 void WorkerImpl::prepare_work_before_execute_on_stream(
-    const ForwardInput& input,
-    ForwardInput& processed_input,
+    const LlmForwardInput& input,
+    LlmForwardInput& processed_input,
     Stream& prepare_stream,
     bool record_ready_event,
     bool restore_linear_state) {
   if (!input.json_object_state_snapshots.empty()) {
-    ForwardInput restored_input = input;
+    LlmForwardInput restored_input = input;
     restore_json_object_states(restored_input);
     prepare_work_before_execute_on_stream(restored_input,
                                           processed_input,
@@ -1254,8 +1255,9 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
 
   auto prepare_device_on_stream = [&]() {
     processed_input = input.to(device_, dtype_);
-    // Packed RPC/SHM inputs deserialize JSON snapshots inside ForwardInput::to.
-    // Restore them before speculative dispatch so MTP sees the grammar rows.
+    // Packed RPC/SHM inputs deserialize JSON snapshots inside
+    // LlmForwardInput::to. Restore them before speculative dispatch so MTP sees
+    // the grammar rows.
     if (processed_input.json_object_states.empty() &&
         !processed_input.json_object_state_snapshots.empty()) {
       restore_json_object_states(processed_input);
@@ -1381,7 +1383,7 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
   }
 }
 
-void WorkerImpl::restore_json_object_states(ForwardInput& input) {
+void WorkerImpl::restore_json_object_states(LlmForwardInput& input) {
   if (input.json_object_state_snapshots.empty()) {
     return;
   }
@@ -1572,8 +1574,8 @@ void WorkerImpl::execute_cuda_block_copy_kernel(
 #endif
 
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
-    const ForwardInput& input) {
-  ForwardInput input_on_device;
+    const LlmForwardInput& input) {
+  LlmForwardInput input_on_device;
 
   prepare_work_before_execute(input, input_on_device);
 

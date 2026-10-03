@@ -37,15 +37,15 @@ void push_cumsum(std::vector<int32_t>& vec, int32_t len) {
   vec.emplace_back(vec.back() + len);
 }
 
-Slice<int32_t> get_token_ids(const ForwardInput& input) {
+Slice<int32_t> get_token_ids(const LlmForwardInput& input) {
   return tensor_slice(input.token_ids_host);
 }
 
-Slice<int32_t> get_positions(const ForwardInput& input) {
+Slice<int32_t> get_positions(const LlmForwardInput& input) {
   return tensor_slice(input.positions_host);
 }
 
-Slice<int32_t> get_kv_seq_lens(const ForwardInput& input) {
+Slice<int32_t> get_kv_seq_lens(const LlmForwardInput& input) {
   return input.input_params.attention.host.kv_seq_lens;
 }
 
@@ -189,8 +189,9 @@ int32_t calc_ring_slot_id(int32_t position,
   return block_id * block_size + block_offset;
 }
 
-std::vector<int32_t> build_grouped_prefill_swa_slots(const ForwardInput& input,
-                                                     int32_t block_size) {
+std::vector<int32_t> build_grouped_prefill_swa_slots(
+    const LlmForwardInput& input,
+    int32_t block_size) {
   DecodeRowContext ctx = make_decode_row_context(input);
   CHECK(ctx.model_managed_multiblock)
       << "grouped prefill SWA slots require multi_block_tables";
@@ -262,7 +263,7 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
   append_seq_len_by_layout(kv_seq_lens_vec, kv_len);
 }
 
-DecodeRowContext make_decode_row_context(const ForwardInput& input) {
+DecodeRowContext make_decode_row_context(const LlmForwardInput& input) {
   DecodeRowContext ctx;
   ctx.num_sequences = input.input_params.meta.num_sequences;
   CHECK_GE(ctx.num_sequences, 0) << "invalid num_sequences";
@@ -489,7 +490,7 @@ torch::Tensor make_cpu_int_tensor(const std::vector<int32_t>& values) {
   return make_pinned_cpu_tensor(values);
 }
 
-void set_token_position_tensors(ForwardInput& input,
+void set_token_position_tensors(LlmForwardInput& input,
                                 const std::vector<int32_t>& token_ids,
                                 const std::vector<int32_t>& positions,
                                 const torch::TensorOptions& token_options,

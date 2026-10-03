@@ -37,12 +37,12 @@ torch::Tensor choose_lm_head_selected_token_idxes(
     const torch::Device& device);
 
 bool forward_input_to_packed_proto(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     proto::PackedForwardInput* packed_forward_input);
 
 bool packed_proto_to_forward_input(
     const proto::PackedForwardInput& packed_forward_input,
-    ForwardInput& forward_input,
+    LlmForwardInput& forward_input,
     const torch::Device& device,
     Stream* stream);
 

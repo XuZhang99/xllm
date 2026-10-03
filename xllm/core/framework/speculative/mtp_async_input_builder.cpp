@@ -28,7 +28,7 @@ limitations under the License.
 namespace xllm::mtp_async {
 namespace {
 
-torch::Tensor build_device_cache_slots(const ForwardInput& input,
+torch::Tensor build_device_cache_slots(const LlmForwardInput& input,
                                        const torch::Tensor& positions,
                                        int32_t block_size) {
   CHECK_EQ(positions.dim(), 2);
@@ -40,8 +40,8 @@ torch::Tensor build_device_cache_slots(const ForwardInput& input,
       input.input_params.attention.device.block_tables, positions, block_size);
 }
 
-void apply_device_row_metadata(ForwardInput& input,
-                               const ForwardInput& block_table_source,
+void apply_device_row_metadata(LlmForwardInput& input,
+                               const LlmForwardInput& block_table_source,
                                const AcceptedState& state,
                                const torch::Tensor& offsets,
                                int32_t block_size,
@@ -57,8 +57,8 @@ void apply_device_row_metadata(ForwardInput& input,
 }
 
 #if defined(USE_NPU)
-void expand_decode_attention_metadata(ForwardInput& draft_input,
-                                      const ForwardInput& block_table_source,
+void expand_decode_attention_metadata(LlmForwardInput& draft_input,
+                                      const LlmForwardInput& block_table_source,
                                       const torch::Tensor& kv_seq_lens,
                                       int32_t block_size) {
   layer::ExpandedDecodeMetadataBuilder::populate(
@@ -69,8 +69,8 @@ void expand_decode_attention_metadata(ForwardInput& draft_input,
 }
 
 void apply_mtp_prepare_output(
-    ForwardInput& draft_input,
-    const ForwardInput& block_table_source,
+    LlmForwardInput& draft_input,
+    const LlmForwardInput& block_table_source,
     const kernel::npu::MtpPrepareNextDraftOutput& output,
     bool use_chunked_prefill,
     bool rebuild_expanded_decode_metadata,
@@ -117,8 +117,8 @@ void apply_mtp_prepare_output(
 }  // namespace
 
 void prepare_next_draft_from_accepted_state(
-    ForwardInput& draft_input,
-    const ForwardInput& block_table_source,
+    LlmForwardInput& draft_input,
+    const LlmForwardInput& block_table_source,
     const torch::Tensor& accepted_tokens,
     const torch::Tensor& accepted_embeddings,
     const torch::Tensor& embedding_placeholder,
@@ -196,8 +196,8 @@ void prepare_next_draft_from_accepted_state(
 }
 
 void prepare_later_draft_from_device_base(
-    ForwardInput& draft_input,
-    const ForwardInput& block_table_source,
+    LlmForwardInput& draft_input,
+    const LlmForwardInput& block_table_source,
     const torch::Tensor& base_positions,
     const torch::Tensor& base_kv_seq_lens,
     int32_t position_offset,
@@ -221,7 +221,7 @@ void prepare_later_draft_from_device_base(
 }
 
 void prepare_target_verify_from_accepted_state(
-    ForwardInput& validate_input,
+    LlmForwardInput& validate_input,
     const torch::Tensor& accepted_tokens,
     const torch::Tensor& base_positions,
     const torch::Tensor& base_kv_seq_lens,

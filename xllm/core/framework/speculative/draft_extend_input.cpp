@@ -83,7 +83,7 @@ void clear_all_output_embeddings(ForwardOutput& output) {
 }
 
 void prepare_first_draft_inputs(EmbeddingCache& embedding_cache,
-                                const ForwardInput& input,
+                                const LlmForwardInput& input,
                                 ForwardOutput& output) {
   const torch::Tensor& sample_hidden_states =
       output.sample_output.selected_embeddings;

@@ -30,8 +30,8 @@ class DFlash2WorkerImpl final : public DFlashWorkerImpl {
   ~DFlash2WorkerImpl() override = default;
 
  protected:
-  DraftBlock run_decode_draft(const ForwardInput& input,
-                              ForwardInput& validate_input) override;
+  DraftBlock run_decode_draft(const LlmForwardInput& input,
+                              LlmForwardInput& validate_input) override;
 
  private:
   ProcessGroup* sampling_process_group_ = nullptr;

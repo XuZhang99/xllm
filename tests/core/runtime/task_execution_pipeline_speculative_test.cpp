@@ -100,7 +100,7 @@ class CountingModel final : public CausalLM {
 class PreparedTestExecutor final : public ExecutorImpl {
  public:
   explicit PreparedTestExecutor(CausalLM* model) : model_(model) {}
-  ForwardInput prepare_inputs(Batch& /*batch*/) override { return {}; }
+  LlmForwardInput prepare_inputs(Batch& /*batch*/) override { return {}; }
   bool supports_prepared_attention_metadata() const override { return true; }
   void prepare_attention_metadata(std::vector<KVCache>& /*kv_caches*/,
                                   ModelInputParams& /*params*/) override {}
@@ -227,8 +227,8 @@ class SpeculativePipelineTest : public ::testing::Test {
     capacity_.common.chunked_prefill = true;
   }
 
-  ForwardInput input(bool decode, int32_t token = 3, int32_t position = 2) {
-    ForwardInput input;
+  LlmForwardInput input(bool decode, int32_t token = 3, int32_t position = 2) {
+    LlmForwardInput input;
     const int32_t query = decode ? 1 : 2;
     input.token_ids = decode ? torch::tensor({token}, torch::kInt32)
                              : torch::tensor({1, 2}, torch::kInt32);
@@ -257,7 +257,7 @@ class SpeculativePipelineTest : public ::testing::Test {
     return input;
   }
 
-  ForwardOutput execute(const ForwardInput& input) {
+  ForwardOutput execute(const LlmForwardInput& input) {
     const auto submitted = pipeline_->submit(input);
     EXPECT_TRUE(submitted.status.ok()) << submitted.status.message();
     if (!submitted.status.ok()) {
@@ -269,9 +269,9 @@ class SpeculativePipelineTest : public ::testing::Test {
     return std::move(result.output);
   }
 
-  ForwardInput dcp_input(bool decode,
-                         int32_t token = 3,
-                         int32_t position = 15) {
+  LlmForwardInput dcp_input(bool decode,
+                            int32_t token = 3,
+                            int32_t position = 15) {
     auto value = input(decode, token, position);
     auto& host = value.input_params.attention.host;
     host.block_tables = torch::tensor({{3, 1}}, torch::kInt32);
@@ -676,7 +676,7 @@ TEST_F(SpeculativePipelineTest,
   capacity_.common.dp_size = 2;
   create();
   ASSERT_NE(pipeline_, nullptr);
-  ForwardInput idle;
+  LlmForwardInput idle;
   idle.input_params.meta.batch_forward_type = BatchForwardType::EMPTY;
   auto& parallel = idle.input_params.parallel;
   parallel.dp_global_token_nums = {0, 2};

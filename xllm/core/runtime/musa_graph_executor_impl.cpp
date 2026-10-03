@@ -1670,7 +1670,7 @@ c10::musa::MUSAStream MusaGraphExecutorImpl::get_capture_stream(
   return thread_capture_stream;
 }
 
-ForwardInput MusaGraphExecutorImpl::prepare_inputs(Batch& batch) {
+LlmForwardInput MusaGraphExecutorImpl::prepare_inputs(Batch& batch) {
   // Prepare inputs for workers
   return batch.prepare_forward_input(
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());

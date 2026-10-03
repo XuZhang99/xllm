@@ -38,13 +38,13 @@ DSparkWorkerImpl::DSparkWorkerImpl(const ParallelArgs& parallel_args,
                                   : parallel_args.process_group_) {}
 
 DSparkWorkerImpl::DraftBlock DSparkWorkerImpl::run_decode_draft(
-    const ForwardInput& input,
-    ForwardInput& validate_input) {
+    const LlmForwardInput& input,
+    LlmForwardInput& validate_input) {
   Timer timer;
 
   // Same input build as DFlash, but sample_from_anchor()==true makes the query
   // block N-wide and every position predicts a draft token.
-  ForwardInput query_input;
+  LlmForwardInput query_input;
   prepare_query_inputs(input, query_input);
 
   CHECK(input.token_ids_host.defined())
@@ -59,7 +59,7 @@ DSparkWorkerImpl::DraftBlock DSparkWorkerImpl::run_decode_draft(
 
   CHECK_GT(num_speculative_tokens, 0)
       << "DSpark requires num_speculative_tokens > 0.";
-  ForwardInput logits_input = query_input;
+  LlmForwardInput logits_input = query_input;
   logits_input.skip_sampling_for_logits_only = true;
   // Request pre-lm_head hidden alongside logits so ConfidenceHead can consume
   // the same [num_reqs*num_spec, hidden] rows without a second projection.
@@ -72,7 +72,7 @@ DSparkWorkerImpl::DraftBlock DSparkWorkerImpl::run_decode_draft(
                                adaptive_spec_controller_->enabled();
   logits_input.return_selected_hidden = want_confidence;
 
-  ForwardInput processed_input;
+  LlmForwardInput processed_input;
   draft_impl_->prepare_work_before_execute_on_stream(
       logits_input, processed_input, *prepare_stream_);
   std::optional<ForwardOutput> draft_output =

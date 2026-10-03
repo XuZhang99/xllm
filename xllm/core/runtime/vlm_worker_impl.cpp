@@ -41,9 +41,10 @@ namespace xllm {
 
 namespace {
 
-void wait_input_ready_events(const ForwardInput& input, const Stream& stream) {
+void wait_input_ready_events(const LlmForwardInput& input,
+                             const Stream& stream) {
   CHECK(stream.wait_event(input.runtime.metadata_ready_event))
-      << "failed to wait ForwardInput metadata ready event";
+      << "failed to wait LlmForwardInput metadata ready event";
 }
 
 StreamEventPtr record_current_stream_event(const Device& device) {
@@ -76,7 +77,7 @@ bool VLMWorkerImpl::init_model(ModelContext& context) {
   return true;
 }
 
-std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
+std::optional<ForwardOutput> VLMWorkerImpl::step(const LlmForwardInput& input) {
   if (::xllm::LoadConfig::get_instance().enable_manual_loader()) {
 #if defined(USE_NPU)
     if (!enable_schedule_overlap()) {
@@ -105,14 +106,14 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
 }
 
 std::optional<ForwardOutput> VLMWorkerImpl::execute_no_sync_on_stream(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     Stream& compute_stream) {
   return execute_no_sync_on_stream(
       input, compute_stream, /*record_ready_event=*/true);
 }
 
 std::optional<ForwardOutput> VLMWorkerImpl::execute_no_sync_on_stream(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     Stream& compute_stream,
     bool record_ready_event) {
   const ForwardSyncPolicy sync_policy = ForwardSyncPolicy::NO_SYNC;
@@ -142,7 +143,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::execute_no_sync_on_stream(
 }
 
 std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     ForwardSyncPolicy sync_policy,
     bool record_ready_event) {
   Timer timer;
@@ -218,7 +219,8 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
   }
 
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
-    output.retained_inputs.emplace_back(std::make_shared<ForwardInput>(input));
+    output.retained_inputs.emplace_back(
+        std::make_shared<LlmForwardInput>(input));
     if (record_ready_event && enable_schedule_overlap()) {
       output.ready_event = record_current_stream_event(device_);
     }
@@ -231,15 +233,15 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
 }
 
 std::optional<ForwardOutput> VLMWorkerImpl::step_for_schedule_overlap(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   // VLM has no linear-attention recurrent state to restore, so the LLM
   // worker's slot-restore preamble is unnecessary here.
   return execute_no_sync_on_stream(input, *compute_stream_);
 }
 
-ForwardInput
+LlmForwardInput
 VLMWorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
-    ForwardInput& input) {
+    LlmForwardInput& input) {
   c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
   CHECK(compute_stream_->wait_event(last_step_output_.ready_event))
       << "failed to wait last step output ready event";

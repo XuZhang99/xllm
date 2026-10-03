@@ -609,7 +609,7 @@ void WorkerService::create_polling_shm_thread(
         device_.set_device();
         Timer timer;
         while (true) {
-          std::variant<ForwardInput, RecForwardInput, DiTForwardInput> input;
+          std::variant<LlmForwardInput, RecForwardInput, DiTForwardInput> input;
           if (options_.backend() == "dit") {
             input.emplace<DiTForwardInput>();
           } else if (options_.backend() == "rec") {
@@ -1040,109 +1040,110 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
                                  const proto::ForwardInput* pb_forward_input,
                                  proto::ForwardOutput* pb_forward_output,
                                  ::google::protobuf::Closure* done) {
-  threadpool_->schedule(
-      [this, controller, pb_forward_input, pb_forward_output, done]() mutable {
-        brpc::ClosureGuard done_guard(done);
-        // convert proto::ForwardInput to ForwardInput
+  threadpool_->schedule([this,
+                         controller,
+                         pb_forward_input,
+                         pb_forward_output,
+                         done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    // convert proto::ForwardInput to LlmForwardInput
 
-        Timer timer;
-        std::variant<ForwardInput, RecForwardInput, DiTForwardInput> input;
-        if (options_.backend() == "dit") {
-          input.emplace<DiTForwardInput>();
-        } else if (options_.backend() == "rec") {
-          input.emplace<RecForwardInput>();
-        }
-        if (!pb_forward_input->has_packed_input()) {
-          controller->SetFailed("ForwardInput requires a packed input payload");
-          return;
-        }
-        const proto::PackedForwardInput& packed_input =
-            pb_forward_input->packed_input();
-        // Dispatch follows the configured domain, including token-only VLM
-        // decode. A mismatched domain is rejected before tensor preparation.
-        const bool valid_input = std::visit(
-            [&](auto& typed_input) {
-              using Input = std::decay_t<decltype(typed_input)>;
-              if constexpr (std::is_same_v<Input, DiTForwardInput>) {
-                return packed_proto_to_dit_forward_input(packed_input,
-                                                         typed_input);
-              } else if constexpr (std::is_same_v<Input, RecForwardInput>) {
-                return packed_proto_to_rec_forward_input(
-                    packed_input, typed_input, device_, stream_.get());
-              } else {
-                return packed_proto_to_forward_input(
-                    packed_input, typed_input, device_, stream_.get());
-              }
-            },
-            input);
-        if (!valid_input) {
-          controller->SetFailed(
-              "Invalid forward input domain, schema, or layout");
-          return;
-        }
+    Timer timer;
+    std::variant<LlmForwardInput, RecForwardInput, DiTForwardInput> input;
+    if (options_.backend() == "dit") {
+      input.emplace<DiTForwardInput>();
+    } else if (options_.backend() == "rec") {
+      input.emplace<RecForwardInput>();
+    }
+    if (!pb_forward_input->has_packed_input()) {
+      controller->SetFailed("LlmForwardInput requires a packed input payload");
+      return;
+    }
+    const proto::PackedForwardInput& packed_input =
+        pb_forward_input->packed_input();
+    // Dispatch follows the configured domain, including token-only VLM
+    // decode. A mismatched domain is rejected before tensor preparation.
+    const bool valid_input = std::visit(
+        [&](auto& typed_input) {
+          using Input = std::decay_t<decltype(typed_input)>;
+          if constexpr (std::is_same_v<Input, DiTForwardInput>) {
+            return packed_proto_to_dit_forward_input(packed_input, typed_input);
+          } else if constexpr (std::is_same_v<Input, RecForwardInput>) {
+            return packed_proto_to_rec_forward_input(
+                packed_input, typed_input, device_, stream_.get());
+          } else {
+            return packed_proto_to_forward_input(
+                packed_input, typed_input, device_, stream_.get());
+          }
+        },
+        input);
+    if (!valid_input) {
+      controller->SetFailed("Invalid forward input domain, schema, or layout");
+      return;
+    }
 
-        // model output
-        torch::Tensor next_tokens;
-        torch::Tensor logprobs;
-        torch::Tensor top_tokens;
-        torch::Tensor top_logprobs;
-        torch::Tensor embeddings;
-        std::vector<std::vector<torch::Tensor>> mm_embeddings;
-        std::vector<SpeculativeTokenStats> speculative_token_stats;
-        std::vector<torch::Tensor> dit_images;
-        std::vector<std::string> dit_text_output;
-        torch::Tensor expert_load_data;
-        int64_t prepared_token = -1;
-        // beam search kernel output
-        torch::Tensor src_seq_idxes;
-        torch::Tensor out_tokens;
-        torch::Tensor out_logprobs;
-        std::vector<JsonObjectOutputError> json_object_errors;
+    // model output
+    torch::Tensor next_tokens;
+    torch::Tensor logprobs;
+    torch::Tensor top_tokens;
+    torch::Tensor top_logprobs;
+    torch::Tensor embeddings;
+    std::vector<std::vector<torch::Tensor>> mm_embeddings;
+    std::vector<SpeculativeTokenStats> speculative_token_stats;
+    std::vector<torch::Tensor> dit_images;
+    std::vector<std::string> dit_text_output;
+    torch::Tensor expert_load_data;
+    int64_t prepared_token = -1;
+    // beam search kernel output
+    torch::Tensor src_seq_idxes;
+    torch::Tensor out_tokens;
+    torch::Tensor out_logprobs;
+    std::vector<JsonObjectOutputError> json_object_errors;
 
-        std::visit(
-            [&](auto& typed_input) {
-              using Input = std::decay_t<decltype(typed_input)>;
-              if constexpr (std::is_same_v<Input, DiTForwardInput>) {
-                step(typed_input, dit_images, dit_text_output);
-              } else {
-                step(typed_input,
-                     next_tokens,
-                     logprobs,
-                     top_tokens,
-                     top_logprobs,
-                     embeddings,
-                     mm_embeddings,
-                     speculative_token_stats,
-                     dit_images,
-                     dit_text_output,
-                     expert_load_data,
-                     prepared_token,
-                     src_seq_idxes,
-                     out_tokens,
-                     out_logprobs,
-                     json_object_errors);
-              }
-            },
-            input);
-        // convert to proto output
-        forward_output_to_proto(next_tokens,
-                                logprobs,
-                                top_tokens,
-                                top_logprobs,
-                                embeddings,
-                                mm_embeddings,
-                                speculative_token_stats,
-                                expert_load_data,
-                                prepared_token,
-                                src_seq_idxes,
-                                out_tokens,
-                                out_logprobs,
-                                dit_images,
-                                dit_text_output,
-                                json_object_errors,
-                                pb_forward_output);
-        COUNTER_ADD(worker_service_latency_seconds, timer.elapsed_seconds());
-      });
+    std::visit(
+        [&](auto& typed_input) {
+          using Input = std::decay_t<decltype(typed_input)>;
+          if constexpr (std::is_same_v<Input, DiTForwardInput>) {
+            step(typed_input, dit_images, dit_text_output);
+          } else {
+            step(typed_input,
+                 next_tokens,
+                 logprobs,
+                 top_tokens,
+                 top_logprobs,
+                 embeddings,
+                 mm_embeddings,
+                 speculative_token_stats,
+                 dit_images,
+                 dit_text_output,
+                 expert_load_data,
+                 prepared_token,
+                 src_seq_idxes,
+                 out_tokens,
+                 out_logprobs,
+                 json_object_errors);
+          }
+        },
+        input);
+    // convert to proto output
+    forward_output_to_proto(next_tokens,
+                            logprobs,
+                            top_tokens,
+                            top_logprobs,
+                            embeddings,
+                            mm_embeddings,
+                            speculative_token_stats,
+                            expert_load_data,
+                            prepared_token,
+                            src_seq_idxes,
+                            out_tokens,
+                            out_logprobs,
+                            dit_images,
+                            dit_text_output,
+                            json_object_errors,
+                            pb_forward_output);
+    COUNTER_ADD(worker_service_latency_seconds, timer.elapsed_seconds());
+  });
 }
 
 void WorkerService::GetLastStepResult(

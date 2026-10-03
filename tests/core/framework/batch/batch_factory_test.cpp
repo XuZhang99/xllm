@@ -159,9 +159,9 @@ TEST(BatchFactoryTest, FactoriesKeepDomainsSeparateForTheSameInputContract) {
       rec_batches[0].prepare_forward_input(args, /*thread_pool=*/nullptr);
   static_assert(std::is_same_v<std::decay_t<decltype(input)>, RecForwardInput>);
   static_assert(std::is_same_v<decltype(input.input_params), RecModelParams>);
-  static_assert(!std::is_base_of_v<ForwardInput, RecForwardInput>);
+  static_assert(!std::is_base_of_v<LlmForwardInput, RecForwardInput>);
   static_assert(!std::is_base_of_v<ModelInputParams, RecModelParams>);
-  static_assert(!std::is_convertible_v<RecForwardInput, ForwardInput>);
+  static_assert(!std::is_convertible_v<RecForwardInput, LlmForwardInput>);
   static_assert(!std::is_convertible_v<RecModelParams, ModelInputParams>);
   EXPECT_FALSE(input.token_ids.defined());
 }

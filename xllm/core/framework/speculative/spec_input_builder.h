@@ -28,7 +28,7 @@ limitations under the License.
 namespace xllm {
 
 struct ModelInputParams;
-struct ForwardInput;
+class LlmForwardInput;
 struct SamplingParameters;
 
 namespace specBuilder {
@@ -93,8 +93,8 @@ struct TokenWithOffset {
   int32_t position_offset = 0;
 };
 
-// Builds a reusable row context from ForwardInput host-side fields.
-DecodeRowContext make_decode_row_context(const ForwardInput& input);
+// Builds a reusable row context from LlmForwardInput host-side fields.
+DecodeRowContext make_decode_row_context(const LlmForwardInput& input);
 
 // Appends one logical decode row into output buffers.
 void append_decode_row(const DecodeRowContext& ctx,
@@ -131,8 +131,9 @@ int32_t calc_ring_slot_id(int32_t position,
                           int32_t block_size);
 
 // Manager 0 in a grouped-cache input is the DSV4 SWA manager.
-std::vector<int32_t> build_grouped_prefill_swa_slots(const ForwardInput& input,
-                                                     int32_t block_size);
+std::vector<int32_t> build_grouped_prefill_swa_slots(
+    const LlmForwardInput& input,
+    int32_t block_size);
 
 // Computes sequence kv length with platform-specific seq-lens layout handling.
 int32_t calc_kv_len(const Slice<int32_t>& kv_seq_lens_slice,
@@ -167,7 +168,7 @@ torch::Tensor make_cpu_int_tensor(const std::vector<int32_t>& values);
 
 // Stages token_ids/positions into both the host and device tensors of `input`
 // with async H2D copies, toggling device_tensors_ready around the write.
-void set_token_position_tensors(ForwardInput& input,
+void set_token_position_tensors(LlmForwardInput& input,
                                 const std::vector<int32_t>& token_ids,
                                 const std::vector<int32_t>& positions,
                                 const torch::TensorOptions& token_options,

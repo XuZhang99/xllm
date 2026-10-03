@@ -37,7 +37,7 @@ class MMEmbedVLMWorkerImpl : public WorkerImpl {
 
   bool init_model(ModelContext& context) override;
 
-  std::optional<ForwardOutput> step(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step(const LlmForwardInput& input) override;
 };
 
 }  // namespace xllm

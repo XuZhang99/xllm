@@ -54,7 +54,7 @@ class LinearStateRestoreWorker final : public WorkerImpl {
 
   bool init_model(ModelContext& /*context*/) override { return true; }
 
-  std::optional<ForwardOutput> step(const ForwardInput& /*input*/) override {
+  std::optional<ForwardOutput> step(const LlmForwardInput& /*input*/) override {
     return std::nullopt;
   }
 
@@ -156,14 +156,14 @@ class OverlapLinearStateRestoreWorker final : public LLMWorkerImpl {
     }
   }
 
-  std::optional<ForwardOutput> run_overlap_forward(const ForwardInput& input,
+  std::optional<ForwardOutput> run_overlap_forward(const LlmForwardInput& input,
                                                    int64_t destination_slot) {
     forward_destination_slot_ = destination_slot;
     return step_for_schedule_overlap(input);
   }
 
   std::optional<ForwardOutput> execute_no_sync_on_stream(
-      const ForwardInput& /*input*/,
+      const LlmForwardInput& /*input*/,
       Stream& compute_stream) override {
     c10::StreamGuard stream_guard = compute_stream.set_stream_guard();
     for (KVCache& kv_cache : kv_caches_) {
@@ -255,7 +255,7 @@ TEST(MluLinearStateRestoreWorkerTest,
   second_cold.linear_state_id = 5;
   second_cold.reset_requested = true;
 
-  ForwardInput input;
+  LlmForwardInput input;
   input.token_ids = torch::ones(
       {4}, torch::TensorOptions().dtype(torch::kInt32).device(device));
   input.positions = torch::zeros_like(input.token_ids);
@@ -267,7 +267,7 @@ TEST(MluLinearStateRestoreWorkerTest,
   input.input_params.linear_state_cache_ops = {
       restore, continued, cold, second_cold};
 
-  ForwardInput processed_input;
+  LlmForwardInput processed_input;
   worker.prepare_work_before_execute(input, processed_input);
   ASSERT_NE(processed_input.runtime.metadata_ready_event, nullptr);
   Device xllm_device(device);
@@ -313,7 +313,7 @@ TEST(MluLinearStateRestoreWorkerTest,
   kv_caches.emplace_back(LinearAttentionKVCacheTensors{cache.conv, cache.ssm});
   worker.set_kv_caches(std::move(kv_caches));
 
-  ForwardInput input;
+  LlmForwardInput input;
   input.token_ids = torch::ones(
       {6}, torch::TensorOptions().dtype(torch::kInt32).device(device));
   input.positions = torch::zeros_like(input.token_ids);
@@ -329,7 +329,7 @@ TEST(MluLinearStateRestoreWorkerTest,
     cache_op.reset_requested = row < 3;
   }
 
-  ForwardInput processed_input;
+  LlmForwardInput processed_input;
   worker.prepare_work_before_execute(input, processed_input);
 
   EXPECT_EQ(processed_input.input_params.linear_state_validity_mask,
@@ -406,7 +406,7 @@ TEST(MluLinearStateRestoreWorkerTest,
   second_cold.linear_state_id = 5;
   second_cold.reset_requested = true;
 
-  ForwardInput input;
+  LlmForwardInput input;
   input.input_params.meta.batch_id = 43;
   input.input_params.linear_state_cache_ops = {
       restore, continued, cold, second_cold};

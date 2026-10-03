@@ -134,7 +134,7 @@ void apply_rotary(RotaryParams& params) {
 
   if (params.position_ids.has_value()) {
     // positions is already int64 on CUDA/MUSA/DCU (pre-converted in
-    // ForwardInput::to).
+    // LlmForwardInput::to).
     pos_ids = params.position_ids.value().to(torch::kInt64);
 #if defined(USE_DCU)
     if (pos_ids.dim() == 2 && params.q.dim() == 3) {
@@ -213,7 +213,7 @@ void apply_rotary(RotaryParams& params) {
     auto cos_sin_vec = params.cos_sin.chunk(4, -1);
     ilu_cos_sin = torch::cat({cos_sin_vec[0], cos_sin_vec[2]}, -1);
   }
-  // positions is already int64 on ILU (pre-converted in ForwardInput::to).
+  // positions is already int64 on ILU (pre-converted in LlmForwardInput::to).
   torch::Tensor long_position_ids = params.position_ids.value().to(at::kLong);
   ilu::apply_rope_pos_ids_cos_sin_cache(
       params.q, params.k, ilu_cos_sin, long_position_ids, params.interleaved);

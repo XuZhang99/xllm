@@ -80,9 +80,9 @@ class RemoteWorker : public WorkerClient {
                       const std::vector<KVTransferMapping>& mappings) override;
 
   // prepare input request
-  ForwardInput prepare_inputs(Batch& batch) override;
+  LlmForwardInput prepare_inputs(Batch& batch) override;
 
-  std::optional<ForwardOutput> step(const ForwardInput& inputs) override;
+  std::optional<ForwardOutput> step(const LlmForwardInput& inputs) override;
 
   folly::SemiFuture<bool> init_model_async(
       const std::string& model_weights_path,
@@ -117,10 +117,10 @@ class RemoteWorker : public WorkerClient {
 
   // Run the model and return the output.
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
-      const ForwardInput& inputs) override;
+      const LlmForwardInput& inputs) override;
 
   folly::SemiFuture<std::optional<RawForwardOutput>> step_remote_async(
-      const ForwardInput& inputs) override;
+      const LlmForwardInput& inputs) override;
 
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const DiTForwardInput& inputs) override;

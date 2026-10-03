@@ -62,12 +62,12 @@ InputData make_input(std::vector<int32_t> query, std::vector<int32_t> kv) {
   return input;
 }
 
-ForwardInput make_forward_input(const InputData& input,
-                                BatchForwardType type,
-                                int32_t actual_rows,
-                                uint64_t batch_id = 0,
-                                bool is_warmup = false) {
-  ForwardInput forward;
+LlmForwardInput make_forward_input(const InputData& input,
+                                   BatchForwardType type,
+                                   int32_t actual_rows,
+                                   uint64_t batch_id = 0,
+                                   bool is_warmup = false) {
+  LlmForwardInput forward;
   forward.token_ids = torch::tensor(input.tokens, torch::kInt32);
   forward.positions = torch::tensor(input.positions, torch::kInt32);
   auto& host = forward.input_params.attention.host;
@@ -100,7 +100,7 @@ class SlotBufferTest : public ::testing::Test {
 
   void TearDown() override { EXPECT_EQ(aclrtSynchronizeDevice(), ACL_SUCCESS); }
 
-  Status prepare_model(const ForwardInput& input, const Stream& stream) {
+  Status prepare_model(const LlmForwardInput& input, const Stream& stream) {
     Status status = binding_->validate(input, 0, stream);
     if (status.ok()) {
       binding_->prepare(input, stream);
@@ -149,7 +149,7 @@ class SlotBufferTest : public ::testing::Test {
     }
   }
 
-  void expect_rejected(const ForwardInput& input) {
+  void expect_rejected(const LlmForwardInput& input) {
     const torch::Tensor before = binding_->tokens().cpu().clone();
     const uint64_t batch_id = binding_->model_params().meta.batch_id;
     const std::vector<int32_t> lengths =

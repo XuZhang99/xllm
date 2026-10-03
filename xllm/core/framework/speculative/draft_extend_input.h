@@ -20,7 +20,7 @@ limitations under the License.
 namespace xllm {
 
 struct SampleOutput;
-struct ForwardInput;
+class LlmForwardInput;
 struct ForwardOutput;
 class EmbeddingCache;
 
@@ -45,7 +45,7 @@ void clear_all_output_embeddings(ForwardOutput& output);
 // selected hidden as `embeddings` for the PD handoff to the first draft-extend
 // step.
 void prepare_first_draft_inputs(EmbeddingCache& embedding_cache,
-                                const ForwardInput& input,
+                                const LlmForwardInput& input,
                                 ForwardOutput& output);
 
 }  // namespace xllm

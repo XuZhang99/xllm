@@ -1143,7 +1143,7 @@ TEST(BatchTest, DecodeForwardInputConsumesMtpBootstrap) {
   sequence.update_mtp_bootstrap_embedding(embedding);
 
   Batch batch(&sequence);
-  ForwardInput forward_input = batch.prepare_forward_input(
+  LlmForwardInput forward_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
 
   const auto& embed_params = forward_input.input_params.embedding;
@@ -1176,7 +1176,7 @@ TEST(BatchTest, DecodeForwardInputMapsSparseMtpBootstrapRows) {
   second.update_mtp_bootstrap_embedding(embedding);
 
   Batch batch({&first, &second});
-  ForwardInput forward_input = batch.prepare_forward_input(
+  LlmForwardInput forward_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
 
   const auto& embed_params = forward_input.input_params.embedding;
@@ -1265,7 +1265,7 @@ TEST(BatchTest, Basic) {
   Batch batch({&seq1, &seq2, &seq3});
   // allowed chunk size 4
   batch.add(&seq4, 4);
-  ForwardInput forward_input = batch.prepare_forward_input(
+  LlmForwardInput forward_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
 
   // check num tokens in kv cache
@@ -1416,7 +1416,7 @@ TEST(BatchTest, SampleRequestInjectsAllMatchedSlots) {
   seq.add_blocks(BlockType::KV, manager.allocate(2));
 
   Batch batch({&seq});
-  ForwardInput forward_input = batch.prepare_forward_input(
+  LlmForwardInput forward_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
 
   const auto& sampling_params_out = forward_input.sampling_params;
@@ -1473,7 +1473,7 @@ TEST(BatchTest, JsonObjectSampleSequenceIdsFollowSamplingRows) {
   second.add_blocks(BlockType::KV, manager.allocate(1));
 
   Batch batch({&second, &first});
-  ForwardInput forward_input = batch.prepare_forward_input(
+  LlmForwardInput forward_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
 
   EXPECT_EQ(forward_input.sample_sequence_ids,
@@ -1496,7 +1496,7 @@ TEST(BatchTest, JsonObjectSampleSequenceIdsFollowSamplingRows) {
   fake_output.outputs = {make_raw_sample_output(-1, std::nullopt),
                          make_raw_sample_output(-2, std::nullopt)};
   batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
-  ForwardInput next_input = batch.prepare_forward_input(
+  LlmForwardInput next_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
   EXPECT_EQ(next_input.sample_prior_output_rows, std::vector<int32_t>({0, 1}));
 }
@@ -1562,7 +1562,7 @@ TEST(BatchTest, ReorderedMtpAcceptedRowsCommitToOwningSequences) {
   plain.add_blocks(BlockType::KV, manager.allocate(1));
 
   Batch batch({&plain, &constrained});
-  ForwardInput first_input = batch.prepare_forward_input(
+  LlmForwardInput first_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
   EXPECT_EQ(
       first_input.sample_sequence_ids,
@@ -1577,7 +1577,7 @@ TEST(BatchTest, ReorderedMtpAcceptedRowsCommitToOwningSequences) {
   fake_output.outputs = {make_raw_sample_output(-1, std::nullopt),
                          make_raw_sample_output(-2, std::nullopt)};
   batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
-  ForwardInput commit_input = batch.prepare_forward_input(
+  LlmForwardInput commit_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
   EXPECT_EQ(
       commit_input.sample_sequence_ids,
@@ -1698,7 +1698,7 @@ TEST(BatchTest, JsonObjectMetadataIsSkippedWhenDisabled) {
   sequence.add_blocks(BlockType::KV, manager.allocate(1));
 
   Batch batch({&sequence});
-  ForwardInput forward_input = batch.prepare_forward_input(
+  LlmForwardInput forward_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
 
   EXPECT_TRUE(forward_input.json_object_states.empty());
@@ -1759,7 +1759,7 @@ TEST(BatchTest, ChunkedPDTransferUsesStepWindow) {
                               nullptr,
                               BatchForwardType::PREFILL);
 
-  ForwardInput input =
+  LlmForwardInput input =
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/0);
 
@@ -1821,7 +1821,7 @@ TEST(BatchTest, PrefixCacheTransferIgnoresKvCacheCursor) {
                               nullptr,
                               BatchForwardType::PREFILL);
 
-  ForwardInput input =
+  LlmForwardInput input =
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/0);
 
@@ -1881,7 +1881,7 @@ TEST(BatchTest, ForwardInputPreservesTransferInfoAndBatchId) {
                               nullptr,
                               BatchForwardType::PREFILL);
 
-  ForwardInput input =
+  LlmForwardInput input =
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/0);
 
@@ -1943,7 +1943,7 @@ TEST(BatchTest, ForwardInputPackedRoundTripPreservesTransportFields) {
                               nullptr,
                               BatchForwardType::PREFILL);
 
-  ForwardInput input =
+  LlmForwardInput input =
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/0);
   input.input_params.parallel.dp_global_batch_generations = {3, 7};
@@ -1970,7 +1970,7 @@ TEST(BatchTest, ForwardInputPackedRoundTripPreservesTransportFields) {
 
   ASSERT_TRUE(writer_manager.input_write(input));
 
-  ForwardInput round_trip;
+  LlmForwardInput round_trip;
   reader_manager.input_read(round_trip, torch::Device(torch::kCPU));
 
   EXPECT_EQ(round_trip.input_params.meta.batch_id, batch_id);
@@ -2245,7 +2245,7 @@ TEST(BatchTest, ForwardInputBlockCopyKernelFieldsMatchExpectedLayout) {
                                       /*batch_id=*/1,
                                       nullptr,
                                       BatchForwardType::PREFILL);
-  ForwardInput forward_input =
+  LlmForwardInput forward_input =
       forward_builder.build_forward_input(/*num_decoding_tokens=*/1,
                                           /*min_decoding_batch_size=*/0);
 
@@ -2374,7 +2374,7 @@ TEST(BatchTest, SampleRequestKeepsThreadedForwardBuilderOffsetsStable) {
                               /*cp_size=*/1,
                               &thread_pool);
 
-  ForwardInput forward_input =
+  LlmForwardInput forward_input =
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/0);
 
@@ -2437,7 +2437,7 @@ TEST(BatchTest, DecodeMinBatchSizeDoesNotPadTransportState) {
                               &args,
                               BatchForwardType::DECODE);
 
-  ForwardInput forward_input =
+  LlmForwardInput forward_input =
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/3);
 
@@ -2505,7 +2505,7 @@ TEST(BatchTest, DecodeEmbeddingAndLinearStateIdsAreIndependentSlots) {
                               &args,
                               BatchForwardType::DECODE);
 
-  ForwardInput forward_input =
+  LlmForwardInput forward_input =
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/0);
 
@@ -2610,7 +2610,7 @@ TEST(BatchTest, LinearRestoreSourceStaysPinnedForBatchLifetime) {
 
   ModelArgs args;
   args.layer_types({"linear_attention"});
-  ForwardInput forward_input = batch->prepare_forward_input(
+  LlmForwardInput forward_input = batch->prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, args);
 
   const auto& cache_ops = forward_input.input_params.linear_state_cache_ops;
@@ -2684,7 +2684,7 @@ TEST(BatchTest, UnusedLinearRestoreSourceIsReleasedDuringBuild) {
   batch->add(&sequence, /*allowed_max_token=*/1);
   ModelArgs args;
   args.layer_types({"linear_attention"});
-  ForwardInput forward_input = batch->prepare_forward_input(
+  LlmForwardInput forward_input = batch->prepare_forward_input(
       /*num_decoding_tokens=*/0, /*min_decoding_bach_size=*/0, args);
 
   ASSERT_EQ(forward_input.input_params.linear_state_cache_ops.size(), 1u);
@@ -2752,7 +2752,8 @@ TEST(BatchTest, ThreadedBatchPinsEveryLinearRestoreSourceUntilRelease) {
   ThreadPool thread_pool(/*num_threads=*/2);
   ModelArgs args;
   args.layer_types({"linear_attention"});
-  ForwardInput forward_input = batch->prepare_forward_input(args, &thread_pool);
+  LlmForwardInput forward_input =
+      batch->prepare_forward_input(args, &thread_pool);
 
   const auto& cache_ops = forward_input.input_params.linear_state_cache_ops;
   ASSERT_EQ(cache_ops.size(), 2u);
@@ -2764,7 +2765,7 @@ TEST(BatchTest, ThreadedBatchPinsEveryLinearRestoreSourceUntilRelease) {
 }
 
 TEST(BatchTest, SharedMemoryRoundTripPreservesLinearStateIds) {
-  ForwardInput forward_input;
+  LlmForwardInput forward_input;
   auto int_options = torch::TensorOptions()
                          .dtype(torch::kInt)
                          .device(torch::kCPU)
@@ -2825,7 +2826,7 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesLinearStateIds) {
       shm_name, 1 << 20, is_reader_creator, ForwardType::RAW_INPUT);
   ASSERT_TRUE(writer_manager.input_write(forward_input));
 
-  ForwardInput from_shm;
+  LlmForwardInput from_shm;
   reader_manager.input_read(from_shm, torch::Device(torch::kCPU));
   EXPECT_EQ(from_shm.input_params.embedding.linear_state_ids,
             std::vector<int32_t>({4, 6}));
@@ -2846,14 +2847,14 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesLinearStateIds) {
   forward_input.input_params.embedding.linear_state_ids.clear();
   ASSERT_TRUE(writer_manager.input_write(forward_input));
 
-  ForwardInput legacy_from_shm;
+  LlmForwardInput legacy_from_shm;
   reader_manager.input_read(legacy_from_shm, torch::Device(torch::kCPU));
   EXPECT_EQ(legacy_from_shm.input_params.embedding.linear_state_ids,
             std::vector<int32_t>({-1, -1}));
 }
 
 TEST(BatchTest, SharedMemoryRoundTripPreservesEmptyRankTensors) {
-  ForwardInput forward_input;
+  LlmForwardInput forward_input;
   auto int_options = torch::TensorOptions()
                          .dtype(torch::kInt)
                          .device(torch::kCPU)
@@ -2882,7 +2883,7 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesEmptyRankTensors) {
       shm_name, 1 << 20, is_reader_creator, ForwardType::RAW_INPUT);
   ASSERT_TRUE(writer_manager.input_write(forward_input));
 
-  ForwardInput from_shm;
+  LlmForwardInput from_shm;
   reader_manager.input_read(from_shm, torch::Device(torch::kCPU));
 
   EXPECT_TRUE(from_shm.token_ids.defined());

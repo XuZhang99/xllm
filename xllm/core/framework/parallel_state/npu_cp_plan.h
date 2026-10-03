@@ -25,7 +25,7 @@ namespace xllm {
 class ProcessGroup;
 struct ModelInputParams;
 struct ParallelInput;
-struct ForwardInput;
+class LlmForwardInput;
 enum class KvSlotLayout : int8_t;
 namespace npu {
 class GraphPersistentParam;
@@ -155,7 +155,7 @@ class NpuCpPlan final {
   }
 
   // Build CP plan and localize attention meta after global-meta consumers.
-  void prepare(ForwardInput& processed_input,
+  void prepare(LlmForwardInput& processed_input,
                const CpPlanRuntimeConfig& runtime_config);
 
   // Rewrite hidden/positions to the rank-local padded layout in place.

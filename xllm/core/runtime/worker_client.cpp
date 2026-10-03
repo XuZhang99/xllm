@@ -86,11 +86,11 @@ bool WorkerClient::pull_kv_blocks(
   return std::move(future).get();
 }
 
-ForwardInput WorkerClient::prepare_inputs(Batch& batch) {
+LlmForwardInput WorkerClient::prepare_inputs(Batch& batch) {
   return worker_->prepare_inputs(batch);
 }
 
-std::optional<ForwardOutput> WorkerClient::step(const ForwardInput& inputs) {
+std::optional<ForwardOutput> WorkerClient::step(const LlmForwardInput& inputs) {
   return worker_->step(inputs);
 }
 
@@ -100,13 +100,13 @@ WorkerClient::estimate_kv_cache_capacity_async() {
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerClient::step_async(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   return worker_->step_async(input);
 }
 
 folly::SemiFuture<std::optional<RawForwardOutput>>
-WorkerClient::step_remote_async(const ForwardInput& input) {
-  LOG(FATAL) << "WorkerClient Method step_remote_async with ForwardInput "
+WorkerClient::step_remote_async(const LlmForwardInput& input) {
+  LOG(FATAL) << "WorkerClient Method step_remote_async with LlmForwardInput "
                 "param is UnImplemented.";
   return folly::makeSemiFuture(std::optional<RawForwardOutput>(std::nullopt));
 }

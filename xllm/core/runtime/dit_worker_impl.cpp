@@ -161,7 +161,7 @@ folly::SemiFuture<bool> DiTWorkerImpl::init_model_async(
 }
 
 std::optional<ForwardOutput> DiTWorkerImpl::step(
-    const ForwardInput& /*inputs*/) {
+    const LlmForwardInput& /*inputs*/) {
   LOG(FATAL) << "DiT worker requires native DiTForwardInput";
   return std::nullopt;
 }

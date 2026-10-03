@@ -54,7 +54,7 @@ bool EmbedVLMWorkerImpl::init_model(ModelContext& context) {
 }
 
 std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
-    const ForwardInput& input) {
+    const LlmForwardInput& input) {
   torch::DeviceGuard device_guard(device_);
   auto ret = device_.synchronize_default_stream();
 

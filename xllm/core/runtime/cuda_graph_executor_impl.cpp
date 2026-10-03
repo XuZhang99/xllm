@@ -1435,7 +1435,7 @@ c10::cuda::CUDAStream CudaGraphExecutorImpl::get_capture_stream(
   return thread_capture_stream;
 }
 
-ForwardInput CudaGraphExecutorImpl::prepare_inputs(Batch& batch) {
+LlmForwardInput CudaGraphExecutorImpl::prepare_inputs(Batch& batch) {
   // Prepare inputs for workers
   return batch.prepare_forward_input(
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());

@@ -46,7 +46,7 @@ class ExecutorImpl {
  public:
   virtual ~ExecutorImpl() = default;
 
-  virtual ForwardInput prepare_inputs(Batch& batch) = 0;
+  virtual LlmForwardInput prepare_inputs(Batch& batch) = 0;
 
   virtual bool supports_prepared_attention_metadata() const { return false; }
   virtual void prepare_attention_metadata(std::vector<KVCache>& /*kv_caches*/,

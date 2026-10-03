@@ -22,11 +22,11 @@ limitations under the License.
 namespace xllm {
 class TaskExecutionPipelineInputTest : public ::testing::Test {
  protected:
-  static Status validate_input(const ForwardInput& input,
+  static Status validate_input(const LlmForwardInput& input,
                                const LlmTaskCapacity& capacity = {}) {
     return TaskExecutionPipeline::validate_input(input, capacity);
   }
-  static uint32_t padded_batch_size(const ForwardInput& input,
+  static uint32_t padded_batch_size(const LlmForwardInput& input,
                                     std::span<const int64_t> sizes) {
     return TaskExecutionPipeline::graph_batch_size(input, sizes);
   }
@@ -37,9 +37,10 @@ class TaskExecutionPipelineInputTest : public ::testing::Test {
 };
 namespace {
 
-ForwardInput ordinary_input(int32_t num_tokens = 3,
-                            BatchForwardType type = BatchForwardType::PREFILL) {
-  ForwardInput input;
+LlmForwardInput ordinary_input(
+    int32_t num_tokens = 3,
+    BatchForwardType type = BatchForwardType::PREFILL) {
+  LlmForwardInput input;
   input.input_params.meta.batch_forward_type = type;
   if (num_tokens == 0) {
     return input;
@@ -96,7 +97,7 @@ TEST_F(TaskExecutionPipelineInputTest, GraphBucketsPadSingleRankDecodeOnly) {
       padded_batch_size(ordinary_input(6, BatchForwardType::DECODE), buckets),
       0);
   EXPECT_EQ(padded_batch_size(ordinary_input(), buckets), 0);
-  EXPECT_EQ(padded_batch_size(ForwardInput{}, buckets), 0);
+  EXPECT_EQ(padded_batch_size(LlmForwardInput{}, buckets), 0);
   EXPECT_EQ(padded_batch_size(ordinary_input(1, BatchForwardType::DECODE), {}),
             0);
 }
@@ -153,7 +154,7 @@ TEST_F(TaskExecutionPipelineInputTest,
 }
 
 TEST_F(TaskExecutionPipelineInputTest, EmptyInputAndAbsentSamplingAreValid) {
-  ASSERT_TRUE(validate_input(ForwardInput{}).ok());
+  ASSERT_TRUE(validate_input(LlmForwardInput{}).ok());
   auto source = ordinary_input();
   source.sampling_params = {};
   ASSERT_TRUE(validate_input(source).ok());
@@ -161,7 +162,7 @@ TEST_F(TaskExecutionPipelineInputTest, EmptyInputAndAbsentSamplingAreValid) {
 
 TEST_F(TaskExecutionPipelineInputTest,
        RejectsInvalidTransportAndAlgorithmFields) {
-  const auto rejected = [](ForwardInput invalid) {
+  const auto rejected = [](LlmForwardInput invalid) {
     EXPECT_FALSE(validate_input(invalid).ok());
   };
   auto invalid = ordinary_input();
@@ -214,7 +215,7 @@ TEST_F(TaskExecutionPipelineInputTest,
   LlmTaskCapacity capacity;
   capacity.dp_size = 2;
   ASSERT_TRUE(validate_input(input, capacity).ok());
-  ForwardInput empty;
+  LlmForwardInput empty;
   empty.input_params.parallel = parallel;
   // The engine gives empty peers the active shard's forward type.
   empty.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
@@ -242,7 +243,7 @@ TEST_F(TaskExecutionPipelineInputTest, ValidatesUnequalIdleAndEmptyDpInputs) {
       EXPECT_TRUE(validate_input(input, capacity).ok());
     }
   }
-  ForwardInput empty;
+  LlmForwardInput empty;
   empty.input_params.parallel.dp_global_token_nums = {0, 0, 0};
   empty.input_params.parallel.dp_is_decode = {1, 1, 1};
   capacity.dp_rank = 0;
@@ -258,7 +259,7 @@ TEST_F(TaskExecutionPipelineInputTest, RejectsMisalignedDpInputs) {
   input.input_params.parallel.dp_is_decode = {1, 1};
   LlmTaskCapacity capacity;
   capacity.dp_size = 2;
-  const auto rejected = [&capacity](const ForwardInput& value) {
+  const auto rejected = [&capacity](const LlmForwardInput& value) {
     EXPECT_FALSE(validate_input(value, capacity).ok());
   };
   for (const auto member :

@@ -46,7 +46,7 @@ ShmChannel::ShmChannel(int dp_group,
             << " and size: " << options.output_shm_size();
 }
 
-bool ShmChannel::execute_model_with_shm(const ForwardInput& input,
+bool ShmChannel::execute_model_with_shm(const LlmForwardInput& input,
                                         RawForwardOutput& raw_output) {
   if (input_shm_manager_) {
     bool use_shm_ret = input_shm_manager_->input_write(input);
@@ -62,7 +62,7 @@ bool ShmChannel::execute_model_with_shm(const ForwardInput& input,
 }
 
 void ShmChannel::execute_model_async(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
   if (enable_shm_) {
     RawForwardOutput raw_output;

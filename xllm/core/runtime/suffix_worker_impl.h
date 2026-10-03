@@ -36,9 +36,12 @@ class SuffixWorkerImpl : public SpeculativeWorkerImpl {
   ~SuffixWorkerImpl() override = default;
 
  protected:
-  std::optional<ForwardOutput> step_prefill(const ForwardInput& input) override;
-  std::optional<ForwardOutput> step_decode(const ForwardInput& inputs) override;
-  std::optional<ForwardOutput> step_empty(const ForwardInput& inputs) override;
+  std::optional<ForwardOutput> step_prefill(
+      const LlmForwardInput& input) override;
+  std::optional<ForwardOutput> step_decode(
+      const LlmForwardInput& inputs) override;
+  std::optional<ForwardOutput> step_empty(
+      const LlmForwardInput& inputs) override;
 
  private:
   SampleOutput validate(const SamplingParameters& sampling_params,

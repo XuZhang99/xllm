@@ -41,7 +41,7 @@ class EmbedWorkerImpl : public WorkerImpl {
   // initialize model, cache manager. blocking call
   bool init_model(ModelContext& context) override;
 
-  std::optional<ForwardOutput> step(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step(const LlmForwardInput& input) override;
 };
 
 }  // namespace xllm

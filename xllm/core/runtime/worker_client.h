@@ -85,9 +85,9 @@ class WorkerClient {
                               const std::vector<KVTransferMapping>& mappings);
 
   // prepare input for execution
-  virtual ForwardInput prepare_inputs(Batch& batch);
+  virtual LlmForwardInput prepare_inputs(Batch& batch);
 
-  virtual std::optional<ForwardOutput> step(const ForwardInput& inputs);
+  virtual std::optional<ForwardOutput> step(const LlmForwardInput& inputs);
 
   // initialize model, cache manager. async call
   virtual folly::SemiFuture<bool> init_model_async(
@@ -126,12 +126,12 @@ class WorkerClient {
   // Run the model on the given input. async call
   // the future returns a successful status with no meaningful value
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
-      const ForwardInput& inputs);
+      const LlmForwardInput& inputs);
 
-  // Remote execution path: send ForwardInput transport payload and decode
+  // Remote execution path: send LlmForwardInput transport payload and decode
   // worker response as RawForwardOutput for distributed engine handling.
   virtual folly::SemiFuture<std::optional<RawForwardOutput>> step_remote_async(
-      const ForwardInput& inputs);
+      const LlmForwardInput& inputs);
 
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const DiTForwardInput& inputs);

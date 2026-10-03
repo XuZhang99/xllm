@@ -2529,8 +2529,8 @@ inline void initialize_device_buffer_session(ReadContext& context,
 
   auto& session = *context.device_session;
   // POSIX shared-memory pages are not pinned merely because TensorOptions says
-  // so. Own a genuinely pinned staging copy and keep it alive with ForwardInput
-  // until the asynchronous H2D has completed.
+  // so. Own a genuinely pinned staging copy and keep it alive with
+  // LlmForwardInput until the asynchronous H2D has completed.
   forward_input.runtime.input_host_buffer =
       torch::empty({static_cast<int64_t>(payload_size)},
                    torch::TensorOptions()
@@ -3507,16 +3507,16 @@ bool unpack_native_input_host_buffer(const Input& input,
   }
 
   // For devices without contiguous-input-buffer support, unpack to CPU tensors
-  // first and fall back to the regular H2D path in ForwardInput::to().
+  // first and fall back to the regular H2D path in LlmForwardInput::to().
   output.runtime.input_host_buffer_has_layout = false;
   output.runtime.device_tensors_ready = false;
   return true;
 }
 
-bool unpack_from_input_host_buffer(const ForwardInput& input,
+bool unpack_from_input_host_buffer(const LlmForwardInput& input,
                                    const torch::Device& device,
                                    torch::ScalarType dtype,
-                                   ForwardInput& output,
+                                   LlmForwardInput& output,
                                    bool materialize_device_buffer) {
   return unpack_native_input_host_buffer(
       input, device, dtype, output, materialize_device_buffer);
@@ -3531,9 +3531,9 @@ bool unpack_from_input_host_buffer(const RecForwardInput& input,
       input, device, dtype, output, materialize_device_buffer);
 }
 
-bool unpack_from_input_host_buffer(const ForwardInput& input,
+bool unpack_from_input_host_buffer(const LlmForwardInput& input,
                                    const torch::Device& device,
-                                   ForwardInput& output) {
+                                   LlmForwardInput& output) {
   return unpack_from_input_host_buffer(input,
                                        device,
                                        torch::kFloat32,
@@ -3541,10 +3541,10 @@ bool unpack_from_input_host_buffer(const ForwardInput& input,
                                        /*materialize_device_buffer=*/false);
 }
 
-bool try_to_device_from_input_host_buffer(const ForwardInput& input,
+bool try_to_device_from_input_host_buffer(const LlmForwardInput& input,
                                           const torch::Device& device,
                                           torch::ScalarType dtype,
-                                          ForwardInput& output) {
+                                          LlmForwardInput& output) {
   return unpack_from_input_host_buffer(
       input, device, dtype, output, /*materialize_device_buffer=*/true);
 }
@@ -3576,7 +3576,7 @@ bool token_input_to_packed_proto(
 }
 
 bool forward_input_to_packed_proto(
-    const ForwardInput& input,
+    const LlmForwardInput& input,
     proto::PackedForwardInput* packed_forward_input) {
   return token_input_to_packed_proto(input, packed_forward_input);
 }
@@ -3602,7 +3602,7 @@ bool packed_proto_to_rec_forward_input(
 
 bool packed_proto_to_forward_input(
     const proto::PackedForwardInput& packed_forward_input,
-    ForwardInput& forward_input,
+    LlmForwardInput& forward_input,
     const torch::Device& device,
     Stream* stream) {
   return packed_proto_to_forward_input_impl(
@@ -3784,7 +3784,7 @@ void ForwardSharedMemoryManager::read_token_input(
   return;
 }
 
-bool ForwardSharedMemoryManager::input_write(const ForwardInput& input) {
+bool ForwardSharedMemoryManager::input_write(const LlmForwardInput& input) {
   return write_token_input(input);
 }
 
@@ -3797,7 +3797,7 @@ bool ForwardSharedMemoryManager::input_write(const RecForwardInput& input) {
 }
 
 void ForwardSharedMemoryManager::input_read(
-    ForwardInput& input,
+    LlmForwardInput& input,
     const torch::Device& device,
     InputDeviceMaterializationPolicy policy) {
   read_token_input(input, device, policy);
