@@ -153,9 +153,9 @@ class WorkerImpl {
   // Builds or reuses draft decode padding on the current stream. MTP calls this
   // while preparing B/2B metadata so the compute stream only observes hits.
   bool uses_npu_dp_ep_padding() const;
-  void prepare_dp_ep_padding(ModelInputParams& input_params);
+  void prepare_dp_ep_padding(LlmModelParams& input_params);
   void prepare_dp_ep_padding(VlmModelParams& input_params);
-  void prepare_dp_ep_padding_on_stream(ModelInputParams& input_params,
+  void prepare_dp_ep_padding_on_stream(LlmModelParams& input_params,
                                        Stream& prepare_stream);
   void prepare_dp_ep_padding_on_stream(VlmModelParams& input_params,
                                        Stream& prepare_stream);
@@ -171,8 +171,9 @@ class WorkerImpl {
       bool reasoning_enabled);
 
   // Internal helper shared by worker pipelines before model execution.
-  virtual void apply_kv_block_swaps(const ModelInputParams& input_params);
+  virtual void apply_kv_block_swaps(const LlmModelParams& input_params);
   virtual void apply_kv_block_swaps(const VlmModelParams& input_params);
+  virtual void apply_kv_block_swaps(const RecModelParams& input_params);
 
   virtual std::optional<ForwardOutput> step(const DiTForwardInput& inputs);
 
@@ -264,7 +265,7 @@ class WorkerImpl {
 
   void clear_hierarchy_kv_cache_transfer();
 
-  void set_hierarchy_layer_synchronizer(ModelInputParams& input_params);
+  void set_hierarchy_layer_synchronizer(LlmModelParams& input_params);
   void set_hierarchy_layer_synchronizer(VlmModelParams& input_params);
 
   virtual std::vector<uint8_t> prefetch_kv_blocks(
@@ -378,19 +379,19 @@ class WorkerImpl {
   virtual VlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
       VlmForwardInput& input);
   // Only used for deepseek chunked prefill ops on npu device
-  void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);
+  void prepare_mla_prefixcache_inputs(LlmModelParams& input_params);
   void prepare_mla_prefixcache_inputs(VlmModelParams& input_params);
+  void prepare_mla_prefixcache_inputs(RecModelParams& input_params);
 
   void init_hierarchy_kv_cache_transfer(
       const KVCacheShape& kv_cache_shape,
       const KVCacheCreateOptions& kv_cache_create_options);
 
   bool can_prepare_npu_graph_decode_input(
-      const ModelInputParams& input_params) const;
+      const LlmModelParams& input_params) const;
   bool can_prepare_without_compute_stream_wait(
-      const ModelInputParams& input_params) const;
-  bool can_skip_npu_graph_decode_sync(
-      const ModelInputParams& input_params) const;
+      const LlmModelParams& input_params) const;
+  bool can_skip_npu_graph_decode_sync(const LlmModelParams& input_params) const;
   bool can_prepare_npu_graph_decode_input(
       const VlmModelParams& input_params) const;
   bool can_prepare_without_compute_stream_wait(
@@ -413,11 +414,12 @@ class WorkerImpl {
 
 #if defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
   void refresh_cuda_block_copy_runtime_state();
-  bool can_use_cuda_block_copy_kernel(
-      const ModelInputParams& input_params) const;
-  void execute_cuda_block_copy_kernel(const ModelInputParams& input_params);
+  bool can_use_cuda_block_copy_kernel(const LlmModelParams& input_params) const;
+  void execute_cuda_block_copy_kernel(const LlmModelParams& input_params);
   bool can_use_cuda_block_copy_kernel(const VlmModelParams& input_params) const;
   void execute_cuda_block_copy_kernel(const VlmModelParams& input_params);
+  bool can_use_cuda_block_copy_kernel(const RecModelParams& input_params) const;
+  void execute_cuda_block_copy_kernel(const RecModelParams& input_params);
 
   struct CudaBlockCopyRuntimeState {
     torch::Tensor k_cache_ptrs_device;

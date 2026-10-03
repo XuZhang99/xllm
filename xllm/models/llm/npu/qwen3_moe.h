@@ -262,8 +262,11 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         attn_mask = attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
       }
     }
-    auto deep_stacks = input_params.multimodal.deep_stacks;
-    int deep_stack_size = deep_stacks.size();
+    const std::vector<torch::Tensor> empty_deep_stacks;
+    const auto& deep_stacks = input_params.has_multimodal()
+                                  ? input_params.multimodal().deep_stacks
+                                  : empty_deep_stacks;
+    const int32_t deep_stack_size = static_cast<int32_t>(deep_stacks.size());
 
     int64_t input_length = h.size(0);
     torch::Tensor expert_array = torch::arange(

@@ -226,7 +226,7 @@ class MiniMaxM2ModelImpl : public torch::nn::Module {
                       torch::Tensor positions,
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
-    ModelInputParams modified_input_params = input_params;
+    ModelInputParams modified_input_params = input_params.clone().view();
     torch::Tensor h;
     if (input_params.embedding.input_embedding.defined()) {
       h = input_params.embedding.input_embedding;

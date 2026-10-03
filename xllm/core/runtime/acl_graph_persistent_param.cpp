@@ -1282,7 +1282,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
 
     if (k_cache.defined() && v_cache.defined() && k_cache.numel() > 0 &&
         v_cache.numel() > 0) {
-      ModelInputParams plan_params = params;
+      ModelInputParams plan_params = params.clone().view();
       torch::Tensor plan_block_tables;
       if (use_expanded_spec_decode_attention) {
         plan_params.meta.num_sequences =
@@ -1338,7 +1338,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   // refreshes them with the actual per-step lengths above before graph replay.
   if (return_capture_params) {
     std::optional<ModelInputParams> graph_params =
-        std::make_optional<ModelInputParams>(params);
+        std::make_optional<ModelInputParams>(params.clone().view());
     // Set persistent buffers in graph_params.
     graph_params->attention.device.kv_seq_lens =
         kv_seq_lens(static_cast<uint32_t>(padded_batch_size));
@@ -1800,7 +1800,7 @@ GraphPersistentParam::classify_spec_verify_paged_attention_plan(
     return std::nullopt;
   }
 
-  ModelInputParams plan_params = params;
+  ModelInputParams plan_params = params.clone().view();
   plan_params.meta.num_sequences = static_cast<int32_t>(num_rows);
   plan_params.attention.device.kv_seq_lens = params.graph.expanded_kv_seq_lens;
   plan_params.attention.device.q_seq_lens =

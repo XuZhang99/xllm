@@ -281,7 +281,7 @@ TEST_F(DeepseekV4SparseMoEBlockTest, NeedGatherOnlyForDpEp) {
 TEST_F(DeepseekV4SparseMoEBlockTest, ConvertsModelTokensToRowTokens) {
   set_dp_ep_ctx(/*dp_size=*/2, /*with_dp_group=*/true);
   DeepseekV4SparseMoEBlock block = create_block();
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.parallel.dp_global_token_nums = {3, 1};
 
   std::vector<int32_t> row_tokens =
@@ -302,8 +302,11 @@ TEST_F(DeepseekV4SparseMoEBlockTest, LoadStateDictAcceptsUnprefixedMoeKeys) {
   FusedMoEImpl::RouteInfo route = route_for(raw_moe, hidden_states);
   torch::Tensor expected = raw_moe->forward_experts(
       hidden_states, /*enable_all2all_communication=*/false, route);
-  torch::Tensor actual = block->forward_selected(
-      hidden_states, route.reduce_weight, route.expert_id, ModelInputParams());
+  torch::Tensor actual =
+      block->forward_selected(hidden_states,
+                              route.reduce_weight,
+                              route.expert_id,
+                              ModelInputSnapshot(LlmModelParams()).view());
 
   sync_dev();
   test::verify_tensor_close(actual, expected, 1e-3, 1e-4);
@@ -318,8 +321,11 @@ TEST_F(DeepseekV4SparseMoEBlockTest, SelectedRouteMergesSharedAndRouted) {
 
   torch::Tensor hidden_states = make_hidden({4, model_args_.hidden_size()});
   FusedMoEImpl::RouteInfo route = route_for(raw_moe, hidden_states);
-  torch::Tensor actual = block->forward_selected(
-      hidden_states, route.reduce_weight, route.expert_id, ModelInputParams());
+  torch::Tensor actual =
+      block->forward_selected(hidden_states,
+                              route.reduce_weight,
+                              route.expert_id,
+                              ModelInputSnapshot(LlmModelParams()).view());
   torch::Tensor expected = raw_moe->forward_experts(
       hidden_states, /*enable_all2all_communication=*/false, route);
 
@@ -343,8 +349,11 @@ TEST_F(DeepseekV4SparseMoEBlockTest, SelectedRouteRestores3DShape) {
       route.reduce_weight.reshape({token_num, hc_mult, -1});
   torch::Tensor topk_ids = route.expert_id.reshape({token_num, hc_mult, -1});
 
-  torch::Tensor actual = block->forward_selected(
-      hidden_states, topk_weights, topk_ids, ModelInputParams());
+  torch::Tensor actual =
+      block->forward_selected(hidden_states,
+                              topk_weights,
+                              topk_ids,
+                              ModelInputSnapshot(LlmModelParams()).view());
 
   sync_dev();
   EXPECT_EQ(actual.sizes(), hidden_states.sizes());
@@ -356,8 +365,11 @@ TEST_F(DeepseekV4SparseMoEBlockTest, SelectedRouteRejectsInvalidTopkShape) {
   torch::Tensor topk_weights = torch::ones({2, 2}, options_);
   torch::Tensor topk_ids = torch::zeros({3, 2}, options_.dtype(torch::kInt64));
 
-  EXPECT_ANY_THROW(block->forward_selected(
-      hidden_states, topk_weights, topk_ids, ModelInputParams()));
+  EXPECT_ANY_THROW(
+      block->forward_selected(hidden_states,
+                              topk_weights,
+                              topk_ids,
+                              ModelInputSnapshot(LlmModelParams()).view()));
 }
 
 TEST_F(DeepseekV4SparseMoEBlockTest, SelectedRouteRequiresDpTokensForGather) {
@@ -367,9 +379,12 @@ TEST_F(DeepseekV4SparseMoEBlockTest, SelectedRouteRequiresDpTokensForGather) {
   torch::Tensor topk_weights = torch::ones({2, 2}, options_);
   torch::Tensor topk_ids = torch::zeros({2, 2}, options_.dtype(torch::kInt64));
 
-  EXPECT_DEATH(block->forward_selected(
-                   hidden_states, topk_weights, topk_ids, ModelInputParams()),
-               "dp_global_token_nums is empty");
+  EXPECT_DEATH(
+      block->forward_selected(hidden_states,
+                              topk_weights,
+                              topk_ids,
+                              ModelInputSnapshot(LlmModelParams()).view()),
+      "dp_global_token_nums is empty");
 }
 
 }  // namespace layer

@@ -28,7 +28,7 @@ namespace xllm::layer {
 namespace {
 
 ModelInputParams make_params() {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.batch_forward_type = BatchForwardType::PREFILL;
   params.meta.num_sequences = 3;
   params.meta.q_max_seq_len = 1;
@@ -136,7 +136,7 @@ TEST(AttentionMetadataBuilderTest, IgnoresTransportIdsWithoutLinearStateOps) {
 }
 
 TEST(AttentionMetadataBuilderTest, MaterializesColdMaskForDummyShard) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
   params.meta.num_sequences = 0;
   params.meta.q_max_seq_len = 0;
@@ -171,7 +171,7 @@ TEST(AttentionMetadataBuilderTest, MaterializesColdMaskForDummyShard) {
 
 #if defined(USE_MUSA)
 TEST(AttentionMetadataBuilderTest, BuildsMusaMetadataWithCommonBuilder) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.batch_forward_type = BatchForwardType::DECODE;
   params.meta.num_sequences = 2;
   params.meta.q_max_seq_len = 1;

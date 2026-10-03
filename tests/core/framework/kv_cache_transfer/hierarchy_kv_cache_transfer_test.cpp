@@ -98,7 +98,7 @@ TEST(HierarchyKVCacheTransferTest,
   load_info.transfer_type = TransferType::H2D;
   EXPECT_EQ(transfer.transfer_kv_blocks(kBatchId, {load_info}), 1U);
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.meta.batch_id = kBatchId;
   transfer.set_layer_synchronizer(input_params);
   ASSERT_NE(input_params.parallel.layer_wise_load_synchronizer, nullptr);

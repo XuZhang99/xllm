@@ -692,7 +692,7 @@ class DeepseekV4ModelImpl
         dynamic_cast<DeepseekV4GraphMetadataState*>(state);
     CHECK(deepseek_v4_state != nullptr)
         << "DeepSeek V4 received incompatible graph metadata state";
-    auto modified_input_params = input_params;
+    auto modified_input_params = input_params.clone().view();
     deepseek_v4_clamp_multi_block_tables(modified_input_params,
                                          group_infos_.size());
     if (modified_input_params.meta.actual_num_sequences == 0) {
@@ -778,7 +778,7 @@ class DeepseekV4ModelImpl
       positions = maybe_to_device(positions, runtime_device);
     }
 
-    auto modified_input_params = input_params;
+    auto modified_input_params = input_params.clone().view();
     if (is_empty_dp_rank && !acl_graph_forward) {
       fill_empty_dp_rank_input_params(modified_input_params, &kv_caches);
     }
@@ -1227,7 +1227,7 @@ class DeepseekV4ModelImpl
   std::shared_ptr<layer::AttentionMetadata>
   build_attention_metadata_for_forward(const torch::Tensor& positions,
                                        const ModelInputParams& input_params) {
-    auto modified_input_params = input_params;
+    auto modified_input_params = input_params.clone().view();
     deepseek_v4_clamp_multi_block_tables(modified_input_params,
                                          group_infos_.size());
     auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;

@@ -102,7 +102,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
                       torch::Tensor positions,
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) override {
-    ModelInputParams modified_input_params = input_params;
+    ModelInputParams modified_input_params = input_params.clone().view();
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
@@ -117,8 +117,11 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       h = embed_tokens_(tokens);
     }
 
-    auto deep_stacks = input_params.multimodal.deep_stacks;
-    int deep_stack_size = deep_stacks.size();
+    const std::vector<torch::Tensor> empty_deep_stacks;
+    const auto& deep_stacks = input_params.has_multimodal()
+                                  ? input_params.multimodal().deep_stacks
+                                  : empty_deep_stacks;
+    const int32_t deep_stack_size = static_cast<int32_t>(deep_stacks.size());
     if (!modified_input_params.attn_metadata) {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(

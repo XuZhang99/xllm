@@ -365,7 +365,7 @@ TEST(NpuCpPlanTest, ShardsModelInputAndAppliesAttentionMeta) {
   expect_tensor_bytes_equal(positions,
                             int32_tensor({0, 1, 6, 7, 0, 1, 2, 9, 10, 11}));
 
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   plan.apply_attention_meta(params);
   EXPECT_EQ(params.attention.host.q_seq_lens,
             plan.attention_meta().host_q_seq_lens);
@@ -520,7 +520,7 @@ TEST(NpuCpPlanTest, PrefixAttentionMetadataMatchesLegacyBytes) {
   expect_tensor_bytes_equal(attention.prefix_cache_slots,
                             torch::arange(640, 768, torch::kInt32));
 
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   plan.apply_attention_meta(params);
   expect_tensor_bytes_equal(params.attention.device.in_prefix_slots,
                             attention.prefix_cache_slots);

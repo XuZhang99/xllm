@@ -193,7 +193,7 @@ uint32_t get_graph_dp_tokens(uint32_t actual_tokens,
 
 xllm::ModelInputParams make_graph_params(const xllm::ModelInputParams& params,
                                          uint32_t padding_num_tokens) {
-  xllm::ModelInputParams graph_params = params;
+  xllm::ModelInputParams graph_params = params.clone().view();
   if (params.parallel.dp_global_token_nums.size() > 1) {
     graph_params.parallel.dp_global_token_nums =
         std::vector<int32_t>(params.parallel.dp_global_token_nums.size(),
@@ -299,27 +299,27 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
 void GraphPersistentParam::init_params(const ModelInputParams& params,
                                        uint32_t padding_num_tokens,
                                        uint32_t padding_needed) {
-  params_ = params.to(tokens_.device());
-  params_.enable_graph = true;
-  params_.attention.device.q_seq_lens = q_seq_lens_.slice(
+  params_.emplace(params.clone().to(tokens_.device()).view());
+  params_->enable_graph = true;
+  params_->attention.device.q_seq_lens = q_seq_lens_.slice(
       0, 0, params.attention.device.q_seq_lens.size(0) + padding_needed);
-  params_.attention.device.kv_seq_lens = kv_seq_lens_.slice(
+  params_->attention.device.kv_seq_lens = kv_seq_lens_.slice(
       0, 0, params.attention.device.kv_seq_lens.size(0) + padding_needed);
-  params_.attention.device.new_cache_slots =
+  params_->attention.device.new_cache_slots =
       new_cache_slots_.slice(0, 0, padding_num_tokens);
-  params_.attention.device.block_tables =
+  params_->attention.device.block_tables =
       block_table_.slice(0, 0, padding_num_tokens);
   if (params.embedding.input_embedding.defined()) {
     if (!input_embeds_.defined()) {
       input_embeds_ = torch::zeros_like(output_);
     }
-    params_.embedding.input_embedding =
+    params_->embedding.input_embedding =
         input_embeds_.slice(0, 0, padding_num_tokens);
   }
 
   if (!params.embedding.linear_state_ids.empty()) {
-    params_.embedding.linear_state_ids = params.embedding.linear_state_ids;
-    params_.embedding.linear_state_indices =
+    params_->embedding.linear_state_ids = params.embedding.linear_state_ids;
+    params_->embedding.linear_state_indices =
         linear_state_indices(padding_num_tokens);
   }
 }
@@ -352,7 +352,7 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
     tokens_.slice(0, actual_tokens, padded_tokens).zero_();
     new_cache_slots_.slice(0, actual_tokens, padded_tokens).zero_();
   }
-  params_.meta.num_sequences = params.meta.num_sequences;
+  params_->meta.num_sequences = params.meta.num_sequences;
 
   // Apply padding if required number of tokens exceeds actual input
   // Generate padded sequence lengths by extending the last valid value
@@ -367,8 +367,8 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
     }
   }
 
-  params_.attention.host.q_seq_lens = q_seq_lens_vec;
-  params_.attention.host.kv_seq_lens = kv_seq_lens_vec;
+  params_->attention.host.q_seq_lens = q_seq_lens_vec;
+  params_->attention.host.kv_seq_lens = kv_seq_lens_vec;
 
   auto q_seq_lens = torch::tensor(q_seq_lens_vec, q_seq_lens_.options());
   auto kv_seq_lens = torch::tensor(kv_seq_lens_vec, kv_seq_lens_.options());
@@ -396,7 +396,7 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   }
 
   if (!params.multi_block_tables.empty()) {
-    params_.multi_block_tables = params.multi_block_tables;
+    params_->multi_block_tables = params.multi_block_tables;
   }
 
   if (params.embedding.input_embedding.defined()) {
@@ -428,8 +428,8 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
           .slice(/*dim=*/0, /*start=*/actual_batch_size, /*end=*/padded_tokens)
           .fill_(kPaddingLinearStateId);
     }
-    params_.embedding.linear_state_ids = params.embedding.linear_state_ids;
-    params_.embedding.linear_state_indices =
+    params_->embedding.linear_state_ids = params.embedding.linear_state_ids;
+    params_->embedding.linear_state_indices =
         linear_state_indices(padded_tokens);
   }
 }
@@ -471,7 +471,7 @@ void MluGraph::prepare_model_graph_metadata(CausalLM* model,
       persistent_param_->positions_.slice(slice_dim, 0, padding_num_tokens_),
       graph_params);
 
-  persistent_param_->params_.attn_metadata = graph_params.attn_metadata;
+  persistent_param_->params_->attn_metadata = graph_params.attn_metadata;
 }
 
 void MluGraph::capture(CausalLM* model,
@@ -489,7 +489,7 @@ void MluGraph::capture(CausalLM* model,
       persistent_param_->tokens_.slice(0, 0, padding_num_tokens_),
       persistent_param_->positions_.slice(slice_dim, 0, padding_num_tokens_),
       kv_cache,
-      persistent_param_->params_);
+      *persistent_param_->params_);
   persistent_param_->output_.slice(0, 0, forward_result.hidden_states.size(0))
       .copy_(forward_result.hidden_states, true);
   // Only capture aux_hidden_states when enable_graph_aux_hidden_states is on

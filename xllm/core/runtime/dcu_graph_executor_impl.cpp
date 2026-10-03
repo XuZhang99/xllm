@@ -180,7 +180,7 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
 
   std::optional<ModelInputParams> params_for_capture;
   if (return_capture_params) {
-    params_for_capture = std::make_optional<ModelInputParams>(params);
+    params_for_capture.emplace(params.clone().view());
   }
 
   std::shared_ptr<layer::AttentionMetadata> attn_metadata =
@@ -556,7 +556,7 @@ ModelInputParams DcuGraphPersistentParam::init_decode_params(
     uint32_t graph_max_seq_len) {
   update_decode_input_buffer(tokens, positions, params, padded_num_tokens);
 
-  ModelInputParams decode_params = params;
+  ModelInputParams decode_params = params.clone().view();
   decode_params.enable_graph = true;
   decode_params.attention.device.q_seq_lens = q_seq_lens(padded_num_tokens + 1);
   decode_params.attention.device.kv_seq_lens =
@@ -691,15 +691,18 @@ bool DcuGraph::capture(CausalLM* model,
 
   std::optional<ModelInputParams> graph_params_opt;
   if (is_piecewise_) {
-    graph_params_opt = persistent_param_.update(tokens,
-                                                positions,
-                                                params,
-                                                padded_num_tokens_,
-                                                /*return_capture_params=*/true,
-                                                graph_max_seq_len);
+    auto updated_graph_params =
+        persistent_param_.update(tokens,
+                                 positions,
+                                 params,
+                                 padded_num_tokens_,
+                                 /*return_capture_params=*/true,
+                                 graph_max_seq_len);
+    CHECK(updated_graph_params.has_value());
+    graph_params_opt.emplace(*updated_graph_params);
   } else {
-    graph_params_opt = persistent_param_.init_decode_params(
-        tokens, positions, params, padded_num_tokens_, graph_max_seq_len);
+    graph_params_opt.emplace(persistent_param_.init_decode_params(
+        tokens, positions, params, padded_num_tokens_, graph_max_seq_len));
   }
 
   CHECK(graph_params_opt.has_value())

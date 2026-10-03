@@ -582,7 +582,7 @@ SlotBuffer::SlotBuffer(SlotBufferCapacity capacity,
   model_host_ = bind_views(host_buffer_, layout_);
   model_device_ = bind_views(device_buffer_, layout_);
 
-  AttentionHostInput& host = model_params_.attention.host;
+  AttentionHostInputView& host = model_params_.attention.host;
   for (std::vector<int32_t>* lengths : {&host.q_seq_lens,
                                         &host.q_cu_seq_lens,
                                         &host.kv_seq_lens,
@@ -944,7 +944,7 @@ void SlotBuffer::prepare_model(const ModelInputHostView& input,
   }
   model_params_.python_attention_metadata.reset();
   const ModelTensors& staging = model_host_;
-  AttentionHostInput& host = model_params_.attention.host;
+  AttentionHostInputView& host = model_params_.attention.host;
   // Read our staging only: input spans may borrow the previous Host metadata.
   assign_prefix(host.q_seq_lens, staging.q_seq_lens, rows);
   assign_prefix(host.q_cu_seq_lens, staging.q_cu_seq_lens, rows);
@@ -962,7 +962,7 @@ void SlotBuffer::prepare_model(const ModelInputHostView& input,
   const ModelTensors& device = model_device_;
   tokens_ = device.token_ids.narrow(/*dim=*/0, /*start=*/0, token_count);
   positions_ = device.positions.narrow(/*dim=*/0, /*start=*/0, token_count);
-  AttentionDeviceInput& attention = model_params_.attention.device;
+  AttentionDeviceInputView& attention = model_params_.attention.device;
   attention.q_seq_lens = device.q_seq_lens.narrow(/*dim=*/0, /*start=*/0, rows);
   attention.kv_seq_lens =
       device.kv_seq_lens.narrow(/*dim=*/0, /*start=*/0, rows);

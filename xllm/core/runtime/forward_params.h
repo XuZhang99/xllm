@@ -32,6 +32,7 @@ limitations under the License.
 #include "core/framework/multimodal/mm_batch_data.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "framework/config/execution_config.h"
+#include "framework/model/llm_model_params.h"
 #include "framework/model/model_input_params.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/json_object_grammar.h"
@@ -212,12 +213,6 @@ inline torch::Tensor normalize_positions_for_device(
   return positions;
 }
 
-inline bool has_contiguous_input_buffer_exclusions(
-    const ModelInputParams& params) {
-  return params.multimodal.mm_data.valid() || params.has_onerec_params() ||
-         params.has_llmrec_params() || !params.multimodal.deep_stacks.empty();
-}
-
 template <typename Params>
 inline void clear_contiguous_input_buffer_tensor_targets(Params& params) {
   params.embedding.input_embedding = torch::Tensor();
@@ -379,27 +374,34 @@ class WorkerType {
 };
 
 // Step-level decode metadata for Rec multi-round (device loop).
-struct StepDecodeMeta {
-  int32_t batch_size = 0;
-  int32_t beam_width = 1;
-  int32_t current_round = 0;
-  int32_t total_round = 0;
-  // Planned decode kv cache shape: [batch_size * beam_width, n_kv_heads,
-  // step_rounds, head_dim]
-  std::vector<int64_t> full_kv_shape;
-  // Flattened decode positions for each sequence.
-  std::vector<int32_t> decode_positions_vec;
-};
-
 // Inputs for forward execution
 class LlmForwardInput final {
  public:
-  LlmForwardInput clone() const { return *this; }
+  LlmForwardInput() = default;
+  LlmForwardInput(const LlmForwardInput&) = delete;
+  LlmForwardInput& operator=(const LlmForwardInput&) = delete;
+  LlmForwardInput(LlmForwardInput&&) = default;
+  LlmForwardInput& operator=(LlmForwardInput&&) = default;
+
+  LlmForwardInput clone() const {
+    LlmForwardInput inputs;
+    copy_metadata_to(inputs);
+    inputs.token_ids = token_ids;
+    inputs.positions = positions;
+    inputs.token_ids_host = token_ids_host;
+    inputs.positions_host = positions_host;
+    inputs.input_params = input_params.clone();
+    inputs.sampling_params = sampling_params;
+    inputs.json_object_invalid_draft = json_object_invalid_draft;
+    inputs.json_object_errors = json_object_errors;
+    inputs.runtime = runtime;
+    return inputs;
+  }
 
   LlmForwardInput to(const torch::Device& device,
                      torch::ScalarType dtype) const {
     if (runtime.device_tensors_ready) {
-      return *this;
+      return clone();
     }
 
     if (runtime.input_host_buffer_has_layout) {
@@ -436,7 +438,6 @@ class LlmForwardInput final {
         safe_to(source_positions, device, true));
     inputs.input_params = input_params.to(device);
     inputs.sampling_params = sampling_params.to(device, dtype);
-    inputs.decoder_sampling_params = decoder_sampling_params.to(device, dtype);
     copy_metadata_to(inputs);
     inputs.runtime.input_host_buffer = runtime.input_host_buffer;
     inputs.runtime.device_input_buffer = runtime.device_input_buffer;
@@ -452,17 +453,15 @@ class LlmForwardInput final {
     copy_metadata_to(inputs);
     set_host_views(inputs);
 
-    const ModelInputParams& source_params = input_params;
-    if (missing_required_host_views(inputs) ||
-        detail::has_contiguous_input_buffer_exclusions(source_params)) {
+    const LlmModelParams& source_params = input_params;
+    if (missing_required_host_views(inputs)) {
       return false;
     }
 
-    inputs.input_params = source_params;
+    inputs.input_params = source_params.clone();
     detail::clear_contiguous_input_buffer_tensor_targets(inputs.input_params);
 
     inputs.sampling_params = sampling_params;
-    inputs.decoder_sampling_params = decoder_sampling_params;
 
     torch::Tensor positions_for_device =
         detail::normalize_positions_for_device(inputs.positions_host);
@@ -481,9 +480,7 @@ class LlmForwardInput final {
     }
 
     if (!detail::add_sampling_to_plan(
-            sampling_params, inputs.sampling_params, plan) ||
-        !detail::add_sampling_to_plan(
-            decoder_sampling_params, inputs.decoder_sampling_params, plan)) {
+            sampling_params, inputs.sampling_params, plan)) {
       return false;
     }
 
@@ -504,7 +501,6 @@ class LlmForwardInput final {
 
   void copy_metadata_to(LlmForwardInput& inputs) const {
     inputs.transfer_kv_infos = transfer_kv_infos;
-    inputs.step_decode = step_decode;
     inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
     inputs.return_selected_hidden = return_selected_hidden;
     inputs.runtime.kv_slot_layout = runtime.kv_slot_layout;
@@ -546,18 +542,12 @@ class LlmForwardInput final {
   void print() const {
     LOG(INFO) << "  token_ids: " << token_ids << std::endl;
     LOG(INFO) << "  positions: " << positions << std::endl;
-    input_params.print();
+    ModelInputParams(input_params).print();
     LOG(INFO) << " params.selected_token_idxes "
               << sampling_params.selected_token_idxes;
     LOG(INFO) << " params.sample_idxes " << sampling_params.sample_idxes;
     LOG(INFO) << " params.do_sample " << sampling_params.do_sample;
   }
-
-  const StepDecodeMeta* step_meta() const {
-    return step_decode ? &(*step_decode) : nullptr;
-  }
-
-  bool has_step_meta() const { return step_decode.has_value(); }
 
   // flatten token ids
   torch::Tensor token_ids;
@@ -565,9 +555,8 @@ class LlmForwardInput final {
   torch::Tensor positions;
   torch::Tensor token_ids_host;
   torch::Tensor positions_host;
-  ModelInputParams input_params;
+  mutable LlmModelParams input_params;
   SamplingParameters sampling_params;
-  SamplingParameters decoder_sampling_params;
   std::vector<std::string> sample_sequence_ids;
   std::vector<int32_t> sample_prior_output_rows;
   std::vector<JsonObjectGrammarState> json_object_states;
@@ -578,8 +567,6 @@ class LlmForwardInput final {
   // Errors detected while aligning prior overlap output with grammar rows.
   std::vector<JsonObjectOutputError> json_object_errors;
 
-  // step-level decode metadata
-  std::optional<StepDecodeMeta> step_decode;
   // If true, skip sampler forward and only keep logits.
   bool skip_sampling_for_logits_only = false;
   // If true, populate ForwardOutput.selected_hidden with hidden states matching

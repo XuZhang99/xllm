@@ -221,8 +221,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_for_schedule_overlap(
   // after those writes without needing a cross-stream barrier.
   if (has_linear_attention_layers(context_.get_model_args())) {
     c10::StreamGuard restore_guard = compute_stream_->set_stream_guard();
-    ModelInputParams& mutable_params =
-        const_cast<ModelInputParams&>(input.input_params);
+    auto& mutable_params = input.input_params;
     restore_linear_state_slots(kv_caches_,
                                mutable_params.linear_state_cache_ops,
                                mutable_params.linear_state_validity_mask);
@@ -267,8 +266,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
             context_.get_model_args().n_layers());
 #endif
 #if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
-    const_cast<ModelInputParams*>(&(input.input_params))
-        ->parallel.layer_synchronizer = layer_synchronizer;
+    input.input_params.parallel.layer_synchronizer = layer_synchronizer;
 
     kv_transfers.add(
         kv_cache_transfer_->push_kv_blocks_async(input.transfer_kv_infos,
@@ -285,8 +283,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   }
 
   // call model executor forward to get hidden states
+  ModelInputParams execution_params(input.input_params);
   auto model_output = model_executor_->forward(
-      input.token_ids, input.positions, kv_caches_, input.input_params);
+      input.token_ids, input.positions, kv_caches_, execution_params);
   if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_executor_->finish_eplb_step();
   }
@@ -301,7 +300,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   if (sampling_params.selected_token_idxes.defined()) {
     torch::Tensor selected_token_idxes = choose_lm_head_selected_token_idxes(
         sampling_params.selected_token_idxes,
-        input.input_params,
+        execution_params,
         context_.get_parallel_args(),
         model_output.hidden_states.size(0),
         model_output.hidden_states.device());
@@ -416,7 +415,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
     wait_kv_push();
     output.retained_inputs.emplace_back(
-        std::make_shared<LlmForwardInput>(input));
+        std::make_shared<LlmForwardInput>(input.clone()));
     if (enable_schedule_overlap() && record_ready_event) {
       output.ready_event = record_current_stream_event(device_);
     }

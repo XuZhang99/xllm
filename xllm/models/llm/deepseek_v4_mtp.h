@@ -62,7 +62,7 @@ class DeepseekV4MultiTokenPredictorLayerImpl
                         const ModelInputParams& input_params,
                         torch::Tensor tokens,
                         torch::Tensor* aux_hidden_states) {
-    ModelInputParams modified_input_params = input_params;
+    ModelInputParams modified_input_params = input_params.clone().view();
     modified_input_params.embedding.input_embedding = previous_hidden_states;
     std::optional<torch::Tensor> residual;
     return MtpDecoderLayerImplBase<layer::DeepseekV4DecoderLayer>::forward(
@@ -244,7 +244,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
 
     const torch::Device runtime_device = hidden_states.device();
 
-    auto modified_input_params = input_params;
+    auto modified_input_params = input_params.clone().view();
     if (is_empty_dp_rank && !acl_graph_forward) {
       fill_empty_dp_rank_input_params(modified_input_params);
     }
@@ -413,7 +413,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
     CHECK(dsa_state != nullptr)
         << "[DeepseekV4Mtp] received incompatible graph metadata state";
 
-    auto modified_input_params = input_params;
+    auto modified_input_params = input_params.clone().view();
     if (modified_input_params.meta.actual_num_sequences == 0) {
       if (modified_input_params.meta.num_sequences > 0) {
         fill_empty_dp_rank_graph_metadata_input_params(modified_input_params);
@@ -657,7 +657,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
   std::shared_ptr<layer::AttentionMetadata>
   build_attention_metadata_for_forward(const torch::Tensor& positions,
                                        const ModelInputParams& input_params) {
-    auto modified_input_params = input_params;
+    auto modified_input_params = input_params.clone().view();
     auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
 

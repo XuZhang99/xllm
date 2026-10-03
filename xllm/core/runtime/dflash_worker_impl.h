@@ -40,7 +40,7 @@ inline int32_t decode_draft_width(int32_t num_speculative_tokens,
                             : num_speculative_tokens + 1;
 }
 
-inline void invalidate_draft_model_geometry(ModelInputParams& input_params) {
+inline void invalidate_draft_model_geometry(LlmModelParams& input_params) {
   // Attention metadata is model-owned: DeepSeek-V4 bakes DSA group layout and
   // sparse tiling values such as ori_win_left into opaque tensors. A draft
   // input copied from the target must rebuild those tensors for draft geometry.

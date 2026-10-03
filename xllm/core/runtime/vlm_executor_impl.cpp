@@ -60,7 +60,7 @@ ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
                                  std::vector<KVCache>& kv_caches,
                                  const ModelInputParams& params) {
   torch::NoGradGuard no_grad;
-  auto& mm_data = params.multimodal.mm_data;
+  auto& mm_data = params.multimodal().mm_data;
 
   // Pure decode steps carry no multimodal data, so get_input_embeddings would
   // just do a plain token lookup. Skipping the host-side embedding here lets

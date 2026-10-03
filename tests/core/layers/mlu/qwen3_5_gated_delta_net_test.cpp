@@ -311,7 +311,7 @@ class Qwen3_5GatedDeltaNetTest : public ::testing::Test {
   ModelInputParams MakeSpecVerifyInputParams(
       const std::vector<int64_t>& accepted_lengths) {
     auto opts_int = torch::dtype(torch::kInt32).device(device_);
-    ModelInputParams input_params;
+    ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
     input_params.is_spec_verify = true;
     input_params.num_accepted_tokens =
         torch::tensor(accepted_lengths, opts_int);
@@ -398,7 +398,7 @@ TEST_F(Qwen3_5GatedDeltaNetTest, PrefillForward) {
   auto hidden = MakeHidden(num_tokens);
   auto metadata = MakePrefillMetadata(batch_size, seq_len);
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.embedding.linear_state_ids = {1};
 
   auto output = layer->forward(hidden, metadata, kv_cache_, input_params);
@@ -422,7 +422,7 @@ TEST_F(Qwen3_5GatedDeltaNetTest, PrefillStoresSsmStateAtCheckpointGroupBase) {
   auto hidden = MakeHidden(kSequenceLength);
   auto metadata = MakePrefillMetadata(/*batch_size=*/1, kSequenceLength);
   auto spec_kv_cache = MakeSpecVerifyKvCache(kCheckpointStride);
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.embedding.linear_state_ids = {kStateId};
 
   layer->forward(hidden, metadata, spec_kv_cache, input_params);
@@ -447,7 +447,7 @@ TEST_F(Qwen3_5GatedDeltaNetTest, DecodeForward) {
   auto hidden = MakeHidden(num_tokens);
   auto metadata = MakeDecodeMetadata(batch_size);
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.embedding.linear_state_ids = {1, 2};
 
   auto output = layer->forward(hidden, metadata, kv_cache_, input_params);

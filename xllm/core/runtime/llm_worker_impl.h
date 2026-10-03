@@ -95,9 +95,13 @@ class LLMWorkerImpl : public WorkerImpl {
   ModelOutput write_context_kv(const torch::Tensor& target_hidden,
                                const torch::Tensor& positions,
                                const torch::Tensor& device_cache_slots,
-                               const ModelInputParams& input_params) {
-    return model_->write_context_kv(
-        target_hidden, positions, device_cache_slots, kv_caches_, input_params);
+                               LlmModelParams& input_params) {
+    ModelInputParams execution_params(input_params);
+    return model_->write_context_kv(target_hidden,
+                                    positions,
+                                    device_cache_slots,
+                                    kv_caches_,
+                                    execution_params);
   }
 
  protected:

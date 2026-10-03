@@ -39,12 +39,31 @@ inline bool has_contiguous_input_buffer_exclusions(
 
 class VlmForwardInput final {
  public:
-  VlmForwardInput clone() const { return *this; }
+  VlmForwardInput() = default;
+  VlmForwardInput(const VlmForwardInput&) = delete;
+  VlmForwardInput& operator=(const VlmForwardInput&) = delete;
+  VlmForwardInput(VlmForwardInput&&) = default;
+  VlmForwardInput& operator=(VlmForwardInput&&) = default;
+
+  VlmForwardInput clone() const {
+    VlmForwardInput inputs;
+    copy_metadata_to(inputs);
+    inputs.token_ids = token_ids;
+    inputs.positions = positions;
+    inputs.token_ids_host = token_ids_host;
+    inputs.positions_host = positions_host;
+    inputs.input_params = input_params.clone();
+    inputs.sampling_params = sampling_params;
+    inputs.json_object_invalid_draft = json_object_invalid_draft;
+    inputs.json_object_errors = json_object_errors;
+    inputs.runtime = runtime;
+    return inputs;
+  }
 
   VlmForwardInput to(const torch::Device& device,
                      torch::ScalarType dtype) const {
     if (runtime.device_tensors_ready) {
-      return *this;
+      return clone();
     }
 
     if (runtime.input_host_buffer_has_layout) {
@@ -102,7 +121,7 @@ class VlmForwardInput final {
       return false;
     }
 
-    inputs.input_params = source_params;
+    inputs.input_params = source_params.clone();
     detail::clear_contiguous_input_buffer_tensor_targets(inputs.input_params);
 
     inputs.sampling_params = sampling_params;
@@ -189,7 +208,7 @@ class VlmForwardInput final {
   torch::Tensor positions;
   torch::Tensor token_ids_host;
   torch::Tensor positions_host;
-  VlmModelParams input_params;
+  mutable VlmModelParams input_params;
   SamplingParameters sampling_params;
   std::vector<std::string> sample_sequence_ids;
   std::vector<int32_t> sample_prior_output_rows;
@@ -216,8 +235,7 @@ class VlmForwardInput final {
 };
 
 inline LlmForwardInput make_llm_draft_input(const LlmForwardInput& target) {
-  LlmForwardInput draft = target;
-  draft.input_params.multimodal = {};
+  LlmForwardInput draft = target.clone();
   draft.input_params.clear_linear_attention_state();
   return draft;
 }
@@ -231,8 +249,10 @@ inline LlmForwardInput make_llm_draft_input(const VlmForwardInput& target) {
   auto& params = draft.input_params;
   const auto& source = target.input_params;
   params.meta = source.meta;
-  params.attention.host = source.attention.host;
-  params.attention.device = source.attention.device;
+  detail::copy_attention_host_input(source.attention.host,
+                                    params.attention.host);
+  detail::copy_attention_device_input(source.attention.device,
+                                      params.attention.device);
   params.attention.attention_host_buffer =
       source.attention.attention_host_buffer;
   params.attention.attention_device_buffer =
@@ -243,11 +263,47 @@ inline LlmForwardInput make_llm_draft_input(const VlmForwardInput& target) {
       source.attention.attention_buffer_capacity;
   params.attention.attention_buffer_owner =
       source.attention.attention_buffer_owner;
-  params.embedding = source.embedding;
+  params.embedding.input_embedding = source.embedding.input_embedding;
+  params.embedding.embedding_ids = source.embedding.embedding_ids;
+  params.embedding.request_ids = source.embedding.request_ids;
+  params.embedding.extra_token_ids = source.embedding.extra_token_ids;
+  params.embedding.mtp_shifted_token_ids =
+      source.embedding.mtp_shifted_token_ids;
+  params.embedding.mtp_bootstrap_row_idxes =
+      source.embedding.mtp_bootstrap_row_idxes;
+  params.embedding.mtp_bootstrap_embeddings =
+      source.embedding.mtp_bootstrap_embeddings;
   params.parallel = source.parallel;
   params.block_copy = source.block_copy;
   params.expert = source.expert;
-  params.graph = source.graph;
+  params.graph.attn_mask = source.graph.attn_mask;
+  params.graph.tiling_data = source.graph.tiling_data;
+#if defined(USE_DCU)
+  params.graph.use_dense_flash_attention =
+      source.graph.use_dense_flash_attention;
+#endif
+  params.graph.use_expanded_decode_for_spec_verify_attention =
+      source.graph.use_expanded_decode_for_spec_verify_attention;
+  params.graph.expanded_kv_seq_lens = source.graph.expanded_kv_seq_lens;
+  params.graph.expanded_block_tables = source.graph.expanded_block_tables;
+  params.graph.expanded_paged_kv_indptr = source.graph.expanded_paged_kv_indptr;
+  params.graph.expanded_paged_kv_indices =
+      source.graph.expanded_paged_kv_indices;
+  params.graph.expanded_paged_kv_last_page_len =
+      source.graph.expanded_paged_kv_last_page_len;
+  params.graph.expanded_tiling_data = source.graph.expanded_tiling_data;
+  params.graph.expanded_kv_seq_lens_vec = source.graph.expanded_kv_seq_lens_vec;
+#if defined(USE_NPU)
+  params.graph.acl_graph_task_update_context =
+      source.graph.acl_graph_task_update_context;
+#endif
+  params.graph.input_tokens_override = source.graph.input_tokens_override;
+  params.graph.spec_verify_draft_token_sources =
+      source.graph.spec_verify_draft_token_sources;
+  params.graph.spec_verify_source_addresses_stable =
+      source.graph.spec_verify_source_addresses_stable;
+  params.graph.spec_verify_static_graph_tasks_prepared =
+      source.graph.spec_verify_static_graph_tasks_prepared;
   params.multi_block_tables = source.multi_block_tables;
   params.mtp_shifted_token_ids = source.mtp_shifted_token_ids;
   params.is_spec_verify = source.is_spec_verify;

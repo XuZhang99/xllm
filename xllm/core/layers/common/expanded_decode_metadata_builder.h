@@ -23,20 +23,20 @@ limitations under the License.
 #include "layers/common/attention_metadata.h"
 
 namespace xllm {
-struct ModelInputParams;
+class ModelInputParams;
 
 namespace layer {
 
 class ExpandedDecodeMetadataBuilder final {
  public:
   template <typename Source>
-  static void populate(ModelInputParams& target,
+  static void populate(ModelInputParams target,
                        const Source& source,
                        const torch::Tensor& kv_seq_lens,
                        int32_t block_size);
 
   static void populate_expanded_layout(
-      ModelInputParams& target,
+      ModelInputParams target,
       const torch::Tensor& expanded_kv_seq_lens,
       const torch::Tensor& expanded_block_tables,
       std::vector<int32_t> expanded_host_kv_seq_lens,

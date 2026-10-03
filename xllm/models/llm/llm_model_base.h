@@ -70,7 +70,7 @@ class LlmModelImplBase : public torch::nn::Module {
       h = embed_tokens_(tokens);
     }
 
-    auto modified_input_params = input_params;
+    auto modified_input_params = input_params.clone().view();
     auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     if (!modified_input_params.attn_metadata) {

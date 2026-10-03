@@ -84,7 +84,7 @@ class DeepseekV4MultiTokenPredictorLayerImpl
                         const ModelInputParams& input_params,
                         torch::Tensor tokens,
                         torch::Tensor* aux_hidden_states) {
-    ModelInputParams modified_input_params = input_params;
+    ModelInputParams modified_input_params = input_params.clone().view();
     modified_input_params.embedding.input_embedding = previous_hidden_states;
     std::optional<torch::Tensor> residual;
     return MtpDecoderLayerImplBase<layer::DeepseekV4DecoderLayer>::forward(
@@ -198,7 +198,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module,
 
     const torch::Device runtime_device = tokens.device();
 
-    auto modified_input_params = input_params;
+    auto modified_input_params = input_params.clone().view();
     if (is_empty_dp_rank) {
       layer::fill_dsv4_empty_dp_params(
           modified_input_params, group_infos_, window_size_);

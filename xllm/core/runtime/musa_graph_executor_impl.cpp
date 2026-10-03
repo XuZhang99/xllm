@@ -176,7 +176,7 @@ bool is_cpu_int32_tensor(const torch::Tensor& tensor) {
   return tensor.scalar_type() == torch::kInt32;
 }
 
-bool has_llm_decode_host_metadata(const AttentionHostInput& host) {
+bool has_llm_decode_host_metadata(const AttentionHostInputView& host) {
   return !host.kv_seq_lens.empty() &&
          is_cpu_int32_tensor(host.paged_kv_indptr) &&
          is_cpu_int32_tensor(host.paged_kv_indices) &&
@@ -509,7 +509,7 @@ std::optional<ModelInputParams> MusaGraphPersistentParam::update(
   if (return_capture_params) {
     CHECK_GT(padded_num_tokens, 0)
         << "padded_num_tokens must be > 0 when return_capture_params is true";
-    params_for_capture = std::make_optional<ModelInputParams>(params);
+    params_for_capture.emplace(params.clone().view());
   }
   // Build attn_metadata with original model_input_params. So we can set actual
   // batch size in plan_info.
@@ -1086,7 +1086,7 @@ std::optional<ModelInputParams> MusaGraphPersistentParam::update(
 
 void MusaGraph::refresh_persistent_paged_kv_host_mirrors(
     const std::shared_ptr<layer::AttentionMetadata>& attn_metadata,
-    const AttentionHostInput& host_src) {
+    const AttentionHostInputView& host_src) {
   // Only applies to the Mate FFI decode path. Prefill/chunked-prefill and MLA
   // attention do not pass host pointers through the FFI run() boundary, so
   // there is nothing to stabilize there.
@@ -1721,7 +1721,7 @@ ModelInputParams MusaGraphExecutorImpl::maybe_precompute_embedding_for_graph(
   // `input_params.embedding.input_embedding` in their forward, branching
   // around the in-graph `embed_tokens_(tokens)` call when the field is
   // defined (see xllm/models/llm/qwen3_next_hybrid_base.h).
-  ModelInputParams new_params = params;
+  ModelInputParams new_params = params.clone().view();
   new_params.embedding.input_embedding = embed_layer(tokens);
   return new_params;
 }

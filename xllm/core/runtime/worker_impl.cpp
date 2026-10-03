@@ -754,7 +754,7 @@ bool WorkerImpl::can_prepare_npu_graph_decode_input_impl(
 }
 
 bool WorkerImpl::can_prepare_npu_graph_decode_input(
-    const ModelInputParams& input_params) const {
+    const LlmModelParams& input_params) const {
   return can_prepare_npu_graph_decode_input_impl(input_params);
 }
 
@@ -779,7 +779,7 @@ bool WorkerImpl::can_prepare_without_compute_stream_wait_impl(
 }
 
 bool WorkerImpl::can_prepare_without_compute_stream_wait(
-    const ModelInputParams& input_params) const {
+    const LlmModelParams& input_params) const {
   return can_prepare_without_compute_stream_wait_impl(input_params);
 }
 
@@ -803,7 +803,7 @@ bool WorkerImpl::can_skip_npu_graph_decode_sync_impl(
 }
 
 bool WorkerImpl::can_skip_npu_graph_decode_sync(
-    const ModelInputParams& input_params) const {
+    const LlmModelParams& input_params) const {
   return can_skip_npu_graph_decode_sync_impl(input_params);
 }
 
@@ -1209,7 +1209,7 @@ void WorkerImpl::prepare_dp_ep_padding_impl(Params& input_params) {
   }
 }
 
-void WorkerImpl::prepare_dp_ep_padding(ModelInputParams& input_params) {
+void WorkerImpl::prepare_dp_ep_padding(LlmModelParams& input_params) {
   prepare_dp_ep_padding_impl(input_params);
 }
 
@@ -1234,7 +1234,7 @@ void WorkerImpl::prepare_dp_ep_padding_on_stream_impl(Params& input_params,
   prepare_dp_ep_padding(input_params);
 }
 
-void WorkerImpl::prepare_dp_ep_padding_on_stream(ModelInputParams& input_params,
+void WorkerImpl::prepare_dp_ep_padding_on_stream(LlmModelParams& input_params,
                                                  Stream& prepare_stream) {
   prepare_dp_ep_padding_on_stream_impl(input_params, prepare_stream);
 }
@@ -1427,18 +1427,11 @@ void WorkerImpl::prepare_work_before_execute_on_stream_impl(
         processed_input, npu_cp_plan_runtime_config());
 
     if (can_prepare_npu_graph_decode_input(input_params)) {
-      if constexpr (std::is_same_v<Input, VlmForwardInput>) {
-        VlmLegacyExecutionProjection projection(processed_input.input_params);
-        model_executor_->prepare_graph_input(processed_input.token_ids,
-                                             processed_input.positions,
-                                             kv_caches_,
-                                             projection.params());
-      } else {
-        model_executor_->prepare_graph_input(processed_input.token_ids,
-                                             processed_input.positions,
-                                             kv_caches_,
-                                             processed_input.input_params);
-      }
+      ModelInputParams execution_params(processed_input.input_params);
+      model_executor_->prepare_graph_input(processed_input.token_ids,
+                                           processed_input.positions,
+                                           kv_caches_,
+                                           execution_params);
     }
 
 #endif
@@ -1555,11 +1548,15 @@ void WorkerImpl::apply_kv_block_swaps_impl(const Params& input_params) {
 #endif
 }
 
-void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
+void WorkerImpl::apply_kv_block_swaps(const LlmModelParams& input_params) {
   apply_kv_block_swaps_impl(input_params);
 }
 
 void WorkerImpl::apply_kv_block_swaps(const VlmModelParams& input_params) {
+  apply_kv_block_swaps_impl(input_params);
+}
+
+void WorkerImpl::apply_kv_block_swaps(const RecModelParams& input_params) {
   apply_kv_block_swaps_impl(input_params);
 }
 
@@ -1642,12 +1639,17 @@ bool WorkerImpl::can_use_cuda_block_copy_kernel_impl(
 }
 
 bool WorkerImpl::can_use_cuda_block_copy_kernel(
-    const ModelInputParams& input_params) const {
+    const LlmModelParams& input_params) const {
   return can_use_cuda_block_copy_kernel_impl(input_params);
 }
 
 bool WorkerImpl::can_use_cuda_block_copy_kernel(
     const VlmModelParams& input_params) const {
+  return can_use_cuda_block_copy_kernel_impl(input_params);
+}
+
+bool WorkerImpl::can_use_cuda_block_copy_kernel(
+    const RecModelParams& input_params) const {
   return can_use_cuda_block_copy_kernel_impl(input_params);
 }
 
@@ -1666,12 +1668,17 @@ void WorkerImpl::execute_cuda_block_copy_kernel_impl(
 }
 
 void WorkerImpl::execute_cuda_block_copy_kernel(
-    const ModelInputParams& input_params) {
+    const LlmModelParams& input_params) {
   execute_cuda_block_copy_kernel_impl(input_params);
 }
 
 void WorkerImpl::execute_cuda_block_copy_kernel(
     const VlmModelParams& input_params) {
+  execute_cuda_block_copy_kernel_impl(input_params);
+}
+
+void WorkerImpl::execute_cuda_block_copy_kernel(
+    const RecModelParams& input_params) {
   execute_cuda_block_copy_kernel_impl(input_params);
 }
 #endif
@@ -2643,9 +2650,10 @@ void WorkerImpl::clear_hierarchy_kv_cache_transfer() {
 }
 
 void WorkerImpl::set_hierarchy_layer_synchronizer(
-    ModelInputParams& input_params) {
+    LlmModelParams& input_params) {
   if (hierarchy_kv_cache_transfer_ != nullptr) {
-    hierarchy_kv_cache_transfer_->set_layer_synchronizer(input_params);
+    ModelInputParams execution_params(input_params);
+    hierarchy_kv_cache_transfer_->set_layer_synchronizer(execution_params);
   }
 }
 
@@ -2759,12 +2767,15 @@ void WorkerImpl::prepare_mla_prefixcache_inputs_impl(Params& input_params) {
       input_params.attention.device.ring_cache_seqlen);
 }
 
-void WorkerImpl::prepare_mla_prefixcache_inputs(
-    ModelInputParams& input_params) {
+void WorkerImpl::prepare_mla_prefixcache_inputs(LlmModelParams& input_params) {
   prepare_mla_prefixcache_inputs_impl(input_params);
 }
 
 void WorkerImpl::prepare_mla_prefixcache_inputs(VlmModelParams& input_params) {
+  prepare_mla_prefixcache_inputs_impl(input_params);
+}
+
+void WorkerImpl::prepare_mla_prefixcache_inputs(RecModelParams& input_params) {
   prepare_mla_prefixcache_inputs_impl(input_params);
 }
 
@@ -2914,8 +2925,8 @@ WorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
 void WorkerImpl::set_hierarchy_layer_synchronizer(
     VlmModelParams& input_params) {
   if (hierarchy_kv_cache_transfer_ != nullptr) {
-    VlmLegacyExecutionProjection projection(input_params);
-    hierarchy_kv_cache_transfer_->set_layer_synchronizer(projection.params());
+    ModelInputParams execution_params(input_params);
+    hierarchy_kv_cache_transfer_->set_layer_synchronizer(execution_params);
   }
 }
 

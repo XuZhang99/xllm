@@ -379,8 +379,8 @@ ModelOutput PyExecutorImpl::run(const torch::Tensor& tokens,
   py::object topk_indices = mtp_topk_indices(params);
 
   // --- VLM: vision encode + embedding merge on image/video prefill steps ---
-  // On steps carrying multimodal input, ``params.multimodal.mm_data`` holds the
-  // batched ``pixel_values`` + ``image_grid_thw`` (still images) and/or
+  // On steps carrying multimodal input, ``params.multimodal().mm_data`` holds
+  // the batched ``pixel_values`` + ``image_grid_thw`` (still images) and/or
   // ``pixel_values_videos`` + ``video_grid_thw`` (video) — same accessors the
   // C++ Qwen3-VL base uses in qwen3_vl_base.h. Drive the Python model's
   // ``encode`` -> ``get_input_embeddings`` pipeline: the latter scatters each
@@ -395,8 +395,8 @@ ModelOutput PyExecutorImpl::run(const torch::Tensor& tokens,
   // boundary can land inside an item's token span — needs item-level scatter
   // (reuse EncoderEmbeddingGatherVisitor + the NPU backend's paged mixed-batch
   // attention, both tracked for a follow-up PR).
-  auto& mm_data = params.multimodal.mm_data;
-  if (mm_data.valid()) {
+  if (params.has_multimodal() && params.multimodal().mm_data.valid()) {
+    auto& mm_data = params.multimodal().mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values")) {
       pixel_values = res.value();

@@ -342,12 +342,12 @@ message DiTGenerationParams {
 }
 
 message PackedForwardInput {
-  // Schema 2 raw payload: [magic:uint64][version:uint16][domain:uint8]
+  // Schema 3 raw payload: [magic:uint64][version:uint16][domain:uint8]
   // [flags:uint8][header_bytes:uint32][descriptor_bytes:uint64]
   // [tensor_arena_offset:uint64][tensor_arena_bytes:uint64][descriptor][arena].
   // The arena is 16-byte aligned. Domain 1 is LLM, 2 is VLM, 3 is Rec,
-  // and 4 is DiT. New writers require
-  // matching worker versions. Readers retain legacy token-only layout support.
+  // and 4 is DiT. Workers must use the same schema version. Readers reject
+  // unversioned payloads and unsupported versions before materializing tensors.
   bytes payload = 1;
 }
 

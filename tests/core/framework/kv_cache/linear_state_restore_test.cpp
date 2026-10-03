@@ -64,10 +64,11 @@ TEST(LinearStateRestoreTest, RejectsNonDivisibleActiveRows) {
 }
 
 TEST(LinearStateRestoreTest, ModelInputConversionPreservesValidityMask) {
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.linear_state_validity_mask = {0, 1, 1, 0};
 
-  ModelInputParams converted = input_params.to(torch::Device(torch::kCPU));
+  ModelInputParams converted =
+      input_params.clone().to(torch::Device(torch::kCPU)).view();
 
   EXPECT_EQ(converted.linear_state_validity_mask,
             std::vector<int64_t>({0, 1, 1, 0}));

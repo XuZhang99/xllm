@@ -22,6 +22,16 @@ namespace xllm {
 
 class RecForwardInput;
 
+struct StepDecodeMeta {
+  int32_t batch_size = 0;
+  int32_t beam_width = 1;
+  int32_t current_round = 0;
+  int32_t total_round = 0;
+  // [batch_size * beam_width, n_kv_heads, step_rounds, head_dim]
+  std::vector<int64_t> full_kv_shape;
+  std::vector<int32_t> decode_positions_vec;
+};
+
 namespace detail {
 
 bool unpack_from_input_host_buffer(const RecForwardInput& input,
@@ -34,10 +44,35 @@ bool unpack_from_input_host_buffer(const RecForwardInput& input,
 
 class RecForwardInput final {
  public:
+  RecForwardInput() = default;
+  RecForwardInput(const RecForwardInput&) = delete;
+  RecForwardInput& operator=(const RecForwardInput&) = delete;
+  RecForwardInput(RecForwardInput&&) = default;
+  RecForwardInput& operator=(RecForwardInput&&) = default;
+
+  RecForwardInput clone() const {
+    RecForwardInput inputs;
+    inputs.token_ids = token_ids;
+    inputs.positions = positions;
+    inputs.token_ids_host = token_ids_host;
+    inputs.positions_host = positions_host;
+    inputs.input_params = input_params.clone();
+    inputs.sampling_params = sampling_params;
+    inputs.decoder_sampling_params = decoder_sampling_params;
+    inputs.step_decode = step_decode;
+    inputs.transfer_kv_infos = transfer_kv_infos;
+    inputs.sample_sequence_ids = sample_sequence_ids;
+    inputs.sample_prior_output_rows = sample_prior_output_rows;
+    inputs.json_object_states = json_object_states;
+    inputs.json_object_state_snapshots = json_object_state_snapshots;
+    inputs.runtime = runtime;
+    return inputs;
+  }
+
   RecForwardInput to(const torch::Device& device,
                      torch::ScalarType dtype) const {
     if (runtime.device_tensors_ready) {
-      return *this;
+      return clone();
     }
     if (runtime.input_host_buffer_has_layout) {
       RecForwardInput buffer_inputs;
@@ -90,7 +125,7 @@ class RecForwardInput final {
   torch::Tensor positions;
   torch::Tensor token_ids_host;
   torch::Tensor positions_host;
-  RecModelParams input_params;
+  mutable RecModelParams input_params;
   SamplingParameters sampling_params;
   SamplingParameters decoder_sampling_params;
   std::optional<StepDecodeMeta> step_decode;

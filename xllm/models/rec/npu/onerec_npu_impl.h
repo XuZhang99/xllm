@@ -247,7 +247,7 @@ class OneRecStackImpl : public torch::nn::Module {
     auto [query_length, key_length] = compute_sequence_lengths(
         input_params.meta.q_max_seq_len, is_prefill, input_params);
 
-    ModelInputParams input_params_local = input_params;
+    ModelInputParams input_params_local = input_params.clone().view();
     auto& mutable_onerec_params = input_params_local.mutable_onerec_params();
     const auto* onerec_xattn_params = input_params.onerec_xattention_params();
 

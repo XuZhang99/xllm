@@ -401,18 +401,14 @@ void RecWorkerImpl::RecWorkPipeline::prepare_work_before_execute(
   processed_inputs =
       inputs.to(runtime_.worker.device(), runtime_.worker.dtype());
   auto& input_params = processed_inputs.input_params;
-  {
-    RecLegacyExecutionProjection projection(input_params);
-    auto& execution_params = projection.params();
-    runtime_.worker.apply_kv_block_swaps(execution_params);
+  runtime_.worker.apply_kv_block_swaps(input_params);
 
 #if defined(USE_NPU)
-    if (runtime_.context->get_model_args().enable_mla() &&
-        execution_params.meta.batch_forward_type.is_chunked_prefill()) {
-      runtime_.worker.prepare_mla_prefixcache_inputs(execution_params);
-    }
-#endif
+  if (runtime_.context->get_model_args().enable_mla() &&
+      input_params.meta.batch_forward_type.is_chunked_prefill()) {
+    runtime_.worker.prepare_mla_prefixcache_inputs(input_params);
   }
+#endif
 
 #if defined(USE_NPU)
   if (!runtime_.context->get_parallel_args().mapping_data().empty() &&
@@ -454,9 +450,7 @@ std::optional<ForwardOutput> RecWorkerImpl::RecWorkPipeline::step(
     const RecForwardInput& input) {
   Timer timer;
   auto& sampling_params = input.sampling_params;
-  RecLegacyExecutionProjection projection(
-      const_cast<RecModelParams&>(input.input_params));
-  auto& input_params = projection.params();
+  ModelInputParams input_params(input.input_params);
 
   std::vector<folly::SemiFuture<bool>> futures;
 
@@ -711,10 +705,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
   Timer timer;
   runtime_.worker.device_.set_device();
 
-  RecForwardInput& mutable_input = const_cast<RecForwardInput&>(input);
-  const auto& sampling_params = mutable_input.sampling_params;
-  RecLegacyExecutionProjection projection(mutable_input.input_params);
-  auto& input_params = projection.params();
+  const auto& sampling_params = input.sampling_params;
+  ModelInputParams input_params(input.input_params);
 
   const auto* onerec_params = input_params.onerec_params();
   CHECK(onerec_params != nullptr) << "OneRec requires rec_params.";
@@ -753,8 +745,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
         LOG(ERROR) << "OneRec prefill requires encoder context.";
         return std::nullopt;
       }
-      auto model_output = run_onerec_forward(mutable_input.token_ids,
-                                             mutable_input.positions,
+      auto model_output = run_onerec_forward(input.token_ids,
+                                             input.positions,
                                              /*is_encoder_forward=*/false,
                                              /*forward_has_encoder_output=*/
                                              has_encoder_output,
@@ -788,8 +780,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
 
       const bool decoder_has_encoder_output =
           encoder_output.hidden_states.defined();
-      auto model_output = run_onerec_forward(mutable_input.token_ids,
-                                             mutable_input.positions,
+      auto model_output = run_onerec_forward(input.token_ids,
+                                             input.positions,
                                              /*is_encoder_forward=*/false,
                                              /*forward_has_encoder_output=*/
                                              decoder_has_encoder_output,
@@ -802,8 +794,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       return std::nullopt;
     }
     auto model_output =
-        run_onerec_forward(mutable_input.token_ids,
-                           mutable_input.positions,
+        run_onerec_forward(input.token_ids,
+                           input.positions,
                            /*is_encoder_forward=*/false,
                            /*forward_has_encoder_output=*/has_encoder_output,
                            /*is_hybrid_mode=*/false);
@@ -1341,9 +1333,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
         stage_timer.reset();
       };
 
-  RecForwardInput& mutable_input = const_cast<RecForwardInput&>(input);
-  RecLegacyExecutionProjection projection(mutable_input.input_params);
-  auto& input_params = projection.params();
+  RecForwardInput mutable_input = input.clone();
+  ModelInputParams input_params(mutable_input.input_params);
   CHECK(input_params.onerec_xattention_params() != nullptr)
       << "OneRec xattention pipeline requires onerec_xattention_params.";
 
@@ -2188,7 +2179,8 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
   auto device = runtime_.worker.device_;
   device.set_device();
 
-  RecForwardInput& mutable_input = const_cast<RecForwardInput&>(input);
+  RecForwardInput mutable_input = input.clone();
+  ModelInputParams input_params(mutable_input.input_params);
 
   const auto* step_meta = mutable_input.step_meta();
   CHECK(step_meta != nullptr)
@@ -2245,13 +2237,10 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
                                           next_round_async_result);
 #endif
 
-    auto model_output = [&]() {
-      RecLegacyExecutionProjection projection(mutable_input.input_params);
-      return runtime_.executor->forward(mutable_input.token_ids,
-                                        mutable_input.positions,
-                                        runtime_.worker.kv_caches_,
-                                        projection.params());
-    }();
+    auto model_output = runtime_.executor->forward(mutable_input.token_ids,
+                                                   mutable_input.positions,
+                                                   runtime_.worker.kv_caches_,
+                                                   input_params);
     if (!model_output.hidden_states.defined()) {
       return std::nullopt;
     }
@@ -3063,7 +3052,7 @@ void RecWorkerImpl::prepare_work_before_execute(
 
 void RecWorkerImpl::prepare_multi_modal_data(
     RecForwardInput& processed_inputs) {
-  if (!processed_inputs.input_params.multimodal.mm_data.valid()) {
+  if (!processed_inputs.input_params.features.mm_data.valid()) {
     return;
   }
 
@@ -3071,7 +3060,7 @@ void RecWorkerImpl::prepare_multi_modal_data(
   torch::Tensor multi_modal_indices;
 
   const auto& processed_mm_data =
-      processed_inputs.input_params.multimodal.mm_data;
+      processed_inputs.input_params.features.mm_data;
   if (auto res = processed_mm_data.get<torch::Tensor>("MULTI_MODAL_VALUES")) {
     multi_modal_values = res.value();
   }

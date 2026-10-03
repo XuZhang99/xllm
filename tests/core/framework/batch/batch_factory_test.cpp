@@ -175,7 +175,7 @@ TEST(RecForwardInputTest, DeviceConversionPreservesRecPayloadAndSampling) {
   source.input_params.embedding.linear_state_ids = {4};
   const auto values = torch::tensor({{1.0F, 2.0F}, {3.0F, 4.0F}});
   const auto indices = torch::tensor({0, 2}, torch::kInt64);
-  source.input_params.multimodal.mm_data = MMBatchData(
+  source.input_params.features.mm_data = MMBatchData(
       MMType::EMBEDDING,
       {{"MULTI_MODAL_VALUES", values}, {"MULTI_MODAL_INDICES", indices}});
   auto& xattention = source.input_params.mutable_onerec_xattention_params();
@@ -204,10 +204,10 @@ TEST(RecForwardInputTest, DeviceConversionPreservesRecPayloadAndSampling) {
   EXPECT_TRUE(torch::equal(input.input_params.embedding.linear_state_indices,
                            torch::tensor({4}, torch::kInt32)));
   const auto converted_values =
-      input.input_params.multimodal.mm_data.get<torch::Tensor>(
+      input.input_params.features.mm_data.get<torch::Tensor>(
           "MULTI_MODAL_VALUES");
   const auto converted_indices =
-      input.input_params.multimodal.mm_data.get<torch::Tensor>(
+      input.input_params.features.mm_data.get<torch::Tensor>(
           "MULTI_MODAL_INDICES");
   ASSERT_TRUE(converted_values.has_value());
   ASSERT_TRUE(converted_indices.has_value());
@@ -270,7 +270,7 @@ TEST(RecModelParamsTest, DeviceConversionPreservesMultiRoundStrategy) {
                            multi_round.decode_positions_tensor_list[0]));
 }
 
-TEST(RecModelParamsTest, ExecutorProjectionRestoresMutatedOwnedState) {
+TEST(RecModelParamsTest, BorrowedExecutionViewMutatesNativeOwnedState) {
   RecModelParams owner;
   owner.attention.host.kv_seq_lens = {2, 3};
   owner.embedding.request_ids = {"first", "second"};
@@ -282,8 +282,7 @@ TEST(RecModelParamsTest, ExecutorProjectionRestoresMutatedOwnedState) {
   const void* original_embedding = owner.embedding.input_embedding.data_ptr();
   const void* original_cache = strategy.full_k_caches[0].data_ptr();
   {
-    RecLegacyExecutionProjection projection(owner);
-    auto& params = projection.params();
+    ModelInputParams params(owner);
     EXPECT_EQ(params.attention.host.kv_seq_lens.data(), original_lengths);
     EXPECT_EQ(params.embedding.request_ids.data(), original_request_ids);
     EXPECT_EQ(params.embedding.input_embedding.data_ptr(), original_embedding);

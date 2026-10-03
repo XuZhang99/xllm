@@ -1250,6 +1250,7 @@ void NpuCpPlan::replace_cp_ep_meta_storage(CpEpMeta meta) {
 template void NpuCpPlan::prepare(LlmForwardInput&, const CpPlanRuntimeConfig&);
 template void NpuCpPlan::prepare(VlmForwardInput&, const CpPlanRuntimeConfig&);
 template void NpuCpPlan::apply_attention_meta(ModelInputParams&) const;
+template void NpuCpPlan::apply_attention_meta(LlmModelParams&) const;
 template void NpuCpPlan::apply_attention_meta(VlmModelParams&) const;
 
 }  // namespace xllm

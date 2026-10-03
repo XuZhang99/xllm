@@ -15,7 +15,11 @@ limitations under the License.
 
 #pragma once
 
-#include "core/framework/model/model_input_params.h"
+#include <algorithm>
+#include <cstring>
+#include <utility>
+
+#include "core/framework/model/model_input_types.h"
 
 namespace xllm {
 
@@ -29,6 +33,74 @@ struct PackedAttentionIntInput {
   const std::vector<int32_t>* values = nullptr;
   torch::Tensor* host_view = nullptr;
   torch::Tensor* device_view = nullptr;
+};
+
+class AttentionHostInputView final {
+ public:
+  template <typename Owner>
+  explicit AttentionHostInputView(Owner& owner)
+      : q_seq_lens(owner.q_seq_lens),
+        q_cu_seq_lens(owner.q_cu_seq_lens),
+        kv_seq_lens(owner.kv_seq_lens),
+        kv_cu_seq_lens(owner.kv_cu_seq_lens),
+        new_cache_slots(owner.new_cache_slots),
+        kv_cache_tokens_nums(owner.kv_cache_tokens_nums),
+        ring_cur_seqlen(owner.ring_cur_seqlen),
+        ring_cache_seqlen(owner.ring_cache_seqlen),
+        block_tables(owner.block_tables),
+        graph_q_seq_lens_data(owner.graph_q_seq_lens_data),
+        graph_kv_seq_lens_data(owner.graph_kv_seq_lens_data) {}
+
+  std::vector<int32_t>& q_seq_lens;
+  std::vector<int32_t>& q_cu_seq_lens;
+  std::vector<int32_t>& kv_seq_lens;
+  std::vector<int32_t>& kv_cu_seq_lens;
+  std::vector<int32_t>& new_cache_slots;
+  std::vector<int32_t>& kv_cache_tokens_nums;
+  std::vector<int32_t>& ring_cur_seqlen;
+  std::vector<int32_t>& ring_cache_seqlen;
+  torch::Tensor& block_tables;
+  const int32_t*& graph_q_seq_lens_data;
+  const int32_t*& graph_kv_seq_lens_data;
+};
+
+class AttentionDeviceInputView final {
+ public:
+  template <typename Owner>
+  explicit AttentionDeviceInputView(Owner& owner)
+      : q_seq_lens(owner.q_seq_lens),
+        kv_seq_lens(owner.kv_seq_lens),
+        q_cu_seq_lens(owner.q_cu_seq_lens),
+        new_cache_slots(owner.new_cache_slots),
+        block_tables(owner.block_tables),
+        paged_kv_indptr(owner.paged_kv_indptr),
+        paged_kv_indices(owner.paged_kv_indices),
+        paged_kv_last_page_len(owner.paged_kv_last_page_len),
+        new_cache_slot_offsets(owner.new_cache_slot_offsets),
+        kv_cache_start_offsets(owner.kv_cache_start_offsets),
+        kv_cache_tokens_nums(owner.kv_cache_tokens_nums),
+        history_compressed_kv(owner.history_compressed_kv),
+        history_k_rope(owner.history_k_rope),
+        ring_cur_seqlen(owner.ring_cur_seqlen),
+        ring_cache_seqlen(owner.ring_cache_seqlen),
+        in_prefix_slots(owner.in_prefix_slots) {}
+
+  torch::Tensor& q_seq_lens;
+  torch::Tensor& kv_seq_lens;
+  torch::Tensor& q_cu_seq_lens;
+  torch::Tensor& new_cache_slots;
+  torch::Tensor& block_tables;
+  torch::Tensor& paged_kv_indptr;
+  torch::Tensor& paged_kv_indices;
+  torch::Tensor& paged_kv_last_page_len;
+  torch::Tensor& new_cache_slot_offsets;
+  torch::Tensor& kv_cache_start_offsets;
+  torch::Tensor& kv_cache_tokens_nums;
+  torch::Tensor& history_compressed_kv;
+  torch::Tensor& history_k_rope;
+  torch::Tensor& ring_cur_seqlen;
+  torch::Tensor& ring_cache_seqlen;
+  torch::Tensor& in_prefix_slots;
 };
 
 // Borrows storage from a domain owner. No tensor or vector is copied.
@@ -223,8 +295,8 @@ class AttentionInputView final {
     ensure_attention_buffer_capacity(capacity, target_device);
   }
 
-  AttentionHostInput& host;
-  AttentionDeviceInput& device;
+  AttentionHostInputView host;
+  AttentionDeviceInputView device;
   torch::Tensor& attention_host_buffer;
   torch::Tensor& attention_device_buffer;
   uint64_t& attention_buffer_bytes;
@@ -269,6 +341,41 @@ class AttentionInputView final {
 };
 
 namespace detail {
+template <typename Source, typename Target>
+void copy_attention_host_input(const Source& source, Target& target) {
+  target.q_seq_lens = source.q_seq_lens;
+  target.q_cu_seq_lens = source.q_cu_seq_lens;
+  target.kv_seq_lens = source.kv_seq_lens;
+  target.kv_cu_seq_lens = source.kv_cu_seq_lens;
+  target.new_cache_slots = source.new_cache_slots;
+  target.kv_cache_tokens_nums = source.kv_cache_tokens_nums;
+  target.ring_cur_seqlen = source.ring_cur_seqlen;
+  target.ring_cache_seqlen = source.ring_cache_seqlen;
+  target.block_tables = source.block_tables;
+  target.graph_q_seq_lens_data = source.graph_q_seq_lens_data;
+  target.graph_kv_seq_lens_data = source.graph_kv_seq_lens_data;
+}
+
+template <typename Source, typename Target>
+void copy_attention_device_input(const Source& source, Target& target) {
+  target.q_seq_lens = source.q_seq_lens;
+  target.kv_seq_lens = source.kv_seq_lens;
+  target.q_cu_seq_lens = source.q_cu_seq_lens;
+  target.new_cache_slots = source.new_cache_slots;
+  target.block_tables = source.block_tables;
+  target.paged_kv_indptr = source.paged_kv_indptr;
+  target.paged_kv_indices = source.paged_kv_indices;
+  target.paged_kv_last_page_len = source.paged_kv_last_page_len;
+  target.new_cache_slot_offsets = source.new_cache_slot_offsets;
+  target.kv_cache_start_offsets = source.kv_cache_start_offsets;
+  target.kv_cache_tokens_nums = source.kv_cache_tokens_nums;
+  target.history_compressed_kv = source.history_compressed_kv;
+  target.history_k_rope = source.history_k_rope;
+  target.ring_cur_seqlen = source.ring_cur_seqlen;
+  target.ring_cache_seqlen = source.ring_cache_seqlen;
+  target.in_prefix_slots = source.in_prefix_slots;
+}
+
 template <typename Owner>
 Owner attention_to(const Owner& source, const torch::Device& device) {
   Owner output;
@@ -301,8 +408,8 @@ class LlmAttentionInput final {
                                       const torch::Device& target) {
     AttentionInputView(*this).reserve_device_buffer_capacity(bytes, target);
   }
-  AttentionHostInput host;
-  AttentionDeviceInput device;
+  LlmAttentionHostInput host;
+  LlmAttentionDeviceInput device;
   torch::Tensor attention_host_buffer;
   torch::Tensor attention_device_buffer;
   uint64_t attention_buffer_bytes = 0;
@@ -328,8 +435,8 @@ class VlmAttentionInput final {
                                       const torch::Device& target) {
     AttentionInputView(*this).reserve_device_buffer_capacity(bytes, target);
   }
-  AttentionHostInput host;
-  AttentionDeviceInput device;
+  VlmAttentionHostInput host;
+  VlmAttentionDeviceInput device;
   torch::Tensor attention_host_buffer;
   torch::Tensor attention_device_buffer;
   uint64_t attention_buffer_bytes = 0;
@@ -355,8 +462,8 @@ class RecAttentionInput final {
                                       const torch::Device& target) {
     AttentionInputView(*this).reserve_device_buffer_capacity(bytes, target);
   }
-  AttentionHostInput host;
-  AttentionDeviceInput device;
+  RecAttentionHostInput host;
+  RecAttentionDeviceInput device;
   torch::Tensor attention_host_buffer;
   torch::Tensor attention_device_buffer;
   uint64_t attention_buffer_bytes = 0;

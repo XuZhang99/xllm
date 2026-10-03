@@ -91,7 +91,7 @@ LlmForwardInput make_multiblock_forward_input(
 }
 
 TEST(SpecDecodeInputBuilderTest, DraftInputsSingleRowPerSeq) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.num_sequences = 2;
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
 
@@ -175,7 +175,7 @@ TEST(SpecDecodeInputBuilderTest, VlmVerifyRowsPreserveVisionState) {
 }
 
 TEST(SpecDecodeInputBuilderTest, ValidateInputsNonAtbExpansion) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.num_sequences = 2;
   const int32_t num_speculative_tokens = 2;
   const int32_t num_val_tokens = num_speculative_tokens + 1;
@@ -266,7 +266,7 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowUsesInputBlockTableLayout) {
 }
 
 TEST(SpecDecodeInputBuilderTest, ValidateRowsStartFromCorrectedCurrentView) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.num_sequences = 2;
   std::vector<int32_t> token_ids = {31, 41};
   std::vector<int32_t> positions = {6, 9};
@@ -323,7 +323,7 @@ TEST(SpecDecodeInputBuilderTest, ValidateInputsAtbChunkedPrefillShape) {
 }
 
 TEST(SpecDecodeInputBuilderTest, FirstDecodeInputsFixAndNonFixMix) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.num_sequences = 2;
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({6, 9});
 
@@ -366,7 +366,7 @@ TEST(SpecDecodeInputBuilderTest, FirstDecodeInputsFixAndNonFixMix) {
 }
 
 TEST(SpecDecodeInputBuilderTest, AppendDecodeRowWithInputTokenSource) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.num_sequences = 2;
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
 
@@ -436,7 +436,7 @@ TEST(SpecDecodeInputBuilderTest, ResolveTokenWithPositionOffset) {
 }
 
 TEST(SpecDecodeInputBuilderTest, AppendDecodeRowFromLastStep) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.num_sequences = 2;
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({6, 9});
 
@@ -795,13 +795,13 @@ TEST(SpecMtpTopkInputBuilderTest, KeepsMluStateWhenRowsAlreadyMatchDraftBatch) {
 }
 
 TEST(SpecMtpTopkInputBuilderTest, MovesTensorStateWithModelInputParams) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   const torch::Tensor topk_indices =
       torch::tensor({{0, 1}, {2, 3}}, torch::kInt32);
   params.mtp_topk_state = MtpTopkState::from_tensor(topk_indices);
 
   const torch::Device target_device("meta");
-  const ModelInputParams converted = params.to(target_device);
+  const ModelInputParams converted = params.clone().to(target_device).view();
 
   ASSERT_NE(converted.mtp_topk_state, nullptr);
   const auto converted_indices = converted.mtp_topk_state->as_tensor();
@@ -813,7 +813,7 @@ TEST(SpecMtpTopkInputBuilderTest, MovesTensorStateWithModelInputParams) {
 }
 
 TEST(SpecMtpTopkInputBuilderTest, MovesMluStateWithModelInputParams) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   mlu::model::MluMtpTopkState::LayerStates states;
   states.emplace_back(
       layer::DsaTopkState(torch::tensor({{0, 1}}, torch::kInt32),
@@ -823,7 +823,7 @@ TEST(SpecMtpTopkInputBuilderTest, MovesMluStateWithModelInputParams) {
       std::make_shared<mlu::model::MluMtpTopkState>(std::move(states));
 
   const torch::Device target_device("meta");
-  const ModelInputParams converted = params.to(target_device);
+  const ModelInputParams converted = params.clone().to(target_device).view();
 
   const auto converted_state =
       std::dynamic_pointer_cast<const mlu::model::MluMtpTopkState>(

@@ -20,6 +20,7 @@ limitations under the License.
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -40,6 +41,46 @@ limitations under the License.
 namespace xllm {
 
 namespace {
+
+static_assert(!std::is_same_v<decltype(LlmAttentionInput::host),
+                              decltype(VlmAttentionInput::host)> &&
+                  !std::is_same_v<decltype(LlmAttentionInput::host),
+                                  decltype(RecAttentionInput::host)> &&
+                  !std::is_same_v<decltype(VlmAttentionInput::host),
+                                  decltype(RecAttentionInput::host)> &&
+                  !std::is_same_v<decltype(LlmAttentionInput::device),
+                                  decltype(VlmAttentionInput::device)> &&
+                  !std::is_same_v<decltype(LlmAttentionInput::device),
+                                  decltype(RecAttentionInput::device)> &&
+                  !std::is_same_v<decltype(VlmAttentionInput::device),
+                                  decltype(RecAttentionInput::device)>,
+              "Each domain must declare its own attention storage types");
+static_assert(
+    !std::is_assignable_v<decltype(LlmAttentionInput::host)&,
+                          const decltype(VlmAttentionInput::host)&> &&
+        !std::is_assignable_v<decltype(VlmAttentionInput::host)&,
+                              const decltype(LlmAttentionInput::host)&> &&
+        !std::is_assignable_v<decltype(LlmAttentionInput::host)&,
+                              const decltype(RecAttentionInput::host)&> &&
+        !std::is_assignable_v<decltype(RecAttentionInput::host)&,
+                              const decltype(LlmAttentionInput::host)&> &&
+        !std::is_assignable_v<decltype(VlmAttentionInput::host)&,
+                              const decltype(RecAttentionInput::host)&> &&
+        !std::is_assignable_v<decltype(RecAttentionInput::host)&,
+                              const decltype(VlmAttentionInput::host)&> &&
+        !std::is_assignable_v<decltype(LlmAttentionInput::device)&,
+                              const decltype(VlmAttentionInput::device)&> &&
+        !std::is_assignable_v<decltype(VlmAttentionInput::device)&,
+                              const decltype(LlmAttentionInput::device)&> &&
+        !std::is_assignable_v<decltype(LlmAttentionInput::device)&,
+                              const decltype(RecAttentionInput::device)&> &&
+        !std::is_assignable_v<decltype(RecAttentionInput::device)&,
+                              const decltype(LlmAttentionInput::device)&> &&
+        !std::is_assignable_v<decltype(VlmAttentionInput::device)&,
+                              const decltype(RecAttentionInput::device)&> &&
+        !std::is_assignable_v<decltype(RecAttentionInput::device)&,
+                              const decltype(VlmAttentionInput::device)&>,
+    "Cross-domain attention copies must be explicit");
 
 class ScopedContiguousInputBuffer final {
  public:
@@ -132,7 +173,7 @@ RecForwardInput make_rec_transport_input() {
   input.input_params.attention.host.new_cache_slots = {3, 4};
   input.input_params.attention.host.block_tables =
       torch::tensor({{7, 9}}, torch::kInt32);
-  input.input_params.multimodal.mm_data.batch({MMData(
+  input.input_params.features.mm_data.batch({MMData(
       MMType::EMBEDDING,
       MMDict{{"MULTI_MODAL_VALUES", torch::tensor({{1.5F, 2.5F}})},
              {"MULTI_MODAL_INDICES", torch::tensor({1}, torch::kInt64)}})});
@@ -158,9 +199,9 @@ void expect_rec_transport_input(const RecForwardInput& input) {
                            torch::tensor({0}, torch::kInt32)));
   EXPECT_EQ(input.sample_sequence_ids, (std::vector<std::string>{"rec#0"}));
   EXPECT_EQ(input.sample_prior_output_rows, (std::vector<int32_t>{-1}));
-  const auto values = input.input_params.multimodal.mm_data.get<torch::Tensor>(
+  const auto values = input.input_params.features.mm_data.get<torch::Tensor>(
       "MULTI_MODAL_VALUES");
-  const auto indices = input.input_params.multimodal.mm_data.get<torch::Tensor>(
+  const auto indices = input.input_params.features.mm_data.get<torch::Tensor>(
       "MULTI_MODAL_INDICES");
   ASSERT_TRUE(values.has_value());
   ASSERT_TRUE(indices.has_value());
@@ -263,7 +304,7 @@ TEST(BatchPackedInputTest, PackedCopyKeepsStagingAliveAfterSourceRelease) {
 
   ASSERT_TRUE(lazy_input.runtime.input_host_buffer.defined());
   const void* staging_data = lazy_input.runtime.input_host_buffer.data_ptr();
-  LlmForwardInput copied_input = lazy_input;
+  LlmForwardInput copied_input = lazy_input.clone();
   lazy_input = LlmForwardInput();
 
   LlmForwardInput materialized_input =
@@ -343,7 +384,7 @@ TEST(BatchPackedInputTest, MaterializedShmReadRebindsTaggedTensorArena) {
     EXPECT_EQ(materialized_input.token_ids.device(), device);
     EXPECT_EQ(materialized_input.positions.device(), device);
 
-    LlmForwardInput overwrite_input = source;
+    LlmForwardInput overwrite_input = source.clone();
     overwrite_input.token_ids = torch::tensor({91, 92}, torch::kInt32);
     overwrite_input.positions = torch::tensor({4, 5}, torch::kInt32);
     ASSERT_TRUE(writer_manager.input_write(overwrite_input));
@@ -567,7 +608,7 @@ TEST(BatchPackedInputTest, PackedProtoLazyUnpackRestoresSampleIdxes) {
                            input.sampling_params.filter_bitmask));
 }
 
-TEST(BatchPackedInputTest, PackedProtoAcceptsLegacyTokenLayout) {
+TEST(BatchPackedInputTest, PackedProtoRejectsLegacyTokenLayout) {
   ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
   LlmForwardInput input;
   input.token_ids = torch::tensor({11, 23}, torch::kInt32);
@@ -583,8 +624,7 @@ TEST(BatchPackedInputTest, PackedProtoAcceptsLegacyTokenLayout) {
   ASSERT_TRUE(forward_input_to_packed_proto(input, &packed_input));
   ASSERT_GE(packed_input.payload().size(), 40u);
 
-  // V1 starts with the three layout sizes; remove the V2 prefix and rebase
-  // the aligned tensor arena without changing the token descriptor.
+  // Legacy peers start with layout sizes and have no domain or version.
   const uint64_t arena_offset =
       read_packed_uint64(packed_input.payload(), /*offset=*/24);
   ASSERT_GE(arena_offset, 40u);
@@ -594,23 +634,58 @@ TEST(BatchPackedInputTest, PackedProtoAcceptsLegacyTokenLayout) {
   legacy_input.set_payload(std::move(legacy_payload));
 
   LlmForwardInput lazy_input;
-  ASSERT_TRUE(packed_proto_to_forward_input(
+  EXPECT_FALSE(packed_proto_to_forward_input(
       legacy_input, lazy_input, torch::Device(torch::kCPU), nullptr));
-  EXPECT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
-  const LlmForwardInput unpacked_input =
-      lazy_input.to(torch::Device(torch::kCPU), torch::kFloat32);
-  EXPECT_TRUE(
-      tensor_equals_vector<int32_t>(unpacked_input.token_ids, {11, 23}));
-  EXPECT_TRUE(tensor_equals_vector<int32_t>(unpacked_input.positions, {0, 1}));
-  EXPECT_EQ(unpacked_input.input_params.attention.host.kv_seq_lens,
-            std::vector<int32_t>({2}));
-  EXPECT_EQ(unpacked_input.sample_sequence_ids,
-            std::vector<std::string>({"legacy#0"}));
-  EXPECT_EQ(unpacked_input.sample_prior_output_rows,
-            std::vector<int32_t>({-1}));
+  EXPECT_FALSE(lazy_input.runtime.input_host_buffer.defined());
 
   DiTForwardInput dit_input;
   EXPECT_FALSE(packed_proto_to_dit_forward_input(legacy_input, dit_input));
+}
+
+TEST(BatchPackedInputTest, NativeDomainsRejectUnsupportedPackedSchemas) {
+  LlmForwardInput llm_source;
+  VlmForwardInput vlm_source;
+  RecForwardInput rec_source;
+  DiTForwardInput dit_source;
+  std::vector<proto::PackedForwardInput> packed_inputs(4);
+  ASSERT_TRUE(forward_input_to_packed_proto(llm_source, &packed_inputs[0]));
+  ASSERT_TRUE(vlm_forward_input_to_packed_proto(vlm_source, &packed_inputs[1]));
+  ASSERT_TRUE(rec_forward_input_to_packed_proto(rec_source, &packed_inputs[2]));
+  ASSERT_TRUE(dit_forward_input_to_packed_proto(dit_source, &packed_inputs[3]));
+
+  for (const auto& packed_input : packed_inputs) {
+    ASSERT_GE(packed_input.payload().size(), 40u);
+    for (int32_t version : {0, 2, 127}) {
+      SCOPED_TRACE(version);
+      std::string payload = packed_input.payload();
+      payload[8] = static_cast<char>(version);
+      payload[9] = '\0';
+      proto::PackedForwardInput unsupported_input;
+      unsupported_input.set_payload(std::move(payload));
+      LlmForwardInput llm_input;
+      VlmForwardInput vlm_input;
+      RecForwardInput rec_input;
+      DiTForwardInput dit_input;
+      EXPECT_FALSE(packed_proto_to_forward_input(unsupported_input,
+                                                 llm_input,
+                                                 torch::Device(torch::kCPU),
+                                                 /*stream=*/nullptr));
+      EXPECT_FALSE(packed_proto_to_vlm_forward_input(unsupported_input,
+                                                     vlm_input,
+                                                     torch::Device(torch::kCPU),
+                                                     /*stream=*/nullptr));
+      EXPECT_FALSE(packed_proto_to_rec_forward_input(unsupported_input,
+                                                     rec_input,
+                                                     torch::Device(torch::kCPU),
+                                                     /*stream=*/nullptr));
+      EXPECT_FALSE(
+          packed_proto_to_dit_forward_input(unsupported_input, dit_input));
+      EXPECT_FALSE(llm_input.runtime.input_host_buffer.defined());
+      EXPECT_FALSE(vlm_input.runtime.input_host_buffer.defined());
+      EXPECT_FALSE(rec_input.runtime.input_host_buffer.defined());
+      EXPECT_TRUE(dit_input.tensor_sources.empty());
+    }
+  }
 }
 
 TEST(BatchPackedInputTest, PackedTokenDecoderRejectsNativeDiTDomain) {
@@ -646,7 +721,7 @@ TEST(BatchPackedInputTest,
     EXPECT_FALSE(packed_proto_to_dit_forward_input(packed_input, dit_input));
   }
   ASSERT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
-  RecForwardInput copied_input = lazy_input;
+  RecForwardInput copied_input = lazy_input.clone();
   lazy_input = RecForwardInput();
   const auto input =
       copied_input.to(torch::Device(torch::kCPU), torch::kFloat32);
@@ -803,6 +878,120 @@ TEST(BatchPackedInputTest, NativeVlmDecodeKeepsDomainWithoutVisionData) {
       payload, lazy_input, torch::Device(torch::kCPU), nullptr));
 }
 
+TEST(BatchPackedInputTest, BorrowedExecutionViewUpdatesNativeMetadata) {
+  static_assert(!std::is_copy_constructible_v<LlmForwardInput>);
+  static_assert(!std::is_copy_constructible_v<VlmForwardInput>);
+  static_assert(!std::is_copy_constructible_v<RecForwardInput>);
+  static_assert(!std::is_copy_constructible_v<LlmModelParams>);
+  static_assert(!std::is_copy_constructible_v<VlmModelParams>);
+  static_assert(!std::is_copy_constructible_v<RecModelParams>);
+  static_assert(!std::is_default_constructible_v<ModelInputParams>);
+  LlmModelParams owner;
+  owner.attention.host.kv_seq_lens = {2};
+  ModelInputParams view(owner);
+  EXPECT_EQ(view.attention.host.kv_seq_lens.data(),
+            owner.attention.host.kv_seq_lens.data());
+  view.attention.host.kv_seq_lens[0] = 7;
+  EXPECT_EQ(owner.attention.host.kv_seq_lens[0], 7);
+  view.graph.input_tokens_override = torch::tensor({13}, torch::kInt32);
+  EXPECT_TRUE(torch::equal(owner.graph.input_tokens_override,
+                           torch::tensor({13}, torch::kInt32)));
+  EXPECT_FALSE(view.has_multimodal());
+  EXPECT_FALSE(view.has_features());
+  EXPECT_FALSE(view.has_rec_params());
+}
+
+TEST(BatchPackedInputTest,
+     SnapshotViewRetainsDomainAndIndependentHostMetadata) {
+  const auto snapshot_view = [] {
+    VlmModelParams owner;
+    owner.attention.host.kv_seq_lens = {2};
+    owner.multimodal.deep_stacks = {torch::tensor({1.0F, 3.0F})};
+    ModelInputParams borrowed(owner);
+    auto retained = borrowed.clone().view();
+    borrowed.attention.host.kv_seq_lens[0] = 9;
+    return retained;
+  }();
+  EXPECT_EQ(snapshot_view.attention.host.kv_seq_lens,
+            (std::vector<int32_t>{2}));
+  EXPECT_TRUE(snapshot_view.has_multimodal());
+  EXPECT_FALSE(snapshot_view.has_features());
+  ASSERT_EQ(snapshot_view.multimodal().deep_stacks.size(), 1u);
+  EXPECT_TRUE(torch::equal(snapshot_view.multimodal().deep_stacks[0],
+                           torch::tensor({1.0F, 3.0F})));
+}
+
+TEST(BatchPackedInputTest, RecSnapshotTransferMovesExecutionTensors) {
+  RecModelParams owner;
+  ModelInputParams params(owner);
+  const torch::Tensor values = torch::tensor({1, 2}, torch::kInt32);
+  params.embedding.mtp_shifted_token_ids = values;
+  params.embedding.mtp_bootstrap_embeddings = values;
+  params.embedding.extra_token_ids = {3};
+  params.embedding.mtp_bootstrap_row_idxes = {4};
+  params.graph.use_expanded_decode_for_spec_verify_attention = true;
+  params.graph.expanded_kv_seq_lens = values;
+  params.graph.expanded_block_tables = values;
+  params.graph.expanded_paged_kv_indptr = values;
+  params.graph.expanded_paged_kv_indices = values;
+  params.graph.expanded_paged_kv_last_page_len = values;
+  params.graph.expanded_tiling_data = values;
+  params.graph.expanded_kv_seq_lens_vec = {5};
+  params.graph.input_tokens_override = values;
+  params.graph.spec_verify_draft_token_sources = {values};
+  params.graph.spec_verify_source_addresses_stable = true;
+  params.graph.spec_verify_static_graph_tasks_prepared = true;
+  params.multi_block_tables = {values};
+  params.mtp_shifted_token_ids = values;
+  params.is_spec_verify = true;
+  params.num_accepted_tokens = values;
+  params.num_accepted_tokens_host = {6};
+  params.mtp_topk_state = MtpTopkState::from_tensor(values);
+
+  const torch::Device target_device("meta");
+  ModelInputParams converted = params.clone().to(target_device).view();
+
+  const std::vector<torch::Tensor> transferred_tensors = {
+      converted.embedding.mtp_shifted_token_ids,
+      converted.embedding.mtp_bootstrap_embeddings,
+      converted.graph.expanded_kv_seq_lens,
+      converted.graph.expanded_block_tables,
+      converted.graph.expanded_paged_kv_indptr,
+      converted.graph.expanded_paged_kv_indices,
+      converted.graph.expanded_paged_kv_last_page_len,
+      converted.graph.expanded_tiling_data,
+      converted.graph.input_tokens_override,
+      converted.graph.spec_verify_draft_token_sources.at(0),
+      converted.mtp_shifted_token_ids,
+      converted.num_accepted_tokens};
+  for (const auto& tensor : transferred_tensors) {
+    ASSERT_TRUE(tensor.defined());
+    EXPECT_EQ(tensor.device(), target_device);
+    EXPECT_EQ(tensor.sizes(), values.sizes());
+    EXPECT_EQ(tensor.scalar_type(), values.scalar_type());
+  }
+  ASSERT_NE(converted.mtp_topk_state, nullptr);
+  EXPECT_EQ(converted.mtp_topk_state->device(), target_device);
+  EXPECT_TRUE(converted.has_features());
+  EXPECT_TRUE(converted.has_rec_params());
+  EXPECT_FALSE(converted.has_multimodal());
+  EXPECT_TRUE(converted.is_spec_verify);
+  EXPECT_TRUE(converted.graph.use_expanded_decode_for_spec_verify_attention);
+  EXPECT_TRUE(converted.graph.spec_verify_source_addresses_stable);
+  EXPECT_TRUE(converted.graph.spec_verify_static_graph_tasks_prepared);
+  EXPECT_EQ(converted.embedding.extra_token_ids, (std::vector<int32_t>{3}));
+  EXPECT_EQ(converted.embedding.mtp_bootstrap_row_idxes,
+            (std::vector<int32_t>{4}));
+  EXPECT_EQ(converted.num_accepted_tokens_host, (std::vector<int64_t>{6}));
+  ASSERT_EQ(converted.multi_block_tables.size(), 1u);
+  EXPECT_TRUE(converted.multi_block_tables[0].device().is_cpu());
+  EXPECT_TRUE(torch::equal(converted.multi_block_tables[0], values));
+  converted.graph.expanded_kv_seq_lens_vec[0] = 9;
+  EXPECT_EQ(params.graph.expanded_kv_seq_lens_vec, (std::vector<int32_t>{5}));
+  EXPECT_TRUE(params.num_accepted_tokens.device().is_cpu());
+  EXPECT_TRUE(params.mtp_topk_state->device().is_cpu());
+}
+
 TEST(BatchPackedInputTest, VlmDraftConversionExcludesTargetOnlyState) {
   auto target = make_vlm_transport_input();
   target.input_params.embedding.linear_state_ids = {17};
@@ -812,8 +1001,6 @@ TEST(BatchPackedInputTest, VlmDraftConversionExcludesTargetOnlyState) {
   auto draft = make_llm_draft_input(target);
   EXPECT_TRUE(torch::equal(draft.token_ids, target.token_ids));
   EXPECT_TRUE(torch::equal(draft.positions, target.positions));
-  EXPECT_FALSE(draft.input_params.multimodal.mm_data.valid());
-  EXPECT_TRUE(draft.input_params.multimodal.deep_stacks.empty());
   EXPECT_TRUE(draft.input_params.embedding.linear_state_ids.empty());
   EXPECT_FALSE(draft.input_params.embedding.linear_state_indices.defined());
   EXPECT_TRUE(draft.input_params.linear_state_cache_ops.empty());
@@ -995,7 +1182,7 @@ TEST(BatchPackedInputTest, NativeDiTPackedProtoRejectsMalformedPayloads) {
   malformed_payloads.emplace_back("truncated header",
                                   packed_input.payload().substr(0, 39));
   malformed_payloads.emplace_back("unknown version", packed_input.payload());
-  malformed_payloads.back().second[8] = 3;
+  malformed_payloads.back().second[8] = 127;
   malformed_payloads.emplace_back("token domain", packed_input.payload());
   malformed_payloads.back().second[10] = 1;
   malformed_payloads.emplace_back("reserved VLM domain",

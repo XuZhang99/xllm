@@ -347,10 +347,10 @@ TEST_F(SpeculativePipelineTest,
   prefill.sampling_params.selected_token_idxes =
       torch::tensor({3}, torch::kInt32);
 
-  auto invalid = prefill;
+  auto invalid = prefill.clone();
   invalid.input_params.attention.host.new_cache_slots = {30, 31, 8, 9};
   EXPECT_FALSE(pipeline_->submit(invalid).status.ok());
-  invalid = prefill;
+  invalid = prefill.clone();
   invalid.input_params.attention.host.block_tables =
       torch::tensor({{3, 4}}, torch::kInt32);
   invalid.input_params.attention.host.new_cache_slots = {62, 63, 64, 65};

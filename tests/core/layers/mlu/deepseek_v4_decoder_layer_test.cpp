@@ -402,7 +402,7 @@ class DeepseekV4DecoderLayerTest : public ::testing::Test {
           -metadata.dsa_metadata->sin_table;
     }
     KVCache kv_cache = make_kv_cache(args, /*batch_size=*/1);
-    ModelInputParams input_params;
+    ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
     std::optional<torch::Tensor> residual = std::nullopt;
     torch::Tensor positions = torch::arange(
         seq_len, torch::TensorOptions().dtype(torch::kInt64).device(device_));

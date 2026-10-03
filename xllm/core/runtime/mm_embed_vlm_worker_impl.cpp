@@ -64,10 +64,8 @@ std::optional<ForwardOutput> MMEmbedVLMWorkerImpl::step(
   // call model executor forward to get hidden states
   CausalVLM* vlm_model = dynamic_cast<CausalVLM*>(model_.get());
   CHECK(vlm_model != nullptr) << "Model is not a CausalVLM.";
-  auto encode_output = [&]() {
-    VlmLegacyExecutionProjection projection(params);
-    return vlm_model->encode(projection.params());
-  }();
+  ModelInputParams execution_params(params);
+  auto encode_output = vlm_model->encode(execution_params);
   const auto it = encode_output.find("image|embedding");
   if (it == encode_output.end() ||
       !std::holds_alternative<std::vector<torch::Tensor>>(it->second)) {

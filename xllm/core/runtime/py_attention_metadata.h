@@ -29,7 +29,7 @@ struct ExpandedDecodeMetadata;
 
 namespace xllm {
 
-struct ModelInputParams;
+class ModelInputParams;
 
 void register_attention_metadata_views(pybind11::module_& module);
 

@@ -193,7 +193,7 @@ ModelInputParams MakeDecodeParams(const torch::Device& device,
   CHECK_GT(num_tokens, 0);
   CHECK_GT(kv_len, 0);
 
-  ModelInputParams p;
+  ModelInputParams p = ModelInputSnapshot(LlmModelParams()).view();
 
   p.meta.batch_forward_type = BatchForwardType::DECODE;
   p.meta.num_sequences = num_tokens;
@@ -247,7 +247,7 @@ ModelInputParams MakePrefillParams(const torch::Device& device,
                                    int32_t num_tokens) {
   CHECK_GT(num_tokens, 0);
 
-  ModelInputParams p;
+  ModelInputParams p = ModelInputSnapshot(LlmModelParams()).view();
 
   p.meta.batch_forward_type = BatchForwardType::PREFILL;
   p.meta.num_sequences = 1;

@@ -240,7 +240,7 @@ class FakeAttnCausalLM final : public CausalLM {
 };
 
 ModelInputParams MakeDecodeParams(const torch::Device& device) {
-  ModelInputParams p;
+  ModelInputParams p = ModelInputSnapshot(LlmModelParams()).view();
   p.meta.batch_forward_type = BatchForwardType::DECODE;
   p.meta.num_sequences = 1;
   p.meta.kv_max_seq_len = 4;
@@ -270,7 +270,7 @@ ModelInputParams MakeBatchDecodeParams(const torch::Device& device,
                                        int32_t num_sequences) {
   CHECK_GT(num_sequences, 0);
 
-  ModelInputParams p;
+  ModelInputParams p = ModelInputSnapshot(LlmModelParams()).view();
   p.meta.batch_forward_type = BatchForwardType::DECODE;
   p.meta.num_sequences = num_sequences;
   p.meta.kv_max_seq_len = 1;
@@ -297,7 +297,7 @@ ModelInputParams MakePrefillParams(const torch::Device& device,
                                    int32_t num_tokens) {
   CHECK_GT(num_tokens, 0);
 
-  ModelInputParams p;
+  ModelInputParams p = ModelInputSnapshot(LlmModelParams()).view();
   p.meta.batch_forward_type = BatchForwardType::PREFILL;
   p.meta.num_sequences = 1;
   p.meta.kv_max_seq_len = num_tokens;
@@ -380,7 +380,7 @@ runtime::Options make_test_runtime_options(int64_t max_seqs_per_batch) {
 
 ModelInputParams make_multi_sequence_decode_params(
     const torch::Device& device) {
-  ModelInputParams p;
+  ModelInputParams p = ModelInputSnapshot(LlmModelParams()).view();
   p.meta.batch_forward_type = BatchForwardType::DECODE;
   p.meta.num_sequences = 2;
   p.meta.kv_max_seq_len = 9;

@@ -286,7 +286,7 @@ void scale_speculative_parallel_token_counts_impl(Params& params,
 
 }  // namespace
 
-bool should_run_speculative_decode(const ModelInputParams& params) {
+bool should_run_speculative_decode(const LlmModelParams& params) {
   return should_run_speculative_decode_impl(params);
 }
 
@@ -294,7 +294,7 @@ bool should_run_speculative_decode(const VlmModelParams& params) {
   return should_run_speculative_decode_impl(params);
 }
 
-void scale_speculative_parallel_token_counts(ModelInputParams& params,
+void scale_speculative_parallel_token_counts(LlmModelParams& params,
                                              int32_t multiplier) {
   scale_speculative_parallel_token_counts_impl(params, multiplier);
 }
@@ -530,8 +530,7 @@ bool SpeculativeWorkerImpl<TargetInput>::allocate_kv_cache_with_transfer(
 template <typename TargetInput>
 std::optional<ForwardOutput> SpeculativeWorkerImpl<TargetInput>::step(
     const TargetInput& input) {
-  TargetModelParams& mutable_params =
-      const_cast<TargetModelParams&>(input.input_params);
+  auto& mutable_params = input.input_params;
   set_hierarchy_layer_synchronizer(mutable_params);
   const bool run_speculative_decode =
       should_run_speculative_decode(input.input_params);

@@ -237,7 +237,7 @@ TEST_F(MLULayerSynchronizerTest, ModelInputWaitsAtRangeBoundaries) {
   std::unique_ptr<Stream> copy_stream = device_->get_stream_from_pool();
   ASSERT_TRUE(
       synchronizer->record_stream(/*layer_index=*/0, copy_stream.get()));
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.parallel.layer_wise_load_synchronizer = synchronizer;
   params.parallel.layers_per_event = 2;
 

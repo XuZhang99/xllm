@@ -515,7 +515,7 @@ class Mistral3ForConditionalGenerationImpl : public torch::nn::Module {
   void prepare_encoder_input(
       const ModelInputParams& input_params,
       std::optional<Mistral3_VLImageInputs>& image_inputs) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+    const auto& mm_data = input_params.multimodal().mm_data;
 
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values")) {
@@ -533,7 +533,7 @@ class Mistral3ForConditionalGenerationImpl : public torch::nn::Module {
   }
 
   MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+    const auto& mm_data = input_params.multimodal().mm_data;
     bool has_pixel = mm_data.get<torch::Tensor>("pixel_values").has_value();
     bool has_thw = mm_data.get<torch::Tensor>("image_grid_thw").has_value();
 
@@ -578,7 +578,7 @@ class Mistral3ForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
                                      const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+    const auto& mm_data = input_params.multimodal().mm_data;
     torch::Tensor multimodal_embeds;
     // Pipeline stores image embeddings under "image|embedding" key
     // (via EncoderEmbeddingGatherVisitor). Also check "embedding" for

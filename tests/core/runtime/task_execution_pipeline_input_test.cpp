@@ -162,7 +162,7 @@ TEST_F(TaskExecutionPipelineInputTest, EmptyInputAndAbsentSamplingAreValid) {
 
 TEST_F(TaskExecutionPipelineInputTest,
        RejectsInvalidTransportAndAlgorithmFields) {
-  const auto rejected = [](LlmForwardInput invalid) {
+  const auto rejected = [](const LlmForwardInput& invalid) {
     EXPECT_FALSE(validate_input(invalid).ok());
   };
   auto invalid = ordinary_input();
@@ -264,20 +264,20 @@ TEST_F(TaskExecutionPipelineInputTest, RejectsMisalignedDpInputs) {
   };
   for (const auto member :
        {&ParallelInput::dp_global_token_nums, &ParallelInput::dp_is_decode}) {
-    auto invalid = input;
+    auto invalid = input.clone();
     (invalid.input_params.parallel.*member).pop_back();
     rejected(invalid);
   }
-  auto invalid = input;
+  auto invalid = input.clone();
   invalid.input_params.parallel.dp_global_token_nums[1] = -1;
   rejected(invalid);
-  invalid = input;
+  invalid = input.clone();
   invalid.input_params.parallel.dp_is_decode[1] = 2;
   rejected(invalid);
-  invalid = input;
+  invalid = input.clone();
   invalid.input_params.parallel.dp_global_token_nums[0] = 2;
   rejected(invalid);
-  invalid = input;
+  invalid = input.clone();
   invalid.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
   rejected(invalid);
 }

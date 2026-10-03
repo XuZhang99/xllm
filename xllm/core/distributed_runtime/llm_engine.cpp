@@ -1416,7 +1416,7 @@ std::vector<LlmForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
         current_batch_forward_type.is_decode() &&
         batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
 
-    const ModelEmbeddingInput& embedding =
+    const LlmEmbeddingInput& embedding =
         batched_inputs[dp_rank].input_params.embedding;
     if (dp_batch_embedding_ids_[dp_rank] != embedding.embedding_ids ||
         dp_batch_request_ids_[dp_rank] != embedding.request_ids) {

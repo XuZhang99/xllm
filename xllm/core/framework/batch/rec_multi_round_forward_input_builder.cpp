@@ -338,7 +338,7 @@ RecForwardInput RecMultiRoundForwardInputBuilder::state_to_forward_input() {
       torch::tensor(state.paged_kv_last_page_len, torch::kInt);
 
   // Setup multimodal data
-  input_params.multimodal.mm_data.batch(mm_data_vec_);
+  input_params.features.mm_data.batch(mm_data_vec_);
 
   // Setup block tables
   util::pad_2d_vector(state.block_tables_vec, /*pad_value=*/0);
@@ -356,7 +356,6 @@ RecForwardInput RecMultiRoundForwardInputBuilder::state_to_forward_input() {
     input_params.embedding.linear_state_indices =
         torch::tensor(input_params.embedding.linear_state_ids, torch::kInt);
   }
-  input_params.embedding.extra_token_ids = std::move(state.extra_token_ids);
 
   if (swap_block_transfer_infos_ != nullptr &&
       swap_block_transfer_infos_->size() > 0) {

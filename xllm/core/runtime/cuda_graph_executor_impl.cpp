@@ -347,7 +347,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   if (return_capture_params) {
     CHECK_GT(padded_num_tokens, 0)
         << "padded_num_tokens must be > 0 when return_capture_params is true";
-    params_for_capture = std::make_optional<ModelInputParams>(params);
+    params_for_capture.emplace(params.clone().view());
   }
   // Build attn_metadata with original model_input_params. So we can set actual
   // batch size in plan_info.

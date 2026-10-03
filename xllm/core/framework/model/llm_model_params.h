@@ -21,22 +21,21 @@ limitations under the License.
 
 namespace xllm {
 
-class VlmModelParams final {
+class LlmModelParams final {
  public:
-  VlmModelParams() = default;
-  VlmModelParams(const VlmModelParams&) = delete;
-  VlmModelParams& operator=(const VlmModelParams&) = delete;
-  VlmModelParams(VlmModelParams&&) = default;
-  VlmModelParams& operator=(VlmModelParams&&) = default;
+  LlmModelParams() = default;
+  LlmModelParams(const LlmModelParams&) = delete;
+  LlmModelParams& operator=(const LlmModelParams&) = delete;
+  LlmModelParams(LlmModelParams&&) = default;
+  LlmModelParams& operator=(LlmModelParams&&) = default;
 
-  VlmModelParams clone() const {
-    VlmModelParams out;
+  LlmModelParams clone() const {
+    LlmModelParams out;
     out.meta = meta;
     out.attention = attention;
     out.embedding = embedding;
     out.parallel = parallel;
     out.block_copy = block_copy;
-    out.multimodal = multimodal;
     out.expert = expert;
     out.graph = graph;
     out.multi_block_tables = multi_block_tables;
@@ -54,13 +53,12 @@ class VlmModelParams final {
     return out;
   }
 
-  VlmModelParams to(const torch::Device& device) const {
-    VlmModelParams params;
+  LlmModelParams to(const torch::Device& device) const {
+    LlmModelParams params;
     params.meta = meta;
     params.attention = attention.to(device);
     params.embedding = embedding.to(device);
     params.block_copy = block_copy.to(device);
-    params.multimodal = multimodal.to(device);
     params.parallel = parallel.to(device);
     params.expert = expert.to(device);
     params.graph = graph.to(device);
@@ -145,13 +143,12 @@ class VlmModelParams final {
   }
 
   BatchInputMeta meta;
-  VlmAttentionInput attention;
-  VlmEmbeddingInput embedding;
+  LlmAttentionInput attention;
+  LlmEmbeddingInput embedding;
   ParallelInput parallel;
   BlockCopyInput block_copy;
-  VlmVisionInput multimodal;
   ExpertInput expert;
-  VlmGraphInput graph;
+  LlmGraphInput graph;
   std::vector<torch::Tensor> multi_block_tables;
   torch::Tensor mtp_shifted_token_ids;
   std::vector<LinearStateCacheOp> linear_state_cache_ops;

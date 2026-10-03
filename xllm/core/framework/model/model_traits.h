@@ -23,7 +23,7 @@ limitations under the License.
 #include <vector>
 
 namespace xllm {
-struct ModelInputParams;
+class ModelInputParams;
 struct ModelGraphMetadataState;
 class KVCache;
 

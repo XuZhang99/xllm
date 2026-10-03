@@ -549,15 +549,15 @@ class JoyImageEditPlusPipelineImpl : public torch::nn::Module,
     return images;
   }
 
-  ModelInputParams build_text_encoder_input(const torch::Tensor& tokens,
-                                            const MMData& mm_data) {
+  VlmModelParams build_text_encoder_input(const torch::Tensor& tokens,
+                                          const MMData& mm_data) {
     CHECK_LE(tokens.numel(), std::numeric_limits<int32_t>::max())
         << "JoyImageEditPlus Qwen3-VL prompt is too long";
     const int32_t sequence_length = static_cast<int32_t>(tokens.numel());
     CHECK_GT(sequence_length, 0)
         << "JoyImageEditPlus Qwen3-VL prompt must not be empty";
 
-    ModelInputParams params;
+    VlmModelParams params;
     params.meta.num_sequences = 1;
     params.meta.actual_num_sequences = 1;
     params.meta.q_max_seq_len = sequence_length;
@@ -590,10 +590,10 @@ class JoyImageEditPlusPipelineImpl : public torch::nn::Module,
         << "JoyImageEditPlus failed to gather Qwen3-VL encoder inputs";
     mm_batch.to(tokens.device());
 
-    ModelInputParams multimodal_params;
+    VlmModelParams multimodal_params;
     multimodal_params.multimodal.mm_data = mm_batch;
-    MMDict multimodal_embeddings =
-        text_encoder_->get_multimodal_embeddings(multimodal_params);
+    MMDict multimodal_embeddings = text_encoder_->get_multimodal_embeddings(
+        ModelInputParams(multimodal_params));
     EncoderOutputScatterVisitor output_scatter(multimodal_embeddings);
     CHECK(mm_batch.foreach (output_scatter));
     CHECK(output_scatter.finish())
@@ -609,7 +609,7 @@ class JoyImageEditPlusPipelineImpl : public torch::nn::Module,
         << "JoyImageEditPlus failed to gather Qwen3-VL embeddings";
     params.multimodal.mm_data = std::move(mm_batch);
     params.embedding.input_embedding =
-        text_encoder_->get_input_embeddings(tokens, params);
+        text_encoder_->get_input_embeddings(tokens, ModelInputParams(params));
     return params;
   }
 
@@ -660,9 +660,12 @@ class JoyImageEditPlusPipelineImpl : public torch::nn::Module,
         torch::tensor(token_ids, torch::TensorOptions().dtype(torch::kInt32))
             .to(device_);
     positions = positions.to(device_);
-    ModelInputParams input_params = build_text_encoder_input(tokens, mm_data);
-    ModelOutput model_output = text_encoder_->forward(
-        tokens, positions, text_encoder_empty_kv_caches_, input_params);
+    VlmModelParams input_params = build_text_encoder_input(tokens, mm_data);
+    ModelOutput model_output =
+        text_encoder_->forward(tokens,
+                               positions,
+                               text_encoder_empty_kv_caches_,
+                               ModelInputParams(input_params));
     CHECK(model_output.residual.defined())
         << "JoyImageEditPlus requires Qwen3-VL pre-norm hidden states from "
            "the TORCH backend.";

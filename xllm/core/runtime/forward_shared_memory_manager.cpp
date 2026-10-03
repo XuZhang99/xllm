@@ -96,7 +96,7 @@ inline bool is_aligned_for_cuda_zero_copy(const void* ptr) {
 }
 
 // Domain values are stable across the forward-input migrations.
-enum class PackedInputDomain : uint8_t { TOKEN = 1, VLM = 2, REC = 3, DIT = 4 };
+enum class PackedInputDomain : uint8_t { LLM = 1, VLM = 2, REC = 3, DIT = 4 };
 
 template <typename Input>
 constexpr PackedInputDomain packed_input_domain() {
@@ -105,12 +105,11 @@ constexpr PackedInputDomain packed_input_domain() {
   } else if constexpr (std::is_same_v<Input, VlmForwardInput>) {
     return PackedInputDomain::VLM;
   }
-  return PackedInputDomain::TOKEN;
+  return PackedInputDomain::LLM;
 }
 constexpr uint64_t kPackedInputMagic = 0x584c4c4d494e5032;
-constexpr uint16_t kPackedInputSchemaVersion = 2;
+constexpr uint16_t kPackedInputSchemaVersion = 3;
 constexpr uint32_t kPackedInputHeaderBytes = 40;
-constexpr uint32_t kLegacyInputHeaderBytes = 24;
 
 struct RawInputLayoutHeader final {
   uint64_t descriptor_bytes = 0;
@@ -119,14 +118,13 @@ struct RawInputLayoutHeader final {
   uint32_t header_bytes = kPackedInputHeaderBytes;
 };
 
-// Validate the envelope before allocating pinned/device buffers. The legacy
-// reader is bounded to token payloads, whose descriptor ends with
-// has_dit=false.
+// Each domain has its own descriptor. Reject incompatible peers before
+// allocating pinned or device buffers.
 bool read_input_layout(const char* payload,
                        uint64_t payload_size,
                        PackedInputDomain expected_domain,
                        RawInputLayoutHeader& layout) {
-  if (payload_size < kLegacyInputHeaderBytes ||
+  if (payload_size < kPackedInputHeaderBytes ||
       payload_size >
           static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
     return false;
@@ -156,10 +154,7 @@ bool read_input_layout(const char* payload,
       return false;
     }
   } else {
-    if (expected_domain != PackedInputDomain::TOKEN) {
-      return false;
-    }
-    layout.header_bytes = kLegacyInputHeaderBytes;
+    return false;
   }
   read(layout.descriptor_bytes);
   read(layout.tensor_arena_offset);
@@ -171,17 +166,6 @@ bool read_input_layout(const char* payload,
       layout.tensor_arena_bytes != payload_size - layout.tensor_arena_offset ||
       layout.tensor_arena_offset % kRawInputTensorArenaAlignment != 0) {
     return false;
-  }
-  if (expected_domain == PackedInputDomain::TOKEN ||
-      expected_domain == PackedInputDomain::VLM ||
-      expected_domain == PackedInputDomain::REC) {
-    // The removed DiT tail remains false in the temporary token descriptor so
-    // legacy token payloads remain readable without reintroducing DiT
-    // ownership.
-    if (layout.descriptor_bytes == 0 ||
-        payload[layout.header_bytes + layout.descriptor_bytes - 1] != 0) {
-      return false;
-    }
   }
   return true;
 }
@@ -2713,22 +2697,23 @@ inline void deserialize_forward_input_payload(
         async_h2d_tensor(input_params.embedding.linear_state_ids, device);
   }
   read_string_vector(context, input_params.embedding.request_ids);
-  read_vector(context, input_params.embedding.extra_token_ids);
-  // Keep upstream's root mtp_shifted_token_ids serialization (consumed by
-  // non-CP MTP paths + minimax / qwen3-next models). The CP path additionally
-  // reads embedding.mtp_shifted_token_ids below. shared_blocks_num was
-  // dropped by the CP polish commit (no live worker consumer).
-  read_tensor(context, input_params.mtp_shifted_token_ids, stream);
-  read_tensor(context, input_params.embedding.mtp_shifted_token_ids, stream);
-  read_vector(context, input_params.embedding.mtp_bootstrap_row_idxes);
-  read_tensor(context, input_params.embedding.mtp_bootstrap_embeddings, stream);
+  if constexpr (!std::is_same_v<Input, RecForwardInput>) {
+    read_vector(context, input_params.embedding.extra_token_ids);
+    read_tensor(context, input_params.mtp_shifted_token_ids, stream);
+    read_tensor(context, input_params.embedding.mtp_shifted_token_ids, stream);
+    read_vector(context, input_params.embedding.mtp_bootstrap_row_idxes);
+    read_tensor(
+        context, input_params.embedding.mtp_bootstrap_embeddings, stream);
+  }
   read_swap_blocks(context, input_params.block_copy.swap_blocks);
   read_tensor(context, input_params.block_copy.src_block_indices, stream);
   read_tensor(context, input_params.block_copy.dst_block_indices, stream);
   read_tensor(context, input_params.block_copy.cum_sum, stream);
-  read_mm_batch_data(context, input_params.multimodal.mm_data);
   if constexpr (std::is_same_v<Input, VlmForwardInput>) {
+    read_mm_batch_data(context, input_params.multimodal.mm_data);
     read_vector_tensor(context, input_params.multimodal.deep_stacks, stream);
+  } else if constexpr (std::is_same_v<Input, RecForwardInput>) {
+    read_mm_batch_data(context, input_params.features.mm_data);
   }
   read_tensor_and_vector(context,
                          input_params.attention.device.kv_cache_tokens_nums,
@@ -2790,25 +2775,23 @@ inline void deserialize_forward_input_payload(
                        input_params.attention.device.block_tables,
                        input_params.attention.host.block_tables,
                        stream);
-  int32_t manager_num = 0;
-  read_data(context, manager_num);
-  CHECK_GE(manager_num, 0) << "multi_block_tables manager num is invalid.";
-  input_params.multi_block_tables.reserve(static_cast<size_t>(manager_num));
-  for (int32_t i = 0; i < manager_num; ++i) {
-    torch::Tensor manager_table;
-    read_tensor(context,
-                manager_table,
-                /*stream=*/nullptr,
-                /*force_host_materialize=*/true);
-    // Clone to decouple from shared memory buffer. With schedule_overlap the
-    // buffer may be overwritten by the next step while the worker is still
-    // reading multi_block_tables (which stay on CPU for DSA metadata).
-    input_params.multi_block_tables.emplace_back(manager_table.clone());
+  if constexpr (!std::is_same_v<Input, RecForwardInput>) {
+    int32_t manager_num = 0;
+    read_data(context, manager_num);
+    CHECK_GE(manager_num, 0) << "multi_block_tables manager num is invalid.";
+    input_params.multi_block_tables.reserve(static_cast<size_t>(manager_num));
+    for (int32_t i = 0; i < manager_num; ++i) {
+      torch::Tensor manager_table;
+      read_tensor(context,
+                  manager_table,
+                  /*stream=*/nullptr,
+                  /*force_host_materialize=*/true);
+      // Clone to decouple from shared memory buffer. With schedule_overlap the
+      // buffer may be overwritten by the next step while the worker is still
+      // reading multi_block_tables (which stay on CPU for DSA metadata).
+      input_params.multi_block_tables.emplace_back(manager_table.clone());
+    }
   }
-
-  bool has_legacy_dit_input = false;
-  read_data(context, has_legacy_dit_input);
-  CHECK(!has_legacy_dit_input) << "Legacy DiT requires native typed transport";
   CHECK_EQ(context.descriptor_cursor, descriptor_base + layout.descriptor_bytes)
       << "forward input descriptor was not consumed exactly";
   CHECK_EQ(context.tensor_cursor,
@@ -3163,21 +3146,23 @@ inline void serialize_forward_input_sections(
   write_vector(context.descriptor, input_params.embedding.linear_state_ids);
   write_linear_state_cache_ops(context, input_params.linear_state_cache_ops);
   write_string_vector(context.descriptor, input_params.embedding.request_ids);
-  write_vector(context.descriptor, input_params.embedding.extra_token_ids);
-  // Mirror the read_* layout: write root + embedding mtp paths so the
-  // deserializer sees both fields. Order MUST match the read_* sequence.
-  write_tensor(context, input_params.mtp_shifted_token_ids);
-  write_tensor(context, input_params.embedding.mtp_shifted_token_ids);
-  write_vector(context.descriptor,
-               input_params.embedding.mtp_bootstrap_row_idxes);
-  write_tensor(context, input_params.embedding.mtp_bootstrap_embeddings);
+  if constexpr (!std::is_same_v<Input, RecForwardInput>) {
+    write_vector(context.descriptor, input_params.embedding.extra_token_ids);
+    write_tensor(context, input_params.mtp_shifted_token_ids);
+    write_tensor(context, input_params.embedding.mtp_shifted_token_ids);
+    write_vector(context.descriptor,
+                 input_params.embedding.mtp_bootstrap_row_idxes);
+    write_tensor(context, input_params.embedding.mtp_bootstrap_embeddings);
+  }
   write_swap_blocks(context, input_params.block_copy.swap_blocks);
   write_tensor(context, input_params.block_copy.src_block_indices);
   write_tensor(context, input_params.block_copy.dst_block_indices);
   write_tensor(context, input_params.block_copy.cum_sum);
-  write_mm_batch_data(context, input_params.multimodal.mm_data);
   if constexpr (std::is_same_v<Input, VlmForwardInput>) {
+    write_mm_batch_data(context, input_params.multimodal.mm_data);
     write_vector_tensor(context, input_params.multimodal.deep_stacks);
+  } else if constexpr (std::is_same_v<Input, RecForwardInput>) {
+    write_mm_batch_data(context, input_params.features.mm_data);
   }
   write_host_vector_or_tensor(
       context,
@@ -3235,15 +3220,13 @@ inline void serialize_forward_input_sections(
       context,
       choose_host_or_device_tensor(input_params.attention.host.block_tables,
                                    input_params.attention.device.block_tables));
-  write_data(context.descriptor,
-             static_cast<int32_t>(input_params.multi_block_tables.size()));
-  for (const auto& manager_table : input_params.multi_block_tables) {
-    write_tensor(context, manager_table);
+  if constexpr (!std::is_same_v<Input, RecForwardInput>) {
+    write_data(context.descriptor,
+               static_cast<int32_t>(input_params.multi_block_tables.size()));
+    for (const auto& manager_table : input_params.multi_block_tables) {
+      write_tensor(context, manager_table);
+    }
   }
-
-  // Temporary legacy-token compatibility marker; removed after all token
-  // domains migrate to their independent descriptor contracts.
-  write_data(context.descriptor, /*has_legacy_dit_input=*/false);
 }
 
 inline void write_input_layout(char*& buffer,
@@ -3483,7 +3466,7 @@ bool unpack_native_input_host_buffer(const Input& input,
           layout)) {
     return false;
   }
-  output = input;
+  output = input.clone();
   output.runtime.device_tensors_ready = false;
   const char* payload_ptr =
       static_cast<const char*>(output.runtime.input_host_buffer.data_ptr());
@@ -3505,7 +3488,7 @@ bool unpack_native_input_host_buffer(const Input& input,
     normalize_float_param(output.sampling_params.repetition_penalties);
     normalize_float_param(output.sampling_params.temperatures);
     normalize_float_param(output.sampling_params.top_p);
-    if constexpr (!std::is_same_v<Input, VlmForwardInput>) {
+    if constexpr (std::is_same_v<Input, RecForwardInput>) {
       normalize_float_param(output.decoder_sampling_params.frequency_penalties);
       normalize_float_param(output.decoder_sampling_params.presence_penalties);
       normalize_float_param(
@@ -3583,7 +3566,7 @@ bool token_input_to_packed_proto(
     const Input& input,
     proto::PackedForwardInput* packed_forward_input) {
   CHECK(packed_forward_input != nullptr);
-  if constexpr (!std::is_same_v<Input, VlmForwardInput>) {
+  if constexpr (std::is_same_v<Input, RecForwardInput>) {
     if (!std::holds_alternative<std::monostate>(
             input.input_params.rec_params) ||
         input.step_decode.has_value()) {
@@ -3743,7 +3726,7 @@ void ForwardSharedMemoryManager::input_read(DiTForwardInput& input) {
 
 template <typename Input>
 bool ForwardSharedMemoryManager::write_token_input(const Input& input) {
-  if constexpr (!std::is_same_v<Input, VlmForwardInput>) {
+  if constexpr (std::is_same_v<Input, RecForwardInput>) {
     if (!std::holds_alternative<std::monostate>(
             input.input_params.rec_params) ||
         input.step_decode.has_value()) {

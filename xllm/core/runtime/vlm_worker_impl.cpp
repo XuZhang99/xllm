@@ -155,9 +155,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
   torch::Tensor lm_head_selected_token_idxes;
   torch::Tensor selected_hidden_from_lm_head;
   {
-    auto& owner = const_cast<VlmModelParams&>(input.input_params);
-    VlmLegacyExecutionProjection projection(owner);
-    ModelInputParams& params = projection.params();
+    ModelInputParams params(input.input_params);
     model_output = model_executor_->forward(
         input.token_ids, input.positions, kv_caches_, params);
     if (sampling_params.selected_token_idxes.defined()) {
@@ -222,7 +220,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
 
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
     output.retained_inputs.emplace_back(
-        std::make_shared<VlmForwardInput>(input));
+        std::make_shared<VlmForwardInput>(input.clone()));
     if (record_ready_event && enable_schedule_overlap()) {
       output.ready_event = record_current_stream_event(device_);
     }

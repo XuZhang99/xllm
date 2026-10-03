@@ -612,13 +612,13 @@ TEST_F(MTPHostOffloadTest, UnifiedTransferRoundTripUsesSharedSynchronizer) {
   load_info.transfer_type = TransferType::H2D;
   EXPECT_EQ(worker.transfer_kv_blocks(kBatchId, {load_info}), 1U);
 
-  ModelInputParams target_input_params;
+  LlmModelParams target_input_params;
   target_input_params.meta.batch_id = kBatchId;
   worker.set_hierarchy_layer_synchronizer(target_input_params);
   ASSERT_NE(target_input_params.parallel.layer_wise_load_synchronizer, nullptr);
   EXPECT_FALSE(unified_transfer->take_load_handle(kBatchId).has_value());
 
-  ModelInputParams draft_input_params = target_input_params;
+  LlmModelParams draft_input_params = target_input_params.clone();
   draft_ptr->set_hierarchy_layer_synchronizer(draft_input_params);
   ASSERT_NE(draft_input_params.parallel.layer_wise_load_synchronizer, nullptr);
   EXPECT_EQ(target_input_params.parallel.layer_wise_load_synchronizer.get(),
@@ -761,13 +761,13 @@ TEST_F(MTPHostOffloadTest, Dsv4DraftSkipsUnsupportedCompressedBlockTypes) {
             block_types.size());
   EXPECT_EQ(worker.transfer_kv_blocks(kBatchId, load_info), block_types.size());
 
-  ModelInputParams target_input_params;
+  LlmModelParams target_input_params;
   target_input_params.meta.batch_id = kBatchId;
   worker.set_hierarchy_layer_synchronizer(target_input_params);
   for (uint32_t layer_index = 0; layer_index < 3; ++layer_index) {
     ASSERT_TRUE(target_input_params.synchronize_layer(layer_index));
   }
-  ModelInputParams draft_input_params = target_input_params;
+  LlmModelParams draft_input_params = target_input_params.clone();
   draft_ptr->set_hierarchy_layer_synchronizer(draft_input_params);
   ASSERT_TRUE(draft_input_params.synchronize_draft_layer());
 

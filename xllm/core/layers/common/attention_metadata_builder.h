@@ -24,7 +24,7 @@ limitations under the License.
 
 namespace xllm {
 struct ModelArgs;
-struct ModelInputParams;
+class ModelInputParams;
 
 namespace layer {
 

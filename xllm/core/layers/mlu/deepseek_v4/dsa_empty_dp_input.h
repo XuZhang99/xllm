@@ -22,7 +22,7 @@ limitations under the License.
 
 namespace xllm {
 
-struct ModelInputParams;
+class ModelInputParams;
 
 namespace layer {
 

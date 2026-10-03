@@ -67,8 +67,9 @@ std::optional<ForwardOutput> EmbedWorkerImpl::step(
   auto sampling_params = input.sampling_params.to(device_, dtype_);
 
   // call model executor forward to get hidden states
+  ModelInputParams execution_params(params);
   auto model_output = model_executor_->forward(
-      flatten_tokens, flatten_positions, kv_caches_, params);
+      flatten_tokens, flatten_positions, kv_caches_, execution_params);
   auto hidden_states = model_output.hidden_states;
 
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());

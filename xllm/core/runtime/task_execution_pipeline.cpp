@@ -147,9 +147,8 @@ Status TaskExecutionPipeline::validate_input(const LlmForwardInput& source,
   if (source.runtime.device_tensors_ready ||
       source.runtime.metadata_ready_event != nullptr ||
       !source.runtime.retained_device_tensors.empty() ||
-      source.step_decode.has_value() || source.skip_sampling_for_logits_only ||
-      source.return_selected_hidden || !source.transfer_kv_infos.empty() ||
-      !source.json_object_states.empty() ||
+      source.skip_sampling_for_logits_only || source.return_selected_hidden ||
+      !source.transfer_kv_infos.empty() || !source.json_object_states.empty() ||
       !source.json_object_state_snapshots.empty() ||
       !source.json_object_invalid_draft.empty() ||
       !source.json_object_errors.empty() || params.is_spec_verify ||
@@ -158,12 +157,9 @@ Status TaskExecutionPipeline::validate_input(const LlmForwardInput& source,
       !params.multi_block_tables.empty() || params.mtp_topk_state != nullptr ||
       params.num_accepted_tokens.defined() ||
       !params.num_accepted_tokens_host.empty() ||
-      !std::holds_alternative<std::monostate>(params.rec_params) ||
       embedding.input_embedding.defined() || !copy.swap_blocks.empty() ||
       copy.src_block_indices.defined() || copy.dst_block_indices.defined() ||
-      copy.cum_sum.defined() || params.multimodal.mm_data.valid() ||
-      !params.multimodal.deep_stacks.empty() ||
-      params.parallel.cp_plan.enabled() ||
+      copy.cum_sum.defined() || params.parallel.cp_plan.enabled() ||
       params.parallel.layer_wise_load_synchronizer != nullptr ||
       params.expert.expert_load_data.defined() ||
       params.expert.expert_array.defined() ||

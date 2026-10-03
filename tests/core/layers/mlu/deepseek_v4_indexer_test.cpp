@@ -168,7 +168,7 @@ ModelInputParams make_c128_params(BatchForwardType batch_forward_type,
                                   const std::vector<int>& q_cu_lens,
                                   const std::vector<int>& kv_cu_lens,
                                   const torch::Tensor& block_table) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.batch_forward_type = batch_forward_type;
   params.meta.num_sequences = num_sequences;
   params.meta.actual_num_sequences = num_sequences;

@@ -899,13 +899,13 @@ ModelOutput AclGraph::replay(CausalLM* model,
     // Explicit producer-stream updates have populated the persistent graph
     // inputs. Host-only task parameters remain current and are consumed by
     // update_graph_tasks() below.
-    graph_params = params;
+    graph_params.emplace(params.clone().view());
   } else if (can_use_prepared_inputs) {
     persistent_param_.update_tokens(
         tokens, params, actual_num_tokens, num_tokens_);
   } else {
     auto [k_cache, v_cache] = find_attention_plan_kv_cache(kv_cache);
-    graph_params =
+    auto updated_graph_params =
         persistent_param_.update(tokens,
                                  k_cache,
                                  v_cache,
@@ -917,6 +917,9 @@ ModelOutput AclGraph::replay(CausalLM* model,
                                  /*for_capture=*/false,
                                  /*update_paged_attention_plan=*/
                                  !has_fused_infer_attention_graph_tasks());
+    if (updated_graph_params.has_value()) {
+      graph_params.emplace(*updated_graph_params);
+    }
     if (needs_graph_metadata) {
       CHECK(graph_params.has_value())
           << "ACL graph replay requires persistent params for graph metadata";
@@ -1104,7 +1107,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
                                       std::vector<KVCache>& kv_caches,
                                       const ModelInputParams& params) {
   auto run_eager = [&]() {
-    ModelInputParams eager_params = params;
+    ModelInputParams eager_params = params.clone().view();
     eager_params.enable_graph = false;
     eager_params.attn_metadata.reset();
     return forward_eager(model_, tokens, positions, kv_caches, eager_params);

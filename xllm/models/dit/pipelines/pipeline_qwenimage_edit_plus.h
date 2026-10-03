@@ -313,11 +313,10 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     return position_ids.reshape({3, -1}).contiguous();
   }
 
-  ModelInputParams build_qwen_vl_input_params(
-      const torch::Tensor& tokens,
-      const torch::Tensor& attention_mask,
-      MMBatchData mm_batch) {
-    ModelInputParams params;
+  VlmModelParams build_qwen_vl_input_params(const torch::Tensor& tokens,
+                                            const torch::Tensor& attention_mask,
+                                            MMBatchData mm_batch) {
+    VlmModelParams params;
     CHECK(attention_mask.defined() && attention_mask.dim() == 2)
         << "QwenImageEditPlus text encoder requires a [B, S] attention mask";
     int64_t batch_size = attention_mask.size(0);
@@ -362,14 +361,14 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
         tokens.eq(context_.get_model_args("text_encoder").image_token_id());
     if (image_mask.sum().item<int64_t>() == 0) {
       params.embedding.input_embedding =
-          text_encoder_->get_input_embeddings(tokens, params);
+          text_encoder_->get_input_embeddings(tokens, ModelInputParams(params));
       return params;
     }
 
-    ModelInputParams mm_params;
+    VlmModelParams mm_params;
     mm_params.multimodal.mm_data = MMBatchData::to(mm_batch, tokens.device());
     MMDict multimodal_embeds =
-        text_encoder_->get_multimodal_embeddings(mm_params);
+        text_encoder_->get_multimodal_embeddings(ModelInputParams(mm_params));
 
     auto image_embedding_value = multimodal_embeds.find("image|embedding");
     CHECK(image_embedding_value != multimodal_embeds.end())
@@ -392,7 +391,7 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     params.multimodal.mm_data = MMBatchData(MMType::IMAGE, embedding_data);
 
     params.embedding.input_embedding =
-        text_encoder_->get_input_embeddings(tokens, params);
+        text_encoder_->get_input_embeddings(tokens, ModelInputParams(params));
     return params;
   }
 #endif
@@ -630,13 +629,15 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     MMBatchData mm_batch(std::move(mm_data_list));
 
     std::vector<KVCache> kv_caches(text_encoder_args.n_layers());
-    ModelInputParams input_params = build_qwen_vl_input_params(
+    VlmModelParams input_params = build_qwen_vl_input_params(
         tokens_flat, attention_mask, std::move(mm_batch));
 #if defined(USE_DCU)
     input_params.graph.use_dense_flash_attention = true;
 #endif
-    auto model_output = text_encoder_->forward(
-        tokens_flat, positions_packed, kv_caches, input_params);
+    auto model_output = text_encoder_->forward(tokens_flat,
+                                               positions_packed,
+                                               kv_caches,
+                                               ModelInputParams(input_params));
     torch::Tensor hidden_states_flat = model_output.hidden_states;
     int64_t hidden_size = hidden_states_flat.size(-1);
     torch::Tensor padded_hidden_states_flat =

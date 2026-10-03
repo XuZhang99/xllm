@@ -33,7 +33,7 @@ namespace {
 ModelInputParams make_params(BatchForwardType forward_type,
                              const std::vector<int32_t>& q_cu_lens,
                              const std::vector<int32_t>& kv_cu_lens) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.batch_forward_type = forward_type;
   params.meta.num_sequences = static_cast<int32_t>(q_cu_lens.size()) - 1;
   params.meta.actual_num_sequences = params.meta.num_sequences;
@@ -105,7 +105,7 @@ TEST(DSAMetadataBuilderMluTest, BuildsCanonicalSeqMetadataFromCuLens) {
 }
 
 TEST(DSAMetadataBuilderMluTest, EmptyDpRankParamsBuildOneTokenDsaMetadata) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.batch_forward_type = BatchForwardType::DECODE;
   params.meta.num_sequences = 0;
   params.meta.actual_num_sequences = 0;

@@ -112,7 +112,7 @@ class SlotBufferTest : public ::testing::Test {
   void expect_device_input(const InputData& input) {
     CHECK(consumer_->wait_event(ready_));
     auto guard = consumer_->set_stream_guard();
-    const AttentionDeviceInput& device =
+    const AttentionDeviceInputView& device =
         binding_->model_params().attention.device;
     const std::array<torch::Tensor, 6> tensors = {binding_->tokens(),
                                                   binding_->positions(),
@@ -416,7 +416,7 @@ TEST_F(SlotBufferTest, VaryingSizesReuseAddressesAndHostCapacity) {
                   .ok());
   expect_device_input(first);
   const void* token_address = binding_->tokens().data_ptr();
-  const AttentionHostInput& host = binding_->model_params().attention.host;
+  const AttentionHostInputView& host = binding_->model_params().attention.host;
   const int32_t* lengths = host.q_seq_lens.data();
   const int32_t* slots = host.new_cache_slots.data();
   const size_t lengths_capacity = host.q_seq_lens.capacity();

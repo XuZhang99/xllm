@@ -66,7 +66,7 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
                       const torch::Tensor& positions,
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
-    ModelInputParams modified_input_params = input_params;
+    ModelInputParams modified_input_params = input_params.clone().view();
     if (!modified_input_params.attn_metadata) {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(

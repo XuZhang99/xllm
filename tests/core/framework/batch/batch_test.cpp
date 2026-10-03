@@ -1412,7 +1412,7 @@ TEST(BatchTest, Basic) {
   EXPECT_TRUE(equal(forward_input.positions, expected_pos));
 
   // check the input parameters
-  const ModelInputParams& input_params = forward_input.input_params;
+  const auto& input_params = forward_input.input_params;
   EXPECT_TRUE(input_params.meta.batch_forward_type.is_mixed());
   EXPECT_EQ(input_params.meta.num_sequences, 4);
   EXPECT_EQ(input_params.meta.q_max_seq_len, 9);

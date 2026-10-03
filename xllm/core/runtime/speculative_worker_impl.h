@@ -47,11 +47,11 @@ KVCacheShape build_speculative_draft_kv_cache_shape(
 
 // Returns whether this rank may execute the multi-step speculative decode
 // plan for the current global DP batch.
-bool should_run_speculative_decode(const ModelInputParams& params);
+bool should_run_speculative_decode(const LlmModelParams& params);
 bool should_run_speculative_decode(const VlmModelParams& params);
 
 // Keep padded and raw DP token-count views in the same speculative layout.
-void scale_speculative_parallel_token_counts(ModelInputParams& params,
+void scale_speculative_parallel_token_counts(LlmModelParams& params,
                                              int32_t multiplier);
 void scale_speculative_parallel_token_counts(VlmModelParams& params,
                                              int32_t multiplier);

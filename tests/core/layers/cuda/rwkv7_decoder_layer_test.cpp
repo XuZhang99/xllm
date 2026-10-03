@@ -147,7 +147,7 @@ KVCache make_kv_cache(const torch::Device& device) {
 ModelInputParams make_input_params(int32_t num_sequences,
                                    const std::vector<int32_t>& q_lens,
                                    const torch::Device& device) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.meta.num_sequences = num_sequences;
 
   std::vector<int32_t> q_cu_seq_lens;

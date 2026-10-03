@@ -108,7 +108,8 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
                               torch::Tensor positions,
                               std::vector<KVCache>& kv_caches,
                               const ModelInputParams& input_params) {
-    bool use_deepstack = input_params.multimodal.deep_stacks.size() > 0;
+    const bool use_deepstack = input_params.has_multimodal() &&
+                               !input_params.multimodal().deep_stacks.empty();
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     std::vector<torch::Tensor> deep_stacks;
@@ -125,8 +126,8 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
       h = embed_tokens_(tokens);
     }
     if (use_deepstack) {
-      deep_stacks =
-          input_params.multimodal.deep_stacks;  // [num_deepstack, hidden_size]
+      deep_stacks = input_params.multimodal()
+                        .deep_stacks;  // [num_deepstack, hidden_size]
     }
 
     auto& dp_token_nums = input_params_new.parallel.dp_global_token_nums;

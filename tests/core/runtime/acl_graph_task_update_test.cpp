@@ -493,7 +493,7 @@ class AclGraphTaskUpdateTest : public ::testing::Test {
     return cloned;
   }
 
-  void populate_query_start_loc(ModelInputParams& params) {
+  void populate_query_start_loc(LlmModelParams& params) {
     const auto& q_seq_lens = params.attention.host.q_seq_lens;
     params.parallel.query_start_loc.clear();
     params.parallel.query_start_loc.reserve(q_seq_lens.size() + 1);
@@ -593,7 +593,7 @@ class AclGraphTaskUpdateTest : public ::testing::Test {
     graph_exec->run({capture_fi.token_ids},
                     {capture_fi.positions},
                     kv_graph,
-                    {capture_fi.input_params});
+                    {ModelInputParams(capture_fi.input_params)});
     ASSERT_TRUE(model_->saw_causal_conv_and_fia_graph_tasks());
     EXPECT_EQ(model_->captured_fia_batch_size(), expected_bucket);
 
@@ -608,14 +608,16 @@ class AclGraphTaskUpdateTest : public ::testing::Test {
     populate_query_start_loc(replay_fi.input_params);
 
     auto kv_eager = clone_kv_caches(kv_graph);
-    auto graph_out = graph_exec->run({replay_fi.token_ids},
-                                     {replay_fi.positions},
-                                     kv_graph,
-                                     {replay_fi.input_params});
-    auto eager_out = model_->forward({replay_fi.token_ids},
-                                     {replay_fi.positions},
-                                     kv_eager,
-                                     {replay_fi.input_params});
+    auto graph_out =
+        graph_exec->run({replay_fi.token_ids},
+                        {replay_fi.positions},
+                        kv_graph,
+                        {ModelInputParams(replay_fi.input_params)});
+    auto eager_out =
+        model_->forward({replay_fi.token_ids},
+                        {replay_fi.positions},
+                        kv_eager,
+                        {ModelInputParams(replay_fi.input_params)});
 
     const int64_t real_tokens = static_cast<int64_t>(replay_batch_size);
     ASSERT_EQ(graph_out.hidden_states.size(0), real_tokens);
@@ -716,7 +718,7 @@ class AclGraphTaskUpdateTest : public ::testing::Test {
       }
     }
     layer::ExpandedDecodeMetadataBuilder::populate_expanded_layout(
-        fi.input_params,
+        ModelInputParams(fi.input_params),
         expanded_kv_seq_lens,
         expanded_bt,
         expanded_kv_vec,
@@ -928,19 +930,20 @@ TEST_F(AclGraphTaskUpdateTest,
   populate_query_start_loc(forward_input.input_params);
 
   auto kv_eager = create_hybrid_kv_caches();
-  auto eager_out =
-      shared_workspace_model->forward({forward_input.token_ids},
-                                      {forward_input.positions},
-                                      kv_eager,
-                                      {forward_input.input_params});
+  auto eager_out = shared_workspace_model->forward(
+      {forward_input.token_ids},
+      {forward_input.positions},
+      kv_eager,
+      {ModelInputParams(forward_input.input_params)});
 
   auto kv_graph = create_hybrid_kv_caches();
   auto graph_exec = std::make_unique<npu::AclGraphExecutorImpl>(
       shared_workspace_model.get(), model_args_, *device_, options_);
-  auto graph_out = graph_exec->run({forward_input.token_ids},
-                                   {forward_input.positions},
-                                   kv_graph,
-                                   {forward_input.input_params});
+  auto graph_out =
+      graph_exec->run({forward_input.token_ids},
+                      {forward_input.positions},
+                      kv_graph,
+                      {ModelInputParams(forward_input.input_params)});
 
   EXPECT_EQ(shared_workspace_model->fia_graph_task_count(), 2);
   EXPECT_TRUE(shared_workspace_model->all_fia_graph_tasks_share_workspace());
@@ -972,18 +975,20 @@ TEST_F(AclGraphTaskUpdateTest,
   populate_query_start_loc(forward_input.input_params);
 
   auto kv_eager = create_hybrid_kv_caches();
-  auto eager_out = non_qwen_model->forward({forward_input.token_ids},
-                                           {forward_input.positions},
-                                           kv_eager,
-                                           {forward_input.input_params});
+  auto eager_out =
+      non_qwen_model->forward({forward_input.token_ids},
+                              {forward_input.positions},
+                              kv_eager,
+                              {ModelInputParams(forward_input.input_params)});
 
   auto kv_graph = create_hybrid_kv_caches();
   auto graph_exec = std::make_unique<npu::AclGraphExecutorImpl>(
       non_qwen_model.get(), non_qwen_args, *device_, options_);
-  auto graph_out = graph_exec->run({forward_input.token_ids},
-                                   {forward_input.positions},
-                                   kv_graph,
-                                   {forward_input.input_params});
+  auto graph_out =
+      graph_exec->run({forward_input.token_ids},
+                      {forward_input.positions},
+                      kv_graph,
+                      {ModelInputParams(forward_input.input_params)});
 
   EXPECT_TRUE(non_qwen_model->saw_causal_conv_graph_task());
   EXPECT_FALSE(non_qwen_model->saw_fia_graph_task());
@@ -1016,18 +1021,20 @@ TEST_F(AclGraphTaskUpdateTest,
   setup_spec_verify_input(forward_input, kNumSequences, kNumSpecTokens);
 
   auto kv_eager = create_hybrid_kv_caches();
-  auto eager_out = pa_model->forward(forward_input.token_ids,
-                                     forward_input.positions,
-                                     kv_eager,
-                                     forward_input.input_params);
+  auto eager_out =
+      pa_model->forward(forward_input.token_ids,
+                        forward_input.positions,
+                        kv_eager,
+                        ModelInputParams(forward_input.input_params));
 
   auto kv_graph = create_hybrid_kv_caches();
   auto graph_exec = std::make_unique<npu::AclGraphExecutorImpl>(
       pa_model.get(), model_args_, *device_, options_);
-  auto graph_out = graph_exec->run(forward_input.token_ids,
-                                   forward_input.positions,
-                                   kv_graph,
-                                   forward_input.input_params);
+  auto graph_out =
+      graph_exec->run(forward_input.token_ids,
+                      forward_input.positions,
+                      kv_graph,
+                      ModelInputParams(forward_input.input_params));
 
   EXPECT_TRUE(pa_model->saw_causal_conv_graph_task());
   EXPECT_FALSE(pa_model->saw_fia_graph_task());
@@ -1050,12 +1057,16 @@ TEST_F(AclGraphTaskUpdateTest,
   auto graph_exec = std::make_unique<npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
-  auto out1 = graph_exec->run(
-      {fi1.token_ids}, {fi1.positions}, kv_graph, {fi1.input_params});
+  auto out1 = graph_exec->run({fi1.token_ids},
+                              {fi1.positions},
+                              kv_graph,
+                              {ModelInputParams(fi1.input_params)});
 
   auto kv_eager1 = create_hybrid_kv_caches();
-  auto eager1 = model_->forward(
-      {fi1.token_ids}, {fi1.positions}, kv_eager1, {fi1.input_params});
+  auto eager1 = model_->forward({fi1.token_ids},
+                                {fi1.positions},
+                                kv_eager1,
+                                {ModelInputParams(fi1.input_params)});
   EXPECT_TRUE(torch::allclose(out1.hidden_states.to(torch::kFloat32),
                               eager1.hidden_states.to(torch::kFloat32),
                               /*rtol=*/1e-2,
@@ -1077,8 +1088,10 @@ TEST_F(AclGraphTaskUpdateTest,
       << "linear_state_ids (cache_indices) must differ between runs";
 
   auto out1_saved = out1.hidden_states.clone();
-  auto out2 = graph_exec->run(
-      {fi2.token_ids}, {fi2.positions}, kv_graph, {fi2.input_params});
+  auto out2 = graph_exec->run({fi2.token_ids},
+                              {fi2.positions},
+                              kv_graph,
+                              {ModelInputParams(fi2.input_params)});
 
   EXPECT_FALSE(torch::allclose(out1_saved.to(torch::kFloat32),
                                out2.hidden_states.to(torch::kFloat32),
@@ -1120,14 +1133,14 @@ TEST_F(AclGraphTaskUpdateTest, CaptureReplayVsEagerSpecVerifyBranch) {
             static_cast<size_t>(kNumSequences));
 
   auto kv_eager = create_hybrid_kv_caches();
-  auto eager_out =
-      model_->forward(fi.token_ids, fi.positions, kv_eager, fi.input_params);
+  auto eager_out = model_->forward(
+      fi.token_ids, fi.positions, kv_eager, ModelInputParams(fi.input_params));
 
   auto kv_graph = create_hybrid_kv_caches();
   auto graph_exec = std::make_unique<npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
-  auto graph_out =
-      graph_exec->run(fi.token_ids, fi.positions, kv_graph, fi.input_params);
+  auto graph_out = graph_exec->run(
+      fi.token_ids, fi.positions, kv_graph, ModelInputParams(fi.input_params));
 
   EXPECT_EQ(eager_out.hidden_states.sizes(), graph_out.hidden_states.sizes());
   EXPECT_TRUE(torch::allclose(eager_out.hidden_states.to(torch::kFloat32),
@@ -1163,7 +1176,7 @@ TEST_F(AclGraphTaskUpdateTest, StaticMtpPrepareReplaysFiaSpecVerifyWidths) {
     graph_exec->run(forward_input.token_ids,
                     forward_input.positions,
                     kv_graph,
-                    forward_input.input_params);
+                    ModelInputParams(forward_input.input_params));
     ASSERT_TRUE(fia_model->saw_causal_conv_and_fia_graph_tasks());
 
     auto kv_eager = clone_kv_caches(kv_graph);
@@ -1200,14 +1213,16 @@ TEST_F(AclGraphTaskUpdateTest, StaticMtpPrepareReplaysFiaSpecVerifyWidths) {
         graph_exec->prepare_static_mtp_graph_tasks(signal, signal_stream));
     forward_input.input_params.graph.spec_verify_static_graph_tasks_prepared =
         true;
-    auto graph_out = graph_exec->run(forward_input.token_ids,
-                                     forward_input.positions,
-                                     kv_graph,
-                                     forward_input.input_params);
-    auto eager_out = fia_model->forward(forward_input.token_ids,
-                                        forward_input.positions,
-                                        kv_eager,
-                                        forward_input.input_params);
+    auto graph_out =
+        graph_exec->run(forward_input.token_ids,
+                        forward_input.positions,
+                        kv_graph,
+                        ModelInputParams(forward_input.input_params));
+    auto eager_out =
+        fia_model->forward(forward_input.token_ids,
+                           forward_input.positions,
+                           kv_eager,
+                           ModelInputParams(forward_input.input_params));
 
     EXPECT_EQ(eager_out.hidden_states.sizes(), graph_out.hidden_states.sizes());
     EXPECT_TRUE(torch::allclose(eager_out.hidden_states.to(torch::kFloat32),

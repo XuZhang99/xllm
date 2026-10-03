@@ -64,11 +64,9 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   auto params = input.input_params.to(device_);
   auto sampling_params = input.sampling_params.to(device_, dtype_);
 
-  auto model_output = [&]() {
-    VlmLegacyExecutionProjection projection(params);
-    return model_executor_->forward(
-        flatten_tokens, flatten_positions, kv_caches_, projection.params());
-  }();
+  ModelInputParams execution_params(params);
+  auto model_output = model_executor_->forward(
+      flatten_tokens, flatten_positions, kv_caches_, execution_params);
   auto hidden_states = model_output.hidden_states;
   ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());

@@ -149,7 +149,7 @@ TEST(MtpAsyncInputBuilderTest, BuildsTokenwiseSpecVerifyKvLengths) {
 }
 
 TEST(MtpAsyncInputBuilderTest, KeepsGenericPagedMetadataSeparate) {
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   params.attention.device.paged_kv_indptr = torch::tensor({0, 1}, torch::kInt);
   params.attention.device.paged_kv_indices = torch::tensor({99}, torch::kInt);
   params.attention.device.paged_kv_last_page_len =
@@ -241,7 +241,7 @@ TEST(MtpAsyncInputBuilderTest, PybindViewSelectsExpandedGraphMetadata) {
   runner.attr("attention_backend") = types.attr("SimpleNamespace")(
       py::arg("page_size") = kBlockSize, py::arg("is_mla") = false);
 
-  ModelInputParams params;
+  ModelInputParams params = ModelInputSnapshot(LlmModelParams()).view();
   // MTP may rewrite num_sequences to execution rows. The Python graph limit
   // must use the original requests, including a truly empty peer rank.
   params.meta.num_sequences = 6;

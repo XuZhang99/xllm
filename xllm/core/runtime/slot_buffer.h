@@ -333,7 +333,8 @@ class SlotBuffer final {
   torch::Tensor device_buffer_;
   ModelTensors model_host_;
   ModelTensors model_device_;
-  ModelInputParams model_params_;
+  LlmModelParams native_model_params_;
+  ModelInputParams model_params_{native_model_params_};
   torch::Tensor tokens_;
   torch::Tensor positions_;
   // Sampling and result storage have equal Host/device capacities.

@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "layers/common/expanded_decode_metadata_builder.h"
+#include "core/layers/common/expanded_decode_metadata_builder.h"
 
 #include <glog/logging.h>
 
@@ -22,8 +22,9 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "framework/model/model_input_params.h"
-#include "framework/model/vlm_model_params.h"
+#include "core/framework/model/llm_model_params.h"
+#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/vlm_model_params.h"
 
 namespace xllm::layer {
 namespace {
@@ -82,7 +83,7 @@ std::vector<int32_t> build_last_page_lens(
 }  // namespace
 
 template <typename Source>
-void ExpandedDecodeMetadataBuilder::populate(ModelInputParams& target,
+void ExpandedDecodeMetadataBuilder::populate(ModelInputParams target,
                                              const Source& source,
                                              const torch::Tensor& kv_seq_lens,
                                              int32_t block_size) {
@@ -128,7 +129,7 @@ void ExpandedDecodeMetadataBuilder::populate(ModelInputParams& target,
 }
 
 void ExpandedDecodeMetadataBuilder::populate_expanded_layout(
-    ModelInputParams& target,
+    ModelInputParams target,
     const torch::Tensor& expanded_kv_seq_lens,
     const torch::Tensor& expanded_block_tables,
     std::vector<int32_t> expanded_host_kv_seq_lens,
@@ -289,11 +290,15 @@ void ExpandedDecodeMetadataBuilder::validate(
   }
 }
 
-template void ExpandedDecodeMetadataBuilder::populate(ModelInputParams&,
+template void ExpandedDecodeMetadataBuilder::populate(ModelInputParams,
                                                       const ModelInputParams&,
                                                       const torch::Tensor&,
                                                       int32_t);
-template void ExpandedDecodeMetadataBuilder::populate(ModelInputParams&,
+template void ExpandedDecodeMetadataBuilder::populate(ModelInputParams,
+                                                      const LlmModelParams&,
+                                                      const torch::Tensor&,
+                                                      int32_t);
+template void ExpandedDecodeMetadataBuilder::populate(ModelInputParams,
                                                       const VlmModelParams&,
                                                       const torch::Tensor&,
                                                       int32_t);

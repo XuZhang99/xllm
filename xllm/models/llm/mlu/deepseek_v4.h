@@ -172,7 +172,7 @@ class DeepseekV4ModelImpl final
 
     const bool mlu_graph_forward = deepseek_v4_uses_mlu_graph(input_params);
 
-    ModelInputParams modified_input_params = input_params;
+    ModelInputParams modified_input_params = input_params.clone().view();
     if (is_empty_dp_rank && !mlu_graph_forward) {
       layer::fill_dsv4_empty_dp_params(
           modified_input_params, group_infos_, window_size_);
@@ -296,7 +296,7 @@ void DeepseekV4Base::prepare_graph_forward_metadata(
   CHECK(dsv4_state != nullptr)
       << "DeepSeek V4 MLU received incompatible graph metadata state";
 
-  auto modified_input_params = input_params;
+  auto modified_input_params = input_params.clone().view();
   auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
   std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
 

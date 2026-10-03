@@ -390,7 +390,7 @@ class MtpModelImplBase : public torch::nn::Module {
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
     // for dp, if tokens is empty, set tokens to 1 and positions to 0
-    ModelInputParams modified_input_params = input_params;
+    ModelInputParams modified_input_params = input_params.clone().view();
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);

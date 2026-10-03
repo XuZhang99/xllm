@@ -179,27 +179,15 @@ void finalize_output_on_stream(ForwardOutput& output,
 }
 
 #if defined(USE_NPU)
-void populate_expanded_layout(ModelInputParams& input_params,
+template <typename Params>
+void populate_expanded_layout(Params& input_params,
                               torch::Tensor expanded_kv_seq_lens,
                               torch::Tensor expanded_block_tables,
                               std::vector<int32_t> expanded_host_kv_seq_lens,
                               int32_t block_size) {
+  ModelInputParams execution_params(input_params);
   layer::ExpandedDecodeMetadataBuilder::populate_expanded_layout(
-      input_params,
-      expanded_kv_seq_lens,
-      expanded_block_tables,
-      std::move(expanded_host_kv_seq_lens),
-      block_size);
-}
-
-void populate_expanded_layout(VlmModelParams& input_params,
-                              torch::Tensor expanded_kv_seq_lens,
-                              torch::Tensor expanded_block_tables,
-                              std::vector<int32_t> expanded_host_kv_seq_lens,
-                              int32_t block_size) {
-  VlmLegacyExecutionProjection projection(input_params);
-  layer::ExpandedDecodeMetadataBuilder::populate_expanded_layout(
-      projection.params(),
+      execution_params,
       expanded_kv_seq_lens,
       expanded_block_tables,
       std::move(expanded_host_kv_seq_lens),
@@ -1451,7 +1439,6 @@ void MTPWorkerImpl<TargetInput>::prepare_prefill_inputs(
   clear_ready_events(prefill_input);
   // Draft prefill consumes target hidden states, not vision inputs.
   auto& input_params = prefill_input.input_params;
-  input_params.multimodal = MultiModalInput();
   // The Qwen draft is a pure full-attention model; without this cleanup the
   // target's recurrent slot metadata makes MTP prefill enter a stateful path
   // it has neither a validity mask nor a recurrent cache for.

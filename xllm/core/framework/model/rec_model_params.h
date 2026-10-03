@@ -17,30 +17,104 @@ limitations under the License.
 
 #include <utility>
 
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/domain_attention_input.h"
+#include "core/framework/model/rec_strategy_params.h"
 
 namespace xllm {
 
+class RecEmbeddingInput final {
+ public:
+  RecEmbeddingInput to(const torch::Device& device) const {
+    RecEmbeddingInput out;
+    out.input_embedding = safe_to(input_embedding, device);
+    out.embedding_ids = embedding_ids;
+    out.linear_state_ids = linear_state_ids;
+    out.linear_state_indices = safe_to(linear_state_indices, device, true);
+    out.request_ids = request_ids;
+    return out;
+  }
+  mutable torch::Tensor input_embedding;
+  std::vector<int32_t> embedding_ids;
+  std::vector<int32_t> linear_state_ids;
+  torch::Tensor linear_state_indices;
+  std::vector<std::string> request_ids;
+};
+
+class RecFeatureInput final {
+ public:
+  RecFeatureInput to(const torch::Device& device) const {
+    RecFeatureInput out;
+    out.mm_data = MMBatchData::to(mm_data, device);
+    return out;
+  }
+  mutable MMBatchData mm_data;
+};
+
+class RecGraphInput final {
+ public:
+  RecGraphInput to(const torch::Device& device) const {
+    RecGraphInput out;
+    out.attn_mask = safe_to(attn_mask, device, true);
+    out.tiling_data = safe_to(tiling_data, device, true);
+#if defined(USE_DCU)
+    out.use_dense_flash_attention = use_dense_flash_attention;
+#endif
+#if defined(USE_NPU)
+    out.acl_graph_task_update_context = acl_graph_task_update_context;
+#endif
+    return out;
+  }
+  torch::Tensor attn_mask;
+  torch::Tensor tiling_data;
+#if defined(USE_DCU)
+  bool use_dense_flash_attention = false;
+#endif
+#if defined(USE_NPU)
+  std::shared_ptr<npu::AclGraphTaskUpdateContext> acl_graph_task_update_context;
+#endif
+};
+
 class RecModelParams final {
  public:
+  RecModelParams() = default;
+  RecModelParams(const RecModelParams&) = delete;
+  RecModelParams& operator=(const RecModelParams&) = delete;
+  RecModelParams(RecModelParams&&) = default;
+  RecModelParams& operator=(RecModelParams&&) = default;
+
+  RecModelParams clone() const {
+    RecModelParams out;
+    out.meta = meta;
+    out.attention = attention;
+    out.embedding = embedding;
+    out.parallel = parallel;
+    out.block_copy = block_copy;
+    out.features = features;
+    out.expert = expert;
+    out.graph = graph;
+    out.linear_state_cache_ops = linear_state_cache_ops;
+    out.linear_state_validity_mask = linear_state_validity_mask;
+    out.rec_params = rec_params;
+    out.attn_metadata = attn_metadata;
+    out.python_attention_metadata = python_attention_metadata;
+    out.prefill_without_cache = prefill_without_cache;
+    out.enable_graph = enable_graph;
+    return out;
+  }
+
   RecModelParams to(const torch::Device& device) const {
     RecModelParams params;
     params.meta = meta;
+    params.prefill_without_cache = prefill_without_cache;
     params.attention = attention.to(device);
     params.embedding = embedding.to(device);
     params.parallel = parallel.to(device);
     params.block_copy = block_copy.to(device);
-    params.multimodal = multimodal.to(device);
+    params.features = features.to(device);
     params.expert = expert.to(device);
     params.graph = graph.to(device);
     params.linear_state_cache_ops = linear_state_cache_ops;
     params.linear_state_validity_mask = linear_state_validity_mask;
-    params.multi_block_tables.reserve(multi_block_tables.size());
-    for (const auto& table : multi_block_tables) {
-      params.multi_block_tables.emplace_back(
-          safe_to(table, table.options().device(torch::kCPU), true));
-    }
-    params.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
     if (!params.embedding.linear_state_indices.defined() &&
         !params.embedding.linear_state_ids.empty()) {
       params.embedding.linear_state_indices =
@@ -108,62 +182,20 @@ class RecModelParams final {
   }
 
   BatchInputMeta meta;
-  AttentionInput attention;
-  ModelEmbeddingInput embedding;
+  RecAttentionInput attention;
+  RecEmbeddingInput embedding;
   ParallelInput parallel;
   BlockCopyInput block_copy;
-  MultiModalInput multimodal;
+  RecFeatureInput features;
   ExpertInput expert;
-  GraphInput graph;
-  std::vector<torch::Tensor> multi_block_tables;
-  torch::Tensor mtp_shifted_token_ids;
+  RecGraphInput graph;
   std::vector<LinearStateCacheOp> linear_state_cache_ops;
   LinearStateValidityMask linear_state_validity_mask;
   RecModelInputParams rec_params;
   std::shared_ptr<layer::AttentionMetadata> attn_metadata;
   std::shared_ptr<PythonAttentionMetadata> python_attention_metadata;
+  bool prefill_without_cache = false;
   bool enable_graph = false;
-};
-
-// Temporary synchronous executor adapter. The owner must not be accessed until
-// destruction restores its fields, including executor-produced metadata.
-class RecLegacyExecutionProjection final {
- public:
-  explicit RecLegacyExecutionProjection(RecModelParams& owner) : owner_(owner) {
-    exchange_fields();
-  }
-
-  ~RecLegacyExecutionProjection() { exchange_fields(); }
-
-  RecLegacyExecutionProjection(const RecLegacyExecutionProjection&) = delete;
-  RecLegacyExecutionProjection& operator=(const RecLegacyExecutionProjection&) =
-      delete;
-
-  ModelInputParams& params() { return params_; }
-
- private:
-  void exchange_fields() {
-    using std::swap;
-    swap(owner_.meta, params_.meta);
-    swap(owner_.attention, params_.attention);
-    swap(owner_.embedding, params_.embedding);
-    swap(owner_.parallel, params_.parallel);
-    swap(owner_.block_copy, params_.block_copy);
-    swap(owner_.multimodal, params_.multimodal);
-    swap(owner_.expert, params_.expert);
-    swap(owner_.graph, params_.graph);
-    swap(owner_.multi_block_tables, params_.multi_block_tables);
-    swap(owner_.mtp_shifted_token_ids, params_.mtp_shifted_token_ids);
-    swap(owner_.linear_state_cache_ops, params_.linear_state_cache_ops);
-    swap(owner_.linear_state_validity_mask, params_.linear_state_validity_mask);
-    swap(owner_.rec_params, params_.rec_params);
-    swap(owner_.attn_metadata, params_.attn_metadata);
-    swap(owner_.python_attention_metadata, params_.python_attention_metadata);
-    swap(owner_.enable_graph, params_.enable_graph);
-  }
-
-  RecModelParams& owner_;
-  ModelInputParams params_;
 };
 
 }  // namespace xllm

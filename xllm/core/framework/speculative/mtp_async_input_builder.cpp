@@ -63,7 +63,7 @@ void expand_decode_attention_metadata(LlmForwardInput& draft_input,
                                       const torch::Tensor& kv_seq_lens,
                                       int32_t block_size) {
   layer::ExpandedDecodeMetadataBuilder::populate(
-      draft_input.input_params,
+      ModelInputParams(draft_input.input_params),
       block_table_source.input_params,
       kv_seq_lens,
       block_size);

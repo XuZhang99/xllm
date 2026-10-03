@@ -27,7 +27,7 @@ limitations under the License.
 
 namespace xllm {
 
-struct ModelInputParams;
+class ModelInputParams;
 class LlmForwardInput;
 struct SamplingParameters;
 

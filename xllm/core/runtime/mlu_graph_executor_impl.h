@@ -54,7 +54,7 @@ class GraphPersistentParam {
   // input tensors
   torch::Tensor tokens_;
   torch::Tensor positions_;
-  ModelInputParams params_;
+  std::optional<ModelInputParams> params_;
   // mrope
   bool use_mrope_ = false;
   // output

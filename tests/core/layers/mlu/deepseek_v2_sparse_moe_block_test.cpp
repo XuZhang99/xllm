@@ -272,14 +272,14 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PlanExecEnablesAll2AllOnlyForDecode) {
   auto block = create_block();
   DeepseekV2SparseMoEBlockTestPeer::set_enable_deep_ep(*block, true);
 
-  ModelInputParams decode_params;
+  ModelInputParams decode_params = ModelInputSnapshot(LlmModelParams()).view();
   decode_params.parallel.dp_global_token_nums = {1, 1};
   decode_params.parallel.dp_is_decode = {1, 1};
   auto decode_cfg = block->plan_exec(decode_params);
   EXPECT_TRUE(decode_cfg.enable_all2all);
   EXPECT_FALSE(decode_cfg.need_dp_gather);
 
-  ModelInputParams mixed_params;
+  ModelInputParams mixed_params = ModelInputSnapshot(LlmModelParams()).view();
   mixed_params.parallel.dp_global_token_nums = {2, 1};
   mixed_params.parallel.dp_is_decode = {0, 1};
   auto mixed_cfg = block->plan_exec(mixed_params);
@@ -291,7 +291,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PlanExecSetsDpGatherWhenAll2AllOff) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.parallel.dp_global_token_nums = {3, 1};
   input_params.parallel.dp_is_decode = {0, 0};
 
@@ -304,7 +304,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInDpGatherBuildsLocalSkip) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.parallel.dp_global_token_nums = {3, 1};
   auto attn_out =
       mat(/*rows=*/4, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f});
@@ -334,7 +334,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, GatherInDpGatherRebuildsGlobalTokens) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.parallel.dp_global_token_nums = {3, 1};
   DeepseekV2SparseMoEBlockImpl::PrepOut prep;
   prep.ffn_in = mat(/*rows=*/2, {11.0f, 22.0f, 33.0f, 44.0f});
@@ -357,7 +357,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInAll2AllPadsTpShardInput) {
   auto block = create_block();
   DeepseekV2SparseMoEBlockTestPeer::set_enable_deep_ep(*block, true);
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.parallel.dp_global_token_nums = {1, 1};
   input_params.parallel.dp_is_decode = {1, 1};
   auto attn_out = mat(/*rows=*/3, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
@@ -383,7 +383,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInUsesProvidedExecCfg) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.parallel.dp_global_token_nums = {3, 1};
   input_params.parallel.dp_is_decode = {0, 0};
   auto planned_cfg = block->plan_exec(input_params);
@@ -412,7 +412,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, MergeOutTpPadGathersAndUnpads) {
   set_tp_ctx(/*world_size=*/2, /*ep_size=*/2);
   auto block = create_block();
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   DeepseekV2SparseMoEBlockImpl::PrepOut prep;
   prep.need_tp_pad = true;
   prep.pad_info = {.original_tokens = 3, .padded_tokens = 4, .active = true};
@@ -431,7 +431,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, MergeOutDpGatherSlicesLocalTokens) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
+  ModelInputParams input_params = ModelInputSnapshot(LlmModelParams()).view();
   input_params.parallel.dp_global_token_nums = {3, 1};
   DeepseekV2SparseMoEBlockImpl::PrepOut prep;
   prep.skip_local = mat(/*rows=*/3, {11.0f, 22.0f, 33.0f, 44.0f, 55.0f, 66.0f});

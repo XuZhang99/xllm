@@ -104,7 +104,7 @@ runtime::Options draft_options(const runtime::Options& options) {
   return opts;
 }
 
-void expand_block_parallel_sequence_rows(ModelInputParams& input_params,
+void expand_block_parallel_sequence_rows(LlmModelParams& input_params,
                                          int32_t query_width) {
   input_params.meta.num_sequences *= query_width;
   if (input_params.meta.actual_num_sequences > 0) {
@@ -151,10 +151,9 @@ void wait_metadata_ready_event(const LlmForwardInput& input, Stream& stream) {
 }
 
 #if defined(USE_NPU)
-void build_dflash_expanded_spec_verify_graph_input(
-    ModelInputParams& input_params,
-    const torch::Device& device,
-    int32_t block_size) {
+void build_dflash_expanded_spec_verify_graph_input(LlmModelParams& input_params,
+                                                   const torch::Device& device,
+                                                   int32_t block_size) {
   if (!::xllm::ExecutionConfig::get_instance().enable_graph() ||
       !input_params.is_spec_verify ||
       !input_params.meta.batch_forward_type.is_chunked_prefill()) {
@@ -195,7 +194,7 @@ void build_dflash_expanded_spec_verify_graph_input(
   torch::Tensor expanded_block_tables =
       torch::stack(expanded_block_rows, /*dim=*/0).contiguous();
   layer::ExpandedDecodeMetadataBuilder::populate_expanded_layout(
-      input_params,
+      ModelInputParams(input_params),
       expanded_kv_seq_lens_device,
       expanded_block_tables,
       std::move(expanded_kv_seq_lens),
@@ -686,7 +685,7 @@ bool DFlashWorkerImpl::allocate_kv_cache_with_transfer(
 
 LlmForwardInput DFlashWorkerImpl::update_input_by_last_step_output(
     LlmForwardInput& inputs) {
-  return inputs;
+  return inputs.clone();
 }
 
 std::optional<ForwardOutput> DFlashWorkerImpl::step_empty(
@@ -1355,7 +1354,7 @@ void DFlashWorkerImpl::prepare_validate_inputs(
       prepared_input, validate_input);
   validate_input.input_params.embedding.input_embedding = torch::Tensor();
   if (use_linear_spec_verify) {
-    ModelInputParams& input_params = validate_input.input_params;
+    LlmModelParams& input_params = validate_input.input_params;
     std::vector<int32_t> accepted_prefix_lengths(
         input.input_params.meta.num_sequences, 1);
     if (embedding_cache_ != nullptr &&
@@ -1395,7 +1394,7 @@ void DFlashWorkerImpl::prepare_query_inputs(const LlmForwardInput& input,
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   query_input = input.clone();
   query_input.runtime.device_tensors_ready = false;
-  ModelInputParams& input_params = query_input.input_params;
+  LlmModelParams& input_params = query_input.input_params;
   input_params.embedding.input_embedding = torch::Tensor();
   dflash_detail::invalidate_draft_model_geometry(input_params);
 
@@ -1493,8 +1492,7 @@ void DFlashWorkerImpl::write_context_kv(
     std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer =
         std::make_shared<NPULayerSynchronizerImpl>(
             draft_impl_->context_.get_model_args().n_layers());
-    const_cast<ModelInputParams*>(&(input.input_params))
-        ->parallel.layer_synchronizer = layer_synchronizer;
+    input.input_params.parallel.layer_synchronizer = layer_synchronizer;
     kv_transfers.add(kv_cache_transfer_->push_kv_blocks_async(
         input.transfer_kv_infos,
         draft_impl_->context_.get_parallel_args(),

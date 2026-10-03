@@ -312,7 +312,7 @@ class MusaGraph final {
   // path), copies CPU->pinned host directly and avoids per-step D2H sync.
   void refresh_persistent_paged_kv_host_mirrors(
       const std::shared_ptr<layer::AttentionMetadata>& attn_metadata,
-      const AttentionHostInput& host_src);
+      const AttentionHostInputView& host_src);
 
   // Reference to persistent parameters (shared across multiple MusaGraph
   // instances).

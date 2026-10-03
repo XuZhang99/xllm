@@ -23,7 +23,7 @@ limitations under the License.
 namespace xllm {
 
 class ProcessGroup;
-struct ModelInputParams;
+class ModelInputParams;
 struct ParallelInput;
 class LlmForwardInput;
 enum class KvSlotLayout : int8_t;

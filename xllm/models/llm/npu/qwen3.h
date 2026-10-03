@@ -167,7 +167,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
                               torch::Tensor positions,
                               std::vector<KVCache>& kv_caches,
                               const ModelInputParams& input_params) {
-    bool use_deepstack = input_params.multimodal.deep_stacks.size() > 0;
+    const bool use_deepstack = input_params.has_multimodal() &&
+                               !input_params.multimodal().deep_stacks.empty();
     std::vector<torch::Tensor> deep_stacks;
 
     if (tokens.numel() == 0) {
@@ -193,8 +194,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     }
 
     if (use_deepstack) {
-      deep_stacks =
-          input_params.multimodal.deep_stacks;  // [num_deepstack, hidden_size]
+      deep_stacks = input_params.multimodal()
+                        .deep_stacks;  // [num_deepstack, hidden_size]
     }
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
