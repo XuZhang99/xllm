@@ -50,7 +50,7 @@ namespace xllm {
 namespace {
 
 void wait_input_ready_events(const ForwardInput& input, const Stream& stream) {
-  CHECK(stream.wait_event(input.metadata_ready_event))
+  CHECK(stream.wait_event(input.runtime.metadata_ready_event))
       << "failed to wait ForwardInput metadata ready event";
 }
 

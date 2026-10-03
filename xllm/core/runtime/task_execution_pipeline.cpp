@@ -144,8 +144,9 @@ Status TaskExecutionPipeline::validate_input(const ForwardInput& source,
   const auto& meta = params.meta;
   const auto& embedding = params.embedding;
   const auto& copy = params.block_copy;
-  if (source.device_tensors_ready || source.metadata_ready_event != nullptr ||
-      !source.retained_device_tensors.empty() ||
+  if (source.runtime.device_tensors_ready ||
+      source.runtime.metadata_ready_event != nullptr ||
+      !source.runtime.retained_device_tensors.empty() ||
       source.step_decode.has_value() || source.skip_sampling_for_logits_only ||
       source.return_selected_hidden || !source.transfer_kv_infos.empty() ||
       !source.json_object_states.empty() ||
@@ -199,7 +200,7 @@ Status TaskExecutionPipeline::validate_input(const ForwardInput& source,
   }
   const auto& tokens = source.host_token_ids();
   const auto& slots = params.attention.device.new_cache_slots;
-  if (source.input_host_buffer_has_layout ||
+  if (source.runtime.input_host_buffer_has_layout ||
       (tokens.defined() && !is_cpu_int_tensor(tokens, /*dimensions=*/1)) ||
       (source.host_positions().defined() &&
        !is_cpu_int_tensor(source.host_positions(), /*dimensions=*/1)) ||
@@ -361,7 +362,7 @@ TaskSubmission TaskExecutionPipeline::submit(const ForwardInput& input) {
   check_external_thread();
   ForwardInput unpacked;
   const ForwardInput* source = &input;
-  if (input.input_host_buffer_has_layout) {
+  if (input.runtime.input_host_buffer_has_layout) {
     CHECK(detail::unpack_from_input_host_buffer(
         input, device_.unwrap(), unpacked));
     source = &unpacked;

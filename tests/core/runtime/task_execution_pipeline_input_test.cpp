@@ -179,10 +179,10 @@ TEST_F(TaskExecutionPipelineInputTest,
   invalid.input_params.meta.actual_num_sequences = 2;
   rejected(invalid);
   invalid = ordinary_input();
-  invalid.input_host_buffer_has_layout = true;
+  invalid.runtime.input_host_buffer_has_layout = true;
   rejected(invalid);
   invalid = ordinary_input();
-  invalid.device_tensors_ready = true;
+  invalid.runtime.device_tensors_ready = true;
   rejected(invalid);
   invalid = ordinary_input();
   invalid.input_params.is_spec_verify = true;

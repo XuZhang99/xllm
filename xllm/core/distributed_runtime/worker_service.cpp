@@ -53,7 +53,7 @@ int32_t get_num_decode_seqs_for_schedule_overlap(const ForwardInput& input) {
     return static_cast<int32_t>(input.sampling_params.sample_idxes.size(0));
   }
 
-  if (!input.input_host_buffer_has_layout) {
+  if (!input.runtime.input_host_buffer_has_layout) {
     return 0;
   }
 

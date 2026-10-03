@@ -1219,7 +1219,7 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
     // only graph double-buffer decode can prepare the next slot independently.
     prepare_stream.wait_stream(*compute_stream_);
   }
-  CHECK(prepare_stream.wait_event(input.metadata_ready_event))
+  CHECK(prepare_stream.wait_event(input.runtime.metadata_ready_event))
       << "failed to wait input metadata ready event on worker prepare stream";
 
   auto prepare_device_on_stream = [&]() {
@@ -1344,10 +1344,10 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
   prepare_device_on_stream();
 
   if (record_ready_event) {
-    processed_input.metadata_ready_event =
+    processed_input.runtime.metadata_ready_event =
         prepare_stream.record_event_or_sync();
   } else {
-    processed_input.metadata_ready_event.reset();
+    processed_input.runtime.metadata_ready_event.reset();
   }
 }
 

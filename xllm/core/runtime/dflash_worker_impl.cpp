@@ -142,11 +142,11 @@ void repeat_sampling_params(SamplingParameters& sampling_params,
 }
 
 void record_metadata_ready_event(Stream& stream, ForwardInput& input) {
-  input.metadata_ready_event = stream.record_event_or_sync();
+  input.runtime.metadata_ready_event = stream.record_event_or_sync();
 }
 
 void wait_metadata_ready_event(const ForwardInput& input, Stream& stream) {
-  CHECK(stream.wait_event(input.metadata_ready_event))
+  CHECK(stream.wait_event(input.runtime.metadata_ready_event))
       << "failed to wait DFlash metadata ready event";
 }
 
@@ -936,11 +936,11 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs(
   torch::Tensor validate_token_rows =
       validate_input.token_ids.view({num_sequences, num_val_tokens});
 
-  validate_input.device_tensors_ready = false;
+  validate_input.runtime.device_tensors_ready = false;
   if (effective_speculative_tokens == 0) {
     // Controller pruned every seq's speculation down to zero; nothing to fill
     // beyond the anchor column that already holds the real token.
-    validate_input.device_tensors_ready = true;
+    validate_input.runtime.device_tensors_ready = true;
     // still need to publish the compute-stream write below.
   } else {
     using ISlice = torch::indexing::Slice;
@@ -953,7 +953,7 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs(
         safe_to(draft_slice, token_options, /*non_blocking=*/true);
     validate_token_rows.index({ISlice(), ISlice(1, num_val_tokens)})
         .copy_(draft_tokens, /*non_blocking=*/true);
-    validate_input.device_tensors_ready = true;
+    validate_input.runtime.device_tensors_ready = true;
   }
   // Publish this compute-stream write so the target's prepare stage (which
   // consumes validate_input.token_ids under ACL-graph double buffering) waits
@@ -982,7 +982,7 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs_varlen(
   c10::StreamGuard stream_guard = compute_stream.set_stream_guard();
   wait_metadata_ready_event(validate_input, compute_stream);
 
-  validate_input.device_tensors_ready = false;
+  validate_input.runtime.device_tensors_ready = false;
 
   // Compute destination offsets: seq i's draft tokens go at
   // [cu_offset[i] + 1, cu_offset[i] + per_seq_val_tokens[i]).
@@ -1025,7 +1025,7 @@ void DFlashWorkerImpl::fill_validate_input_from_draft_outputs_varlen(
         safe_to(draft_selected, token_options, /*non_blocking=*/true);
     validate_input.token_ids.index_copy_(/*dim=*/0, dst_idx, draft_tokens);
   }
-  validate_input.device_tensors_ready = true;
+  validate_input.runtime.device_tensors_ready = true;
   record_metadata_ready_event(compute_stream, validate_input);
 }
 
@@ -1340,14 +1340,14 @@ void DFlashWorkerImpl::update_decode_step_input(
   input.token_ids_host = specBuilder::make_cpu_int_tensor(token_ids_vec);
   input.positions_host = specBuilder::make_cpu_int_tensor(positions_vec);
   input.input_params.attention.host.kv_seq_lens = std::move(kv_seq_lens_vec);
-  input.device_tensors_ready = false;
+  input.runtime.device_tensors_ready = false;
 }
 
 void DFlashWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
                                                ForwardInput& validate_input) {
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   ForwardInput prepared_input = input;
-  prepared_input.metadata_ready_event.reset();
+  prepared_input.runtime.metadata_ready_event.reset();
   const bool use_linear_spec_verify = target_is_hybrid_recurrent_;
   prepared_input.input_params.is_spec_verify = use_linear_spec_verify;
   SpeculativeWorkerImpl::prepare_validate_inputs(prepared_input,
@@ -1393,7 +1393,7 @@ void DFlashWorkerImpl::prepare_query_inputs(const ForwardInput& input,
                                             ForwardInput& query_input) {
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   query_input = input;
-  query_input.device_tensors_ready = false;
+  query_input.runtime.device_tensors_ready = false;
   ModelInputParams& input_params = query_input.input_params;
   input_params.embedding.input_embedding = torch::Tensor();
   dflash_detail::invalidate_draft_model_geometry(input_params);
@@ -1455,7 +1455,7 @@ void DFlashWorkerImpl::prepare_query_inputs(const ForwardInput& input,
   force_greedy_draft_sampling(query_input.sampling_params);
   repeat_sampling_params(query_input.sampling_params,
                          options_.num_speculative_tokens());
-  query_input.device_tensors_ready = true;
+  query_input.runtime.device_tensors_ready = true;
 }
 
 void DFlashWorkerImpl::write_context_kv(
@@ -1684,7 +1684,7 @@ void DFlashWorkerImpl::apply_per_seq_varlen_prune(
   CHECK_EQ(static_cast<int32_t>(per_seq_val_tokens.size()), num_sequences);
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   ForwardInput prepared_input = input;
-  prepared_input.metadata_ready_event.reset();
+  prepared_input.runtime.metadata_ready_event.reset();
   ForwardInput new_validate;
   SpeculativeWorkerImpl::prepare_validate_inputs(
       prepared_input, new_validate, per_seq_val_tokens);

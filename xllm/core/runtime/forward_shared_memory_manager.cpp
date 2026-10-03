@@ -2264,15 +2264,17 @@ inline void initialize_device_buffer_session(ReadContext& context,
   // POSIX shared-memory pages are not pinned merely because TensorOptions says
   // so. Own a genuinely pinned staging copy and keep it alive with ForwardInput
   // until the asynchronous H2D has completed.
-  forward_input.input_host_buffer =
+  forward_input.runtime.input_host_buffer =
       torch::empty({static_cast<int64_t>(payload_size)},
                    torch::TensorOptions()
                        .dtype(torch::kUInt8)
                        .device(torch::kCPU)
                        .pinned_memory(/*pinned_memory=*/true));
-  std::memcpy(
-      forward_input.input_host_buffer.data_ptr(), payload_base, payload_size);
-  const torch::Tensor& host_input_buffer = forward_input.input_host_buffer;
+  std::memcpy(forward_input.runtime.input_host_buffer.data_ptr(),
+              payload_base,
+              payload_size);
+  const torch::Tensor& host_input_buffer =
+      forward_input.runtime.input_host_buffer;
   context.tensor_cursor =
       static_cast<const char*>(host_input_buffer.data_ptr()) +
       tensor_arena_offset;
@@ -2294,16 +2296,17 @@ inline void initialize_device_buffer_session(ReadContext& context,
     }
 #endif
     c10::StreamGuard stream_guard = stream->set_stream_guard();
-    forward_input.device_input_buffer =
+    forward_input.runtime.device_input_buffer =
         safe_to(host_input_buffer, device_options, /*non_blocking=*/true);
   } else {
-    forward_input.device_input_buffer =
+    forward_input.runtime.device_input_buffer =
         safe_to(host_input_buffer, device_options);
   }
 
-  session.owner_buffer = forward_input.device_input_buffer;
+  session.owner_buffer = forward_input.runtime.device_input_buffer;
   session.device_cursor =
-      static_cast<const char*>(forward_input.device_input_buffer.data_ptr()) +
+      static_cast<const char*>(
+          forward_input.runtime.device_input_buffer.data_ptr()) +
       tensor_arena_offset;
   session.active = session.device_cursor != nullptr;
   session.need_finalize_sync = session.active && stream != nullptr;
@@ -2549,10 +2552,10 @@ inline void deserialize_forward_input_payload(
   }
 
   finalize_device_buffer_session(device_session, stream);
-  forward_input.input_host_buffer_has_layout = true;
+  forward_input.runtime.input_host_buffer_has_layout = true;
   if (materialize_device_buffer &&
-      forward_input.device_input_buffer.defined()) {
-    forward_input.device_tensors_ready = true;
+      forward_input.runtime.device_input_buffer.defined()) {
+    forward_input.runtime.device_tensors_ready = true;
   }
   buffer = payload_base + buffer_size;
 }
@@ -2573,17 +2576,17 @@ void packed_proto_to_forward_input_impl(
     return;
   }
 
-  forward_input.input_host_buffer =
+  forward_input.runtime.input_host_buffer =
       torch::empty({static_cast<int64_t>(payload.size())},
                    torch::TensorOptions()
                        .dtype(torch::kUInt8)
                        .device(torch::kCPU)
                        .pinned_memory(true));
-  std::memcpy(forward_input.input_host_buffer.data_ptr(),
+  std::memcpy(forward_input.runtime.input_host_buffer.data_ptr(),
               payload.data(),
               payload.size());
-  forward_input.input_host_buffer_has_layout = true;
-  forward_input.device_tensors_ready = false;
+  forward_input.runtime.input_host_buffer_has_layout = true;
+  forward_input.runtime.device_tensors_ready = false;
 }
 
 size_t calculate_raw_token_size(const RawToken& token) {
@@ -3154,19 +3157,19 @@ bool unpack_from_input_host_buffer(const ForwardInput& input,
                                    torch::ScalarType dtype,
                                    ForwardInput& output,
                                    bool materialize_device_buffer) {
-  if (!input.input_host_buffer.defined() ||
-      !input.input_host_buffer.device().is_cpu() ||
-      input.input_host_buffer.numel() == 0) {
+  if (!input.runtime.input_host_buffer.defined() ||
+      !input.runtime.input_host_buffer.device().is_cpu() ||
+      input.runtime.input_host_buffer.numel() == 0) {
     return false;
   }
 
   output = input;
-  output.device_tensors_ready = false;
+  output.runtime.device_tensors_ready = false;
   const char* payload_ptr =
-      static_cast<const char*>(output.input_host_buffer.data_ptr());
+      static_cast<const char*>(output.runtime.input_host_buffer.data_ptr());
   deserialize_forward_input_payload(
       payload_ptr,
-      static_cast<uint64_t>(output.input_host_buffer.numel()),
+      static_cast<uint64_t>(output.runtime.input_host_buffer.numel()),
       output,
       device,
       /*stream=*/nullptr,
@@ -3188,13 +3191,13 @@ bool unpack_from_input_host_buffer(const ForwardInput& input,
     normalize_float_param(output.decoder_sampling_params.temperatures);
     normalize_float_param(output.decoder_sampling_params.top_p);
     output.positions = detail::normalize_positions_for_device(output.positions);
-    return output.device_tensors_ready;
+    return output.runtime.device_tensors_ready;
   }
 
   // For devices without contiguous-input-buffer support, unpack to CPU tensors
   // first and fall back to the regular H2D path in ForwardInput::to().
-  output.input_host_buffer_has_layout = false;
-  output.device_tensors_ready = false;
+  output.runtime.input_host_buffer_has_layout = false;
+  output.runtime.device_tensors_ready = false;
   return true;
 }
 
@@ -3333,14 +3336,16 @@ void ForwardSharedMemoryManager::input_read(
 #endif
 #if defined(USE_NPU)
   if (policy == InputDeviceMaterializationPolicy::DEFER_TO_WORKER_PREPARE) {
-    input.input_host_buffer =
+    input.runtime.input_host_buffer =
         torch::empty({static_cast<int64_t>(total_size)},
                      torch::TensorOptions()
                          .dtype(torch::kUInt8)
                          .device(torch::kCPU)
                          .pinned_memory(/*pinned_memory=*/true));
-    std::memcpy(input.input_host_buffer.data_ptr(), data_ptr, total_size);
-    data_ptr = static_cast<const char*>(input.input_host_buffer.data_ptr());
+    std::memcpy(
+        input.runtime.input_host_buffer.data_ptr(), data_ptr, total_size);
+    data_ptr =
+        static_cast<const char*>(input.runtime.input_host_buffer.data_ptr());
   }
 #endif
   deserialize_forward_input_payload(data_ptr,

@@ -571,7 +571,7 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   input_params.attention.host.new_cache_slots =
       std::move(buf.out_new_cache_slots);
   input_params.attention.rebuild_device_buffer(device_);
-  new_inputs.device_tensors_ready = true;
+  new_inputs.runtime.device_tensors_ready = true;
 
   return new_inputs;
 }
@@ -650,7 +650,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
     const ForwardInput& input,
     ForwardInput& validate_input) {
   validate_input = input.to(device_, dtype_);
-  validate_input.device_tensors_ready = false;
+  validate_input.runtime.device_tensors_ready = false;
   auto& input_params = validate_input.input_params;
   torch::TensorOptions token_options = validate_input.token_ids.options();
   torch::TensorOptions position_options = validate_input.positions.options();
@@ -760,7 +760,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
       validate_input.sampling_params, num_val_tokens, total_num_val_tokens);
 
   scale_speculative_parallel_token_counts(input_params, num_val_tokens);
-  validate_input.device_tensors_ready = true;
+  validate_input.runtime.device_tensors_ready = true;
 }
 
 void SpeculativeWorkerImpl::prepare_work_before_execute(
@@ -785,7 +785,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
     ForwardInput& validate_input,
     const std::vector<int32_t>& per_seq_val_tokens) {
   validate_input = input.to(device_, dtype_);
-  validate_input.device_tensors_ready = false;
+  validate_input.runtime.device_tensors_ready = false;
   auto& input_params = validate_input.input_params;
   torch::TensorOptions token_options = validate_input.token_ids.options();
   torch::TensorOptions position_options = validate_input.positions.options();
@@ -885,7 +885,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   // all-to-all pads. The authoritative per-rank counts are gathered over the DP
   // group by sync_dp_global_token_nums_after_prune(), which the worker calls on
   // every DP rank right before the target validate forward.
-  validate_input.device_tensors_ready = true;
+  validate_input.runtime.device_tensors_ready = true;
 }
 
 void SpeculativeWorkerImpl::sync_dp_global_token_nums_after_prune(

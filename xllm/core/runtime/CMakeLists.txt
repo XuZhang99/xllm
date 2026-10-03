@@ -8,6 +8,7 @@ cc_library(
     options.h
     decode_graph_bucket.h
     forward_params.h
+    forward_runtime_state.h
     dit_forward_params.h
     params_utils.h
     executor.h

@@ -282,7 +282,7 @@ void prepare_target_verify_from_accepted_state(
   token_rows.select(/*dim=*/1, /*index=*/0)
       .copy_(metadata.last_tokens.to(validate_input.token_ids.options()),
              /*non_blocking=*/true);
-  validate_input.device_tensors_ready = true;
+  validate_input.runtime.device_tensors_ready = true;
 }
 
 }  // namespace xllm::mtp_async

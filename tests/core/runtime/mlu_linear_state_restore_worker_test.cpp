@@ -259,7 +259,7 @@ TEST(MluLinearStateRestoreWorkerTest,
   input.token_ids = torch::ones(
       {4}, torch::TensorOptions().dtype(torch::kInt32).device(device));
   input.positions = torch::zeros_like(input.token_ids);
-  input.device_tensors_ready = true;
+  input.runtime.device_tensors_ready = true;
   input.input_params.meta.num_sequences = 4;
   input.input_params.meta.batch_id = 42;
   input.input_params.attention.host.q_seq_lens = {0, 1, 2, 3, 4};
@@ -269,10 +269,11 @@ TEST(MluLinearStateRestoreWorkerTest,
 
   ForwardInput processed_input;
   worker.prepare_work_before_execute(input, processed_input);
-  ASSERT_NE(processed_input.metadata_ready_event, nullptr);
+  ASSERT_NE(processed_input.runtime.metadata_ready_event, nullptr);
   Device xllm_device(device);
   std::unique_ptr<Stream> model_stream = xllm_device.current_stream();
-  ASSERT_TRUE(model_stream->wait_event(processed_input.metadata_ready_event));
+  ASSERT_TRUE(
+      model_stream->wait_event(processed_input.runtime.metadata_ready_event));
   ASSERT_EQ(model_stream->synchronize(), 0);
 
   EXPECT_EQ(processed_input.input_params.linear_state_validity_mask,
@@ -316,7 +317,7 @@ TEST(MluLinearStateRestoreWorkerTest,
   input.token_ids = torch::ones(
       {6}, torch::TensorOptions().dtype(torch::kInt32).device(device));
   input.positions = torch::zeros_like(input.token_ids);
-  input.device_tensors_ready = true;
+  input.runtime.device_tensors_ready = true;
   input.input_params.meta.num_sequences = 2;
   input.input_params.attention.host.q_seq_lens = {0, 1, 2, 3, 4, 5, 6};
   input.input_params.attention.host.kv_cache_tokens_nums = {0, 8};

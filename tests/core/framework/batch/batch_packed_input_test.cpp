@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/framework/batch/forward_input_builder.h"
 #include "core/framework/block/block_manager_impl.h"
+#include "core/framework/config/execution_config.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/request/stopping_checker.h"
 #include "core/framework/sampling/json_object_grammar.h"
@@ -33,6 +34,23 @@ limitations under the License.
 namespace xllm {
 
 namespace {
+
+class ScopedContiguousInputBuffer final {
+ public:
+  explicit ScopedContiguousInputBuffer(bool enabled)
+      : previous_enabled_(
+            ExecutionConfig::get_instance().use_contiguous_input_buffer()) {
+    ExecutionConfig::get_instance().use_contiguous_input_buffer(enabled);
+  }
+
+  ~ScopedContiguousInputBuffer() {
+    ExecutionConfig::get_instance().use_contiguous_input_buffer(
+        previous_enabled_);
+  }
+
+ private:
+  bool previous_enabled_;
+};
 
 void expect_linear_state_cache_op_eq(const LinearStateCacheOp& actual,
                                      const LinearStateCacheOp& expected) {
@@ -57,6 +75,86 @@ bool tensor_equals_vector(const torch::Tensor& tensor,
     }
   }
   return true;
+}
+
+TEST(BatchPackedInputTest, PackedCopyKeepsStagingAliveAfterSourceRelease) {
+  ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
+  ForwardInput lazy_input;
+  {
+    ForwardInput source;
+    source.token_ids = torch::tensor({11, 23}, torch::kInt32);
+    source.positions = torch::tensor({0, 1}, torch::kInt32);
+    source.input_params.meta.num_sequences = 1;
+    source.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
+    source.input_params.attention.host.q_seq_lens = {2};
+    source.input_params.attention.host.q_cu_seq_lens = {0, 2};
+    source.input_params.attention.host.kv_seq_lens = {2};
+
+    proto::PackedForwardInput packed_input;
+    ASSERT_TRUE(forward_input_to_packed_proto(source, &packed_input));
+    packed_proto_to_forward_input(
+        packed_input, lazy_input, torch::Device(torch::kCPU), nullptr);
+  }
+
+  ASSERT_TRUE(lazy_input.runtime.input_host_buffer.defined());
+  const void* staging_data = lazy_input.runtime.input_host_buffer.data_ptr();
+  ForwardInput copied_input = lazy_input;
+  lazy_input = ForwardInput();
+
+  ForwardInput materialized_input =
+      copied_input.to(torch::Device(torch::kCPU), torch::kFloat32);
+  copied_input = ForwardInput();
+
+  EXPECT_EQ(materialized_input.runtime.input_host_buffer.data_ptr(),
+            staging_data);
+  EXPECT_FALSE(materialized_input.runtime.input_host_buffer_has_layout);
+  EXPECT_TRUE(materialized_input.runtime.device_tensors_ready);
+  EXPECT_TRUE(materialized_input.token_ids.device().is_cpu());
+  EXPECT_TRUE(
+      tensor_equals_vector<int32_t>(materialized_input.token_ids, {11, 23}));
+  EXPECT_TRUE(
+      tensor_equals_vector<int32_t>(materialized_input.positions, {0, 1}));
+  EXPECT_EQ(materialized_input.input_params.attention.host.kv_seq_lens,
+            std::vector<int32_t>({2}));
+}
+
+TEST(BatchPackedInputTest, CpuPreparationAndReadyCopyRetainExecutionSources) {
+  ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
+  ForwardInput prepared_input;
+  const void* retained_data = nullptr;
+  const void* buffer_data = nullptr;
+  {
+    ForwardInput source;
+    source.token_ids = torch::tensor({11, 23}, torch::kInt32);
+    source.positions = torch::tensor({0, 1}, torch::kInt32);
+    source.runtime.device_input_buffer = torch::tensor({7, 9}, torch::kUInt8);
+    source.runtime.retained_device_tensors.reserve(1);
+    source.runtime.retained_device_tensors.emplace_back(
+        torch::tensor({3.0f, 5.0f}));
+    source.runtime.kv_slot_layout = KvSlotLayout::NPU_CP_RECOVERED_PHYSICAL;
+    buffer_data = source.runtime.device_input_buffer.data_ptr();
+    retained_data = source.runtime.retained_device_tensors[0].data_ptr();
+
+    prepared_input = source.to(torch::Device(torch::kCPU), torch::kFloat32);
+  }
+
+  ForwardInput ready_copy =
+      prepared_input.to(torch::Device(torch::kCPU), torch::kFloat32);
+  prepared_input = ForwardInput();
+
+  ASSERT_EQ(ready_copy.runtime.retained_device_tensors.size(), 1u);
+  EXPECT_EQ(ready_copy.runtime.device_input_buffer.data_ptr(), buffer_data);
+  EXPECT_EQ(ready_copy.runtime.retained_device_tensors[0].data_ptr(),
+            retained_data);
+  EXPECT_TRUE(tensor_equals_vector<uint8_t>(
+      ready_copy.runtime.device_input_buffer, {7, 9}));
+  EXPECT_TRUE(tensor_equals_vector<float>(
+      ready_copy.runtime.retained_device_tensors[0], {3.0f, 5.0f}));
+  EXPECT_EQ(ready_copy.runtime.kv_slot_layout,
+            KvSlotLayout::NPU_CP_RECOVERED_PHYSICAL);
+  EXPECT_TRUE(ready_copy.runtime.device_tensors_ready);
+  EXPECT_TRUE(
+      tensor_equals_vector<int32_t>(ready_copy.host_token_ids(), {11, 23}));
 }
 
 TEST(BatchPackedInputTest, PackedProtoLazyUnpackPreservesLinearStateCacheOps) {
@@ -123,7 +221,7 @@ TEST(BatchPackedInputTest, PackedProtoLazyUnpackPreservesLinearStateCacheOps) {
   packed_proto_to_forward_input(
       packed_input, lazy_input, torch::Device(torch::kCPU), nullptr);
   EXPECT_TRUE(lazy_input.input_params.linear_state_cache_ops.empty());
-  EXPECT_TRUE(lazy_input.input_host_buffer_has_layout);
+  EXPECT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
 
   ForwardInput unpacked_input;
   unpacked_input.input_params.dit_forward_input.emplace().batch_size = 1;
@@ -198,7 +296,7 @@ TEST(BatchPackedInputTest, PackedProtoLazyUnpackRestoresSampleIdxes) {
   packed_proto_to_forward_input(
       packed_input, lazy_input, torch::Device(torch::kCPU), nullptr);
   EXPECT_FALSE(lazy_input.sampling_params.sample_idxes.defined());
-  EXPECT_TRUE(lazy_input.input_host_buffer_has_layout);
+  EXPECT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
 
   ForwardInput unpacked_input;
   ASSERT_TRUE(detail::unpack_from_input_host_buffer(lazy_input,
@@ -359,7 +457,7 @@ TEST(BatchPackedInputTest, PackedProtoLazyToPreservesJsonMetadata) {
   ForwardInput lazy_input;
   packed_proto_to_forward_input(
       packed_input, lazy_input, torch::Device(torch::kCPU), nullptr);
-  EXPECT_TRUE(lazy_input.input_host_buffer_has_layout);
+  EXPECT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
   EXPECT_TRUE(lazy_input.json_object_state_snapshots.empty());
 
   const ForwardInput materialized_input =

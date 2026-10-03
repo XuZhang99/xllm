@@ -39,6 +39,7 @@ limitations under the License.
 #include "platform/device.h"
 #include "platform/platform.h"
 #include "runtime/dit_forward_params.h"
+#include "runtime/forward_runtime_state.h"
 #include "runtime/json_object_output_rows.h"
 #include "util/tensor_helper.h"
 
@@ -376,12 +377,6 @@ class WorkerType {
   Value value_;
 };
 
-// Worker-local KV slot layout for NPU CP (not transported).
-enum class KvSlotLayout : int8_t {
-  LOGICAL_REAL = 0,  // Builder slots; input to prepare_cache_slots.
-  NPU_CP_RECOVERED_PHYSICAL = 1,  // Already CP-expanded; skip re-prepare.
-};
-
 // Step-level decode metadata for Rec multi-round (device loop).
 struct StepDecodeMeta {
   int32_t batch_size = 0;
@@ -398,11 +393,11 @@ struct StepDecodeMeta {
 // Inputs for forward execution
 struct ForwardInput {
   ForwardInput to(const torch::Device& device, torch::ScalarType dtype) const {
-    if (device_tensors_ready) {
+    if (runtime.device_tensors_ready) {
       return *this;
     }
 
-    if (input_host_buffer_has_layout) {
+    if (runtime.input_host_buffer_has_layout) {
       ForwardInput buffer_inputs;
       const bool materialize_device_buffer =
           ::xllm::ExecutionConfig::get_instance()
@@ -410,7 +405,7 @@ struct ForwardInput {
           detail::supports_contiguous_forward_input_buffer(device);
       if (detail::unpack_from_input_host_buffer(
               *this, device, dtype, buffer_inputs, materialize_device_buffer)) {
-        if (buffer_inputs.device_tensors_ready) {
+        if (buffer_inputs.runtime.device_tensors_ready) {
           return buffer_inputs;
         }
         return buffer_inputs.to(device, dtype);
@@ -438,11 +433,12 @@ struct ForwardInput {
     inputs.sampling_params = sampling_params.to(device, dtype);
     inputs.decoder_sampling_params = decoder_sampling_params.to(device, dtype);
     copy_metadata_to(inputs);
-    inputs.input_host_buffer = input_host_buffer;
-    inputs.device_input_buffer = device_input_buffer;
-    inputs.input_host_buffer_has_layout = input_host_buffer_has_layout;
-    inputs.device_tensors_ready = true;
-    inputs.kv_slot_layout = kv_slot_layout;
+    inputs.runtime.input_host_buffer = runtime.input_host_buffer;
+    inputs.runtime.device_input_buffer = runtime.device_input_buffer;
+    inputs.runtime.input_host_buffer_has_layout =
+        runtime.input_host_buffer_has_layout;
+    inputs.runtime.device_tensors_ready = true;
+    inputs.runtime.kv_slot_layout = runtime.kv_slot_layout;
     return inputs;
   }
 
@@ -488,16 +484,16 @@ struct ForwardInput {
 
     const uint64_t total_bytes = plan.prepare_layout();
     if (total_bytes > 0) {
-      inputs.input_host_buffer = plan.build_host_buffer(total_bytes);
-      inputs.device_input_buffer =
-          safe_to(inputs.input_host_buffer,
+      inputs.runtime.input_host_buffer = plan.build_host_buffer(total_bytes);
+      inputs.runtime.device_input_buffer =
+          safe_to(inputs.runtime.input_host_buffer,
                   torch::TensorOptions().dtype(torch::kUInt8).device(device),
                   true);
-      plan.bind_device_views(inputs.device_input_buffer, device);
+      plan.bind_device_views(inputs.runtime.device_input_buffer, device);
     }
 
-    inputs.device_tensors_ready = true;
-    inputs.input_host_buffer_has_layout = false;
+    inputs.runtime.device_tensors_ready = true;
+    inputs.runtime.input_host_buffer_has_layout = false;
     return true;
   }
 
@@ -506,9 +502,9 @@ struct ForwardInput {
     inputs.step_decode = step_decode;
     inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
     inputs.return_selected_hidden = return_selected_hidden;
-    inputs.kv_slot_layout = kv_slot_layout;
-    inputs.metadata_ready_event = metadata_ready_event;
-    inputs.retained_device_tensors = retained_device_tensors;
+    inputs.runtime.kv_slot_layout = runtime.kv_slot_layout;
+    inputs.runtime.metadata_ready_event = runtime.metadata_ready_event;
+    inputs.runtime.retained_device_tensors = runtime.retained_device_tensors;
     inputs.sample_sequence_ids = sample_sequence_ids;
     inputs.sample_prior_output_rows = sample_prior_output_rows;
     inputs.json_object_states = json_object_states;
@@ -589,28 +585,7 @@ struct ForwardInput {
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
 
-  // A tensor used to store all device-side input data, with other input tensors
-  // constructed based on the address and offset of this tensor.
-  torch::Tensor input_host_buffer;
-  torch::Tensor device_input_buffer;
-  bool input_host_buffer_has_layout = false;
-
-  // True when token_ids, positions, model input tensors and sampling tensors
-  // already point to the device-side views for execution. Worker prepare can
-  // then skip rebuilding/H2D in ForwardInput::to().
-  bool device_tensors_ready = false;
-
-  // new_cache_slots layout; flip after one-shot CP remap.
-  KvSlotLayout kv_slot_layout = KvSlotLayout::LOGICAL_REAL;
-
-  // Device-side readiness dependencies for inputs prepared on a different
-  // stream. These are local runtime handles and are intentionally not included
-  // in proto or shared-memory transport.
-  StreamEventPtr metadata_ready_event;
-
-  // Keep cross-stream metadata sources alive through no-sync execution. These
-  // handles are local runtime state and are not serialized.
-  std::vector<torch::Tensor> retained_device_tensors;
+  ForwardRuntimeState runtime;
 };
 
 // output after forward execution

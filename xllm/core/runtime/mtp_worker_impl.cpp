@@ -133,7 +133,7 @@ void broadcast_spec_tokens(torch::Tensor& tokens,
 }
 
 void record_metadata_ready_event(Stream& stream, ForwardInput& input) {
-  input.metadata_ready_event = stream.record_event_or_sync();
+  input.runtime.metadata_ready_event = stream.record_event_or_sync();
 }
 
 void finish_metadata_prepare(Stream& stream, ForwardInput& input) {
@@ -141,13 +141,13 @@ void finish_metadata_prepare(Stream& stream, ForwardInput& input) {
 }
 
 void record_current_metadata_ready_event(ForwardInput& input, Stream& stream) {
-  CHECK(stream.wait_event(input.metadata_ready_event))
+  CHECK(stream.wait_event(input.runtime.metadata_ready_event))
       << "failed to wait speculative metadata ready event";
   record_metadata_ready_event(stream, input);
 }
 
 void wait_metadata_ready_event(const ForwardInput& input, Stream& stream) {
-  CHECK(stream.wait_event(input.metadata_ready_event))
+  CHECK(stream.wait_event(input.runtime.metadata_ready_event))
       << "failed to wait speculative metadata ready event";
 }
 
@@ -262,7 +262,7 @@ void build_expanded_spec_verify_graph_input(ModelInputParams& input_params,
 #endif
 
 void clear_ready_events(ForwardInput& input) {
-  input.metadata_ready_event.reset();
+  input.runtime.metadata_ready_event.reset();
 }
 
 void clear_mla_prefixcache_workspace(ForwardInput& input) {
@@ -318,11 +318,11 @@ void set_token_ids_device_tensor(ForwardInput& input,
       << "draft token count must match num_sequences";
 
   c10::StreamGuard stream_guard = compute_stream.set_stream_guard();
-  input.device_tensors_ready = false;
+  input.runtime.device_tensors_ready = false;
   input.token_ids_host = torch::Tensor();
   input.token_ids =
       safe_to(flat_token_ids, token_options, /*non_blocking=*/true);
-  input.device_tensors_ready = true;
+  input.runtime.device_tensors_ready = true;
 }
 
 torch::Tensor to_cpu_int_tensor_for_read(const torch::Tensor& values) {
@@ -381,7 +381,7 @@ void replace_host_token_placeholders(ForwardInput& input,
   CHECK_EQ(input.token_ids_host.scalar_type(), torch::kInt)
       << "token_ids_host must be int32";
 
-  input.device_tensors_ready = false;
+  input.runtime.device_tensors_ready = false;
   torch::Tensor replacement_cpu = to_cpu_int_tensor_for_read(replacements);
   int32_t* token_ids = input.token_ids_host.data_ptr<int32_t>();
   const size_t num_token_ids =
@@ -403,18 +403,18 @@ void replace_host_token_placeholders(ForwardInput& input,
   if (refresh_device) {
     input.token_ids =
         safe_to(input.token_ids_host, token_options, /*non_blocking=*/true);
-    input.device_tensors_ready = true;
+    input.runtime.device_tensors_ready = true;
   }
 }
 
 void set_positions_tensor(ForwardInput& input,
                           const torch::Tensor& positions_host,
                           const torch::TensorOptions& device_options) {
-  input.device_tensors_ready = false;
+  input.runtime.device_tensors_ready = false;
   input.positions_host = positions_host;
   input.positions =
       safe_to(input.positions_host, device_options, /*non_blocking=*/true);
-  input.device_tensors_ready = true;
+  input.runtime.device_tensors_ready = true;
 }
 
 runtime::Options mtp_target_options(const runtime::Options& options) {
@@ -1390,13 +1390,13 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
                          tokens_ids_slice_i.end());
     new_token_ids.emplace_back(extra_token_ids[i]);
   }
-  prefill_input.device_tensors_ready = false;
+  prefill_input.runtime.device_tensors_ready = false;
   prefill_input.token_ids_host =
       specBuilder::make_cpu_int_tensor(new_token_ids);
   prefill_input.token_ids = safe_to(prefill_input.token_ids_host,
                                     prefill_input.positions.options(),
                                     /*non_blocking=*/true);
-  prefill_input.device_tensors_ready = true;
+  prefill_input.runtime.device_tensors_ready = true;
   finish_metadata_prepare(*prepare_stream_, prefill_input);
 }
 
@@ -1732,7 +1732,7 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
             target_base_positions,
             target_base_kv_seq_lens,
             logical_block_size());
-        validate_input.retained_device_tensors = {
+        validate_input.runtime.retained_device_tensors = {
             accepted_tokens, target_base_positions, target_base_kv_seq_lens};
         finish_metadata_prepare(*prepare_stream_, validate_input);
       }
@@ -1925,7 +1925,7 @@ void MTPWorkerImpl::fill_validate_input_from_draft_outputs(
     validate_input.sampling_params.filter_mask = torch::Tensor();
   }
 
-  validate_input.device_tensors_ready = false;
+  validate_input.runtime.device_tensors_ready = false;
   auto& fused_draft_tokens =
       validate_input.input_params.graph.spec_verify_draft_token_sources;
   fused_draft_tokens.clear();
@@ -1948,7 +1948,7 @@ void MTPWorkerImpl::fill_validate_input_from_draft_outputs(
              "int64 token per sequence and draft step";
       fused_draft_tokens.emplace_back(next_tokens.flatten());
     }
-    validate_input.device_tensors_ready = true;
+    validate_input.runtime.device_tensors_ready = true;
     return;
   }
 #endif
@@ -2043,7 +2043,7 @@ void MTPWorkerImpl::fill_validate_input_from_draft_outputs(
       }
     }
   }
-  validate_input.device_tensors_ready = true;
+  validate_input.runtime.device_tensors_ready = true;
   record_metadata_ready_event(compute_stream, validate_input);
 }
 
@@ -3006,7 +3006,7 @@ void MTPWorkerImpl::update_decode_step_input(
   input.token_ids_host = specBuilder::make_cpu_int_tensor(token_ids_vec);
   input.positions_host = specBuilder::make_cpu_int_tensor(positions_vec);
   input.input_params.attention.host.kv_seq_lens = std::move(kv_seq_lens_vec);
-  input.device_tensors_ready = false;
+  input.runtime.device_tensors_ready = false;
 }
 
 void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
@@ -3016,7 +3016,7 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   validate_input = input;
   clear_ready_events(validate_input);
-  validate_input.device_tensors_ready = false;
+  validate_input.runtime.device_tensors_ready = false;
   auto& input_params = validate_input.input_params;
   input_params.embedding.input_embedding = torch::Tensor();
   torch::TensorOptions token_options = validate_input.token_ids.options();
@@ -3380,7 +3380,7 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
 #else
   input_params.attention.rebuild_device_buffer(device_);
 #endif
-  validate_input.device_tensors_ready = true;
+  validate_input.runtime.device_tensors_ready = true;
   // This metadata is independent of the in-flight final draft. Keep it on the
   // auxiliary stream and hand it to the compute stream with a device event.
 #if defined(USE_NPU)
@@ -3451,7 +3451,7 @@ void MTPWorkerImpl::prepare_validate_inputs(
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   validate_input = input;
   clear_ready_events(validate_input);
-  validate_input.device_tensors_ready = false;
+  validate_input.runtime.device_tensors_ready = false;
   auto& input_params = validate_input.input_params;
   input_params.embedding.input_embedding = torch::Tensor();
   torch::TensorOptions token_options = validate_input.token_ids.options();
@@ -3633,7 +3633,7 @@ void MTPWorkerImpl::prepare_validate_inputs(
 #else
   input_params.attention.rebuild_device_buffer(device_);
 #endif
-  validate_input.device_tensors_ready = true;
+  validate_input.runtime.device_tensors_ready = true;
   finish_metadata_prepare(*prepare_stream_, validate_input);
 }
 
@@ -3652,7 +3652,7 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
   extend_input = base_input;
   prepare_draft_sampling(extend_input.sampling_params);
   clear_ready_events(extend_input);
-  extend_input.device_tensors_ready = false;
+  extend_input.runtime.device_tensors_ready = false;
   auto& input_params = extend_input.input_params;
   const int32_t num_sequences = input_params.meta.num_sequences;
 
@@ -3883,7 +3883,7 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
     params.sample_idxes = torch::arange(
         /*start=*/0, /*end=*/num_sequences, idx_options);
   }
-  extend_input.device_tensors_ready = true;
+  extend_input.runtime.device_tensors_ready = true;
   finish_metadata_prepare(*prepare_stream_, extend_input);
 }
 
@@ -3894,7 +3894,7 @@ void MTPWorkerImpl::prepare_draft_inputs(const ForwardInput& input,
   draft_input = input;
   prepare_draft_sampling(draft_input.sampling_params);
   clear_ready_events(draft_input);
-  draft_input.device_tensors_ready = false;
+  draft_input.runtime.device_tensors_ready = false;
 
   auto& input_params = draft_input.input_params;
   input_params.embedding.input_embedding = torch::Tensor();
@@ -3947,7 +3947,7 @@ void MTPWorkerImpl::prepare_draft_inputs(const ForwardInput& input,
   draft_impl_->prepare_dp_ep_padding_on_stream(input_params, *prepare_stream_);
 #endif
   // token_ids is intentionally filled later from the previous draft output.
-  draft_input.device_tensors_ready = false;
+  draft_input.runtime.device_tensors_ready = false;
 
   // Positions/KV metadata do not depend on the in-flight draft result. Prepare
   // them concurrently; token ids and embeddings are filled on compute_stream.

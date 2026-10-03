@@ -1219,7 +1219,7 @@ void NpuCpPlan::prepare(ForwardInput& processed_input,
   *this = build(make_plan_input(processed_input, runtime_config),
                 runtime_config.plan_config);
   cp_group_ = runtime_config.cp_group;
-  if (processed_input.kv_slot_layout == KvSlotLayout::LOGICAL_REAL) {
+  if (processed_input.runtime.kv_slot_layout == KvSlotLayout::LOGICAL_REAL) {
     processed_input.input_params.attention.device.new_cache_slots =
         prepare_cache_slots(
             processed_input.input_params.attention.device.new_cache_slots);
@@ -1232,7 +1232,8 @@ void NpuCpPlan::prepare(ForwardInput& processed_input,
         << processed_input.input_params.attention.device.new_cache_slots.numel()
         << ") must equal recovered token count (" << recovered_token_count()
         << ")";
-    processed_input.kv_slot_layout = KvSlotLayout::NPU_CP_RECOVERED_PHYSICAL;
+    processed_input.runtime.kv_slot_layout =
+        KvSlotLayout::NPU_CP_RECOVERED_PHYSICAL;
   }
   apply_attention_meta(processed_input.input_params);
 }
