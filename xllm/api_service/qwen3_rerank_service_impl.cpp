@@ -37,6 +37,11 @@ void Qwen3RerankServiceImpl::process_async_impl(
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
+  if (master->options().task_type() != "generate") {
+    call->finish_with_error(StatusCode::UNKNOWN,
+                            "Model does not support logprobs output");
+    return;
+  }
 
   auto query = rpc_request.query();
   std::vector<std::string> documents;
@@ -69,10 +74,13 @@ void Qwen3RerankServiceImpl::process_async_impl(
     rerank_outputs.reserve(documents.size());
 
     for (size_t i = 0; i < documents.size(); ++i) {
-      if (req_outputs[i].outputs[0].logprobs.has_value()) {
-        auto score = req_outputs[i].outputs[0].logprobs.value()[0].logprob;
-        rerank_outputs.emplace_back(i, documents[i], score);
+      if (i >= req_outputs.size() || req_outputs[i].outputs.empty() ||
+          !req_outputs[i].outputs[0].logprobs.has_value() ||
+          req_outputs[i].outputs[0].logprobs->empty()) {
+        continue;
       }
+      auto score = req_outputs[i].outputs[0].logprobs.value()[0].logprob;
+      rerank_outputs.emplace_back(i, documents[i], score);
     }
     return rerank_outputs;
   };

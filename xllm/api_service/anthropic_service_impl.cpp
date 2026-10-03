@@ -499,16 +499,24 @@ AnthropicServiceImpl::AnthropicServiceImpl(
 }
 
 void AnthropicServiceImpl::count_tokens(std::shared_ptr<AnthropicCall> call) {
-  if (master_->get_rate_limiter()->is_limited()) {
+  const auto& request = call->request();
+  auto model_master = std::dynamic_pointer_cast<LLMMaster>(
+      master_manager_->find_master(request.model()));
+  if (model_master == nullptr) {
+    call->finish_with_error(
+        StatusCode::NOT_FOUND,
+        "The model `" + request.model() + "` does not exist.");
+    return;
+  }
+  if (model_master->get_rate_limiter()->is_limited()) {
     call->finish_with_error(
         StatusCode::RESOURCE_EXHAUSTED,
         "The number of concurrent requests has reached the limit.");
     return;
   }
-  const auto& request = call->request();
   RequestParams params(
       request, call->get_x_request_id(), call->get_x_request_time());
-  master_->count_chat_tokens(
+  model_master->count_chat_tokens(
       api_service::build_anthropic_messages(request),
       std::move(params),
       [call](Status status, int32_t input_tokens) {
@@ -551,8 +559,9 @@ void AnthropicServiceImpl::process_async_impl(
   std::vector<Message> messages =
       api_service::build_anthropic_messages(rpc_request);
 
-  const auto rendered = master_->chat_template().apply_with_generation_mode(
-      messages, request_params.tools, request_params.chat_template_kwargs);
+  const auto rendered =
+      model_master->chat_template().apply_with_generation_mode(
+          messages, request_params.tools, request_params.chat_template_kwargs);
   if (!rendered.has_value()) {
     call->finish_with_error(StatusCode::INVALID_ARGUMENT,
                             "Failed to construct prompt from messages");
@@ -599,10 +608,10 @@ void AnthropicServiceImpl::process_async_impl(
   }
   if (saved_streaming && !prompt_tokens.has_value()) {
     prompt_tokens.emplace();
-    if (!master_->tokenizer().encode(rendered->prompt,
-                                     &prompt_tokens.value(),
-                                     request_params.add_special_tokens)) {
-      master_->get_rate_limiter()->decrease_one_request();
+    if (!model_master->tokenizer().encode(rendered->prompt,
+                                          &prompt_tokens.value(),
+                                          request_params.add_special_tokens)) {
+      model_master->get_rate_limiter()->decrease_one_request();
       call->finish_with_error(StatusCode::INVALID_ARGUMENT,
                               "Failed to encode prompt");
       return;

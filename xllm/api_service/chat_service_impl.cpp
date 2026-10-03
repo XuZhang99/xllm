@@ -40,6 +40,7 @@ limitations under the License.
 #include "core/distributed_runtime/vlm_master.h"
 #include "core/framework/request/rec_type.h"
 #include "core/framework/request/request_params.h"
+#include "core/runtime/xservice_client.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
 #include "mm_service_utils.h"
@@ -630,6 +631,10 @@ void ChatServiceImpl::process_async_rpc_impl(
     const proto::ChatRequest* request) {
   const auto& service_request_id = request->service_request_id();
   const auto& target_xservice_addr = request->source_xservice_addr();
+  OutputCallback callback = [](RequestOutput output) {
+    const auto results = XServiceClient::get_instance()->generations({output});
+    return results.size() == 1 && results.front();
+  };
   if (rec_master_ != nullptr) {
     CALLBACK_WITH_ERROR(StatusCode::UNKNOWN,
                         "RPC chat is not supported for RecMaster",
@@ -648,7 +653,7 @@ void ChatServiceImpl::process_async_rpc_impl(
     return;
   }
   const std::weak_ptr<LLMMaster> weak_master = master;
-  auto callback = [weak_master](const RequestOutput& req_output) -> bool {
+  callback = [weak_master](const RequestOutput& req_output) -> bool {
     const auto master = weak_master.lock();
     if (master == nullptr) {
       return false;

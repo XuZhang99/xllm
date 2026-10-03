@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/master_manager.h"
 #include "core/framework/request/request_output.h"
+#include "core/runtime/xservice_client.h"
 #include "core/util/utils.h"
 
 #ifdef likely
@@ -214,6 +215,10 @@ void CompletionServiceImpl::process_async_rpc_impl(
     const proto::CompletionRequest* request) {
   const auto& service_request_id = request->service_request_id();
   const auto& target_xservice_addr = request->source_xservice_addr();
+  OutputCallback callback = [](RequestOutput output) {
+    const auto results = XServiceClient::get_instance()->generations({output});
+    return results.size() == 1 && results.front();
+  };
   const auto& rpc_request = *request;
   const auto& model = rpc_request.model();
   auto master = get_model_master(model);
@@ -225,7 +230,7 @@ void CompletionServiceImpl::process_async_rpc_impl(
     return;
   }
   const std::weak_ptr<LLMMaster> weak_master = master;
-  auto callback = [weak_master](const RequestOutput& req_output) -> bool {
+  callback = [weak_master](const RequestOutput& req_output) -> bool {
     const auto master = weak_master.lock();
     if (master == nullptr) {
       return false;

@@ -101,6 +101,11 @@ void RerankServiceImpl::process_async_impl(std::shared_ptr<RerankCall> call) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
+  if (master->options().task_type() != "embed") {
+    call->finish_with_error(StatusCode::UNKNOWN,
+                            "Model does not support embedding output");
+    return;
+  }
 
   std::vector<std::string> documents;
   if (rpc_request.documents_size() > 0) {
@@ -124,8 +129,13 @@ void RerankServiceImpl::process_async_impl(std::shared_ptr<RerankCall> call) {
                            const std::vector<RequestOutput>& req_outputs)
       -> std::vector<RerankRequestOutput> {
     size_t doc_size = documents.size() - 1;
-    auto& query_output = req_outputs[doc_size];
-    if (!query_output.outputs[0].embeddings.has_value()) {
+    if (req_outputs.size() <= doc_size ||
+        req_outputs[doc_size].outputs.empty()) {
+      return {};
+    }
+    const auto& query_output = req_outputs[doc_size];
+    if (!query_output.outputs[0].embeddings.has_value() ||
+        query_output.outputs[0].embeddings->empty()) {
       return {};
     }
 
@@ -138,16 +148,19 @@ void RerankServiceImpl::process_async_impl(std::shared_ptr<RerankCall> call) {
     std::vector<RerankRequestOutput> rerank_outputs;
     rerank_outputs.reserve(doc_size);
     for (size_t i = 0; i < doc_size; ++i) {
-      if (req_outputs[i].outputs[0].embeddings.has_value()) {
-        auto doc_embed = req_outputs[i].outputs[0].embeddings.value();
-        auto doc_tensor =
-            torch::from_blob(doc_embed.data(),
-                             {static_cast<int64_t>(doc_embed.size())},
-                             torch::kFloat32);
-        auto score =
-            torch::cosine_similarity(query_tensor, doc_tensor, 0).item<float>();
-        rerank_outputs.emplace_back(i, documents[i], score);
+      if (req_outputs[i].outputs.empty() ||
+          !req_outputs[i].outputs[0].embeddings.has_value() ||
+          req_outputs[i].outputs[0].embeddings->empty()) {
+        continue;
       }
+      auto doc_embed = req_outputs[i].outputs[0].embeddings.value();
+      auto doc_tensor =
+          torch::from_blob(doc_embed.data(),
+                           {static_cast<int64_t>(doc_embed.size())},
+                           torch::kFloat32);
+      auto score =
+          torch::cosine_similarity(query_tensor, doc_tensor, 0).item<float>();
+      rerank_outputs.emplace_back(i, documents[i], score);
     }
     return rerank_outputs;
   };
