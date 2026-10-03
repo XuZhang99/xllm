@@ -1479,14 +1479,14 @@ void APIService::LinkP2P(::google::protobuf::RpcController* controller,
   }
 
   std::string error_message;
-  const bool ok = master_manager_->link_p2p(
+  const bool status = master_manager_->link_p2p(
       request->model_id(),
       {request->remote_addrs().begin(), request->remote_addrs().end()},
       &error_message);
-  if (!ok) {
+  if (!status) {
     LOG(ERROR) << error_message;
   }
-  response->set_ok(ok);
+  response->set_ok(status);
 }
 
 void APIService::LinkP2PHttp(::google::protobuf::RpcController* controller,
@@ -1524,14 +1524,14 @@ void APIService::LinkP2PHttp(::google::protobuf::RpcController* controller,
   }
 
   std::string error_message;
-  const bool ok = master_manager_->link_p2p(
+  const bool status = master_manager_->link_p2p(
       req_pb->model_id(),
       {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()},
       &error_message);
-  if (!ok) {
+  if (!status) {
     LOG(ERROR) << error_message;
   }
-  resp_pb->set_ok(ok);
+  resp_pb->set_ok(status);
 
   json2pb::Pb2JsonOptions json_options;
   json_options.bytes_to_base64 = false;
@@ -1555,14 +1555,14 @@ void APIService::UnlinkP2P(::google::protobuf::RpcController* controller,
   }
 
   std::string error_message;
-  const bool ok = master_manager_->unlink_p2p(
+  const bool status = master_manager_->unlink_p2p(
       request->model_id(),
       {request->remote_addrs().begin(), request->remote_addrs().end()},
       &error_message);
-  if (!ok) {
+  if (!status) {
     LOG(ERROR) << error_message;
   }
-  response->set_ok(ok);
+  response->set_ok(status);
 }
 
 void APIService::UnlinkP2PHttp(::google::protobuf::RpcController* controller,
@@ -1600,14 +1600,14 @@ void APIService::UnlinkP2PHttp(::google::protobuf::RpcController* controller,
   }
 
   std::string error_message;
-  const bool ok = master_manager_->unlink_p2p(
+  const bool status = master_manager_->unlink_p2p(
       req_pb->model_id(),
       {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()},
       &error_message);
-  if (!ok) {
+  if (!status) {
     LOG(ERROR) << error_message;
   }
-  resp_pb->set_ok(ok);
+  resp_pb->set_ok(status);
 
   json2pb::Pb2JsonOptions json_options;
   json_options.bytes_to_base64 = false;
