@@ -39,11 +39,10 @@ std::optional<int32_t> resolve_npu_logical_id(
     int32_t device_index,
     const std::string& visible_devices,
     const std::vector<NpuIdentity>& devices);
-CpuBindingOptions npu_cpu_binding_options(bool global_slice, bool bind_irq);
+CpuBindingOptions npu_cpu_binding_options(bool global_slice);
 std::optional<NpuCpuBindingInfo> get_npu_cpu_binding(
     int32_t device_index,
-    const std::string& soc_name,
-    bool bind_irq);
+    const std::string& soc_name);
 void bind_npu_irqs(const std::vector<int32_t>& cpus, const NpuIdentity& device);
 
 }  // namespace xllm::npu

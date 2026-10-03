@@ -279,5 +279,27 @@ TEST(NumaUtilsTest, InvalidMemoryNodesLeavePolicyUnchanged) {
   });
 }
 
+TEST(NumaUtilsTest, MigrationOnlyPreservesAllocationPolicy) {
+  if (!is_numa_available()) {
+    GTEST_SKIP() << "requires NUMA";
+  }
+  int mode = -1;
+  if (get_mempolicy(&mode, nullptr, 0, nullptr, 0) != 0 && errno == EPERM) {
+    GTEST_SKIP() << "memory policy syscalls are blocked";
+  }
+  const int32_t node = get_current_numa_node();
+  ASSERT_GE(node, 0);
+  expect_child_success([&]() {
+    if (bind_memory_to_numa_node(node, MemoryPolicy::PREFERRED) != 0) {
+      return false;
+    }
+    migrate_process_memory_to_numa_node(node);
+    return memory_policy_is(MPOL_PREFERRED, node) &&
+           migrate_process_memory_to_numa_node(-1) != 0 &&
+           migrate_process_memory_to_numa_node(INT_MAX) != 0 &&
+           memory_policy_is(MPOL_PREFERRED, node);
+  });
+}
+
 }  // namespace
 }  // namespace xllm::numa

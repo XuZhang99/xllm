@@ -100,11 +100,12 @@ void Platform::initialize_cpu_binding(int32_t device_index, bool bind_irq) {
   }
 #if defined(USE_NPU)
   const char* soc_name = aclrtGetSocName();
-  auto binding = npu::get_npu_cpu_binding(
-      device_index, soc_name == nullptr ? "" : soc_name, bind_irq);
+  auto binding = npu::get_npu_cpu_binding(device_index,
+                                          soc_name == nullptr ? "" : soc_name);
   if (binding) {
     const auto irq_cpus = binding->plan.reserved_cpus;
-    if (CpuBinding::get_instance().initialize(std::move(binding->plan))) {
+    if (CpuBinding::get_instance().initialize(std::move(binding->plan)) &&
+        bind_irq) {
       npu::bind_npu_irqs(irq_cpus, binding->device);
     }
   }
@@ -163,6 +164,13 @@ void Platform::refresh_cpu_binding_after_first_forward() {
 #if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU) || \
     defined(USE_MUSA) || defined(USE_DCU)
   CpuBinding::get_instance().refresh_after_first_forward();
+#endif
+}
+
+void Platform::finish_cpu_binding_warmup() {
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU) || \
+    defined(USE_MUSA) || defined(USE_DCU)
+  CpuBinding::get_instance().finish_warmup();
 #endif
 }
 
