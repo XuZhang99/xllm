@@ -28,7 +28,8 @@ DEFINE_bool(
 
 DEFINE_bool(enable_npu_irq_binding,
             false,
-            "Also reserve and bind SQ/CQ IRQ CPUs for this NPU. Requires "
+            "Write SQ/CQ IRQ affinity to the CPUs already reserved by NPU "
+            "CPU binding. Requires "
             "enable_cpu_binding and writable IRQ affinity files; does not "
             "stop irqbalance.");
 

@@ -42,6 +42,11 @@ int32_t bind_process_to_cpus(
 // Host CPU-to-NUMA topology, independent of any accelerator's device numbering.
 std::unordered_map<int32_t, int32_t> get_cpu_numa_nodes();
 
+// Migrate existing process pages from all NUMA nodes, without changing the
+// calling thread's allocation policy. Returns zero only for complete migration;
+// unavailable migration or remaining pages are logged and return nonzero.
+int32_t migrate_process_memory_to_numa_node(int32_t numa_node);
+
 // Set the calling thread's allocation policy and attempt to migrate existing
 // process pages. Child threads inherit the policy. Migration is best effort;
 // return nonzero if the policy itself cannot be installed.

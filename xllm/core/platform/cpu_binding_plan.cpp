@@ -62,9 +62,15 @@ std::vector<int32_t> intersect(const std::vector<int32_t>& left,
 
 std::vector<int32_t> slice(const std::vector<int32_t>& cpus,
                            size_t index,
-                           size_t count) {
+                           size_t count,
+                           bool remainder_to_last = false) {
   const size_t base = cpus.size() / count;
   const size_t extra = cpus.size() % count;
+  if (remainder_to_last) {
+    const size_t start = index * base;
+    const size_t end = index + 1 == count ? cpus.size() : start + base;
+    return {cpus.begin() + start, cpus.begin() + end};
+  }
   const size_t start = index * base + std::min(index, extra);
   const size_t length = base + (index < extra ? 1 : 0);
   return {cpus.begin() + start, cpus.begin() + start + length};
@@ -127,6 +133,8 @@ std::optional<CpuBindingPlan> make_cpu_binding_plan(
       options.dedicated_threads.size() >= allowed.size() ||
       (options.mode != CpuBindingMode::GLOBAL_SLICE &&
        options.mode != CpuBindingMode::TOPO_AFFINITY) ||
+      (options.memory_mode != CpuBindingMemoryMode::BIND_AT_STARTUP &&
+       options.memory_mode != CpuBindingMemoryMode::MIGRATE_AFTER_WARMUP) ||
       (options.memory_policy != numa::MemoryPolicy::BIND &&
        options.memory_policy != numa::MemoryPolicy::PREFERRED)) {
     return fail("invalid CPU binding options");
@@ -210,8 +218,10 @@ std::optional<CpuBindingPlan> make_cpu_binding_plan(
       if (cpus.size() / members.size() < minimum) {
         return fail("insufficient CPUs in the shared topology affinity group");
       }
-      pool = slice(
-          cpus, static_cast<size_t>(member - members.begin()), members.size());
+      pool = slice(cpus,
+                   static_cast<size_t>(member - members.begin()),
+                   members.size(),
+                   options.topology_remainder_to_last);
     }
   }
   if (pool.size() < minimum) {
@@ -221,6 +231,7 @@ std::optional<CpuBindingPlan> make_cpu_binding_plan(
   plan.device_id = device_id;
   plan.mode = mode;
   plan.memory_policy = options.memory_policy;
+  plan.memory_mode = options.memory_mode;
   const size_t worker_end = pool.size() - dedicated;
   plan.worker_cpus.assign(pool.begin() + reserved, pool.begin() + worker_end);
   plan.reserved_cpus.assign(pool.begin(), pool.begin() + reserved);

@@ -28,6 +28,9 @@ namespace xllm {
 
 enum class CpuBindingMode { GLOBAL_SLICE, TOPO_AFFINITY };
 
+// Migration after warmup leaves the process allocation policy unchanged.
+enum class CpuBindingMemoryMode { BIND_AT_STARTUP, MIGRATE_AFTER_WARMUP };
+
 struct CpuBindingTopology {
   std::vector<int32_t> allowed_cpus;
   // Stable IDs within the device inventory supplied by the platform.
@@ -39,10 +42,12 @@ struct CpuBindingTopology {
 struct CpuBindingOptions {
   CpuBindingMode mode = CpuBindingMode::TOPO_AFFINITY;
   bool extend_numa_pool = false;
+  bool topology_remainder_to_last = false;
   int32_t reserved_cpu_count = 0;
   // Assign one CPU per named thread role, in this order, at the pool's end.
   std::vector<std::string> dedicated_threads;
   numa::MemoryPolicy memory_policy = numa::MemoryPolicy::BIND;
+  CpuBindingMemoryMode memory_mode = CpuBindingMemoryMode::BIND_AT_STARTUP;
 };
 
 struct CpuBindingPlan {
@@ -53,6 +58,7 @@ struct CpuBindingPlan {
   std::unordered_map<std::string, std::vector<int32_t>> thread_cpus;
   int32_t memory_node = -1;
   numa::MemoryPolicy memory_policy = numa::MemoryPolicy::BIND;
+  CpuBindingMemoryMode memory_mode = CpuBindingMemoryMode::BIND_AT_STARTUP;
 };
 
 std::optional<std::vector<int32_t>> parse_cpu_list(const std::string& text);
@@ -75,10 +81,12 @@ class CpuBinding final {
   bool initialized() const;
   void refresh_threads();
   void refresh_after_first_forward();
+  void finish_warmup();
 
  private:
   mutable std::mutex mutex_;
   std::once_flag first_forward_;
+  bool warmup_finished_ = false;
   std::optional<CpuBindingPlan> plan_;
 };
 

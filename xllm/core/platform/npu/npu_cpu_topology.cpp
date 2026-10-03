@@ -364,21 +364,21 @@ std::optional<int32_t> resolve_npu_logical_id(
                                 : std::optional<int32_t>(logical_id);
 }
 
-CpuBindingOptions npu_cpu_binding_options(bool global_slice, bool bind_irq) {
+CpuBindingOptions npu_cpu_binding_options(bool global_slice) {
   CpuBindingOptions options;
   options.mode = global_slice ? CpuBindingMode::GLOBAL_SLICE
                               : CpuBindingMode::TOPO_AFFINITY;
   options.extend_numa_pool = true;
-  options.reserved_cpu_count = bind_irq ? 2 : 0;
+  options.topology_remainder_to_last = true;
+  options.reserved_cpu_count = 2;
   options.dedicated_threads = {"acl_thread", "release_thread"};
-  options.memory_policy = numa::MemoryPolicy::PREFERRED;
+  options.memory_mode = CpuBindingMemoryMode::MIGRATE_AFTER_WARMUP;
   return options;
 }
 
 std::optional<NpuCpuBindingInfo> get_npu_cpu_binding(
     int32_t device_index,
-    const std::string& soc_name,
-    bool bind_irq) {
+    const std::string& soc_name) {
 #if !defined(__aarch64__)
   LOG(WARNING) << "NPU CPU binding is supported on aarch64 hosts only";
   return std::nullopt;
@@ -429,7 +429,7 @@ std::optional<NpuCpuBindingInfo> get_npu_cpu_binding(
   topology.cpu_nodes = numa::get_cpu_numa_nodes();
   std::string error;
   auto plan = make_cpu_binding_plan(
-      topology, *id, npu_cpu_binding_options(global_slice, bind_irq), &error);
+      topology, *id, npu_cpu_binding_options(global_slice), &error);
   if (!plan) {
     LOG(WARNING) << "NPU CPU binding skipped: " << error;
     return std::nullopt;

@@ -36,7 +36,9 @@ std::string cpu_list(const std::vector<int32_t>& cpus) {
 }
 
 bool validate_plan(const CpuBindingPlan& plan) {
-  if (plan.worker_cpus.empty()) {
+  if (plan.worker_cpus.empty() ||
+      (plan.memory_mode != CpuBindingMemoryMode::BIND_AT_STARTUP &&
+       plan.memory_mode != CpuBindingMemoryMode::MIGRATE_AFTER_WARMUP)) {
     return false;
   }
   std::unordered_set<int32_t> assigned;
@@ -96,8 +98,10 @@ bool CpuBinding::initialize(CpuBindingPlan plan) {
     LOG(WARNING) << "CPU binding: failed to apply the worker plan";
     return false;
   }
-  if (plan.memory_node >= 0 && numa::bind_memory_to_numa_node(
-                                   plan.memory_node, plan.memory_policy) == 0) {
+  if (plan.memory_mode == CpuBindingMemoryMode::BIND_AT_STARTUP &&
+      plan.memory_node >= 0 &&
+      numa::bind_memory_to_numa_node(plan.memory_node, plan.memory_policy) ==
+          0) {
     LOG(INFO) << "CPU binding memory node=" << plan.memory_node << " policy="
               << (plan.memory_policy == numa::MemoryPolicy::BIND ? "bind"
                                                                  : "preferred");
@@ -120,6 +124,24 @@ void CpuBinding::refresh_threads() {
 
 void CpuBinding::refresh_after_first_forward() {
   std::call_once(first_forward_, [this]() { refresh_threads(); });
+}
+
+void CpuBinding::finish_warmup() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!plan_ || warmup_finished_) {
+    return;
+  }
+  warmup_finished_ = true;
+  if (!apply_cpu_binding_plan(*plan_)) {
+    LOG(WARNING) << "CPU binding: could not refresh placement after warmup";
+  }
+  if (plan_->memory_mode == CpuBindingMemoryMode::MIGRATE_AFTER_WARMUP &&
+      plan_->memory_node >= 0) {
+    if (numa::migrate_process_memory_to_numa_node(plan_->memory_node) == 0) {
+      LOG(INFO) << "CPU binding migrated process memory after warmup: node="
+                << plan_->memory_node;
+    }
+  }
 }
 
 }  // namespace xllm

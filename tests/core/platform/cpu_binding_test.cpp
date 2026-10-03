@@ -16,13 +16,18 @@ limitations under the License.
 #include "core/platform/cpu_binding.h"
 
 #include <gtest/gtest.h>
+#include <numa.h>
+#include <numaif.h>
 #include <pthread.h>
 #include <sched.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <memory>
 #include <numeric>
 #include <thread>
 #include <unordered_set>
@@ -381,6 +386,125 @@ TEST(CpuBindingTest, ProcessLifecycleRefreshesLateThreads) {
     done = true;
     late.join();
     _exit(success && inherited && rebound ? 0 : 1);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+  EXPECT_EQ(numa::get_thread_cpus(), cpus);
+}
+
+TEST(CpuBindingTest, TopologyRemainderPolicyDoesNotChangeGlobalSlices) {
+  auto host = topology(20, 3);
+  for (int32_t id : host.device_ids) {
+    host.affinity[id] = host.allowed_cpus;
+  }
+  CpuBindingOptions options;
+  const auto balanced = make_cpu_binding_plan(host, 0, options);
+  ASSERT_TRUE(balanced);
+  EXPECT_EQ(balanced->worker_cpus.size(), 7U);
+  options.topology_remainder_to_last = true;
+  const auto first = make_cpu_binding_plan(host, 0, options);
+  const auto last = make_cpu_binding_plan(host, 2, options);
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(last);
+  EXPECT_EQ(first->worker_cpus, *parse_cpu_list("0-5"));
+  EXPECT_EQ(last->worker_cpus, *parse_cpu_list("12-19"));
+  options.mode = CpuBindingMode::GLOBAL_SLICE;
+  const auto global = make_cpu_binding_plan(host, 0, options);
+  ASSERT_TRUE(global);
+  EXPECT_EQ(global->worker_cpus, balanced->worker_cpus);
+}
+
+int32_t page_node(void* page) {
+  int node = -1;
+  if (get_mempolicy(&node, nullptr, 0, page, MPOL_F_NODE | MPOL_F_ADDR) != 0) {
+    return -1;
+  }
+  return node;
+}
+
+void* allocate_page_on_node(int32_t node) {
+  using NodeMask =
+      std::unique_ptr<struct bitmask, decltype(&numa_bitmask_free)>;
+  NodeMask mask(numa_allocate_nodemask(), numa_bitmask_free);
+  if (!mask) {
+    return MAP_FAILED;
+  }
+  numa_bitmask_clearall(mask.get());
+  numa_bitmask_setbit(mask.get(), node);
+  if (set_mempolicy(MPOL_BIND, mask->maskp, mask->size + 1) != 0) {
+    return MAP_FAILED;
+  }
+  void* page = mmap(nullptr,
+                    sysconf(_SC_PAGESIZE),
+                    PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS,
+                    -1,
+                    0);
+  if (page != MAP_FAILED) {
+    *static_cast<volatile char*>(page) = 1;
+  }
+  if (set_mempolicy(MPOL_DEFAULT, nullptr, 0) != 0) {
+    return MAP_FAILED;
+  }
+  return page;
+}
+
+TEST(CpuBindingTest, MigratesExistingPagesOnlyOnceAfterWarmup) {
+  const auto cpus = numa::get_thread_cpus();
+  const auto nodes = numa::get_cpu_numa_nodes();
+  std::vector<int32_t> memory_nodes;
+  if (numa_all_nodes_ptr != nullptr) {
+    memory_nodes.reserve(numa_all_nodes_ptr->size);
+    for (unsigned long node = 0; node < numa_all_nodes_ptr->size; ++node) {
+      if (numa_bitmask_isbitset(numa_all_nodes_ptr, node)) {
+        memory_nodes.emplace_back(static_cast<int32_t>(node));
+      }
+    }
+  }
+  if (memory_nodes.size() < 2 || cpus.empty() || !nodes.count(cpus[0])) {
+    GTEST_SKIP() << "requires two NUMA nodes";
+  }
+  int mode = -1;
+  if (get_mempolicy(&mode, nullptr, 0, nullptr, 0) != 0 && errno == EPERM) {
+    GTEST_SKIP() << "memory policy syscalls are blocked";
+  }
+  const int32_t source = memory_nodes.front();
+  const int32_t target = memory_nodes.back();
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    auto& binding = CpuBinding::get_instance();
+    binding.finish_warmup();  // An early no-op must not consume completion.
+    CpuBindingPlan plan;
+    plan.device_id = 0;
+    plan.worker_cpus = {cpus[0]};
+    plan.memory_node = target;
+    plan.memory_mode = CpuBindingMemoryMode::MIGRATE_AFTER_WARMUP;
+    void* page = allocate_page_on_node(source);
+    if (page == MAP_FAILED || page_node(page) != source ||
+        !binding.initialize(std::move(plan))) {
+      _exit(1);
+    }
+    binding.refresh_after_first_forward();
+    if (page_node(page) != source ||
+        get_mempolicy(&mode, nullptr, 0, nullptr, 0) != 0 ||
+        mode != MPOL_DEFAULT) {
+      _exit(2);
+    }
+    binding.finish_warmup();
+    if (page_node(page) != target ||
+        get_mempolicy(&mode, nullptr, 0, nullptr, 0) != 0 ||
+        mode != MPOL_DEFAULT) {
+      _exit(3);
+    }
+    void* later_page = allocate_page_on_node(source);
+    if (later_page == MAP_FAILED || page_node(later_page) != source) {
+      _exit(4);
+    }
+    binding.finish_warmup();
+    _exit(page_node(later_page) == source ? 0 : 5);
   }
   int status = 0;
   ASSERT_EQ(waitpid(child, &status, 0), child);

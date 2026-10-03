@@ -309,6 +309,30 @@ std::unordered_map<int32_t, int32_t> get_cpu_numa_nodes() {
   return nodes;
 }
 
+int32_t migrate_process_memory_to_numa_node(int32_t numa_node) {
+  if (!is_numa_available() || !is_valid_numa_node(numa_node)) {
+    LOG(WARNING) << "Cannot migrate memory to NUMA node " << numa_node;
+    return -1;
+  }
+  using NodeMask =
+      std::unique_ptr<struct bitmask, decltype(&numa_bitmask_free)>;
+  NodeMask target(numa_allocate_nodemask(), numa_bitmask_free);
+  if (!target) {
+    return -1;
+  }
+  numa_bitmask_clearall(target.get());
+  numa_bitmask_setbit(target.get(), numa_node);
+  const long remaining =
+      numa_migrate_pages(getpid(), numa_all_nodes_ptr, target.get());
+  if (remaining != 0) {
+    LOG(WARNING) << "NUMA memory migration incomplete: result=" << remaining
+                 << (remaining < 0 ? std::string(" error=") + strerror(errno)
+                                   : "");
+    return -1;
+  }
+  return 0;
+}
+
 int32_t bind_memory_to_numa_node(int32_t numa_node, MemoryPolicy policy) {
   if (!is_numa_available() || !is_valid_numa_node(numa_node)) {
     LOG(WARNING) << "Cannot set memory policy for NUMA node " << numa_node;

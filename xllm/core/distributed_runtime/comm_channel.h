@@ -129,6 +129,8 @@ class CommChannel {
 
   virtual bool wakeup(const WakeupOptions& options);
 
+  virtual bool finish_cpu_binding();
+
   virtual bool start_profile();
 
   virtual bool stop_profile();
