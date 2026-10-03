@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "framework/model/model_input_params.h"
+#include "framework/model/vlm_model_params.h"
 
 namespace xllm::layer {
 namespace {
@@ -80,8 +81,9 @@ std::vector<int32_t> build_last_page_lens(
 
 }  // namespace
 
+template <typename Source>
 void ExpandedDecodeMetadataBuilder::populate(ModelInputParams& target,
-                                             const ModelInputParams& source,
+                                             const Source& source,
                                              const torch::Tensor& kv_seq_lens,
                                              int32_t block_size) {
   const torch::Tensor& source_block_tables =
@@ -286,5 +288,14 @@ void ExpandedDecodeMetadataBuilder::validate(
     }
   }
 }
+
+template void ExpandedDecodeMetadataBuilder::populate(ModelInputParams&,
+                                                      const ModelInputParams&,
+                                                      const torch::Tensor&,
+                                                      int32_t);
+template void ExpandedDecodeMetadataBuilder::populate(ModelInputParams&,
+                                                      const VlmModelParams&,
+                                                      const torch::Tensor&,
+                                                      int32_t);
 
 }  // namespace xllm::layer

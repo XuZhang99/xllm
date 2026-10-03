@@ -46,6 +46,7 @@ limitations under the License.
 #include "models/model_registry.h"
 #include "runtime/llm_worker_impl.h"
 #include "runtime/params_utils.h"
+#include "runtime/vlm_forward_params.h"
 #include "runtime/worker.h"
 #include "util/env_var.h"
 #include "util/pretty_print.h"
@@ -519,8 +520,8 @@ std::vector<int64_t> VLMEngine::get_active_activation_memory() const {
   return active_activation_memories;
 }
 
-std::vector<LlmForwardInput> VLMEngine::prepare_inputs(BatchGroup& batch) {
-  std::vector<LlmForwardInput> batched_inputs;
+std::vector<VlmForwardInput> VLMEngine::prepare_inputs(BatchGroup& batch) {
+  std::vector<VlmForwardInput> batched_inputs;
   batched_inputs.reserve(dp_size_);
   // some dp related variables
   std::vector<int32_t> dp_global_token_nums(dp_size_);
@@ -535,13 +536,13 @@ std::vector<LlmForwardInput> VLMEngine::prepare_inputs(BatchGroup& batch) {
   for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     if (batch[dp_rank].empty()) {
       // Use value-initialization to zero primitive fields for empty shard.
-      LlmForwardInput empty_input;
+      VlmForwardInput empty_input;
       empty_input.input_params.meta.batch_forward_type = BatchForwardType();
       empty_input.input_params.meta.batch_id = UNINITIALIZED_BATCH_ID;
       batched_inputs.emplace_back(std::move(empty_input));
     } else {
       batched_inputs.emplace_back(std::move(
-          batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
+          batch[dp_rank].prepare_vlm_forward_input(args_, threadpool_.get())));
     }
     dp_global_token_nums[dp_rank] =
         static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());

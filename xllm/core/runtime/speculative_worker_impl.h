@@ -18,6 +18,8 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "common/macros.h"
@@ -46,9 +48,12 @@ KVCacheShape build_speculative_draft_kv_cache_shape(
 // Returns whether this rank may execute the multi-step speculative decode
 // plan for the current global DP batch.
 bool should_run_speculative_decode(const ModelInputParams& params);
+bool should_run_speculative_decode(const VlmModelParams& params);
 
 // Keep padded and raw DP token-count views in the same speculative layout.
 void scale_speculative_parallel_token_counts(ModelInputParams& params,
+                                             int32_t multiplier);
+void scale_speculative_parallel_token_counts(VlmModelParams& params,
                                              int32_t multiplier);
 
 struct SpeculativeOutputStats {
@@ -73,8 +78,12 @@ std::vector<SpeculativeTokenStats> calculate_block_speculative_token_stats(
 // Provides common logic: target model management, step dispatch, and
 // sampling parameter updates. Subclasses implement algorithm-specific
 // draft generation and validation (MTP, Eagle3, Suffix, DFlash, etc.).
+template <typename TargetInput>
 class SpeculativeWorkerImpl : public WorkerImpl {
  public:
+  using TargetModelParams = std::remove_reference_t<
+      decltype(std::declval<TargetInput&>().input_params)>;
+
   ~SpeculativeWorkerImpl() override;
 
  protected:
@@ -131,18 +140,20 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   // prepare input for execution
   LlmForwardInput prepare_inputs(Batch& batch) override {
     return impl_->prepare_inputs(batch);
-  };
+  }
+  VlmForwardInput prepare_vlm_inputs(Batch& batch) override {
+    return impl_->prepare_vlm_inputs(batch);
+  }
 
   // prepare work before model execution
-  void prepare_work_before_execute(const LlmForwardInput& input,
-                                   LlmForwardInput& new_input) override;
-  void restore_json_object_states(LlmForwardInput& input) override;
+  void prepare_work_before_execute(const TargetInput& input,
+                                   TargetInput& new_input) override;
+  void restore_json_object_states(TargetInput& input) override;
 
   // Common step dispatch: prefill / decode / empty
-  std::optional<ForwardOutput> step(const LlmForwardInput& input) override;
+  std::optional<ForwardOutput> step(const TargetInput& input) override;
 
-  LlmForwardInput update_input_by_last_step_output(
-      LlmForwardInput& inputs) override;
+  TargetInput update_input_by_last_step_output(TargetInput& inputs) override;
 
   folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,
@@ -154,11 +165,11 @@ class SpeculativeWorkerImpl : public WorkerImpl {
  protected:
   // Algorithm-specific virtual methods for subclasses to implement
   virtual std::optional<ForwardOutput> step_prefill(
-      const LlmForwardInput& input) = 0;
+      const TargetInput& input) = 0;
   virtual std::optional<ForwardOutput> step_decode(
-      const LlmForwardInput& inputs) = 0;
+      const TargetInput& inputs) = 0;
   virtual std::optional<ForwardOutput> step_empty(
-      const LlmForwardInput& inputs) = 0;
+      const TargetInput& inputs) = 0;
 
   // Common helper: update sampling params for validation
   void update_sampling_params(SamplingParameters& sampling_params,
@@ -171,14 +182,14 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   static void force_greedy_draft_sampling(SamplingParameters& sampling_params);
 
   // prepare inputs for target model at Decode phase (validation).
-  void prepare_validate_inputs(const LlmForwardInput& inputs,
-                               LlmForwardInput& validate_inputs);
+  void prepare_validate_inputs(const TargetInput& inputs,
+                               TargetInput& validate_inputs);
   // Per-seq variant used by adaptive-speculative pruning: each sequence's
   // validate row width equals per_seq_val_tokens[i] (must be in [1, N+1]).
   // The dense meta/token/position/kv-slot buffers are rebuilt as varlen with
   // total_tokens = Σ per_seq_val_tokens.
-  void prepare_validate_inputs(const LlmForwardInput& inputs,
-                               LlmForwardInput& validate_inputs,
+  void prepare_validate_inputs(const TargetInput& inputs,
+                               TargetInput& validate_inputs,
                                const std::vector<int32_t>& per_seq_val_tokens);
 
   // Overwrite dp_global_token_nums / raw_dp_global_token_nums with the true
@@ -190,7 +201,7 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   // group spans a single rank. MUST be called on every DP rank each validate
   // step (both the pruned and the unpruned branch) so the collective stays in
   // lockstep and does not deadlock.
-  void sync_dp_global_token_nums_after_prune(ModelInputParams& input_params,
+  void sync_dp_global_token_nums_after_prune(TargetModelParams& input_params,
                                              int32_t local_total_val_tokens);
 
   // Idle-rank counterpart: a DP rank whose shard is empty still runs the target
@@ -198,7 +209,7 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   // Both must join the same DP allgather. This variant contributes the idle
   // rank's own current dp_global_token_nums entry (already scaled to the
   // uniform validate width) so it stays symmetric with the busy peers.
-  void sync_dp_global_token_nums_for_idle_rank(ModelInputParams& input_params);
+  void sync_dp_global_token_nums_for_idle_rank(TargetModelParams& input_params);
 
   // Target-side cache budget after reserving storage for a colocated draft.
   // DeepSeek-V4's fixed SWA pools require both geometries to participate.

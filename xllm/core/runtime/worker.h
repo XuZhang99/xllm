@@ -34,6 +34,7 @@ limitations under the License.
 #include "util/threadpool.h"
 
 namespace xllm {
+class VlmForwardInput;
 
 class Worker {
  public:
@@ -92,6 +93,8 @@ class Worker {
   LlmForwardInput prepare_inputs(Batch& batch);
   RecForwardInput prepare_inputs(RecBatch& batch);
   std::optional<ForwardOutput> step(const RecForwardInput& inputs);
+  VlmForwardInput prepare_vlm_inputs(Batch& batch);
+  std::optional<ForwardOutput> step(const VlmForwardInput& inputs);
 
   std::optional<ForwardOutput> step(const DiTForwardInput& inputs);
 
@@ -141,6 +144,9 @@ class Worker {
 
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const RecForwardInput& inputs);
+
+  folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const VlmForwardInput& inputs);
 
   folly::SemiFuture<folly::Unit> process_group_test_async();
 

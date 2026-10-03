@@ -23,6 +23,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "models/llm/mlu/mtp_topk_state.h"
 #include "runtime/forward_params.h"
+#include "runtime/vlm_forward_params.h"
 
 namespace xllm {
 namespace specBuilder {
@@ -114,6 +115,63 @@ TEST(SpecDecodeInputBuilderTest, DraftInputsSingleRowPerSeq) {
   expect_position_ids(buf, {5, 9});
   EXPECT_EQ(buf.out_new_cache_slots, std::vector<int32_t>({5, 21}));
   EXPECT_EQ(buf.out_kv_seq_lens, to_layout_seq_lens({6, 10}));
+}
+
+TEST(SpecDecodeInputBuilderTest, VlmVerifyRowsPreserveVisionState) {
+  VlmForwardInput input;
+  input.input_params.meta.num_sequences = 2;
+  input.input_params.is_spec_verify = true;
+  input.token_ids_host = torch::tensor({10, 20}, torch::kInt);
+  input.positions_host = torch::tensor({4, 8}, torch::kInt);
+  input.input_params.attention.host.block_tables =
+      torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
+  input.input_params.attention.host.kv_seq_lens = to_layout_seq_lens({5, 9});
+  const torch::Tensor pixels = torch::tensor({{1.0f, 2.0f}});
+  input.input_params.multimodal.mm_data.batch(
+      {MMData(MMType::IMAGE, MMDict{{"pixel_values", pixels}})});
+  const torch::Tensor deep_stack = torch::tensor({{3.0f, 4.0f}});
+  input.input_params.multimodal.deep_stacks = {deep_stack};
+  DecodeRowContext ctx = make_decode_row_context(input);
+
+  DecodeBuildBuffers buf;
+  for (int32_t seq_id = 0; seq_id < ctx.num_sequences; ++seq_id) {
+    RowSpec row;
+    row.seq_id = seq_id;
+    row.use_input_token = true;
+    row.position_offset = 1;
+    row.append_q_len_one = true;
+    row.append_block_table = true;
+    append_decode_row(ctx, row, /*block_size=*/4, buf);
+  }
+  EXPECT_EQ(buf.out_token_ids, std::vector<int32_t>({10, 20}));
+  expect_position_ids(buf, {5, 9});
+  update_input_params(input.input_params,
+                      buf,
+                      /*q_max_seq_len=*/1,
+                      buf.out_q_seq_lens,
+                      buf.out_q_cu_seq_lens,
+                      buf.meta.kv_max_seq_len,
+                      buf.out_kv_seq_lens,
+                      /*update_block_tables=*/true);
+
+  EXPECT_EQ(input.input_params.attention.host.new_cache_slots,
+            std::vector<int32_t>({5, 21}));
+  EXPECT_EQ(input.input_params.attention.host.kv_seq_lens,
+            to_layout_seq_lens({6, 10}));
+  EXPECT_EQ(input.input_params.attention.host.q_seq_lens,
+            to_layout_seq_lens({1, 1}));
+  EXPECT_EQ(input.input_params.attention.host.q_cu_seq_lens,
+            std::vector<int32_t>({1, 2}));
+  EXPECT_TRUE(torch::equal(input.input_params.attention.host.block_tables,
+                           torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt)));
+  EXPECT_TRUE(input.input_params.is_spec_verify);
+  const auto retained_pixels =
+      input.input_params.multimodal.mm_data.get<torch::Tensor>("pixel_values");
+  ASSERT_TRUE(retained_pixels.has_value());
+  EXPECT_TRUE(torch::equal(*retained_pixels, pixels));
+  ASSERT_EQ(input.input_params.multimodal.deep_stacks.size(), 1u);
+  EXPECT_EQ(input.input_params.multimodal.deep_stacks.front().data_ptr(),
+            deep_stack.data_ptr());
 }
 
 TEST(SpecDecodeInputBuilderTest, ValidateInputsNonAtbExpansion) {
@@ -516,6 +574,19 @@ TEST(SpecDecodeInputBuilderTest, GroupedPrefillSwaSlotsWrapRing) {
 
   EXPECT_EQ(build_grouped_prefill_swa_slots(input, /*block_size=*/4),
             std::vector<int32_t>({40, 41, 42}));
+}
+
+TEST(SpecDecodeInputBuilderTest, VlmGroupedPrefillUsesRingCachePositions) {
+  VlmForwardInput input;
+  input.input_params.meta.num_sequences = 2;
+  input.positions_host = torch::tensor({2, 3, 4, 6, 7}, torch::kInt);
+  input.input_params.attention.host.q_seq_lens = to_layout_seq_lens({3, 2});
+  input.input_params.attention.host.kv_seq_lens = to_layout_seq_lens({5, 8});
+  input.input_params.multi_block_tables = {
+      torch::tensor({{10, 11}, {20, 21}}, torch::kInt)};
+
+  EXPECT_EQ(build_grouped_prefill_swa_slots(input, /*block_size=*/4),
+            std::vector<int32_t>({42, 43, 44, 86, 87}));
 }
 
 TEST(SpecDecodeInputBuilderTest, MultiBlockKeepsSparseAbsoluteRows) {

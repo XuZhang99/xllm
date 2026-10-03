@@ -22,6 +22,7 @@ limitations under the License.
 #include <cstddef>
 
 #include "common/global_flags.h"
+#include "runtime/vlm_forward_params.h"
 
 namespace xllm {
 
@@ -648,11 +649,32 @@ void CommChannel::execute_model_async(
   execute_model_with_brpc(input, promise);
 }
 
+void CommChannel::execute_model_async(
+    const VlmForwardInput& input,
+    folly::Promise<std::optional<RawForwardOutput>>& promise) {
+  execute_model_with_brpc(input, promise);
+}
+
 bool CommChannel::execute_model_with_brpc(
     const RecForwardInput& input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
   proto::ForwardInput pb_forward_input;
   if (!rec_forward_input_to_packed_proto(
+          input, pb_forward_input.mutable_packed_input())) {
+    promise.setValue(std::optional<RawForwardOutput>{});
+    return false;
+  }
+  auto done = new ExecuteModelClosure();
+  done->promise = std::move(promise);
+  stub_->ExecuteModel(&done->cntl, &pb_forward_input, &done->pb_output, done);
+  return true;
+}
+
+bool CommChannel::execute_model_with_brpc(
+    const VlmForwardInput& input,
+    folly::Promise<std::optional<RawForwardOutput>>& promise) {
+  proto::ForwardInput pb_forward_input;
+  if (!vlm_forward_input_to_packed_proto(
           input, pb_forward_input.mutable_packed_input())) {
     promise.setValue(std::optional<RawForwardOutput>{});
     return false;

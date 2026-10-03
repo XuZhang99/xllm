@@ -10,11 +10,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mm_embed_vlm_worker_impl.h"
+#include "core/runtime/mm_embed_vlm_worker_impl.h"
 
 #include <c10/core/DeviceGuard.h>
-#include <folly/Unit.h>
-#include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 
@@ -24,8 +22,8 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
+#include "framework/model/causal_vlm.h"
 #include "framework/model/model_input_params.h"
-#include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
 #include "options.h"
 #include "util/timer.h"
@@ -50,7 +48,7 @@ bool MMEmbedVLMWorkerImpl::init_model(ModelContext& context) {
 }
 
 std::optional<ForwardOutput> MMEmbedVLMWorkerImpl::step(
-    const LlmForwardInput& input) {
+    const VlmForwardInput& input) {
   torch::DeviceGuard device_guard(device_);
   auto ret = device_.synchronize_default_stream();
 
@@ -59,17 +57,17 @@ std::optional<ForwardOutput> MMEmbedVLMWorkerImpl::step(
   // TODO remove language params in only vision model forward.
   // TODO to adapt multi stream parallel later, just use [0] temporarily
   // all tensors should be on the same device as model
-  auto flatten_tokens = input.token_ids.to(device_);
-  auto flatten_positions = input.positions.to(device_);
   auto params = input.input_params.to(device_);
-  auto sampling_params = input.sampling_params.to(device_, dtype_);
   CHECK(input.sampling_params.is_embeddings)
       << "Only mm embedding is supported.";
 
   // call model executor forward to get hidden states
   CausalVLM* vlm_model = dynamic_cast<CausalVLM*>(model_.get());
   CHECK(vlm_model != nullptr) << "Model is not a CausalVLM.";
-  auto encode_output = vlm_model->encode(params);
+  auto encode_output = [&]() {
+    VlmLegacyExecutionProjection projection(params);
+    return vlm_model->encode(projection.params());
+  }();
   const auto it = encode_output.find("image|embedding");
   if (it == encode_output.end() ||
       !std::holds_alternative<std::vector<torch::Tensor>>(it->second)) {
@@ -100,9 +98,9 @@ std::optional<ForwardOutput> MMEmbedVLMWorkerImpl::step(
     seq_mm_embeddings.reserve(seq_image_count);
     for (size_t i = 0; i < seq_image_count; ++i) {
       CHECK_LT(image_idx, mm_embeddings.size());
-      seq_mm_embeddings.push_back(mm_embeddings[image_idx++]);
+      seq_mm_embeddings.emplace_back(mm_embeddings[image_idx++]);
     }
-    sample_output.mm_embeddings.push_back(std::move(seq_mm_embeddings));
+    sample_output.mm_embeddings.emplace_back(std::move(seq_mm_embeddings));
   }
   CHECK_EQ(image_idx, mm_embeddings.size())
       << "mm_embedding count mismatch: grouped " << image_idx << " but got "

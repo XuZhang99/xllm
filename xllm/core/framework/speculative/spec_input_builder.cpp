@@ -22,7 +22,7 @@ limitations under the License.
 
 #include "framework/model/model_input_params.h"
 #include "framework/sampling/sampling_params.h"
-#include "runtime/forward_params.h"
+#include "runtime/vlm_forward_params.h"
 #include "util/tensor_helper.h"
 
 namespace xllm::specBuilder {
@@ -36,16 +36,16 @@ void push_cumsum(std::vector<int32_t>& vec, int32_t len) {
   }
   vec.emplace_back(vec.back() + len);
 }
-
-Slice<int32_t> get_token_ids(const LlmForwardInput& input) {
+template <typename Input>
+Slice<int32_t> get_token_ids(const Input& input) {
   return tensor_slice(input.token_ids_host);
 }
-
-Slice<int32_t> get_positions(const LlmForwardInput& input) {
+template <typename Input>
+Slice<int32_t> get_positions(const Input& input) {
   return tensor_slice(input.positions_host);
 }
-
-Slice<int32_t> get_kv_seq_lens(const LlmForwardInput& input) {
+template <typename Input>
+Slice<int32_t> get_kv_seq_lens(const Input& input) {
   return input.input_params.attention.host.kv_seq_lens;
 }
 
@@ -188,10 +188,9 @@ int32_t calc_ring_slot_id(int32_t position,
   const int32_t block_offset = position % block_size;
   return block_id * block_size + block_offset;
 }
-
-std::vector<int32_t> build_grouped_prefill_swa_slots(
-    const LlmForwardInput& input,
-    int32_t block_size) {
+template <typename Input>
+std::vector<int32_t> build_grouped_prefill_swa_slots(const Input& input,
+                                                     int32_t block_size) {
   DecodeRowContext ctx = make_decode_row_context(input);
   CHECK(ctx.model_managed_multiblock)
       << "grouped prefill SWA slots require multi_block_tables";
@@ -262,8 +261,8 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
   }
   append_seq_len_by_layout(kv_seq_lens_vec, kv_len);
 }
-
-DecodeRowContext make_decode_row_context(const LlmForwardInput& input) {
+template <typename Input>
+DecodeRowContext make_decode_row_context(const Input& input) {
   DecodeRowContext ctx;
   ctx.num_sequences = input.input_params.meta.num_sequences;
   CHECK_GE(ctx.num_sequences, 0) << "invalid num_sequences";
@@ -446,8 +445,8 @@ void append_decode_row_from_last_step(const DecodeRowContext& ctx,
   row.position_offset = resolved.position_offset;
   append_decode_row(ctx, row, block_size, buf);
 }
-
-void update_input_params(ModelInputParams& input_params,
+template <typename Params>
+void update_input_params(Params& input_params,
                          DecodeBuildBuffers& buf,
                          int32_t q_max_seq_len,
                          std::vector<int32_t> q_seq_lens_vec,
@@ -489,8 +488,8 @@ void update_input_params(ModelInputParams& input_params,
 torch::Tensor make_cpu_int_tensor(const std::vector<int32_t>& values) {
   return make_pinned_cpu_tensor(values);
 }
-
-void set_token_position_tensors(LlmForwardInput& input,
+template <typename Input>
+void set_token_position_tensors(Input& input,
                                 const std::vector<int32_t>& token_ids,
                                 const std::vector<int32_t>& positions,
                                 const torch::TensorOptions& token_options,
@@ -520,5 +519,40 @@ DraftProposal build_validate_proposal(
   return DraftProposal(std::move(draft_token_ids),
                        torch::stack(draft_probs_steps, /*dim=*/1));
 }
+
+template DecodeRowContext make_decode_row_context(const LlmForwardInput&);
+template std::vector<int32_t> build_grouped_prefill_swa_slots(
+    const LlmForwardInput&,
+    int32_t);
+template void set_token_position_tensors(LlmForwardInput&,
+                                         const std::vector<int32_t>&,
+                                         const std::vector<int32_t>&,
+                                         const torch::TensorOptions&,
+                                         const torch::TensorOptions&);
+template DecodeRowContext make_decode_row_context(const VlmForwardInput&);
+template std::vector<int32_t> build_grouped_prefill_swa_slots(
+    const VlmForwardInput&,
+    int32_t);
+template void set_token_position_tensors(VlmForwardInput&,
+                                         const std::vector<int32_t>&,
+                                         const std::vector<int32_t>&,
+                                         const torch::TensorOptions&,
+                                         const torch::TensorOptions&);
+template void update_input_params(ModelInputParams&,
+                                  DecodeBuildBuffers&,
+                                  int32_t,
+                                  std::vector<int32_t>,
+                                  std::vector<int32_t>,
+                                  int32_t,
+                                  std::vector<int32_t>,
+                                  bool);
+template void update_input_params(VlmModelParams&,
+                                  DecodeBuildBuffers&,
+                                  int32_t,
+                                  std::vector<int32_t>,
+                                  std::vector<int32_t>,
+                                  int32_t,
+                                  std::vector<int32_t>,
+                                  bool);
 
 }  // namespace xllm::specBuilder

@@ -28,6 +28,7 @@ limitations under the License.
 #include "core/framework/batch/batch_output_handler.h"
 #include "core/framework/batch/batch_state.h"
 #include "core/framework/request/request.h"
+#include "core/runtime/vlm_forward_params.h"
 
 namespace xllm {
 
@@ -91,6 +92,13 @@ class Batch final {
   LlmForwardInput prepare_forward_input(const ModelArgs& args,
                                         ThreadPool* thread_pool,
                                         int32_t cp_size = 1);
+  VlmForwardInput prepare_vlm_forward_input(uint32_t num_decoding_tokens,
+                                            uint32_t min_decoding_batch_size,
+                                            const ModelArgs& args,
+                                            int32_t cp_size = 1);
+  VlmForwardInput prepare_vlm_forward_input(const ModelArgs& args,
+                                            ThreadPool* thread_pool,
+                                            int32_t cp_size = 1);
 
   // process output
   //

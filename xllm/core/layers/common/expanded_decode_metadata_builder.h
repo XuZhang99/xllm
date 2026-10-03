@@ -29,8 +29,9 @@ namespace layer {
 
 class ExpandedDecodeMetadataBuilder final {
  public:
+  template <typename Source>
   static void populate(ModelInputParams& target,
-                       const ModelInputParams& source,
+                       const Source& source,
                        const torch::Tensor& kv_seq_lens,
                        int32_t block_size);
 

@@ -142,8 +142,14 @@ class WorkerClient {
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const RecForwardInput& inputs);
 
+  virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const VlmForwardInput& inputs);
+
   virtual folly::SemiFuture<std::optional<RawForwardOutput>> step_remote_async(
       const RecForwardInput& inputs);
+
+  virtual folly::SemiFuture<std::optional<RawForwardOutput>> step_remote_async(
+      const VlmForwardInput& inputs);
 
   virtual folly::SemiFuture<folly::Unit> process_group_test_async();
 

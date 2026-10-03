@@ -67,10 +67,10 @@ runtime::Options SuffixTargetOptions(const runtime::Options& options) {
 SuffixWorkerImpl::SuffixWorkerImpl(const ParallelArgs& parallel_args,
                                    const torch::Device& device,
                                    const runtime::Options& options)
-    : SpeculativeWorkerImpl(parallel_args,
-                            device,
-                            options,
-                            SuffixTargetOptions(options)) {
+    : SpeculativeWorkerImpl<LlmForwardInput>(parallel_args,
+                                             device,
+                                             options,
+                                             SuffixTargetOptions(options)) {
   suffix_cache_ = std::make_unique<SuffixDecodingCache>(
       options_.speculative_suffix_cache_max_depth(),
       options_.speculative_suffix_max_cached_requests());
@@ -83,7 +83,7 @@ std::optional<ForwardOutput> SuffixWorkerImpl::step_empty(
     output->sample_output.embeddings = torch::Tensor();
     return output;
   } else {
-    LlmForwardInput new_input = input;
+    LlmForwardInput new_input = input.clone();
     scale_speculative_parallel_token_counts(
         new_input.input_params, options_.num_speculative_tokens() + 1);
 

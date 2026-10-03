@@ -59,7 +59,7 @@ DSparkWorkerImpl::DraftBlock DSparkWorkerImpl::run_decode_draft(
 
   CHECK_GT(num_speculative_tokens, 0)
       << "DSpark requires num_speculative_tokens > 0.";
-  LlmForwardInput logits_input = query_input;
+  LlmForwardInput logits_input = query_input.clone();
   logits_input.skip_sampling_for_logits_only = true;
   // Request pre-lm_head hidden alongside logits so ConfidenceHead can consume
   // the same [num_reqs*num_spec, hidden] rows without a second projection.

@@ -155,7 +155,8 @@ class NpuCpPlan final {
   }
 
   // Build CP plan and localize attention meta after global-meta consumers.
-  void prepare(LlmForwardInput& processed_input,
+  template <typename Input>
+  void prepare(Input& processed_input,
                const CpPlanRuntimeConfig& runtime_config);
 
   // Rewrite hidden/positions to the rank-local padded layout in place.
@@ -174,7 +175,8 @@ class NpuCpPlan final {
 
   // Rewrites the model attention metadata to the per-rank local-padded view.
   // Called from prepare(); public for unit tests that build a plan directly.
-  void apply_attention_meta(ModelInputParams& params) const;
+  template <typename Params>
+  void apply_attention_meta(Params& params) const;
 
  private:
   friend class npu::GraphPersistentParam;

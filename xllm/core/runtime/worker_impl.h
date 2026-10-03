@@ -44,6 +44,7 @@ limitations under the License.
 #include "options.h"
 #include "platform/device.h"
 #include "runtime/rec_forward_params.h"
+#include "runtime/vlm_forward_params.h"
 #include "util/threadpool.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/mooncake_weight_transfer.h"
@@ -125,14 +126,23 @@ class WorkerImpl {
 
   // prepare input for execution
   virtual LlmForwardInput prepare_inputs(Batch& batch);
+  virtual VlmForwardInput prepare_vlm_inputs(Batch& batch);
   virtual RecForwardInput prepare_inputs(RecBatch& batch);
 
   // prepare work before model execution
   virtual void prepare_work_before_execute(const LlmForwardInput& inputs,
                                            LlmForwardInput& processed_inputs);
   virtual void restore_json_object_states(LlmForwardInput& input);
+  virtual void prepare_work_before_execute(const VlmForwardInput& inputs,
+                                           VlmForwardInput& processed_inputs);
+  virtual void restore_json_object_states(VlmForwardInput& input);
   void prepare_work_before_execute_on_stream(const LlmForwardInput& input,
                                              LlmForwardInput& processed_input,
+                                             Stream& prepare_stream,
+                                             bool record_ready_event = true,
+                                             bool restore_linear_state = true);
+  void prepare_work_before_execute_on_stream(const VlmForwardInput& input,
+                                             VlmForwardInput& processed_input,
                                              Stream& prepare_stream,
                                              bool record_ready_event = true,
                                              bool restore_linear_state = true);
@@ -144,7 +154,10 @@ class WorkerImpl {
   // while preparing B/2B metadata so the compute stream only observes hits.
   bool uses_npu_dp_ep_padding() const;
   void prepare_dp_ep_padding(ModelInputParams& input_params);
+  void prepare_dp_ep_padding(VlmModelParams& input_params);
   void prepare_dp_ep_padding_on_stream(ModelInputParams& input_params,
+                                       Stream& prepare_stream);
+  void prepare_dp_ep_padding_on_stream(VlmModelParams& input_params,
                                        Stream& prepare_stream);
 #endif
 
@@ -159,6 +172,7 @@ class WorkerImpl {
 
   // Internal helper shared by worker pipelines before model execution.
   virtual void apply_kv_block_swaps(const ModelInputParams& input_params);
+  virtual void apply_kv_block_swaps(const VlmModelParams& input_params);
 
   virtual std::optional<ForwardOutput> step(const DiTForwardInput& inputs);
 
@@ -167,12 +181,16 @@ class WorkerImpl {
   virtual void prepare_work_before_execute(const RecForwardInput& inputs,
                                            RecForwardInput& processed_inputs);
 
-  virtual std::optional<ForwardOutput> step(const LlmForwardInput& inputs) = 0;
+  virtual std::optional<ForwardOutput> step(const LlmForwardInput& inputs);
+  virtual std::optional<ForwardOutput> step(const VlmForwardInput& inputs);
 
   // Optional no-sync execution hook used by speculative LLM/VLM workers.
   // Other worker types do not support this execution mode.
   virtual std::optional<ForwardOutput> execute_no_sync_on_stream(
       const LlmForwardInput& input,
+      Stream& compute_stream);
+  virtual std::optional<ForwardOutput> execute_no_sync_on_stream(
+      const VlmForwardInput& input,
       Stream& compute_stream);
 
   virtual void process_group_test();
@@ -181,6 +199,10 @@ class WorkerImpl {
       LlmForwardInput& inputs);
   void update_json_object_states_by_last_step_output(LlmForwardInput& inputs);
   void sanitize_json_object_error_inputs(LlmForwardInput& inputs);
+  virtual VlmForwardInput update_input_by_last_step_output(
+      VlmForwardInput& inputs);
+  void update_json_object_states_by_last_step_output(VlmForwardInput& inputs);
+  void sanitize_json_object_error_inputs(VlmForwardInput& inputs);
 
   // initialize model, cache manager. async call
   virtual folly::SemiFuture<bool> init_model_async(
@@ -243,6 +265,7 @@ class WorkerImpl {
   void clear_hierarchy_kv_cache_transfer();
 
   void set_hierarchy_layer_synchronizer(ModelInputParams& input_params);
+  void set_hierarchy_layer_synchronizer(VlmModelParams& input_params);
 
   virtual std::vector<uint8_t> prefetch_kv_blocks(
       Slice<BlockTransferInfo>& block_transfer_info);
@@ -251,6 +274,8 @@ class WorkerImpl {
   // the future returns a successful status with no meaningful value
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const LlmForwardInput& inputs);
+  virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const VlmForwardInput& inputs);
 
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const DiTForwardInput& inputs);
@@ -342,12 +367,19 @@ class WorkerImpl {
       const std::vector<std::string>& sample_sequence_ids);
   bool can_use_last_step_output_for_schedule_overlap(
       const LlmForwardInput& input) const;
+  bool can_use_last_step_output_for_schedule_overlap(
+      const VlmForwardInput& input) const;
   virtual std::optional<ForwardOutput> step_for_schedule_overlap(
       const LlmForwardInput& input);
   virtual LlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
       LlmForwardInput& input);
+  virtual std::optional<ForwardOutput> step_for_schedule_overlap(
+      const VlmForwardInput& input);
+  virtual VlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
+      VlmForwardInput& input);
   // Only used for deepseek chunked prefill ops on npu device
   void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);
+  void prepare_mla_prefixcache_inputs(VlmModelParams& input_params);
 
   void init_hierarchy_kv_cache_transfer(
       const KVCacheShape& kv_cache_shape,
@@ -359,6 +391,11 @@ class WorkerImpl {
       const ModelInputParams& input_params) const;
   bool can_skip_npu_graph_decode_sync(
       const ModelInputParams& input_params) const;
+  bool can_prepare_npu_graph_decode_input(
+      const VlmModelParams& input_params) const;
+  bool can_prepare_without_compute_stream_wait(
+      const VlmModelParams& input_params) const;
+  bool can_skip_npu_graph_decode_sync(const VlmModelParams& input_params) const;
 
   bool allocate_kv_cache_storage(
       const KVCacheShape& kv_cache_shape,
@@ -379,6 +416,8 @@ class WorkerImpl {
   bool can_use_cuda_block_copy_kernel(
       const ModelInputParams& input_params) const;
   void execute_cuda_block_copy_kernel(const ModelInputParams& input_params);
+  bool can_use_cuda_block_copy_kernel(const VlmModelParams& input_params) const;
+  void execute_cuda_block_copy_kernel(const VlmModelParams& input_params);
 
   struct CudaBlockCopyRuntimeState {
     torch::Tensor k_cache_ptrs_device;
@@ -403,6 +442,53 @@ class WorkerImpl {
   // decoder ATB binding refresh.
   bool init_rolling_runtime_state();
 
+#endif
+
+ private:
+  template <typename Input>
+  bool can_use_last_step_output_for_schedule_overlap_impl(
+      const Input& input) const;
+  template <typename Input>
+  Input update_input_by_last_step_output_impl(Input& inputs);
+  template <typename Input>
+  void update_json_object_states_by_last_step_output_impl(Input& input);
+  template <typename Input>
+  void sanitize_json_object_error_inputs_impl(Input& input);
+  template <typename Input>
+  void restore_json_object_states_impl(Input& input);
+  template <typename Input>
+  void prepare_work_before_execute_on_stream_impl(const Input& input,
+                                                  Input& processed_input,
+                                                  Stream& prepare_stream,
+                                                  bool record_ready_event,
+                                                  bool restore_linear_state);
+  template <typename Input>
+  folly::SemiFuture<std::optional<ForwardOutput>> step_async_impl(
+      const Input& input);
+  template <typename Params>
+  bool can_prepare_npu_graph_decode_input_impl(
+      const Params& input_params) const;
+  template <typename Params>
+  bool can_prepare_without_compute_stream_wait_impl(
+      const Params& input_params) const;
+  template <typename Params>
+  bool can_skip_npu_graph_decode_sync_impl(const Params& input_params) const;
+  template <typename Params>
+  void apply_kv_block_swaps_impl(const Params& input_params);
+  template <typename Params>
+  void prepare_mla_prefixcache_inputs_impl(Params& input_params);
+#if defined(USE_NPU)
+  template <typename Params>
+  void prepare_dp_ep_padding_impl(Params& input_params);
+  template <typename Params>
+  void prepare_dp_ep_padding_on_stream_impl(Params& input_params,
+                                            Stream& prepare_stream);
+#endif
+#if defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
+  template <typename Params>
+  bool can_use_cuda_block_copy_kernel_impl(const Params& input_params) const;
+  template <typename Params>
+  void execute_cuda_block_copy_kernel_impl(const Params& input_params);
 #endif
 
  protected:

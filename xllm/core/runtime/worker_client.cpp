@@ -28,6 +28,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
+#include "runtime/vlm_forward_params.h"
 #include "util/timer.h"
 
 namespace xllm {
@@ -127,9 +128,20 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerClient::step_async(
   return worker_->step_async(input);
 }
 
+folly::SemiFuture<std::optional<ForwardOutput>> WorkerClient::step_async(
+    const VlmForwardInput& input) {
+  return worker_->step_async(input);
+}
+
 folly::SemiFuture<std::optional<RawForwardOutput>>
 WorkerClient::step_remote_async(const RecForwardInput& /*input*/) {
   LOG(FATAL) << "Native Rec local execution requires step_async";
+  return folly::makeSemiFuture(std::optional<RawForwardOutput>{});
+}
+
+folly::SemiFuture<std::optional<RawForwardOutput>>
+WorkerClient::step_remote_async(const VlmForwardInput& /*input*/) {
+  LOG(FATAL) << "Native VLM local execution requires step_async";
   return folly::makeSemiFuture(std::optional<RawForwardOutput>{});
 }
 

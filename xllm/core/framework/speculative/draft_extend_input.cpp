@@ -20,7 +20,7 @@ limitations under the License.
 #include "common/macros.h"
 #include "core/framework/sampling/sampling_params.h"
 #include "core/framework/speculative/embedding_cache.h"
-#include "runtime/forward_params.h"
+#include "runtime/vlm_forward_params.h"
 
 namespace xllm {
 
@@ -81,9 +81,9 @@ void clear_all_output_embeddings(ForwardOutput& output) {
   output.sample_output.embeddings = torch::Tensor();
   clear_selected_embeddings(output);
 }
-
+template <typename Input>
 void prepare_first_draft_inputs(EmbeddingCache& embedding_cache,
-                                const LlmForwardInput& input,
+                                const Input& input,
                                 ForwardOutput& output) {
   const torch::Tensor& sample_hidden_states =
       output.sample_output.selected_embeddings;
@@ -99,5 +99,12 @@ void prepare_first_draft_inputs(EmbeddingCache& embedding_cache,
   output.sample_output.embeddings = sample_hidden_states.detach();
   clear_selected_embeddings(output);
 }
+
+template void prepare_first_draft_inputs(EmbeddingCache&,
+                                         const LlmForwardInput&,
+                                         ForwardOutput&);
+template void prepare_first_draft_inputs(EmbeddingCache&,
+                                         const VlmForwardInput&,
+                                         ForwardOutput&);
 
 }  // namespace xllm

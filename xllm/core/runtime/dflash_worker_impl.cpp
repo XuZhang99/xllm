@@ -353,11 +353,11 @@ std::vector<int64_t> build_accepted_context_rows(
 DFlashWorkerImpl::DFlashWorkerImpl(const ParallelArgs& parallel_args,
                                    const torch::Device& device,
                                    const runtime::Options& options)
-    : SpeculativeWorkerImpl(parallel_args,
-                            device,
-                            options,
-                            target_options(options),
-                            WorkerType::LLM) {
+    : SpeculativeWorkerImpl<LlmForwardInput>(parallel_args,
+                                             device,
+                                             options,
+                                             target_options(options),
+                                             WorkerType::LLM) {
   bool allow_cp = false;
   if (parallel_args.cp_size() > 1 && Platform::is_npu()) {
     allow_cp = util::is_deepseek_v4_model_type(
@@ -469,7 +469,7 @@ bool DFlashWorkerImpl::init_model(const std::string& model_weights_path,
   const bool loading_target =
       impl_->get_status() == WorkerImpl::Status::UNINITIALIZED;
   if (loading_target) {
-    result = SpeculativeWorkerImpl::init_model(
+    result = SpeculativeWorkerImpl<LlmForwardInput>::init_model(
         model_weights_path, random_seed, master_status);
   } else {
     CHECK_EQ(draft_impl_->get_status(), WorkerImpl::Status::UNINITIALIZED);
@@ -711,7 +711,7 @@ std::optional<ForwardOutput> DFlashWorkerImpl::step_empty(
   const int32_t draft_width = dflash_detail::decode_draft_width(
       options_.num_speculative_tokens(), sample_from_anchor());
   const bool use_block_parallel_rows = draft_use_block_parallel_rows();
-  LlmForwardInput query_input = input;
+  LlmForwardInput query_input = input.clone();
   dflash_detail::invalidate_draft_model_geometry(query_input.input_params);
   query_input.input_params.meta.batch_forward_type = draft_batch_forward_type();
   query_input.input_params.meta.q_max_seq_len =
@@ -727,7 +727,7 @@ std::optional<ForwardOutput> DFlashWorkerImpl::step_empty(
   std::optional<ForwardOutput> draft_output = run_worker_no_sync_impl(
       *draft_impl_, query_input, *prepare_stream_, *compute_stream_);
 
-  LlmForwardInput validate_input = input;
+  LlmForwardInput validate_input = input.clone();
   // DSpark's N-wide draft geometry must be rescaled to (N+1) for the target's
   // anchor + drafts forward.
   scale_speculative_parallel_token_counts(
@@ -807,7 +807,7 @@ std::optional<ForwardOutput> DFlashWorkerImpl::step_prefill(
 
 std::optional<ForwardOutput> DFlashWorkerImpl::step_decode(
     const LlmForwardInput& raw_input) {
-  LlmForwardInput input = raw_input;
+  LlmForwardInput input = raw_input.clone();
   LlmForwardInput validate_input;
 
   CHECK(embedding_cache_ != nullptr)
@@ -1347,12 +1347,12 @@ void DFlashWorkerImpl::prepare_validate_inputs(
     const LlmForwardInput& input,
     LlmForwardInput& validate_input) {
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
-  LlmForwardInput prepared_input = input;
+  LlmForwardInput prepared_input = input.clone();
   prepared_input.runtime.metadata_ready_event.reset();
   const bool use_linear_spec_verify = target_is_hybrid_recurrent_;
   prepared_input.input_params.is_spec_verify = use_linear_spec_verify;
-  SpeculativeWorkerImpl::prepare_validate_inputs(prepared_input,
-                                                 validate_input);
+  SpeculativeWorkerImpl<LlmForwardInput>::prepare_validate_inputs(
+      prepared_input, validate_input);
   validate_input.input_params.embedding.input_embedding = torch::Tensor();
   if (use_linear_spec_verify) {
     ModelInputParams& input_params = validate_input.input_params;
@@ -1393,7 +1393,7 @@ void DFlashWorkerImpl::prepare_validate_inputs(
 void DFlashWorkerImpl::prepare_query_inputs(const LlmForwardInput& input,
                                             LlmForwardInput& query_input) {
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
-  query_input = input;
+  query_input = input.clone();
   query_input.runtime.device_tensors_ready = false;
   ModelInputParams& input_params = query_input.input_params;
   input_params.embedding.input_embedding = torch::Tensor();
@@ -1684,10 +1684,10 @@ void DFlashWorkerImpl::apply_per_seq_varlen_prune(
   const int32_t num_sequences = input.input_params.meta.num_sequences;
   CHECK_EQ(static_cast<int32_t>(per_seq_val_tokens.size()), num_sequences);
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
-  LlmForwardInput prepared_input = input;
+  LlmForwardInput prepared_input = input.clone();
   prepared_input.runtime.metadata_ready_event.reset();
   LlmForwardInput new_validate;
-  SpeculativeWorkerImpl::prepare_validate_inputs(
+  SpeculativeWorkerImpl<LlmForwardInput>::prepare_validate_inputs(
       prepared_input, new_validate, per_seq_val_tokens);
   new_validate.input_params.embedding.input_embedding = torch::Tensor();
   record_metadata_ready_event(*prepare_stream_, new_validate);

@@ -15,23 +15,14 @@ limitations under the License.
 
 #pragma once
 
-#include <folly/futures/Future.h>
-#include <torch/types.h>
+#include <optional>
 
-#include "core/common/global_flags.h"
-#include "executor.h"
-#include "forward_params.h"
-#include "framework/model/causal_vlm.h"
-#include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
-#include "framework/quant_args.h"
-#include "framework/state_dict/state_dict.h"
-#include "options.h"
+#include "core/runtime/vlm_forward_params.h"
 #include "runtime/worker_impl.h"
 
 namespace xllm {
 
-class EmbedVLMWorkerImpl : public WorkerImpl {
+class EmbedVLMWorkerImpl final : public WorkerImpl {
  public:
   EmbedVLMWorkerImpl(const ParallelArgs& parallel_args,
                      const torch::Device& device,
@@ -41,7 +32,7 @@ class EmbedVLMWorkerImpl : public WorkerImpl {
 
   bool init_model(ModelContext& context) override;
 
-  std::optional<ForwardOutput> step(const LlmForwardInput& input) override;
+  std::optional<ForwardOutput> step(const VlmForwardInput& input) override;
 };
 
 }  // namespace xllm

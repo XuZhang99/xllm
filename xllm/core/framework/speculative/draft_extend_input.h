@@ -44,8 +44,9 @@ void clear_all_output_embeddings(ForwardOutput& output);
 // Writes the target prefill context to the embedding cache and exposes the
 // selected hidden as `embeddings` for the PD handoff to the first draft-extend
 // step.
+template <typename Input>
 void prepare_first_draft_inputs(EmbeddingCache& embedding_cache,
-                                const LlmForwardInput& input,
+                                const Input& input,
                                 ForwardOutput& output);
 
 }  // namespace xllm

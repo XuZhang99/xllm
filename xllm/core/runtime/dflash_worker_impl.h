@@ -65,7 +65,7 @@ inline DSparkSasMode classify_dspark_sas_mode(const ModelArgs& draft_args,
 
 }  // namespace dflash_detail
 
-class DFlashWorkerImpl : public SpeculativeWorkerImpl {
+class DFlashWorkerImpl : public SpeculativeWorkerImpl<LlmForwardInput> {
  public:
   DFlashWorkerImpl(const ParallelArgs& parallel_args,
                    const torch::Device& device,
@@ -111,7 +111,7 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
     // DSpark ConfidenceHead output for adaptive pruning; empty otherwise.
     torch::Tensor confidence_probs;
     // No-sync draft inputs must outlive validation's stream sync.
-    std::vector<std::shared_ptr<LlmForwardInput>> retained_inputs;
+    std::vector<std::shared_ptr<const void>> retained_inputs;
   };
 
   // virtual: DSpark overrides the draft sampling (parallel block sample ->
@@ -192,7 +192,7 @@ class DFlashWorkerImpl : public SpeculativeWorkerImpl {
   // Per-seq varlen prune: rebuild validate_input as a true varlen
   // [Σ per_seq_val_tokens[i], ...] batch so target forward only spends
   // compute on tokens each seq's prefix_len actually needs. Reuses the base
-  // SpeculativeWorkerImpl per-seq builder.
+  // SpeculativeWorkerImpl<LlmForwardInput> per-seq builder.
   void apply_per_seq_varlen_prune(
       const LlmForwardInput& input,
       LlmForwardInput& validate_input,

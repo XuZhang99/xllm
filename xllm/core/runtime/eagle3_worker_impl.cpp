@@ -48,29 +48,33 @@ runtime::Options eagle3_draft_options(const runtime::Options& options) {
 
 }  // namespace
 
-Eagle3WorkerImpl::Eagle3WorkerImpl(const ParallelArgs& parallel_args,
-                                   const torch::Device& device,
-                                   const runtime::Options& options,
-                                   WorkerType worker_type)
-    : MTPWorkerImpl(parallel_args,
-                    device,
-                    options,
-                    eagle3_main_options(options),
-                    eagle3_draft_options(options),
-                    worker_type,
-                    /*enable_adaptive_speculative_decode=*/false) {
+template <typename TargetInput>
+Eagle3WorkerImpl<TargetInput>::Eagle3WorkerImpl(
+    const ParallelArgs& parallel_args,
+    const torch::Device& device,
+    const runtime::Options& options,
+    WorkerType worker_type)
+    : MTPWorkerImpl<TargetInput>(parallel_args,
+                                 device,
+                                 options,
+                                 eagle3_main_options(options),
+                                 eagle3_draft_options(options),
+                                 worker_type,
+                                 /*enable_adaptive_speculative_decode=*/false) {
   // Context parallelism does not expose the auxiliary hidden states.
   CHECK_LE(parallel_args.cp_size(), 1)
       << "EAGLE-3 speculative decoding does not support context parallelism "
          "(cp_size > 1).";
 }
 
-bool Eagle3WorkerImpl::init_model(const std::string& model_weights_path,
-                                  int32_t random_seed,
-                                  MasterStatus master_status) {
+template <typename TargetInput>
+bool Eagle3WorkerImpl<TargetInput>::init_model(
+    const std::string& model_weights_path,
+    int32_t random_seed,
+    MasterStatus master_status) {
   // Call parent's init_model first
-  bool result =
-      MTPWorkerImpl::init_model(model_weights_path, random_seed, master_status);
+  bool result = MTPWorkerImpl<TargetInput>::init_model(
+      model_weights_path, random_seed, master_status);
 
   // Load hot_token_id_ directly from state_dict (EAGLE-3 specific)
   // This should be done after draft model is loaded
@@ -101,15 +105,17 @@ bool Eagle3WorkerImpl::init_model(const std::string& model_weights_path,
   return result;
 }
 
-int64_t Eagle3WorkerImpl::get_embedding_placeholder_size() {
+template <typename TargetInput>
+int64_t Eagle3WorkerImpl<TargetInput>::get_embedding_placeholder_size() {
   const int64_t target_hidden = context_.get_model_args().hidden_size();
   return 3 * target_hidden;
 }
 
-void Eagle3WorkerImpl::process_draft_sample_output(
+template <typename TargetInput>
+void Eagle3WorkerImpl<TargetInput>::process_draft_sample_output(
     SampleOutput& sample_output) {
   // Keep probability compression behavior fully aligned with MTP.
-  MTPWorkerImpl::process_draft_sample_output(sample_output);
+  MTPWorkerImpl<TargetInput>::process_draft_sample_output(sample_output);
 
   // EAGLE-3 specific: map draft token IDs to target token IDs.
   if (!use_draft_token_mapping_ || !hot_token_id_.defined() ||
@@ -134,7 +140,8 @@ void Eagle3WorkerImpl::process_draft_sample_output(
       hot_token_id_.index_select(0, sample_output.next_tokens);
 }
 
-void Eagle3WorkerImpl::check_draft_input_embedding(
+template <typename TargetInput>
+void Eagle3WorkerImpl<TargetInput>::check_draft_input_embedding(
     const torch::Tensor& embedding,
     const std::string& phase) const {
   if (!embedding.defined()) {
@@ -170,5 +177,8 @@ void Eagle3WorkerImpl::check_draft_input_embedding(
       << ". Check that target model captures three aux hidden-state layers "
          "for Eagle3.";
 }
+
+template class Eagle3WorkerImpl<LlmForwardInput>;
+template class Eagle3WorkerImpl<VlmForwardInput>;
 
 }  // namespace xllm

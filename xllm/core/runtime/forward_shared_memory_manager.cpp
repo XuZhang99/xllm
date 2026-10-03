@@ -34,6 +34,7 @@ limitations under the License.
 #endif
 #include "platform/stream.h"
 #include "runtime/rec_forward_params.h"
+#include "runtime/vlm_forward_params.h"
 #if defined(USE_MUSA)
 #include <musa_runtime.h>
 #endif
@@ -94,15 +95,15 @@ inline bool is_aligned_for_cuda_zero_copy(const void* ptr) {
   return reinterpret_cast<std::uintptr_t>(ptr) % kCudaZeroCopyAlignment == 0;
 }
 
-// Domain values are stable across later forward-input migrations. TOKEN is the
-// temporary token contract; VLM=2 and REC=3 are reserved until their codecs
-// land.
-enum class PackedInputDomain : uint8_t { TOKEN = 1, REC = 3, DIT = 4 };
+// Domain values are stable across the forward-input migrations.
+enum class PackedInputDomain : uint8_t { TOKEN = 1, VLM = 2, REC = 3, DIT = 4 };
 
 template <typename Input>
 constexpr PackedInputDomain packed_input_domain() {
   if constexpr (std::is_same_v<Input, RecForwardInput>) {
     return PackedInputDomain::REC;
+  } else if constexpr (std::is_same_v<Input, VlmForwardInput>) {
+    return PackedInputDomain::VLM;
   }
   return PackedInputDomain::TOKEN;
 }
@@ -172,6 +173,7 @@ bool read_input_layout(const char* payload,
     return false;
   }
   if (expected_domain == PackedInputDomain::TOKEN ||
+      expected_domain == PackedInputDomain::VLM ||
       expected_domain == PackedInputDomain::REC) {
     // The removed DiT tail remains false in the temporary token descriptor so
     // legacy token payloads remain readable without reintroducing DiT
@@ -2725,6 +2727,9 @@ inline void deserialize_forward_input_payload(
   read_tensor(context, input_params.block_copy.dst_block_indices, stream);
   read_tensor(context, input_params.block_copy.cum_sum, stream);
   read_mm_batch_data(context, input_params.multimodal.mm_data);
+  if constexpr (std::is_same_v<Input, VlmForwardInput>) {
+    read_vector_tensor(context, input_params.multimodal.deep_stacks, stream);
+  }
   read_tensor_and_vector(context,
                          input_params.attention.device.kv_cache_tokens_nums,
                          input_params.attention.host.kv_cache_tokens_nums,
@@ -3171,6 +3176,9 @@ inline void serialize_forward_input_sections(
   write_tensor(context, input_params.block_copy.dst_block_indices);
   write_tensor(context, input_params.block_copy.cum_sum);
   write_mm_batch_data(context, input_params.multimodal.mm_data);
+  if constexpr (std::is_same_v<Input, VlmForwardInput>) {
+    write_vector_tensor(context, input_params.multimodal.deep_stacks);
+  }
   write_host_vector_or_tensor(
       context,
       input_params.attention.host.kv_cache_tokens_nums,
@@ -3497,11 +3505,14 @@ bool unpack_native_input_host_buffer(const Input& input,
     normalize_float_param(output.sampling_params.repetition_penalties);
     normalize_float_param(output.sampling_params.temperatures);
     normalize_float_param(output.sampling_params.top_p);
-    normalize_float_param(output.decoder_sampling_params.frequency_penalties);
-    normalize_float_param(output.decoder_sampling_params.presence_penalties);
-    normalize_float_param(output.decoder_sampling_params.repetition_penalties);
-    normalize_float_param(output.decoder_sampling_params.temperatures);
-    normalize_float_param(output.decoder_sampling_params.top_p);
+    if constexpr (!std::is_same_v<Input, VlmForwardInput>) {
+      normalize_float_param(output.decoder_sampling_params.frequency_penalties);
+      normalize_float_param(output.decoder_sampling_params.presence_penalties);
+      normalize_float_param(
+          output.decoder_sampling_params.repetition_penalties);
+      normalize_float_param(output.decoder_sampling_params.temperatures);
+      normalize_float_param(output.decoder_sampling_params.top_p);
+    }
     output.positions = detail::normalize_positions_for_device(output.positions);
     return output.runtime.device_tensors_ready;
   }
@@ -3531,6 +3542,22 @@ bool unpack_from_input_host_buffer(const RecForwardInput& input,
       input, device, dtype, output, materialize_device_buffer);
 }
 
+bool unpack_from_input_host_buffer(const VlmForwardInput& input,
+                                   const torch::Device& device,
+                                   torch::ScalarType dtype,
+                                   VlmForwardInput& output,
+                                   bool materialize_device_buffer) {
+  return unpack_native_input_host_buffer(
+      input, device, dtype, output, materialize_device_buffer);
+}
+
+bool unpack_from_input_host_buffer(const VlmForwardInput& input,
+                                   const torch::Device& device,
+                                   VlmForwardInput& output) {
+  return unpack_native_input_host_buffer(
+      input, device, torch::kFloat32, output, false);
+}
+
 bool unpack_from_input_host_buffer(const LlmForwardInput& input,
                                    const torch::Device& device,
                                    LlmForwardInput& output) {
@@ -3556,10 +3583,13 @@ bool token_input_to_packed_proto(
     const Input& input,
     proto::PackedForwardInput* packed_forward_input) {
   CHECK(packed_forward_input != nullptr);
-  if (!std::holds_alternative<std::monostate>(input.input_params.rec_params) ||
-      input.step_decode.has_value()) {
-    LOG(ERROR) << "Rec input transport is not supported";
-    return false;
+  if constexpr (!std::is_same_v<Input, VlmForwardInput>) {
+    if (!std::holds_alternative<std::monostate>(
+            input.input_params.rec_params) ||
+        input.step_decode.has_value()) {
+      LOG(ERROR) << "Rec input transport is not supported";
+      return false;
+    }
   }
   const RawInputLayoutHeader layout = calculate_forward_input_layout(input);
   const uint64_t payload_size = get_input_layout_size(layout);
@@ -3594,6 +3624,21 @@ bool rec_forward_input_to_packed_proto(
 bool packed_proto_to_rec_forward_input(
     const proto::PackedForwardInput& packed_forward_input,
     RecForwardInput& input,
+    const torch::Device& device,
+    Stream* stream) {
+  return packed_proto_to_forward_input_impl(
+      packed_forward_input, input, device, stream);
+}
+
+bool vlm_forward_input_to_packed_proto(
+    const VlmForwardInput& input,
+    proto::PackedForwardInput* packed_forward_input) {
+  return token_input_to_packed_proto(input, packed_forward_input);
+}
+
+bool packed_proto_to_vlm_forward_input(
+    const proto::PackedForwardInput& packed_forward_input,
+    VlmForwardInput& input,
     const torch::Device& device,
     Stream* stream) {
   return packed_proto_to_forward_input_impl(
@@ -3698,10 +3743,13 @@ void ForwardSharedMemoryManager::input_read(DiTForwardInput& input) {
 
 template <typename Input>
 bool ForwardSharedMemoryManager::write_token_input(const Input& input) {
-  if (!std::holds_alternative<std::monostate>(input.input_params.rec_params) ||
-      input.step_decode.has_value()) {
-    LOG(ERROR) << "Rec input transport is not supported";
-    return false;
+  if constexpr (!std::is_same_v<Input, VlmForwardInput>) {
+    if (!std::holds_alternative<std::monostate>(
+            input.input_params.rec_params) ||
+        input.step_decode.has_value()) {
+      LOG(ERROR) << "Rec input transport is not supported";
+      return false;
+    }
   }
   const RawInputLayoutHeader layout = calculate_forward_input_layout(input);
   const uint64_t payload_size = get_input_layout_size(layout);
@@ -3796,6 +3844,10 @@ bool ForwardSharedMemoryManager::input_write(const RecForwardInput& input) {
   return write_token_input(input);
 }
 
+bool ForwardSharedMemoryManager::input_write(const VlmForwardInput& input) {
+  return write_token_input(input);
+}
+
 void ForwardSharedMemoryManager::input_read(
     LlmForwardInput& input,
     const torch::Device& device,
@@ -3805,6 +3857,13 @@ void ForwardSharedMemoryManager::input_read(
 
 void ForwardSharedMemoryManager::input_read(
     RecForwardInput& input,
+    const torch::Device& device,
+    InputDeviceMaterializationPolicy policy) {
+  read_token_input(input, device, policy);
+}
+
+void ForwardSharedMemoryManager::input_read(
+    VlmForwardInput& input,
     const torch::Device& device,
     InputDeviceMaterializationPolicy policy) {
   read_token_input(input, device, policy);

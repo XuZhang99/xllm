@@ -91,6 +91,25 @@ void Batch::process_sample_output(const RawForwardOutput& output,
       {sequences, state_.sequence_groups()}, output, replace_fake_token);
 }
 
+VlmForwardInput Batch::prepare_vlm_forward_input(
+    uint32_t num_decoding_tokens,
+    uint32_t min_decoding_batch_size,
+    const ModelArgs& args,
+    int32_t cp_size) {
+  const auto data = state_.prepare_sequence_input_data();
+  output_handler_.prepare(data);
+  return state_.build_vlm_sequence_input(
+      data, num_decoding_tokens, min_decoding_batch_size, args, cp_size);
+}
+
+VlmForwardInput Batch::prepare_vlm_forward_input(const ModelArgs& args,
+                                                 ThreadPool* thread_pool,
+                                                 int32_t cp_size) {
+  const auto data = state_.prepare_distributed_input_data();
+  output_handler_.prepare(data);
+  return state_.build_vlm_distributed_input(data, args, thread_pool, cp_size);
+}
+
 void Batch::process_sample_output(const SampleOutput& output,
                                   bool replace_fake_token,
                                   bool force_requested_beam_result_size) {

@@ -23,6 +23,7 @@ limitations under the License.
 
 namespace xllm {
 class RecForwardInput;
+class VlmForwardInput;
 
 class Stream;
 
@@ -113,6 +114,12 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
 
   bool input_write(const RecForwardInput& input);
   void input_read(RecForwardInput& input,
+                  const torch::Device& device,
+                  InputDeviceMaterializationPolicy policy =
+                      InputDeviceMaterializationPolicy::MATERIALIZE_ON_READ);
+
+  bool input_write(const VlmForwardInput& input);
+  void input_read(VlmForwardInput& input,
                   const torch::Device& device,
                   InputDeviceMaterializationPolicy policy =
                       InputDeviceMaterializationPolicy::MATERIALIZE_ON_READ);

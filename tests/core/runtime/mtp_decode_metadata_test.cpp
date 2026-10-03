@@ -28,12 +28,15 @@ limitations under the License.
 namespace xllm {
 namespace {
 
-class DecodeMetadataTestWorker final : public MTPWorkerImpl {
+class DecodeMetadataTestWorker final : public MTPWorkerImpl<LlmForwardInput> {
  public:
   DecodeMetadataTestWorker(const ParallelArgs& parallel_args,
                            const torch::Device& device,
                            const runtime::Options& options)
-      : MTPWorkerImpl(parallel_args, device, options, WorkerType::LLM) {
+      : MTPWorkerImpl<LlmForwardInput>(parallel_args,
+                                       device,
+                                       options,
+                                       WorkerType::LLM) {
     context_.set_model_impl("python");
     target_spec_verify_mode_ =
         mtp_async::TargetSpecVerifyMode::DEEPSEEK_V32_EXPANDED_VERIFY;

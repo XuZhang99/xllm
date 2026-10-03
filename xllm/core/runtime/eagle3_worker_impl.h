@@ -20,7 +20,8 @@ limitations under the License.
 
 namespace xllm {
 
-class Eagle3WorkerImpl : public MTPWorkerImpl {
+template <typename TargetInput>
+class Eagle3WorkerImpl final : public MTPWorkerImpl<TargetInput> {
  public:
   Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                    const torch::Device& device,
@@ -41,6 +42,11 @@ class Eagle3WorkerImpl : public MTPWorkerImpl {
   torch::Tensor get_hot_token_id() const { return hot_token_id_; }
 
  protected:
+  using MTPWorkerImpl<TargetInput>::context_;
+  using MTPWorkerImpl<TargetInput>::device_;
+  using MTPWorkerImpl<TargetInput>::draft_impl_;
+  using MTPWorkerImpl<TargetInput>::uses_embedded_eagle3_draft;
+
   // EAGLE-3 specific draft output post-processing during decode:
   // selected prob extraction + draft->target token id mapping.
   void process_draft_sample_output(SampleOutput& sample_output) override;

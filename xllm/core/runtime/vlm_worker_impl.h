@@ -15,22 +15,15 @@ limitations under the License.
 
 #pragma once
 
-#include <folly/futures/Future.h>
-#include <torch/types.h>
+#include <cstdint>
+#include <optional>
 
-#include "executor.h"
-#include "forward_params.h"
-#include "framework/model/causal_vlm.h"
-#include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
-#include "framework/quant_args.h"
-#include "framework/state_dict/state_dict.h"
-#include "options.h"
+#include "core/runtime/vlm_forward_params.h"
 #include "runtime/worker_impl.h"
 
 namespace xllm {
 
-class VLMWorkerImpl : public WorkerImpl {
+class VLMWorkerImpl final : public WorkerImpl {
  public:
   enum class ForwardSyncPolicy : int8_t {
     LEGACY = 0,
@@ -46,29 +39,29 @@ class VLMWorkerImpl : public WorkerImpl {
   // initialize model, cache manager. blocking call
   bool init_model(ModelContext& context) override;
 
-  std::optional<ForwardOutput> step(const LlmForwardInput& input) override;
+  std::optional<ForwardOutput> step(const VlmForwardInput& input) override;
 
  protected:
   std::optional<ForwardOutput> step_for_schedule_overlap(
-      const LlmForwardInput& input) override;
-  LlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
-      LlmForwardInput& input) override;
+      const VlmForwardInput& input) override;
+  VlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
+      VlmForwardInput& input) override;
 
  private:
   // Execute forward + sampling on the given compute stream without a host-side
   // synchronize, recording a ready event for cross-step dependency. Shared by
   // the schedule-overlap decode fast path.
   std::optional<ForwardOutput> execute_no_sync_on_stream(
-      const LlmForwardInput& input,
+      const VlmForwardInput& input,
       Stream& compute_stream,
       bool record_ready_event);
 
   std::optional<ForwardOutput> execute_no_sync_on_stream(
-      const LlmForwardInput& input,
+      const VlmForwardInput& input,
       Stream& compute_stream) override;
 
   std::optional<ForwardOutput> step_internal(
-      const LlmForwardInput& input,
+      const VlmForwardInput& input,
       ForwardSyncPolicy sync_policy = ForwardSyncPolicy::LEGACY,
       bool record_ready_event = true);
 };

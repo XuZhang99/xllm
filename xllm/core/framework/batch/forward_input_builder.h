@@ -32,6 +32,7 @@ limitations under the License.
 #include "core/framework/request/sequence.h"
 #include "core/runtime/forward_params.h"
 #include "core/runtime/rec_forward_params.h"
+#include "core/runtime/vlm_forward_params.h"
 #include "core/util/threadpool.h"
 
 namespace xllm {
@@ -62,6 +63,8 @@ class ForwardInputBuilder final {
   LlmForwardInput build_forward_input(uint32_t num_decoding_tokens,
                                       uint32_t min_decoding_batch_size);
   RecForwardInput build_rec_forward_input(uint32_t num_decoding_tokens,
+                                          uint32_t min_decoding_batch_size);
+  VlmForwardInput build_vlm_forward_input(uint32_t num_decoding_tokens,
                                           uint32_t min_decoding_batch_size);
 
   std::vector<Block> take_linear_restore_src_blocks() {

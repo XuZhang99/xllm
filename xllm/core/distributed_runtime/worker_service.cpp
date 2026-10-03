@@ -46,6 +46,7 @@ limitations under the License.
 #include "runtime/params_utils.h"
 #include "runtime/rec_forward_params.h"
 #include "runtime/speculative_worker_impl.h"
+#include "runtime/vlm_forward_params.h"
 #include "util/timer.h"
 
 namespace xllm {
@@ -609,11 +610,17 @@ void WorkerService::create_polling_shm_thread(
         device_.set_device();
         Timer timer;
         while (true) {
-          std::variant<LlmForwardInput, RecForwardInput, DiTForwardInput> input;
+          std::variant<LlmForwardInput,
+                       VlmForwardInput,
+                       RecForwardInput,
+                       DiTForwardInput>
+              input;
           if (options_.backend() == "dit") {
             input.emplace<DiTForwardInput>();
           } else if (options_.backend() == "rec") {
             input.emplace<RecForwardInput>();
+          } else if (options_.backend() == "vlm") {
+            input.emplace<VlmForwardInput>();
           }
           // NPU graph task updates cannot safely overlap an H2D enqueue from
           // the SHM polling thread. Keep scheduler overlap, but defer device
@@ -1049,11 +1056,17 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
     // convert proto::ForwardInput to LlmForwardInput
 
     Timer timer;
-    std::variant<LlmForwardInput, RecForwardInput, DiTForwardInput> input;
+    std::variant<LlmForwardInput,
+                 VlmForwardInput,
+                 RecForwardInput,
+                 DiTForwardInput>
+        input;
     if (options_.backend() == "dit") {
       input.emplace<DiTForwardInput>();
     } else if (options_.backend() == "rec") {
       input.emplace<RecForwardInput>();
+    } else if (options_.backend() == "vlm") {
+      input.emplace<VlmForwardInput>();
     }
     if (!pb_forward_input->has_packed_input()) {
       controller->SetFailed("LlmForwardInput requires a packed input payload");
@@ -1070,6 +1083,9 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
             return packed_proto_to_dit_forward_input(packed_input, typed_input);
           } else if constexpr (std::is_same_v<Input, RecForwardInput>) {
             return packed_proto_to_rec_forward_input(
+                packed_input, typed_input, device_, stream_.get());
+          } else if constexpr (std::is_same_v<Input, VlmForwardInput>) {
+            return packed_proto_to_vlm_forward_input(
                 packed_input, typed_input, device_, stream_.get());
           } else {
             return packed_proto_to_forward_input(

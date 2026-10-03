@@ -28,6 +28,7 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
+#include "runtime/vlm_forward_params.h"
 #include "runtime/worker.h"
 #include "runtime/worker_client.h"
 #include "util/threadpool.h"
@@ -60,7 +61,7 @@ class VLMEngine : public Engine {
   bool init_model(MasterStatus master_status);
   KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);
-  std::vector<LlmForwardInput> prepare_inputs(BatchGroup& batch);
+  std::vector<VlmForwardInput> prepare_inputs(BatchGroup& batch);
   void setup_workers(const runtime::Options& options);
   void process_group_test();
 

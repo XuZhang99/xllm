@@ -94,7 +94,8 @@ struct TokenWithOffset {
 };
 
 // Builds a reusable row context from LlmForwardInput host-side fields.
-DecodeRowContext make_decode_row_context(const LlmForwardInput& input);
+template <typename Input>
+DecodeRowContext make_decode_row_context(const Input& input);
 
 // Appends one logical decode row into output buffers.
 void append_decode_row(const DecodeRowContext& ctx,
@@ -131,9 +132,9 @@ int32_t calc_ring_slot_id(int32_t position,
                           int32_t block_size);
 
 // Manager 0 in a grouped-cache input is the DSV4 SWA manager.
-std::vector<int32_t> build_grouped_prefill_swa_slots(
-    const LlmForwardInput& input,
-    int32_t block_size);
+template <typename Input>
+std::vector<int32_t> build_grouped_prefill_swa_slots(const Input& input,
+                                                     int32_t block_size);
 
 // Computes sequence kv length with platform-specific seq-lens layout handling.
 int32_t calc_kv_len(const Slice<int32_t>& kv_seq_lens_slice,
@@ -154,7 +155,8 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
                                 int32_t& kv_max_seq_len);
 
 // Updates common decode-side ModelInputParams fields from built buffers.
-void update_input_params(ModelInputParams& input_params,
+template <typename Params>
+void update_input_params(Params& input_params,
                          DecodeBuildBuffers& buf,
                          int32_t q_max_seq_len,
                          std::vector<int32_t> q_seq_lens_vec,
@@ -168,7 +170,8 @@ torch::Tensor make_cpu_int_tensor(const std::vector<int32_t>& values);
 
 // Stages token_ids/positions into both the host and device tensors of `input`
 // with async H2D copies, toggling device_tensors_ready around the write.
-void set_token_position_tensors(LlmForwardInput& input,
+template <typename Input>
+void set_token_position_tensors(Input& input,
                                 const std::vector<int32_t>& token_ids,
                                 const std::vector<int32_t>& positions,
                                 const torch::TensorOptions& token_options,

@@ -13,11 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "embed_vlm_worker_impl.h"
+#include "core/runtime/embed_vlm_worker_impl.h"
 
 #include <c10/core/DeviceGuard.h>
-#include <folly/Unit.h>
-#include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 
@@ -29,7 +27,6 @@ limitations under the License.
 #include "core/framework/config/model_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
 #include "options.h"
 #include "util/timer.h"
@@ -54,7 +51,7 @@ bool EmbedVLMWorkerImpl::init_model(ModelContext& context) {
 }
 
 std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
-    const LlmForwardInput& input) {
+    const VlmForwardInput& input) {
   torch::DeviceGuard device_guard(device_);
   auto ret = device_.synchronize_default_stream();
 
@@ -67,9 +64,11 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   auto params = input.input_params.to(device_);
   auto sampling_params = input.sampling_params.to(device_, dtype_);
 
-  // call model executor forward to get hidden states
-  auto model_output = model_executor_->forward(
-      flatten_tokens, flatten_positions, kv_caches_, params);
+  auto model_output = [&]() {
+    VlmLegacyExecutionProjection projection(params);
+    return model_executor_->forward(
+        flatten_tokens, flatten_positions, kv_caches_, projection.params());
+  }();
   auto hidden_states = model_output.hidden_states;
   ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
@@ -89,13 +88,14 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
     // so that the user could receive embeddings of images and texts
     if (::xllm::ModelConfig::get_instance()
             .enable_return_mm_full_embeddings()) {
-      auto q_seq_len_vec = input.input_params.attention.host.q_seq_lens;
+      const auto& q_seq_len_vec = input.input_params.attention.host.q_seq_lens;
       sample_output.mm_embeddings.reserve(q_seq_len_vec.size());
       int32_t token_start_idx = 0;
-      for (auto seq_len : q_seq_len_vec) {
+      for (int32_t seq_len : q_seq_len_vec) {
         auto seq_embed =
             embeddings.slice(0, token_start_idx, token_start_idx + seq_len);
-        sample_output.mm_embeddings.push_back({seq_embed});
+        sample_output.mm_embeddings.emplace_back(
+            std::vector<torch::Tensor>{seq_embed});
         token_start_idx += seq_len;
       }
     } else {

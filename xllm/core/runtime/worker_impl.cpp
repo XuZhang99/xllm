@@ -42,6 +42,7 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -202,7 +203,8 @@ void move_tensor_to_device_if_needed(torch::Tensor& tensor,
 // LlmForwardInput::to(device) returns early when device_tensors_ready is set.
 // Nested step_async (e.g. MTP target/draft) can leave CP-remapped control
 // tensors on CPU while model tensors are already on NPU.
-void ensure_forward_input_device_tensors(LlmForwardInput& input,
+template <typename Input>
+void ensure_forward_input_device_tensors(Input& input,
                                          const torch::Device& device) {
   move_tensor_to_device_if_needed(input.token_ids, device);
   move_tensor_to_device_if_needed(input.positions, device);
@@ -211,10 +213,12 @@ void ensure_forward_input_device_tensors(LlmForwardInput& input,
   move_tensor_to_device_if_needed(input.sampling_params.selected_token_idxes,
                                   device);
   move_tensor_to_device_if_needed(input.sampling_params.sample_idxes, device);
-  move_tensor_to_device_if_needed(
-      input.decoder_sampling_params.selected_token_idxes, device);
-  move_tensor_to_device_if_needed(input.decoder_sampling_params.sample_idxes,
-                                  device);
+  if constexpr (std::is_same_v<Input, RecForwardInput>) {
+    move_tensor_to_device_if_needed(
+        input.decoder_sampling_params.selected_token_idxes, device);
+    move_tensor_to_device_if_needed(input.decoder_sampling_params.sample_idxes,
+                                    device);
+  }
 }
 
 #if defined(USE_NPU) || defined(USE_MLU) || defined(USE_CUDA) || \
@@ -230,8 +234,8 @@ struct LinearStateInputRows {
 // NPU, CUDA, and MUSA workers carry the same host attention views, so they
 // derive linear-state rows identically. NPU and MUSA models also read back
 // parallel.query_start_loc.
-LinearStateInputRows get_host_linear_state_rows(
-    ModelInputParams& input_params) {
+template <typename Params>
+LinearStateInputRows get_host_linear_state_rows(Params& input_params) {
   // Early-return on dummy/empty-shard inputs. Under dp>1, an empty shard is
   // padded with a fake token by worker_impl but its GDN-related tensors
   // (attention.device.kv_cache_tokens_nums etc.) are left undefined. Reading
@@ -304,7 +308,8 @@ LinearStateInputRows get_host_linear_state_rows(
 #endif
 
 #if defined(USE_MLU)
-LinearStateInputRows get_mlu_linear_state_rows(ModelInputParams& input_params) {
+template <typename Params>
+LinearStateInputRows get_mlu_linear_state_rows(Params& input_params) {
   const std::vector<int32_t>& cached_tokens =
       input_params.attention.host.kv_cache_tokens_nums;
   const std::vector<int32_t>& host_q_seq_lens =
@@ -344,7 +349,8 @@ LinearStateInputRows get_mlu_linear_state_rows(ModelInputParams& input_params) {
 
 #if defined(USE_NPU) || defined(USE_MLU) || defined(USE_CUDA) || \
     defined(USE_MUSA)
-void prepare_input_params_for_linear_attention(ModelInputParams& input_params) {
+template <typename Params>
+void prepare_input_params_for_linear_attention(Params& input_params) {
 #if defined(USE_MLU)
   LinearStateInputRows rows = get_mlu_linear_state_rows(input_params);
 #else
@@ -731,8 +737,9 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
   return folly::makeSemiFuture(std::optional<ForwardOutput>{});
 }
 
-bool WorkerImpl::can_prepare_npu_graph_decode_input(
-    const ModelInputParams& input_params) const {
+template <typename Params>
+bool WorkerImpl::can_prepare_npu_graph_decode_input_impl(
+    const Params& input_params) const {
 #if defined(USE_NPU)
   return !options_.enable_speculative_decode() &&
          ::xllm::ExecutionConfig::get_instance().enable_graph() &&
@@ -746,8 +753,19 @@ bool WorkerImpl::can_prepare_npu_graph_decode_input(
 #endif
 }
 
-bool WorkerImpl::can_prepare_without_compute_stream_wait(
+bool WorkerImpl::can_prepare_npu_graph_decode_input(
     const ModelInputParams& input_params) const {
+  return can_prepare_npu_graph_decode_input_impl(input_params);
+}
+
+bool WorkerImpl::can_prepare_npu_graph_decode_input(
+    const VlmModelParams& input_params) const {
+  return can_prepare_npu_graph_decode_input_impl(input_params);
+}
+
+template <typename Params>
+bool WorkerImpl::can_prepare_without_compute_stream_wait_impl(
+    const Params& input_params) const {
 #if defined(USE_NPU)
   (void)input_params;
   return !options_.enable_speculative_decode() &&
@@ -760,8 +778,19 @@ bool WorkerImpl::can_prepare_without_compute_stream_wait(
 #endif
 }
 
-bool WorkerImpl::can_skip_npu_graph_decode_sync(
+bool WorkerImpl::can_prepare_without_compute_stream_wait(
     const ModelInputParams& input_params) const {
+  return can_prepare_without_compute_stream_wait_impl(input_params);
+}
+
+bool WorkerImpl::can_prepare_without_compute_stream_wait(
+    const VlmModelParams& input_params) const {
+  return can_prepare_without_compute_stream_wait_impl(input_params);
+}
+
+template <typename Params>
+bool WorkerImpl::can_skip_npu_graph_decode_sync_impl(
+    const Params& input_params) const {
 #if defined(USE_NPU)
   return can_prepare_npu_graph_decode_input(input_params) &&
          input_params.meta.batch_forward_type.is_decode() &&
@@ -771,6 +800,16 @@ bool WorkerImpl::can_skip_npu_graph_decode_sync(
   (void)input_params;
   return false;
 #endif
+}
+
+bool WorkerImpl::can_skip_npu_graph_decode_sync(
+    const ModelInputParams& input_params) const {
+  return can_skip_npu_graph_decode_sync_impl(input_params);
+}
+
+bool WorkerImpl::can_skip_npu_graph_decode_sync(
+    const VlmModelParams& input_params) const {
+  return can_skip_npu_graph_decode_sync_impl(input_params);
 }
 
 folly::SemiFuture<std::tuple<int64_t, int64_t>>
@@ -804,8 +843,9 @@ void WorkerImpl::update_last_step_output(
   }
 }
 
-bool WorkerImpl::can_use_last_step_output_for_schedule_overlap(
-    const LlmForwardInput& input) const {
+template <typename Input>
+bool WorkerImpl::can_use_last_step_output_for_schedule_overlap_impl(
+    const Input& input) const {
   if (!last_step_output_valid_) {
     return false;
   }
@@ -816,8 +856,8 @@ bool WorkerImpl::can_use_last_step_output_for_schedule_overlap(
   return detail::has_request_id_overlap(request_ids, last_step_request_ids_);
 }
 
-LlmForwardInput WorkerImpl::update_input_by_last_step_output(
-    LlmForwardInput& inputs) {
+template <typename Input>
+Input WorkerImpl::update_input_by_last_step_output_impl(Input& inputs) {
 #if defined(USE_NPU)
   if (can_prepare_npu_graph_decode_input(inputs.input_params)) {
     xllm::kernel::npu::replace_token(
@@ -825,7 +865,7 @@ LlmForwardInput WorkerImpl::update_input_by_last_step_output(
         last_step_output_.sample_output.next_tokens,
         /*synchronize_stream=*/false);
     inputs.input_params.graph.input_tokens_override = inputs.token_ids;
-    return inputs;
+    return inputs.clone();
   }
   xllm::kernel::npu::replace_token(inputs.token_ids,
                                    last_step_output_.sample_output.next_tokens,
@@ -842,7 +882,7 @@ LlmForwardInput WorkerImpl::update_input_by_last_step_output(
       {clamped_neg_indices - 1});
   inputs.token_ids = torch::where(neg_mask, replacement, flatten_tokens);
 #endif
-  return inputs;
+  return inputs.clone();
 }
 
 std::optional<ForwardOutput> WorkerImpl::step_for_schedule_overlap(
@@ -864,8 +904,9 @@ WorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
   return update_input_by_last_step_output(input);
 }
 
-void WorkerImpl::update_json_object_states_by_last_step_output(
-    LlmForwardInput& input) {
+template <typename Input>
+void WorkerImpl::update_json_object_states_by_last_step_output_impl(
+    Input& input) {
   if (input.json_object_states.empty()) {
     return;
   }
@@ -1005,7 +1046,8 @@ void WorkerImpl::update_json_object_states_by_last_step_output(
   input.sampling_params.filter_mask = torch::Tensor();
 }
 
-void WorkerImpl::sanitize_json_object_error_inputs(LlmForwardInput& input) {
+template <typename Input>
+void WorkerImpl::sanitize_json_object_error_inputs_impl(Input& input) {
   std::string error;
   CHECK(detail::sanitize_json_object_error_token_ids(
       &input.token_ids,
@@ -1091,7 +1133,8 @@ bool WorkerImpl::uses_npu_dp_ep_padding() const {
          (parallel_args.dp_size() > 1 || parallel_args.ep_size() > 1);
 }
 
-void WorkerImpl::prepare_dp_ep_padding(ModelInputParams& input_params) {
+template <typename Params>
+void WorkerImpl::prepare_dp_ep_padding_impl(Params& input_params) {
   if (!uses_npu_dp_ep_padding()) {
     return;
   }
@@ -1166,8 +1209,17 @@ void WorkerImpl::prepare_dp_ep_padding(ModelInputParams& input_params) {
   }
 }
 
-void WorkerImpl::prepare_dp_ep_padding_on_stream(ModelInputParams& input_params,
-                                                 Stream& prepare_stream) {
+void WorkerImpl::prepare_dp_ep_padding(ModelInputParams& input_params) {
+  prepare_dp_ep_padding_impl(input_params);
+}
+
+void WorkerImpl::prepare_dp_ep_padding(VlmModelParams& input_params) {
+  prepare_dp_ep_padding_impl(input_params);
+}
+
+template <typename Params>
+void WorkerImpl::prepare_dp_ep_padding_on_stream_impl(Params& input_params,
+                                                      Stream& prepare_stream) {
   if (!uses_npu_dp_ep_padding()) {
     return;
   }
@@ -1180,6 +1232,16 @@ void WorkerImpl::prepare_dp_ep_padding_on_stream(ModelInputParams& input_params,
   }
   c10::StreamGuard stream_guard = prepare_stream.set_stream_guard();
   prepare_dp_ep_padding(input_params);
+}
+
+void WorkerImpl::prepare_dp_ep_padding_on_stream(ModelInputParams& input_params,
+                                                 Stream& prepare_stream) {
+  prepare_dp_ep_padding_on_stream_impl(input_params, prepare_stream);
+}
+
+void WorkerImpl::prepare_dp_ep_padding_on_stream(VlmModelParams& input_params,
+                                                 Stream& prepare_stream) {
+  prepare_dp_ep_padding_on_stream_impl(input_params, prepare_stream);
 }
 #endif
 
@@ -1208,14 +1270,15 @@ std::optional<ForwardOutput> WorkerImpl::execute_no_sync_on_stream(
   return std::nullopt;
 }
 
-void WorkerImpl::prepare_work_before_execute_on_stream(
-    const LlmForwardInput& input,
-    LlmForwardInput& processed_input,
+template <typename Input>
+void WorkerImpl::prepare_work_before_execute_on_stream_impl(
+    const Input& input,
+    Input& processed_input,
     Stream& prepare_stream,
     bool record_ready_event,
     bool restore_linear_state) {
   if (!input.json_object_state_snapshots.empty()) {
-    LlmForwardInput restored_input = input;
+    Input restored_input = input.clone();
     restore_json_object_states(restored_input);
     prepare_work_before_execute_on_stream(restored_input,
                                           processed_input,
@@ -1256,7 +1319,7 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
   auto prepare_device_on_stream = [&]() {
     processed_input = input.to(device_, dtype_);
     // Packed RPC/SHM inputs deserialize JSON snapshots inside
-    // LlmForwardInput::to. Restore them before speculative dispatch so MTP sees
+    // Input::to. Restore them before speculative dispatch so MTP sees
     // the grammar rows.
     if (processed_input.json_object_states.empty() &&
         !processed_input.json_object_state_snapshots.empty()) {
@@ -1364,10 +1427,18 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
         processed_input, npu_cp_plan_runtime_config());
 
     if (can_prepare_npu_graph_decode_input(input_params)) {
-      model_executor_->prepare_graph_input(processed_input.token_ids,
-                                           processed_input.positions,
-                                           kv_caches_,
-                                           processed_input.input_params);
+      if constexpr (std::is_same_v<Input, VlmForwardInput>) {
+        VlmLegacyExecutionProjection projection(processed_input.input_params);
+        model_executor_->prepare_graph_input(processed_input.token_ids,
+                                             processed_input.positions,
+                                             kv_caches_,
+                                             projection.params());
+      } else {
+        model_executor_->prepare_graph_input(processed_input.token_ids,
+                                             processed_input.positions,
+                                             kv_caches_,
+                                             processed_input.input_params);
+      }
     }
 
 #endif
@@ -1383,7 +1454,8 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
   }
 }
 
-void WorkerImpl::restore_json_object_states(LlmForwardInput& input) {
+template <typename Input>
+void WorkerImpl::restore_json_object_states_impl(Input& input) {
   if (input.json_object_state_snapshots.empty()) {
     return;
   }
@@ -1436,7 +1508,8 @@ std::shared_ptr<const JsonObjectGrammar> WorkerImpl::ensure_json_object_grammar(
   return *grammar;
 }
 
-void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
+template <typename Params>
+void WorkerImpl::apply_kv_block_swaps_impl(const Params& input_params) {
 #if defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
   if (::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel() &&
       can_use_cuda_block_copy_kernel(input_params)) {
@@ -1480,6 +1553,14 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
     kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
   }
 #endif
+}
+
+void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
+  apply_kv_block_swaps_impl(input_params);
+}
+
+void WorkerImpl::apply_kv_block_swaps(const VlmModelParams& input_params) {
+  apply_kv_block_swaps_impl(input_params);
 }
 
 #if defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
@@ -1548,8 +1629,9 @@ void WorkerImpl::refresh_cuda_block_copy_runtime_state() {
   cuda_block_copy_runtime_state_.numel_per_block = key_cache[0].numel();
 }
 
-bool WorkerImpl::can_use_cuda_block_copy_kernel(
-    const ModelInputParams& input_params) const {
+template <typename Params>
+bool WorkerImpl::can_use_cuda_block_copy_kernel_impl(
+    const Params& input_params) const {
   return cuda_block_copy_runtime_state_.valid() &&
          input_params.block_copy.src_block_indices.defined() &&
          input_params.block_copy.dst_block_indices.defined() &&
@@ -1559,8 +1641,19 @@ bool WorkerImpl::can_use_cuda_block_copy_kernel(
          input_params.block_copy.cum_sum.numel() > 0;
 }
 
-void WorkerImpl::execute_cuda_block_copy_kernel(
-    const ModelInputParams& input_params) {
+bool WorkerImpl::can_use_cuda_block_copy_kernel(
+    const ModelInputParams& input_params) const {
+  return can_use_cuda_block_copy_kernel_impl(input_params);
+}
+
+bool WorkerImpl::can_use_cuda_block_copy_kernel(
+    const VlmModelParams& input_params) const {
+  return can_use_cuda_block_copy_kernel_impl(input_params);
+}
+
+template <typename Params>
+void WorkerImpl::execute_cuda_block_copy_kernel_impl(
+    const Params& input_params) {
   CHECK(!kv_caches_.empty());
   xllm::kernel::cuda::block_copy(
       cuda_block_copy_runtime_state_.k_cache_ptrs_device,
@@ -1571,11 +1664,22 @@ void WorkerImpl::execute_cuda_block_copy_kernel(
       cuda_block_copy_runtime_state_.numel_per_block,
       kv_caches_.front().get_k_cache().scalar_type());
 }
+
+void WorkerImpl::execute_cuda_block_copy_kernel(
+    const ModelInputParams& input_params) {
+  execute_cuda_block_copy_kernel_impl(input_params);
+}
+
+void WorkerImpl::execute_cuda_block_copy_kernel(
+    const VlmModelParams& input_params) {
+  execute_cuda_block_copy_kernel_impl(input_params);
+}
 #endif
 
-folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
-    const LlmForwardInput& input) {
-  LlmForwardInput input_on_device;
+template <typename Input>
+folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async_impl(
+    const Input& input) {
+  Input input_on_device;
 
   prepare_work_before_execute(input, input_on_device);
 
@@ -1585,7 +1689,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
                         input = std::move(input_on_device),
                         promise = std::move(promise)]() mutable {
     if (hierarchy_kv_cache_transfer_ != nullptr) {
-      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
+      set_hierarchy_layer_synchronizer(input.input_params);
     }
 
     // run the model on the given input in working thread
@@ -2614,8 +2718,8 @@ void WorkerImpl::init_hierarchy_kv_cache_transfer(
                               hierarchy_kv_cache_role_.value(),
                               hierarchy_kv_cache_producer_stream_);
 }
-void WorkerImpl::prepare_mla_prefixcache_inputs(
-    ModelInputParams& input_params) {
+template <typename Params>
+void WorkerImpl::prepare_mla_prefixcache_inputs_impl(Params& input_params) {
   const bool has_prefixcache_metadata =
       input_params.meta.num_sequences > 0 &&
       input_params.attention.device.kv_cache_tokens_nums.defined() &&
@@ -2625,8 +2729,8 @@ void WorkerImpl::prepare_mla_prefixcache_inputs(
   if (!has_prefixcache_metadata) {
     return;
   }
-  int32_t sum_prefix =
-      input_params.attention.device.kv_cache_tokens_nums.sum().item<int>();
+  int32_t sum_prefix = input_params.attention.device.kv_cache_tokens_nums.sum()
+                           .template item<int>();
   input_params.attention.device.history_compressed_kv =
       torch::empty({sum_prefix, context_.get_model_args().kv_lora_rank()},
                    torch::TensorOptions().dtype(dtype_).pinned_memory(true))
@@ -2655,6 +2759,15 @@ void WorkerImpl::prepare_mla_prefixcache_inputs(
       input_params.attention.device.ring_cache_seqlen);
 }
 
+void WorkerImpl::prepare_mla_prefixcache_inputs(
+    ModelInputParams& input_params) {
+  prepare_mla_prefixcache_inputs_impl(input_params);
+}
+
+void WorkerImpl::prepare_mla_prefixcache_inputs(VlmModelParams& input_params) {
+  prepare_mla_prefixcache_inputs_impl(input_params);
+}
+
 int64_t WorkerImpl::get_num_layers() const {
   int64_t num_layers = context_.get_model_args().n_layers();
 #if !defined(USE_NPU)
@@ -2669,6 +2782,141 @@ int64_t WorkerImpl::get_num_layers() const {
   }
 #endif
   return num_layers;
+}
+
+bool WorkerImpl::can_use_last_step_output_for_schedule_overlap(
+    const LlmForwardInput& input) const {
+  return can_use_last_step_output_for_schedule_overlap_impl(input);
+}
+
+bool WorkerImpl::can_use_last_step_output_for_schedule_overlap(
+    const VlmForwardInput& input) const {
+  return can_use_last_step_output_for_schedule_overlap_impl(input);
+}
+
+LlmForwardInput WorkerImpl::update_input_by_last_step_output(
+    LlmForwardInput& inputs) {
+  return update_input_by_last_step_output_impl(inputs);
+}
+
+VlmForwardInput WorkerImpl::update_input_by_last_step_output(
+    VlmForwardInput& inputs) {
+  return update_input_by_last_step_output_impl(inputs);
+}
+
+void WorkerImpl::update_json_object_states_by_last_step_output(
+    LlmForwardInput& input) {
+  update_json_object_states_by_last_step_output_impl(input);
+}
+
+void WorkerImpl::update_json_object_states_by_last_step_output(
+    VlmForwardInput& input) {
+  update_json_object_states_by_last_step_output_impl(input);
+}
+
+void WorkerImpl::sanitize_json_object_error_inputs(LlmForwardInput& input) {
+  sanitize_json_object_error_inputs_impl(input);
+}
+
+void WorkerImpl::sanitize_json_object_error_inputs(VlmForwardInput& input) {
+  sanitize_json_object_error_inputs_impl(input);
+}
+
+void WorkerImpl::prepare_work_before_execute_on_stream(
+    const LlmForwardInput& input,
+    LlmForwardInput& processed_input,
+    Stream& prepare_stream,
+    bool record_ready_event,
+    bool restore_linear_state) {
+  prepare_work_before_execute_on_stream_impl(input,
+                                             processed_input,
+                                             prepare_stream,
+                                             record_ready_event,
+                                             restore_linear_state);
+}
+
+void WorkerImpl::prepare_work_before_execute_on_stream(
+    const VlmForwardInput& input,
+    VlmForwardInput& processed_input,
+    Stream& prepare_stream,
+    bool record_ready_event,
+    bool restore_linear_state) {
+  prepare_work_before_execute_on_stream_impl(input,
+                                             processed_input,
+                                             prepare_stream,
+                                             record_ready_event,
+                                             restore_linear_state);
+}
+
+void WorkerImpl::restore_json_object_states(LlmForwardInput& input) {
+  restore_json_object_states_impl(input);
+}
+
+void WorkerImpl::restore_json_object_states(VlmForwardInput& input) {
+  restore_json_object_states_impl(input);
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
+    const LlmForwardInput& input) {
+  return step_async_impl(input);
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
+    const VlmForwardInput& input) {
+  return step_async_impl(input);
+}
+
+VlmForwardInput WorkerImpl::prepare_vlm_inputs(Batch& batch) {
+  return batch.prepare_vlm_forward_input(options_.num_decoding_tokens(),
+                                         /*min_decoding_batch_size=*/0,
+                                         context_.get_model_args(),
+                                         options_.cp_size());
+}
+
+void WorkerImpl::prepare_work_before_execute(const VlmForwardInput& input,
+                                             VlmForwardInput& processed_input) {
+  prepare_work_before_execute_on_stream(
+      input, processed_input, *prepare_stream_);
+}
+
+std::optional<ForwardOutput> WorkerImpl::step(
+    const LlmForwardInput& /*input*/) {
+  LOG(FATAL) << "LLM input requires an LLM worker";
+  return std::nullopt;
+}
+
+std::optional<ForwardOutput> WorkerImpl::step(
+    const VlmForwardInput& /*input*/) {
+  LOG(FATAL) << "VLM input requires a VLM worker";
+  return std::nullopt;
+}
+
+std::optional<ForwardOutput> WorkerImpl::execute_no_sync_on_stream(
+    const VlmForwardInput& /*input*/,
+    Stream& /*compute_stream*/) {
+  LOG(FATAL) << "execute_no_sync_on_stream is not supported by this worker";
+  return std::nullopt;
+}
+
+std::optional<ForwardOutput> WorkerImpl::step_for_schedule_overlap(
+    const VlmForwardInput& input) {
+  return step(input);
+}
+
+VlmForwardInput
+WorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
+    VlmForwardInput& input) {
+  update_json_object_states_by_last_step_output(input);
+  sanitize_json_object_error_inputs(input);
+  return update_input_by_last_step_output(input);
+}
+
+void WorkerImpl::set_hierarchy_layer_synchronizer(
+    VlmModelParams& input_params) {
+  if (hierarchy_kv_cache_transfer_ != nullptr) {
+    VlmLegacyExecutionProjection projection(input_params);
+    hierarchy_kv_cache_transfer_->set_layer_synchronizer(projection.params());
+  }
 }
 
 }  // namespace xllm

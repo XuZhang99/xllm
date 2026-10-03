@@ -33,6 +33,7 @@ limitations under the License.
 #include "worker.pb.h"
 
 namespace xllm {
+class VlmForwardInput;
 
 class CommChannel {
  public:
@@ -92,6 +93,10 @@ class CommChannel {
       const RecForwardInput& input,
       folly::Promise<std::optional<RawForwardOutput>>& promise);
 
+  virtual void execute_model_async(
+      const VlmForwardInput& input,
+      folly::Promise<std::optional<RawForwardOutput>>& promise);
+
   virtual bool process_group_test();
 
   virtual bool allocate_kv_cache_with_transfer(
@@ -139,6 +144,10 @@ class CommChannel {
 
   bool execute_model_with_brpc(
       const RecForwardInput& input,
+      folly::Promise<std::optional<RawForwardOutput>>& promise);
+
+  bool execute_model_with_brpc(
+      const VlmForwardInput& input,
       folly::Promise<std::optional<RawForwardOutput>>& promise);
 
  private:

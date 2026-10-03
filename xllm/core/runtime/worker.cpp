@@ -49,6 +49,7 @@ limitations under the License.
 #include "runtime/mtp_worker_impl.h"
 #include "runtime/rec_worker_impl.h"
 #include "runtime/suffix_worker_impl.h"
+#include "runtime/vlm_forward_params.h"
 #include "runtime/vlm_worker_impl.h"
 #include "util/timer.h"
 
@@ -111,7 +112,13 @@ Worker::Worker(const ParallelArgs& parallel_args,
     const std::string& algorithm = options.speculative_algorithm();
     LOG(INFO) << "Speculative decode is enabled, algorithm: " << algorithm;
     if (algorithm == "Eagle3") {
-      impl_ = new Eagle3WorkerImpl(parallel_args, device, options, worker_type);
+      if (worker_type == WorkerType::VLM) {
+        impl_ = new Eagle3WorkerImpl<VlmForwardInput>(
+            parallel_args, device, options, worker_type);
+      } else {
+        impl_ = new Eagle3WorkerImpl<LlmForwardInput>(
+            parallel_args, device, options, worker_type);
+      }
     } else if (algorithm == "DFlash") {
       impl_ = new DFlashWorkerImpl(parallel_args, device, options);
     } else if (SpeculativeConfig::is_dflash2_algorithm(algorithm)) {
@@ -124,7 +131,13 @@ Worker::Worker(const ParallelArgs& parallel_args,
     } else if (algorithm == "Suffix") {
       impl_ = new SuffixWorkerImpl(parallel_args, device, options);
     } else if (SpeculativeConfig::is_mtp_algorithm(algorithm)) {
-      impl_ = new MTPWorkerImpl(parallel_args, device, options, worker_type);
+      if (worker_type == WorkerType::VLM) {
+        impl_ = new MTPWorkerImpl<VlmForwardInput>(
+            parallel_args, device, options, worker_type);
+      } else {
+        impl_ = new MTPWorkerImpl<LlmForwardInput>(
+            parallel_args, device, options, worker_type);
+      }
     } else {
       LOG(FATAL) << "Unsupported speculative decoding algorithm: " << algorithm;
     }
@@ -229,6 +242,10 @@ LlmForwardInput Worker::prepare_inputs(Batch& batch) {
   return impl_->prepare_inputs(batch);
 }
 
+VlmForwardInput Worker::prepare_vlm_inputs(Batch& batch) {
+  return impl_->prepare_vlm_inputs(batch);
+}
+
 RecForwardInput Worker::prepare_inputs(RecBatch& batch) {
   return impl_->prepare_inputs(batch);
 }
@@ -238,9 +255,20 @@ std::optional<ForwardOutput> Worker::step(const RecForwardInput& inputs) {
   return impl_->step(inputs);
 }
 
+std::optional<ForwardOutput> Worker::step(const VlmForwardInput& inputs) {
+  CHECK(!enable_task_pipeline_) << "VLM does not support the LLM task pipeline";
+  return impl_->step(inputs);
+}
+
 folly::SemiFuture<std::optional<ForwardOutput>> Worker::step_async(
     const RecForwardInput& inputs) {
   CHECK(!enable_task_pipeline_) << "Rec does not support the LLM task pipeline";
+  return impl_->step_async(inputs);
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>> Worker::step_async(
+    const VlmForwardInput& inputs) {
+  CHECK(!enable_task_pipeline_) << "VLM does not support the LLM task pipeline";
   return impl_->step_async(inputs);
 }
 

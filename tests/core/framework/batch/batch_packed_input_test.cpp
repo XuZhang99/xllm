@@ -35,6 +35,7 @@ limitations under the License.
 #include "core/runtime/forward_shared_memory_manager.h"
 #include "core/runtime/params_utils.h"
 #include "core/runtime/rec_forward_params.h"
+#include "core/runtime/vlm_forward_params.h"
 
 namespace xllm {
 
@@ -169,6 +170,59 @@ void expect_rec_transport_input(const RecForwardInput& input) {
   EXPECT_FALSE(input.has_step_meta());
   EXPECT_FALSE(input.input_params.has_onerec_params());
   EXPECT_FALSE(input.input_params.has_llmrec_params());
+}
+
+VlmForwardInput make_vlm_transport_input() {
+  VlmForwardInput input;
+  input.token_ids = torch::tensor({11, 23}, torch::kInt32);
+  input.positions = torch::tensor({{0, 1}, {2, 3}, {4, 5}}, torch::kInt32);
+  input.input_params.meta.num_sequences = 1;
+  input.input_params.meta.batch_id = 47;
+  input.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
+  input.input_params.attention.host.q_seq_lens = {2};
+  input.input_params.attention.host.q_cu_seq_lens = {0, 2};
+  input.input_params.attention.host.kv_seq_lens = {2};
+  input.input_params.attention.host.new_cache_slots = {3, 4};
+  input.input_params.attention.host.block_tables =
+      torch::tensor({{7, 9}}, torch::kInt32);
+  input.input_params.multimodal.mm_data.batch({MMData(
+      MMType::IMAGE,
+      MMDict{{"pixel_values", torch::tensor({{1.5F, 2.5F}})},
+             {"image_grid_thw", torch::tensor({{1, 2, 2}}, torch::kInt64)}})});
+  input.input_params.multimodal.deep_stacks = {torch::tensor({{3.5F, 4.5F}}),
+                                               torch::tensor({{5.5F, 6.5F}})};
+  input.sampling_params.selected_token_idxes =
+      torch::tensor({1}, torch::kInt32);
+  input.sampling_params.sample_idxes = torch::tensor({0}, torch::kInt32);
+  input.sample_sequence_ids = {"vlm#0"};
+  input.sample_prior_output_rows = {-1};
+  return input;
+}
+
+void expect_vlm_transport_input(const VlmForwardInput& input) {
+  EXPECT_TRUE(
+      torch::equal(input.token_ids, torch::tensor({11, 23}, torch::kInt32)));
+  EXPECT_TRUE(torch::equal(
+      input.positions,
+      torch::tensor({{0, 1}, {2, 3}, {4, 5}}, input.positions.options())));
+  EXPECT_EQ(input.input_params.meta.batch_id, 47);
+  EXPECT_EQ(input.input_params.attention.host.kv_seq_lens,
+            (std::vector<int32_t>{2}));
+  EXPECT_EQ(input.sample_sequence_ids, (std::vector<std::string>{"vlm#0"}));
+  EXPECT_EQ(input.sample_prior_output_rows, (std::vector<int32_t>{-1}));
+  const auto pixels =
+      input.input_params.multimodal.mm_data.get<torch::Tensor>("pixel_values");
+  const auto grid = input.input_params.multimodal.mm_data.get<torch::Tensor>(
+      "image_grid_thw");
+  ASSERT_TRUE(pixels.has_value());
+  ASSERT_TRUE(grid.has_value());
+  EXPECT_TRUE(torch::equal(*pixels, torch::tensor({{1.5F, 2.5F}})));
+  EXPECT_TRUE(torch::equal(*grid, torch::tensor({{1, 2, 2}}, torch::kInt64)));
+  ASSERT_EQ(input.input_params.multimodal.deep_stacks.size(), 2u);
+  EXPECT_TRUE(torch::equal(input.input_params.multimodal.deep_stacks[0],
+                           torch::tensor({{3.5F, 4.5F}})));
+  EXPECT_TRUE(torch::equal(input.input_params.multimodal.deep_stacks[1],
+                           torch::tensor({{5.5F, 6.5F}})));
 }
 
 }  // namespace
@@ -667,6 +721,128 @@ TEST(BatchPackedInputTest, NativeRecTransportRejectsLocalDecodeStrategies) {
   input.decoder_sampling_params.selected_token_idxes =
       torch::tensor({0}, torch::kInt32);
   EXPECT_FALSE(rec_forward_input_to_packed_proto(input, &packed_input));
+}
+
+TEST(BatchPackedInputTest, NativeVlmPackedCopyRetainsVisionAndMrope) {
+  ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
+  VlmForwardInput lazy_input;
+  {
+    auto source = make_vlm_transport_input();
+    proto::PackedForwardInput payload;
+    ASSERT_TRUE(vlm_forward_input_to_packed_proto(source, &payload));
+    ASSERT_GE(payload.payload().size(), 40u);
+    EXPECT_EQ(static_cast<uint8_t>(payload.payload()[10]), 2u);
+    ASSERT_TRUE(packed_proto_to_vlm_forward_input(
+        payload, lazy_input, torch::Device(torch::kCPU), nullptr));
+  }
+  ASSERT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
+  auto copied_input = lazy_input.clone();
+  lazy_input = VlmForwardInput();
+  const auto prepared =
+      copied_input.to(torch::Device(torch::kCPU), torch::kFloat32);
+  copied_input = VlmForwardInput();
+  EXPECT_TRUE(prepared.runtime.device_tensors_ready);
+  expect_vlm_transport_input(prepared);
+}
+
+TEST(BatchPackedInputTest, NativeVlmSharedMemoryRetainsVisionAfterOverwrite) {
+  ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
+  VlmForwardInput lazy_input;
+  {
+    const std::string shm_name =
+        ForwardSharedMemoryManager::create_unique_name("batch_test_native_vlm",
+                                                       /*dp_group=*/0,
+                                                       ForwardType::RAW_INPUT,
+                                                       /*rank=*/0);
+    bool is_creator = false;
+    ForwardSharedMemoryManager writer(
+        shm_name, /*size=*/1 << 20, is_creator, ForwardType::RAW_INPUT);
+    bool is_reader_creator = false;
+    ForwardSharedMemoryManager reader(
+        shm_name, /*size=*/1 << 20, is_reader_creator, ForwardType::RAW_INPUT);
+    auto source = make_vlm_transport_input();
+    ASSERT_TRUE(writer.input_write(source));
+    reader.input_read(
+        lazy_input,
+        torch::Device(torch::kCPU),
+        InputDeviceMaterializationPolicy::DEFER_TO_WORKER_PREPARE);
+    source.token_ids = torch::tensor({91, 92}, torch::kInt32);
+    source.input_params.multimodal.deep_stacks.clear();
+    ASSERT_TRUE(writer.input_write(source));
+  }
+  const auto prepared =
+      lazy_input.to(torch::Device(torch::kCPU), torch::kFloat32);
+  expect_vlm_transport_input(prepared);
+}
+
+TEST(BatchPackedInputTest, NativeVlmDecodeKeepsDomainWithoutVisionData) {
+  VlmForwardInput source;
+  source.token_ids = torch::tensor({29}, torch::kInt32);
+  source.positions = torch::tensor({9}, torch::kInt32);
+  source.input_params.meta.batch_forward_type = BatchForwardType::DECODE;
+  proto::PackedForwardInput payload;
+  ASSERT_TRUE(vlm_forward_input_to_packed_proto(source, &payload));
+  VlmForwardInput lazy_input;
+  ASSERT_TRUE(packed_proto_to_vlm_forward_input(
+      payload, lazy_input, torch::Device(torch::kCPU), nullptr));
+  const auto prepared =
+      lazy_input.to(torch::Device(torch::kCPU), torch::kFloat32);
+  EXPECT_TRUE(prepared.input_params.meta.batch_forward_type.is_decode());
+  EXPECT_FALSE(prepared.input_params.multimodal.mm_data.valid());
+  EXPECT_TRUE(torch::equal(prepared.token_ids.cpu(), source.token_ids));
+  LlmForwardInput llm_input;
+  RecForwardInput rec_input;
+  DiTForwardInput dit_input;
+  EXPECT_FALSE(packed_proto_to_forward_input(
+      payload, llm_input, torch::Device(torch::kCPU), nullptr));
+  EXPECT_FALSE(packed_proto_to_rec_forward_input(
+      payload, rec_input, torch::Device(torch::kCPU), nullptr));
+  EXPECT_FALSE(packed_proto_to_dit_forward_input(payload, dit_input));
+  payload.mutable_payload()->at(10) = 1;
+  EXPECT_FALSE(packed_proto_to_vlm_forward_input(
+      payload, lazy_input, torch::Device(torch::kCPU), nullptr));
+}
+
+TEST(BatchPackedInputTest, VlmDraftConversionExcludesTargetOnlyState) {
+  auto target = make_vlm_transport_input();
+  target.input_params.embedding.linear_state_ids = {17};
+  target.input_params.embedding.linear_state_indices =
+      torch::tensor({17}, torch::kInt32);
+  target.input_params.linear_state_cache_ops = {{17, true, false, -1}};
+  auto draft = make_llm_draft_input(target);
+  EXPECT_TRUE(torch::equal(draft.token_ids, target.token_ids));
+  EXPECT_TRUE(torch::equal(draft.positions, target.positions));
+  EXPECT_FALSE(draft.input_params.multimodal.mm_data.valid());
+  EXPECT_TRUE(draft.input_params.multimodal.deep_stacks.empty());
+  EXPECT_TRUE(draft.input_params.embedding.linear_state_ids.empty());
+  EXPECT_FALSE(draft.input_params.embedding.linear_state_indices.defined());
+  EXPECT_TRUE(draft.input_params.linear_state_cache_ops.empty());
+  draft.input_params.attention.host.kv_seq_lens[0] = 9;
+  EXPECT_EQ(target.input_params.attention.host.kv_seq_lens[0], 2);
+  EXPECT_EQ(target.input_params.embedding.linear_state_ids,
+            (std::vector<int32_t>{17}));
+  expect_vlm_transport_input(target);
+}
+
+TEST(BatchPackedInputTest, NativeVlmReadyCopyRetainsRuntimeLifetime) {
+  ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
+  VlmForwardInput prepared;
+  {
+    auto source = make_vlm_transport_input();
+    source.runtime.retained_device_tensors = {
+        torch::tensor({7, 9}, torch::kInt32)};
+    source.runtime.kv_slot_layout = KvSlotLayout::NPU_CP_RECOVERED_PHYSICAL;
+    prepared = source.to(torch::Device(torch::kCPU), torch::kFloat32);
+  }
+  const auto ready_copy =
+      prepared.to(torch::Device(torch::kCPU), torch::kFloat32);
+  prepared = VlmForwardInput();
+  EXPECT_EQ(ready_copy.runtime.kv_slot_layout,
+            KvSlotLayout::NPU_CP_RECOVERED_PHYSICAL);
+  ASSERT_EQ(ready_copy.runtime.retained_device_tensors.size(), 1u);
+  EXPECT_TRUE(torch::equal(ready_copy.runtime.retained_device_tensors[0],
+                           torch::tensor({7, 9}, torch::kInt32)));
+  expect_vlm_transport_input(ready_copy);
 }
 
 TEST(BatchPackedInputTest,

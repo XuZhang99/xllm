@@ -22,13 +22,13 @@ limitations under the License.
 #endif
 
 #include "core/framework/speculative/mtp_async_state.h"
-#include "core/runtime/forward_params.h"
+#include "core/runtime/vlm_forward_params.h"
 #include "layers/common/expanded_decode_metadata_builder.h"
 
 namespace xllm::mtp_async {
 namespace {
-
-torch::Tensor build_device_cache_slots(const LlmForwardInput& input,
+template <typename Input>
+torch::Tensor build_device_cache_slots(const Input& input,
                                        const torch::Tensor& positions,
                                        int32_t block_size) {
   CHECK_EQ(positions.dim(), 2);
@@ -39,9 +39,9 @@ torch::Tensor build_device_cache_slots(const LlmForwardInput& input,
   return map_positions_to_cache_slots(
       input.input_params.attention.device.block_tables, positions, block_size);
 }
-
+template <typename Source>
 void apply_device_row_metadata(LlmForwardInput& input,
-                               const LlmForwardInput& block_table_source,
+                               const Source& block_table_source,
                                const AcceptedState& state,
                                const torch::Tensor& offsets,
                                int32_t block_size,
@@ -57,8 +57,9 @@ void apply_device_row_metadata(LlmForwardInput& input,
 }
 
 #if defined(USE_NPU)
+template <typename Source>
 void expand_decode_attention_metadata(LlmForwardInput& draft_input,
-                                      const LlmForwardInput& block_table_source,
+                                      const Source& block_table_source,
                                       const torch::Tensor& kv_seq_lens,
                                       int32_t block_size) {
   layer::ExpandedDecodeMetadataBuilder::populate(
@@ -68,9 +69,10 @@ void expand_decode_attention_metadata(LlmForwardInput& draft_input,
       block_size);
 }
 
+template <typename Source>
 void apply_mtp_prepare_output(
     LlmForwardInput& draft_input,
-    const LlmForwardInput& block_table_source,
+    const Source& block_table_source,
     const kernel::npu::MtpPrepareNextDraftOutput& output,
     bool use_chunked_prefill,
     bool rebuild_expanded_decode_metadata,
@@ -115,10 +117,10 @@ void apply_mtp_prepare_output(
 #endif
 
 }  // namespace
-
+template <typename Source>
 void prepare_next_draft_from_accepted_state(
     LlmForwardInput& draft_input,
-    const LlmForwardInput& block_table_source,
+    const Source& block_table_source,
     const torch::Tensor& accepted_tokens,
     const torch::Tensor& accepted_embeddings,
     const torch::Tensor& embedding_placeholder,
@@ -194,14 +196,13 @@ void prepare_next_draft_from_accepted_state(
   }
 #endif
 }
-
-void prepare_later_draft_from_device_base(
-    LlmForwardInput& draft_input,
-    const LlmForwardInput& block_table_source,
-    const torch::Tensor& base_positions,
-    const torch::Tensor& base_kv_seq_lens,
-    int32_t position_offset,
-    int32_t block_size) {
+template <typename Source>
+void prepare_later_draft_from_device_base(LlmForwardInput& draft_input,
+                                          const Source& block_table_source,
+                                          const torch::Tensor& base_positions,
+                                          const torch::Tensor& base_kv_seq_lens,
+                                          int32_t position_offset,
+                                          int32_t block_size) {
   CHECK(base_positions.defined());
   CHECK(base_kv_seq_lens.defined());
   CHECK_EQ(base_positions.dim(), 1);
@@ -219,9 +220,9 @@ void prepare_later_draft_from_device_base(
       (base_kv_seq_lens + position_offset)
           .to(draft_input.input_params.attention.device.kv_seq_lens.options());
 }
-
+template <typename Input>
 void prepare_target_verify_from_accepted_state(
-    LlmForwardInput& validate_input,
+    Input& validate_input,
     const torch::Tensor& accepted_tokens,
     const torch::Tensor& base_positions,
     const torch::Tensor& base_kv_seq_lens,
@@ -284,5 +285,48 @@ void prepare_target_verify_from_accepted_state(
              /*non_blocking=*/true);
   validate_input.runtime.device_tensors_ready = true;
 }
+
+template void prepare_next_draft_from_accepted_state(LlmForwardInput&,
+                                                     const LlmForwardInput&,
+                                                     const torch::Tensor&,
+                                                     const torch::Tensor&,
+                                                     const torch::Tensor&,
+                                                     const torch::Tensor&,
+                                                     const torch::Tensor&,
+                                                     bool,
+                                                     bool,
+                                                     int32_t);
+template void prepare_later_draft_from_device_base(LlmForwardInput&,
+                                                   const LlmForwardInput&,
+                                                   const torch::Tensor&,
+                                                   const torch::Tensor&,
+                                                   int32_t,
+                                                   int32_t);
+template void prepare_target_verify_from_accepted_state(LlmForwardInput&,
+                                                        const torch::Tensor&,
+                                                        const torch::Tensor&,
+                                                        const torch::Tensor&,
+                                                        int32_t);
+template void prepare_next_draft_from_accepted_state(LlmForwardInput&,
+                                                     const VlmForwardInput&,
+                                                     const torch::Tensor&,
+                                                     const torch::Tensor&,
+                                                     const torch::Tensor&,
+                                                     const torch::Tensor&,
+                                                     const torch::Tensor&,
+                                                     bool,
+                                                     bool,
+                                                     int32_t);
+template void prepare_later_draft_from_device_base(LlmForwardInput&,
+                                                   const VlmForwardInput&,
+                                                   const torch::Tensor&,
+                                                   const torch::Tensor&,
+                                                   int32_t,
+                                                   int32_t);
+template void prepare_target_verify_from_accepted_state(VlmForwardInput&,
+                                                        const torch::Tensor&,
+                                                        const torch::Tensor&,
+                                                        const torch::Tensor&,
+                                                        int32_t);
 
 }  // namespace xllm::mtp_async

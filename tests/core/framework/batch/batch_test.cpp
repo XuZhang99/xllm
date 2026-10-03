@@ -186,7 +186,8 @@ LinearStatePrefixHash compute_linear_state_prefix_hash_for_test(
   return hash;
 }
 
-Sequence make_basic_sequence(const std::vector<int32_t>& prompt_token_ids) {
+Sequence make_basic_sequence(const std::vector<int32_t>& prompt_token_ids,
+                             MMData mm_data = {}) {
   static RequestSamplingParam sampling_param;
   static StoppingChecker stopping_checker;
 
@@ -206,7 +207,7 @@ Sequence make_basic_sequence(const std::vector<int32_t>& prompt_token_ids) {
   return Sequence(/*index=*/0,
                   prompt_token_ids,
                   /*input_embedding=*/torch::Tensor(),
-                  /*mm_data=*/MMData(),
+                  std::move(mm_data),
                   decoder,
                   seq_params);
 }
@@ -1184,6 +1185,125 @@ TEST(BatchTest, DecodeForwardInputMapsSparseMtpBootstrapRows) {
   ASSERT_TRUE(embed_params.mtp_bootstrap_embeddings.defined());
   EXPECT_TRUE(torch::equal(embed_params.mtp_bootstrap_embeddings,
                            embedding.unsqueeze(0)));
+}
+
+TEST(BatchTest, NativeVlmPrefillSchedulesOnlyVisibleVisionItems) {
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  const torch::Tensor visible_pixels = torch::tensor({{1.0f, 2.0f}});
+  MMDataItem visible_image(MMType::IMAGE,
+                           MMDict{{"pixel_values", visible_pixels}});
+  visible_image.mutable_state().mutable_token_pos() = {/*offset=*/1,
+                                                       /*length=*/2};
+  MMDataItem later_image(
+      MMType::IMAGE, MMDict{{"pixel_values", torch::tensor({{3.0f, 4.0f}})}});
+  later_image.mutable_state().mutable_token_pos() = {/*offset=*/4,
+                                                     /*length=*/1};
+  Sequence sequence = make_basic_sequence(
+      {10, 11, 12, 13, 14},
+      MMData(MMType::IMAGE, MMItemVec{visible_image, later_image}));
+  sequence.add_blocks(BlockType::KV, manager.allocate(/*num_blocks=*/2));
+  Batch batch;
+  batch.add(&sequence, /*allowed_max_token=*/3);
+
+  VlmForwardInput input = batch.prepare_vlm_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  EXPECT_TRUE(input.input_params.meta.batch_forward_type.is_prefill());
+  EXPECT_EQ(input.input_params.meta.num_sequences, 1);
+  EXPECT_TRUE(equal(input.token_ids, std::vector<int32_t>{10, 11, 12}));
+  EXPECT_TRUE(equal(input.positions, std::vector<int32_t>{0, 1, 2}));
+  const MMBatchData& vision = input.input_params.multimodal.mm_data;
+  ASSERT_TRUE(vision.valid());
+  ASSERT_EQ(vision.mm_data_vec().size(), 1u);
+  const MMData& scheduled_data = vision.mm_data_vec().front();
+  ASSERT_TRUE(scheduled_data.hold<MMItemVec>());
+  const MMItemVec& scheduled_items = scheduled_data.items<MMItemVec>();
+  ASSERT_EQ(scheduled_items.size(), 1u);
+  const MMItemState& scheduled_state = scheduled_items.front().state();
+  EXPECT_EQ(scheduled_state.seq_index(), 0);
+  EXPECT_EQ(scheduled_state.schedule_data().start_pos, 0);
+  EXPECT_EQ(scheduled_state.schedule_data().end_pos, 2);
+  const auto pixels = vision.get<torch::Tensor>("pixel_values");
+  ASSERT_TRUE(pixels.has_value());
+  EXPECT_TRUE(torch::equal(*pixels, visible_pixels));
+}
+
+TEST(BatchTest, NativeVlmDecodeKeepsDomainWithoutVisionPayload) {
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  MMDataItem image(MMType::IMAGE,
+                   MMDict{{"pixel_values", torch::tensor({{1.0f, 2.0f}})}});
+  image.mutable_state().mutable_token_pos() = {/*offset=*/1, /*length=*/2};
+  Sequence sequence = make_basic_sequence(
+      {10, 11, 12}, MMData(MMType::IMAGE, MMItemVec{image}));
+  sequence.add_blocks(BlockType::KV, manager.allocate(/*num_blocks=*/1));
+  sequence.kv_state().set_kv_cache_tokens_num(sequence.num_prompt_tokens());
+  sequence.append_token(Token(13));
+  Batch batch({&sequence});
+
+  VlmForwardInput input = batch.prepare_vlm_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  EXPECT_TRUE(input.input_params.meta.batch_forward_type.is_decode());
+  EXPECT_EQ(input.input_params.meta.num_sequences, 1);
+  EXPECT_TRUE(equal(input.token_ids, std::vector<int32_t>{13}));
+  EXPECT_TRUE(equal(input.positions, std::vector<int32_t>{3}));
+  EXPECT_FALSE(input.input_params.multimodal.mm_data.valid());
+  EXPECT_TRUE(input.input_params.multimodal.mm_data.mm_data_vec().empty());
+  EXPECT_TRUE(sequence.mm_data().valid());
+}
+
+TEST(BatchTest, NativeVlmChunkRetainsAllMropePositionAxes) {
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  Sequence sequence = make_basic_sequence({10, 11, 12, 13, 14});
+  sequence.add_blocks(BlockType::KV, manager.allocate(/*num_blocks=*/2));
+  sequence.kv_state().set_kv_cache_tokens_num(/*size=*/1);
+  const torch::Tensor cached_positions = torch::tensor(
+      {{0, 1, 2, 3, 4}, {10, 11, 12, 13, 14}, {20, 21, 22, 23, 24}},
+      torch::kInt);
+  sequence.set_mrope_positions(cached_positions);
+  ModelArgs args;
+  args.rope_scaling_rope_type("mrope");
+  VlmForwardInput input;
+  {
+    Batch batch;
+    batch.add(&sequence, /*allowed_max_token=*/2);
+    input = batch.prepare_vlm_forward_input(
+        /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, args);
+  }
+  sequence.set_mrope_positions(torch::Tensor());
+
+  const torch::Tensor expected_positions =
+      torch::tensor({{1, 2}, {11, 12}, {21, 22}}, torch::kInt);
+  EXPECT_TRUE(input.input_params.meta.batch_forward_type.is_chunked_prefill());
+  EXPECT_TRUE(equal(input.token_ids, std::vector<int32_t>{11, 12}));
+  EXPECT_EQ(input.positions.dim(), 2);
+  EXPECT_TRUE(torch::equal(input.positions, expected_positions));
+  EXPECT_TRUE(torch::equal(input.positions_host, expected_positions));
+}
+
+TEST(BatchTest, NativeVlmEmptyBatchAndShardProduceEmptyInputs) {
+  Batch batch;
+  VlmForwardInput input = batch.prepare_vlm_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+  EXPECT_EQ(input.input_params.meta.num_sequences, 0);
+  EXPECT_FALSE(input.token_ids.defined());
+  EXPECT_FALSE(input.positions.defined());
+  EXPECT_FALSE(input.input_params.multimodal.mm_data.valid());
+  EXPECT_FALSE(input.sampling_params.sample_idxes.defined());
+
+  VlmForwardInput shard_input = batch.prepare_vlm_forward_input(
+      ModelArgs(), /*thread_pool=*/nullptr, /*cp_size=*/1);
+  EXPECT_EQ(shard_input.input_params.meta.num_sequences, 0);
+  EXPECT_FALSE(shard_input.token_ids.defined());
+  EXPECT_FALSE(shard_input.positions.defined());
+  EXPECT_FALSE(shard_input.input_params.multimodal.mm_data.valid());
+  EXPECT_FALSE(shard_input.sampling_params.sample_idxes.defined());
 }
 
 TEST(BatchTest, Basic) {

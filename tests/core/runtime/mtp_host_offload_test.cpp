@@ -270,12 +270,15 @@ class ImmediateHierarchyTransferTestWorker final
   uint32_t vector_transfer_count_ = 0;
 };
 
-class TestMTPWorker final : public MTPWorkerImpl {
+class TestMTPWorker final : public MTPWorkerImpl<LlmForwardInput> {
  public:
   TestMTPWorker(const ParallelArgs& parallel_args,
                 const torch::Device& device,
                 const runtime::Options& options)
-      : MTPWorkerImpl(parallel_args, device, options, WorkerType::LLM) {}
+      : MTPWorkerImpl<LlmForwardInput>(parallel_args,
+                                       device,
+                                       options,
+                                       WorkerType::LLM) {}
 
   void replace_transfer_workers(std::unique_ptr<LLMWorkerImpl> target,
                                 std::unique_ptr<LLMWorkerImpl> draft) {

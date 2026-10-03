@@ -73,7 +73,8 @@ KVCacheShape build_speculative_draft_kv_cache_shape(
   return KVCacheShape(draft_capacity, draft_model_args, draft_world_size);
 }
 
-KVCacheShape SpeculativeWorkerImpl::draft_kv_cache_shape(
+template <typename TargetInput>
+KVCacheShape SpeculativeWorkerImpl<TargetInput>::draft_kv_cache_shape(
     const KVCacheShape& target_kv_cache_shape) const {
   if (draft_impl_ == nullptr) {
     return target_kv_cache_shape;
@@ -81,7 +82,8 @@ KVCacheShape SpeculativeWorkerImpl::draft_kv_cache_shape(
   return build_draft_kv_cache_shape(target_kv_cache_shape);
 }
 
-KVCacheShape SpeculativeWorkerImpl::build_draft_kv_cache_shape(
+template <typename TargetInput>
+KVCacheShape SpeculativeWorkerImpl<TargetInput>::build_draft_kv_cache_shape(
     const KVCacheShape& target_kv_cache_shape,
     int64_t draft_world_size) const {
   if (draft_world_size <= 0 &&
@@ -237,7 +239,10 @@ std::vector<SpeculativeTokenStats> calculate_contiguous_speculative_token_stats(
 
 }  // namespace
 
-bool should_run_speculative_decode(const ModelInputParams& params) {
+namespace {
+
+template <typename Params>
+bool should_run_speculative_decode_impl(const Params& params) {
   if (!params.meta.batch_forward_type.is_decode()) {
     return false;
   }
@@ -271,11 +276,32 @@ bool should_run_speculative_decode(const ModelInputParams& params) {
   return any_active;
 }
 
-void scale_speculative_parallel_token_counts(ModelInputParams& params,
-                                             int32_t multiplier) {
+template <typename Params>
+void scale_speculative_parallel_token_counts_impl(Params& params,
+                                                  int32_t multiplier) {
   scale_parallel_token_counts(params.parallel, multiplier);
   params.expert.eplb_decode_token_mask = eplb::expand_decode_token_mask(
       params.expert.eplb_decode_token_mask, multiplier);
+}
+
+}  // namespace
+
+bool should_run_speculative_decode(const ModelInputParams& params) {
+  return should_run_speculative_decode_impl(params);
+}
+
+bool should_run_speculative_decode(const VlmModelParams& params) {
+  return should_run_speculative_decode_impl(params);
+}
+
+void scale_speculative_parallel_token_counts(ModelInputParams& params,
+                                             int32_t multiplier) {
+  scale_speculative_parallel_token_counts_impl(params, multiplier);
+}
+
+void scale_speculative_parallel_token_counts(VlmModelParams& params,
+                                             int32_t multiplier) {
+  scale_speculative_parallel_token_counts_impl(params, multiplier);
 }
 
 std::vector<SpeculativeTokenStats> calculate_mtp_speculative_token_stats(
@@ -327,7 +353,8 @@ SpeculativeOutputStats calculate_speculative_output_stats(
   return stats;
 }
 
-SpeculativeWorkerImpl::SpeculativeWorkerImpl(
+template <typename TargetInput>
+SpeculativeWorkerImpl<TargetInput>::SpeculativeWorkerImpl(
     const ParallelArgs& parallel_args,
     const torch::Device& device,
     const runtime::Options& options,
@@ -348,7 +375,8 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(
   }
 }
 
-SpeculativeWorkerImpl::~SpeculativeWorkerImpl() {
+template <typename TargetInput>
+SpeculativeWorkerImpl<TargetInput>::~SpeculativeWorkerImpl() {
   if (impl_ != nullptr) {
     impl_->clear_hierarchy_kv_cache_transfer();
   }
@@ -358,9 +386,11 @@ SpeculativeWorkerImpl::~SpeculativeWorkerImpl() {
   clear_hierarchy_kv_cache_transfer();
 }
 
-bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
-                                       int32_t random_seed,
-                                       MasterStatus master_status) {
+template <typename TargetInput>
+bool SpeculativeWorkerImpl<TargetInput>::init_model(
+    const std::string& model_weights_path,
+    int32_t random_seed,
+    MasterStatus master_status) {
   // Base class only loads the target model.
   bool result = true;
   CHECK(impl_ != nullptr);
@@ -377,8 +407,9 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
   return result;
 }
 
+template <typename TargetInput>
 std::tuple<int64_t, int64_t>
-SpeculativeWorkerImpl::estimate_kv_cache_capacity_with_draft(
+SpeculativeWorkerImpl<TargetInput>::estimate_kv_cache_capacity_with_draft(
     LLMWorkerImpl& draft_impl,
     const runtime::Options& target_options,
     const runtime::Options& draft_options) {
@@ -417,12 +448,15 @@ SpeculativeWorkerImpl::estimate_kv_cache_capacity_with_draft(
   return {capacity.cache_size_in_bytes(), total_memory};
 }
 
-bool SpeculativeWorkerImpl::allocate_kv_cache(
+template <typename TargetInput>
+bool SpeculativeWorkerImpl<TargetInput>::allocate_kv_cache(
     const KVCacheShape& kv_cache_shape) {
   return impl_->allocate_kv_cache(kv_cache_shape);
 }
 
-void SpeculativeWorkerImpl::prepare_hierarchy_kv_cache_transfers() {
+template <typename TargetInput>
+void SpeculativeWorkerImpl<
+    TargetInput>::prepare_hierarchy_kv_cache_transfers() {
   if (options_.host_blocks_factor() <= 1.0 || draft_impl_ == nullptr) {
     return;
   }
@@ -471,7 +505,9 @@ void SpeculativeWorkerImpl::prepare_hierarchy_kv_cache_transfers() {
   }
 }
 
-void SpeculativeWorkerImpl::finalize_hierarchy_kv_cache_transfers() {
+template <typename TargetInput>
+void SpeculativeWorkerImpl<
+    TargetInput>::finalize_hierarchy_kv_cache_transfers() {
   if (options_.host_blocks_factor() <= 1.0 || draft_impl_ == nullptr) {
     return;
   }
@@ -484,16 +520,18 @@ void SpeculativeWorkerImpl::finalize_hierarchy_kv_cache_transfers() {
 }
 
 #if defined(USE_NPU)
-bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
+template <typename TargetInput>
+bool SpeculativeWorkerImpl<TargetInput>::allocate_kv_cache_with_transfer(
     const KVCacheShape& kv_cache_shape) {
   return impl_->allocate_kv_cache_with_transfer(kv_cache_shape);
 }
 #endif
 
-std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
-    const LlmForwardInput& input) {
-  ModelInputParams& mutable_params =
-      const_cast<ModelInputParams&>(input.input_params);
+template <typename TargetInput>
+std::optional<ForwardOutput> SpeculativeWorkerImpl<TargetInput>::step(
+    const TargetInput& input) {
+  TargetModelParams& mutable_params =
+      const_cast<TargetModelParams&>(input.input_params);
   set_hierarchy_layer_synchronizer(mutable_params);
   const bool run_speculative_decode =
       should_run_speculative_decode(input.input_params);
@@ -501,7 +539,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
       input.token_ids.numel() == 0) {
     if (input.input_params.meta.batch_forward_type.is_decode() &&
         !run_speculative_decode) {
-      LlmForwardInput aligned_input = input;
+      TargetInput aligned_input = input.clone();
       aligned_input.input_params.meta.batch_forward_type =
           BatchForwardType::EMPTY;
       return step_empty(aligned_input);
@@ -515,10 +553,12 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
   return step_prefill(input);
 }
 
-LlmForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
-    LlmForwardInput& inputs) {
+template <typename TargetInput>
+TargetInput
+SpeculativeWorkerImpl<TargetInput>::update_input_by_last_step_output(
+    TargetInput& inputs) {
   // only process decode batch, so prepare draft input here.
-  LlmForwardInput& new_inputs = inputs;
+  TargetInput& new_inputs = inputs;
 
   auto& input_params = new_inputs.input_params;
   const int32_t num_sequences = input_params.meta.num_sequences;
@@ -573,10 +613,11 @@ LlmForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   input_params.attention.rebuild_device_buffer(device_);
   new_inputs.runtime.device_tensors_ready = true;
 
-  return new_inputs;
+  return new_inputs.clone();
 }
 
-void SpeculativeWorkerImpl::force_greedy_draft_sampling(
+template <typename TargetInput>
+void SpeculativeWorkerImpl<TargetInput>::force_greedy_draft_sampling(
     SamplingParameters& sampling_params) {
   if (sampling_params.do_sample.defined()) {
     sampling_params.do_sample = torch::zeros_like(sampling_params.do_sample);
@@ -588,7 +629,8 @@ void SpeculativeWorkerImpl::force_greedy_draft_sampling(
   sampling_params.return_probs = false;
 }
 
-void SpeculativeWorkerImpl::update_sampling_params(
+template <typename TargetInput>
+void SpeculativeWorkerImpl<TargetInput>::update_sampling_params(
     SamplingParameters& sampling_params,
     const int32_t num_val_tokens,
     const int32_t total_num_val_tokens) {
@@ -613,7 +655,8 @@ void SpeculativeWorkerImpl::update_sampling_params(
   TENSOR_REPEAT(sampling_params.filter_bitmask, num_val_tokens);
 }
 
-void SpeculativeWorkerImpl::update_sampling_params(
+template <typename TargetInput>
+void SpeculativeWorkerImpl<TargetInput>::update_sampling_params(
     SamplingParameters& sampling_params,
     const std::vector<int32_t>& per_seq_val_tokens,
     const int32_t total_num_val_tokens) {
@@ -646,9 +689,10 @@ void SpeculativeWorkerImpl::update_sampling_params(
   repeat_per_seq(sampling_params.do_sample);
 }
 
-void SpeculativeWorkerImpl::prepare_validate_inputs(
-    const LlmForwardInput& input,
-    LlmForwardInput& validate_input) {
+template <typename TargetInput>
+void SpeculativeWorkerImpl<TargetInput>::prepare_validate_inputs(
+    const TargetInput& input,
+    TargetInput& validate_input) {
   validate_input = input.to(device_, dtype_);
   validate_input.runtime.device_tensors_ready = false;
   auto& input_params = validate_input.input_params;
@@ -763,9 +807,10 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   validate_input.runtime.device_tensors_ready = true;
 }
 
-void SpeculativeWorkerImpl::prepare_work_before_execute(
-    const LlmForwardInput& input,
-    LlmForwardInput& processed_input) {
+template <typename TargetInput>
+void SpeculativeWorkerImpl<TargetInput>::prepare_work_before_execute(
+    const TargetInput& input,
+    TargetInput& processed_input) {
   // The composite owns no KV cache. Preserve linear-state metadata for the
   // target leaf, which prepares and restores its own recurrent cache before
   // execution.
@@ -780,9 +825,10 @@ void SpeculativeWorkerImpl::prepare_work_before_execute(
 // per_seq_val_tokens[i] rows instead of a uniform N+1. Only implements the
 // chunked-prefill (non-atb_spec_kernel) path since DFlash/DSpark require
 // --enable_chunked_prefill=true anyway.
-void SpeculativeWorkerImpl::prepare_validate_inputs(
-    const LlmForwardInput& input,
-    LlmForwardInput& validate_input,
+template <typename TargetInput>
+void SpeculativeWorkerImpl<TargetInput>::prepare_validate_inputs(
+    const TargetInput& input,
+    TargetInput& validate_input,
     const std::vector<int32_t>& per_seq_val_tokens) {
   validate_input = input.to(device_, dtype_);
   validate_input.runtime.device_tensors_ready = false;
@@ -888,8 +934,9 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   validate_input.runtime.device_tensors_ready = true;
 }
 
-void SpeculativeWorkerImpl::sync_dp_global_token_nums_after_prune(
-    ModelInputParams& input_params,
+template <typename TargetInput>
+void SpeculativeWorkerImpl<TargetInput>::sync_dp_global_token_nums_after_prune(
+    TargetModelParams& input_params,
     int32_t local_total_val_tokens) {
   // Only the adaptive controller makes the per-rank validate token count
   // data-dependent. When it is inactive the dense path already keeps
@@ -929,8 +976,9 @@ void SpeculativeWorkerImpl::sync_dp_global_token_nums_after_prune(
   }
 }
 
-void SpeculativeWorkerImpl::sync_dp_global_token_nums_for_idle_rank(
-    ModelInputParams& input_params) {
+template <typename TargetInput>
+void SpeculativeWorkerImpl<TargetInput>::
+    sync_dp_global_token_nums_for_idle_rank(TargetModelParams& input_params) {
   if (adaptive_spec_controller_ == nullptr ||
       !adaptive_spec_controller_->enabled()) {
     return;
@@ -952,7 +1000,12 @@ void SpeculativeWorkerImpl::sync_dp_global_token_nums_for_idle_rank(
       input_params, token_nums[static_cast<size_t>(dp_rank)]);
 }
 
-void SpeculativeWorkerImpl::restore_json_object_states(LlmForwardInput& input) {
+template <typename TargetInput>
+void SpeculativeWorkerImpl<TargetInput>::restore_json_object_states(
+    TargetInput& input) {
   impl_->restore_json_object_states(input);
 }
+template class SpeculativeWorkerImpl<LlmForwardInput>;
+template class SpeculativeWorkerImpl<VlmForwardInput>;
+
 }  // namespace xllm

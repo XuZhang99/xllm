@@ -450,6 +450,14 @@ RecForwardInput ForwardInputBuilder::build_rec_forward_input(
   return state_to_forward_input<RecForwardInput>();
 }
 
+VlmForwardInput ForwardInputBuilder::build_vlm_forward_input(
+    uint32_t num_decoding_tokens,
+    uint32_t min_decoding_batch_size) {
+  process_sequences();
+  padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
+  return state_to_forward_input<VlmForwardInput>();
+}
+
 void ForwardInputBuilder::process_sequences() {
   // Multithreading only helps when the parallelized per-sequence work is large
   // enough to amortize the fixed thread-dispatch cost plus the serial merge of

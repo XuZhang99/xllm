@@ -26,6 +26,7 @@ limitations under the License.
 
 namespace xllm {
 class RecForwardInput;
+class VlmForwardInput;
 
 class Stream;
 
@@ -61,6 +62,15 @@ bool rec_forward_input_to_packed_proto(
 bool packed_proto_to_rec_forward_input(
     const proto::PackedForwardInput& packed_forward_input,
     RecForwardInput& input,
+    const torch::Device& device,
+    Stream* stream);
+
+bool vlm_forward_input_to_packed_proto(
+    const VlmForwardInput& input,
+    proto::PackedForwardInput* packed_forward_input);
+bool packed_proto_to_vlm_forward_input(
+    const proto::PackedForwardInput& packed_forward_input,
+    VlmForwardInput& input,
     const torch::Device& device,
     Stream* stream);
 

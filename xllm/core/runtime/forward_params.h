@@ -218,8 +218,8 @@ inline bool has_contiguous_input_buffer_exclusions(
          params.has_llmrec_params() || !params.multimodal.deep_stacks.empty();
 }
 
-inline void clear_contiguous_input_buffer_tensor_targets(
-    ModelInputParams& params) {
+template <typename Params>
+inline void clear_contiguous_input_buffer_tensor_targets(Params& params) {
   params.embedding.input_embedding = torch::Tensor();
   params.embedding.linear_state_indices = torch::Tensor();
   params.embedding.mtp_bootstrap_embeddings = torch::Tensor();
@@ -230,8 +230,9 @@ inline void clear_contiguous_input_buffer_tensor_targets(
   params.graph.tiling_data = torch::Tensor();
 }
 
-inline bool add_attention_to_plan(const AttentionInput& source,
-                                  AttentionInput& target,
+template <typename Attention>
+inline bool add_attention_to_plan(const Attention& source,
+                                  Attention& target,
                                   ForwardInputBufferPlan& plan) {
   return plan.add(source.device.q_seq_lens, &target.device.q_seq_lens) &&
          plan.add(source.device.kv_seq_lens, &target.device.kv_seq_lens) &&
@@ -261,8 +262,9 @@ inline bool add_attention_to_plan(const AttentionInput& source,
                   &target.device.ring_cache_seqlen);
 }
 
-inline bool add_model_tensors_to_plan(const ModelInputParams& source,
-                                      ModelInputParams& target,
+template <typename Params>
+inline bool add_model_tensors_to_plan(const Params& source,
+                                      Params& target,
                                       ForwardInputBufferPlan& plan) {
   return plan.add(source.embedding.input_embedding,
                   &target.embedding.input_embedding) &&
@@ -392,6 +394,8 @@ struct StepDecodeMeta {
 // Inputs for forward execution
 class LlmForwardInput final {
  public:
+  LlmForwardInput clone() const { return *this; }
+
   LlmForwardInput to(const torch::Device& device,
                      torch::ScalarType dtype) const {
     if (runtime.device_tensors_ready) {
@@ -608,7 +612,7 @@ struct ForwardOutput {
   // Keep no-sync input tensor handles alive until downstream consumers finish
   // using outputs on the same compute stream. Composite workers append child
   // outputs' retained inputs here. Local runtime handles; not in proto/shm.
-  std::vector<std::shared_ptr<LlmForwardInput>> retained_inputs;
+  std::vector<std::shared_ptr<const void>> retained_inputs;
   // Device-side readiness dependency for no-sync outputs. This local runtime
   // handle is intentionally not included in proto or shared-memory transport.
   StreamEventPtr ready_event;
@@ -653,7 +657,7 @@ inline void transfer_retained_inputs(ForwardOutput& destination,
   source.retained_inputs.clear();
 }
 
-inline std::vector<std::shared_ptr<LlmForwardInput>> take_retained_inputs(
+inline std::vector<std::shared_ptr<const void>> take_retained_inputs(
     ForwardOutput& source) {
   return std::exchange(source.retained_inputs, {});
 }

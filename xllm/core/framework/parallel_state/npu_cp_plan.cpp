@@ -27,7 +27,7 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/parallel_state/parallel_state.h"
 #include "core/framework/parallel_state/process_group.h"
-#include "core/runtime/forward_params.h"
+#include "core/runtime/vlm_forward_params.h"
 #include "core/util/tensor_helper.h"
 
 namespace xllm {
@@ -957,7 +957,8 @@ torch::Tensor map_cache_slots_to_kv_shard(
 // Extracts the global-real CpPlanInput from a LlmForwardInput: positions and
 // per-seq lengths come from the host view (or the device fallback), prefix
 // counts and block tables from the attention metadata.
-CpPlanInput make_plan_input(const LlmForwardInput& processed_input,
+template <typename Input>
+CpPlanInput make_plan_input(const Input& processed_input,
                             const CpPlanRuntimeConfig& runtime_config) {
   auto tensor_to_int32_vec = [](const torch::Tensor& tensor) {
     std::vector<int32_t> values;
@@ -1146,7 +1147,9 @@ void NpuCpPlan::shard_model_input(torch::Tensor& hidden_states,
   position_ids = input_shard_meta_.local_position_ids;
 }
 
-void NpuCpPlan::apply_attention_meta(ModelInputParams& params) const {
+template <typename Params>
+
+void NpuCpPlan::apply_attention_meta(Params& params) const {
   if (!enabled()) {
     return;
   }
@@ -1210,7 +1213,9 @@ void NpuCpPlan::set_process_group(ProcessGroup* process_group) {
   cp_group_ = process_group;
 }
 
-void NpuCpPlan::prepare(LlmForwardInput& processed_input,
+template <typename Input>
+
+void NpuCpPlan::prepare(Input& processed_input,
                         const CpPlanRuntimeConfig& runtime_config) {
   if (!runtime_config.enabled ||
       processed_input.input_params.meta.batch_forward_type.is_decode()) {
@@ -1241,5 +1246,10 @@ void NpuCpPlan::prepare(LlmForwardInput& processed_input,
 void NpuCpPlan::replace_cp_ep_meta_storage(CpEpMeta meta) {
   cp_ep_meta_ = std::move(meta);
 }
+
+template void NpuCpPlan::prepare(LlmForwardInput&, const CpPlanRuntimeConfig&);
+template void NpuCpPlan::prepare(VlmForwardInput&, const CpPlanRuntimeConfig&);
+template void NpuCpPlan::apply_attention_meta(ModelInputParams&) const;
+template void NpuCpPlan::apply_attention_meta(VlmModelParams&) const;
 
 }  // namespace xllm

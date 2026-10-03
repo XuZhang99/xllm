@@ -13,38 +13,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "vlm_worker_impl.h"
+#include "core/runtime/vlm_worker_impl.h"
 
 #include <c10/core/DeviceGuard.h>
-#include <folly/Unit.h>
-#include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <memory>
 #include <optional>
-#include <utility>
 
 #include "common/macros.h"
 #include "common/metrics.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/speculative/draft_extend_input.h"
+#include "core/runtime/params_utils.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
-#include "runtime/params_utils.h"
-#include "util/threadpool.h"
 #include "util/timer.h"
 
 namespace xllm {
 
 namespace {
 
-void wait_input_ready_events(const LlmForwardInput& input,
+void wait_input_ready_events(const VlmForwardInput& input,
                              const Stream& stream) {
   CHECK(stream.wait_event(input.runtime.metadata_ready_event))
-      << "failed to wait LlmForwardInput metadata ready event";
+      << "failed to wait VlmForwardInput metadata ready event";
 }
 
 StreamEventPtr record_current_stream_event(const Device& device) {
@@ -77,7 +72,7 @@ bool VLMWorkerImpl::init_model(ModelContext& context) {
   return true;
 }
 
-std::optional<ForwardOutput> VLMWorkerImpl::step(const LlmForwardInput& input) {
+std::optional<ForwardOutput> VLMWorkerImpl::step(const VlmForwardInput& input) {
   if (::xllm::LoadConfig::get_instance().enable_manual_loader()) {
 #if defined(USE_NPU)
     if (!enable_schedule_overlap()) {
@@ -106,14 +101,14 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const LlmForwardInput& input) {
 }
 
 std::optional<ForwardOutput> VLMWorkerImpl::execute_no_sync_on_stream(
-    const LlmForwardInput& input,
+    const VlmForwardInput& input,
     Stream& compute_stream) {
   return execute_no_sync_on_stream(
       input, compute_stream, /*record_ready_event=*/true);
 }
 
 std::optional<ForwardOutput> VLMWorkerImpl::execute_no_sync_on_stream(
-    const LlmForwardInput& input,
+    const VlmForwardInput& input,
     Stream& compute_stream,
     bool record_ready_event) {
   const ForwardSyncPolicy sync_policy = ForwardSyncPolicy::NO_SYNC;
@@ -143,7 +138,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::execute_no_sync_on_stream(
 }
 
 std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
-    const LlmForwardInput& input,
+    const VlmForwardInput& input,
     ForwardSyncPolicy sync_policy,
     bool record_ready_event) {
   Timer timer;
@@ -154,21 +149,28 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
     return ForwardOutput{};
   }
 
-  // TODO guojinrong, to adapt multi stream parallel later
-  // call model executor forward to get hidden states
-  auto model_output = model_executor_->forward(
-      input.token_ids, input.positions, kv_caches_, input.input_params);
-  auto& sampling_params = input.sampling_params;
+  const auto& sampling_params = input.sampling_params;
+  ModelOutput model_output;
   torch::Tensor logits;
   torch::Tensor lm_head_selected_token_idxes;
   torch::Tensor selected_hidden_from_lm_head;
+  {
+    auto& owner = const_cast<VlmModelParams&>(input.input_params);
+    VlmLegacyExecutionProjection projection(owner);
+    ModelInputParams& params = projection.params();
+    model_output = model_executor_->forward(
+        input.token_ids, input.positions, kv_caches_, params);
+    if (sampling_params.selected_token_idxes.defined()) {
+      lm_head_selected_token_idxes = choose_lm_head_selected_token_idxes(
+          sampling_params.selected_token_idxes,
+          params,
+          context_.get_parallel_args(),
+          model_output.hidden_states.size(0),
+          model_output.hidden_states.device());
+    }
+  }
+
   if (sampling_params.selected_token_idxes.defined()) {
-    lm_head_selected_token_idxes = choose_lm_head_selected_token_idxes(
-        sampling_params.selected_token_idxes,
-        input.input_params,
-        context_.get_parallel_args(),
-        model_output.hidden_states.size(0),
-        model_output.hidden_states.device());
     if (options_.enable_speculative_decode()) {
       logits = model_->logits(model_output.hidden_states,
                               lm_head_selected_token_idxes,
@@ -220,7 +222,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
 
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
     output.retained_inputs.emplace_back(
-        std::make_shared<LlmForwardInput>(input));
+        std::make_shared<VlmForwardInput>(input));
     if (record_ready_event && enable_schedule_overlap()) {
       output.ready_event = record_current_stream_event(device_);
     }
@@ -233,15 +235,15 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
 }
 
 std::optional<ForwardOutput> VLMWorkerImpl::step_for_schedule_overlap(
-    const LlmForwardInput& input) {
+    const VlmForwardInput& input) {
   // VLM has no linear-attention recurrent state to restore, so the LLM
   // worker's slot-restore preamble is unnecessary here.
   return execute_no_sync_on_stream(input, *compute_stream_);
 }
 
-LlmForwardInput
+VlmForwardInput
 VLMWorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
-    LlmForwardInput& input) {
+    VlmForwardInput& input) {
   c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
   CHECK(compute_stream_->wait_event(last_step_output_.ready_event))
       << "failed to wait last step output ready event";

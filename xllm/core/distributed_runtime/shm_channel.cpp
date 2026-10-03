@@ -16,6 +16,7 @@ limitations under the License.
 #include "shm_channel.h"
 
 #include "common/global_flags.h"
+#include "runtime/vlm_forward_params.h"
 #include "util/net.h"
 
 namespace xllm {
@@ -92,6 +93,22 @@ void ShmChannel::execute_model_async(
 
 void ShmChannel::execute_model_async(
     const RecForwardInput& input,
+    folly::Promise<std::optional<RawForwardOutput>>& promise) {
+  if (enable_shm_) {
+    if (input_shm_manager_ && !input_shm_manager_->input_write(input)) {
+      enable_shm_ = false;
+    } else {
+      RawForwardOutput output;
+      output_shm_manager_->raw_output_read(output);
+      promise.setValue(std::move(output));
+      return;
+    }
+  }
+  execute_model_with_brpc(input, promise);
+}
+
+void ShmChannel::execute_model_async(
+    const VlmForwardInput& input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
   if (enable_shm_) {
     if (input_shm_manager_ && !input_shm_manager_->input_write(input)) {

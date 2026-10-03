@@ -27,7 +27,7 @@ namespace xllm {
 // Suffix-based speculative decoding worker.
 // Uses a suffix tree cache to generate draft tokens from previously seen
 // patterns, without requiring a separate draft model.
-class SuffixWorkerImpl : public SpeculativeWorkerImpl {
+class SuffixWorkerImpl : public SpeculativeWorkerImpl<LlmForwardInput> {
  public:
   SuffixWorkerImpl(const ParallelArgs& parallel_args,
                    const torch::Device& device,
