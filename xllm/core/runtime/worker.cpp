@@ -240,6 +240,17 @@ std::optional<ForwardOutput> Worker::step(const ForwardInput& inputs) {
   return impl_->step(inputs);
 }
 
+std::optional<ForwardOutput> Worker::step(const DiTForwardInput& inputs) {
+  CHECK(!enable_task_pipeline_) << "DiT does not support the LLM task pipeline";
+  return impl_->step(inputs);
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>> Worker::step_async(
+    const DiTForwardInput& inputs) {
+  CHECK(!enable_task_pipeline_) << "DiT does not support the LLM task pipeline";
+  return impl_->step_async(inputs);
+}
+
 const bool Worker::is_driver() { return impl_->is_driver(); }
 
 folly::SemiFuture<std::tuple<int64_t, int64_t>>

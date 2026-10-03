@@ -18,6 +18,8 @@ limitations under the License.
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -28,7 +30,9 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/request/stopping_checker.h"
 #include "core/framework/sampling/json_object_grammar.h"
+#include "core/runtime/dit_forward_params.h"
 #include "core/runtime/forward_params.h"
+#include "core/runtime/forward_shared_memory_manager.h"
 #include "core/runtime/params_utils.h"
 
 namespace xllm {
@@ -58,6 +62,59 @@ void expect_linear_state_cache_op_eq(const LinearStateCacheOp& actual,
   EXPECT_EQ(actual.reset_requested, expected.reset_requested);
   EXPECT_EQ(actual.restore_requested, expected.restore_requested);
   EXPECT_EQ(actual.restore_src_slot_id, expected.restore_src_slot_id);
+}
+
+void expect_dit_forward_input_eq(const DiTForwardInput& actual,
+                                 const DiTForwardInput& expected) {
+  EXPECT_EQ(actual.batch_size, expected.batch_size);
+  EXPECT_EQ(actual.prompts, expected.prompts);
+  EXPECT_EQ(actual.prompts_2, expected.prompts_2);
+  EXPECT_EQ(actual.negative_prompts, expected.negative_prompts);
+  EXPECT_EQ(actual.negative_prompts_2, expected.negative_prompts_2);
+  EXPECT_EQ(actual.audio_prompt_text, expected.audio_prompt_text);
+  EXPECT_EQ(actual.generation_params, expected.generation_params);
+
+  ASSERT_EQ(actual.image_sources.size(), expected.image_sources.size());
+  for (size_t index = 0; index < expected.image_sources.size(); ++index) {
+    const NamedTensor& actual_source = actual.image_sources.at(index);
+    const NamedTensor& expected_source = expected.image_sources.at(index);
+    EXPECT_EQ(actual_source.name, expected_source.name);
+    EXPECT_TRUE(actual_source.tensor.device().is_cpu());
+    EXPECT_EQ(actual_source.tensor.scalar_type(),
+              expected_source.tensor.scalar_type());
+    EXPECT_TRUE(torch::equal(actual_source.tensor, expected_source.tensor));
+  }
+
+  ASSERT_EQ(actual.tensor_sources.size(), expected.tensor_sources.size());
+  for (size_t index = 0; index < expected.tensor_sources.size(); ++index) {
+    const NamedTensor& actual_source = actual.tensor_sources.entries()[index];
+    const NamedTensor& expected_source =
+        expected.tensor_sources.entries()[index];
+    EXPECT_EQ(actual_source.name, expected_source.name);
+    EXPECT_TRUE(actual_source.tensor.device().is_cpu());
+    EXPECT_EQ(actual_source.tensor.scalar_type(),
+              expected_source.tensor.scalar_type());
+    EXPECT_TRUE(torch::equal(actual_source.tensor, expected_source.tensor));
+  }
+}
+
+void overwrite_packed_uint64(std::string& payload,
+                             size_t offset,
+                             uint64_t value) {
+  for (size_t index = 0; index < sizeof(value); ++index) {
+    payload.at(offset + index) =
+        static_cast<char>((value >> (index * 8)) & 0xff);
+  }
+}
+
+uint64_t read_packed_uint64(const std::string& payload, size_t offset) {
+  uint64_t value = 0;
+  for (size_t index = 0; index < sizeof(value); ++index) {
+    value |=
+        static_cast<uint64_t>(static_cast<uint8_t>(payload.at(offset + index)))
+        << (index * 8);
+  }
+  return value;
 }
 
 }  // namespace
@@ -117,6 +174,97 @@ TEST(BatchPackedInputTest, PackedCopyKeepsStagingAliveAfterSourceRelease) {
   EXPECT_EQ(materialized_input.input_params.attention.host.kv_seq_lens,
             std::vector<int32_t>({2}));
 }
+
+#if defined(USE_NPU)
+TEST(BatchPackedInputTest, MaterializedShmReadRebindsTaggedTensorArena) {
+  ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/true);
+  const torch::Device device(torch::kPrivateUse1, 0);
+  ForwardInput source;
+  source.token_ids = torch::tensor({11, 23}, torch::kInt32);
+  source.positions = torch::tensor({0, 1}, torch::kInt32);
+  source.input_params.meta.num_sequences = 1;
+  source.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
+  source.input_params.attention.host.q_seq_lens = {2};
+  source.input_params.attention.host.q_cu_seq_lens = {0, 2};
+  source.input_params.attention.host.kv_seq_lens = {2};
+  source.input_params.attention.host.new_cache_slots = {3, 4};
+  source.input_params.attention.host.block_tables =
+      torch::tensor({{7, 9}}, torch::kInt32);
+  source.sampling_params.selected_token_idxes =
+      torch::tensor({1}, torch::kInt32);
+  proto::PackedForwardInput packed_input;
+  ASSERT_TRUE(forward_input_to_packed_proto(source, &packed_input));
+  ASSERT_GE(packed_input.payload().size(), 40u);
+  EXPECT_EQ(static_cast<uint8_t>(packed_input.payload()[8]), 2u);
+  EXPECT_EQ(static_cast<uint8_t>(packed_input.payload()[10]), 1u);
+  const uint64_t arena_offset =
+      read_packed_uint64(packed_input.payload(), /*offset=*/24);
+
+  ForwardInput materialized_input;
+  {
+    const std::string shm_name = ForwardSharedMemoryManager::create_unique_name(
+        "batch_test_materialized_tagged_input",
+        /*dp_group=*/0,
+        ForwardType::RAW_INPUT,
+        /*rank=*/0);
+    bool is_creator = false;
+    ForwardSharedMemoryManager writer_manager(shm_name,
+                                              /*size=*/1 << 20,
+                                              is_creator,
+                                              ForwardType::RAW_INPUT);
+    bool is_reader_creator = false;
+    ForwardSharedMemoryManager reader_manager(shm_name,
+                                              /*size=*/1 << 20,
+                                              is_reader_creator,
+                                              ForwardType::RAW_INPUT);
+    ASSERT_TRUE(writer_manager.input_write(source));
+    reader_manager.input_read(
+        materialized_input,
+        device,
+        InputDeviceMaterializationPolicy::MATERIALIZE_ON_READ);
+
+    ASSERT_TRUE(materialized_input.runtime.input_host_buffer.defined());
+    EXPECT_TRUE(materialized_input.runtime.input_host_buffer.is_pinned());
+    ASSERT_TRUE(materialized_input.runtime.device_input_buffer.defined());
+    EXPECT_EQ(materialized_input.runtime.device_input_buffer.device(), device);
+    EXPECT_TRUE(materialized_input.runtime.device_tensors_ready);
+    const uint8_t* retained_arena =
+        materialized_input.runtime.input_host_buffer.data_ptr<uint8_t>() +
+        arena_offset;
+    EXPECT_EQ(materialized_input.token_ids_host.data_ptr(), retained_arena);
+    EXPECT_EQ(materialized_input.token_ids.device(), device);
+    EXPECT_EQ(materialized_input.positions.device(), device);
+
+    ForwardInput overwrite_input = source;
+    overwrite_input.token_ids = torch::tensor({91, 92}, torch::kInt32);
+    overwrite_input.positions = torch::tensor({4, 5}, torch::kInt32);
+    ASSERT_TRUE(writer_manager.input_write(overwrite_input));
+  }
+
+  EXPECT_TRUE(tensor_equals_vector<int32_t>(materialized_input.token_ids_host,
+                                            {11, 23}));
+  EXPECT_TRUE(
+      tensor_equals_vector<int32_t>(materialized_input.positions_host, {0, 1}));
+  EXPECT_TRUE(tensor_equals_vector<int32_t>(materialized_input.token_ids.cpu(),
+                                            {11, 23}));
+  EXPECT_TRUE(tensor_equals_vector<int32_t>(materialized_input.positions.cpu(),
+                                            {0, 1}));
+  EXPECT_TRUE(tensor_equals_vector<int32_t>(
+      materialized_input.input_params.attention.device.new_cache_slots.cpu(),
+      {3, 4}));
+  EXPECT_TRUE(torch::equal(
+      materialized_input.input_params.attention.device.block_tables.cpu(),
+      source.input_params.attention.host.block_tables));
+  EXPECT_TRUE(tensor_equals_vector<int32_t>(
+      materialized_input.sampling_params.selected_token_idxes.cpu(), {1}));
+  EXPECT_EQ(materialized_input.input_params.attention.host.q_seq_lens,
+            std::vector<int32_t>({2}));
+  EXPECT_EQ(materialized_input.input_params.attention.host.q_cu_seq_lens,
+            std::vector<int32_t>({0, 2}));
+  EXPECT_EQ(materialized_input.input_params.attention.host.kv_seq_lens,
+            std::vector<int32_t>({2}));
+}
+#endif
 
 TEST(BatchPackedInputTest, CpuPreparationAndReadyCopyRetainExecutionSources) {
   ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
@@ -224,13 +372,12 @@ TEST(BatchPackedInputTest, PackedProtoLazyUnpackPreservesLinearStateCacheOps) {
   EXPECT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
 
   ForwardInput unpacked_input;
-  unpacked_input.input_params.dit_forward_input.emplace().batch_size = 1;
+  unpacked_input.input_params.linear_state_cache_ops = {no_restore_op};
   ASSERT_TRUE(detail::unpack_from_input_host_buffer(lazy_input,
                                                     torch::Device(torch::kCPU),
                                                     torch::kFloat32,
                                                     unpacked_input,
                                                     false));
-  EXPECT_FALSE(unpacked_input.input_params.dit_forward_input.has_value());
   ASSERT_EQ(unpacked_input.input_params.linear_state_cache_ops.size(), 2u);
   expect_linear_state_cache_op_eq(
       unpacked_input.input_params.linear_state_cache_ops[0], restore_op);
@@ -312,10 +459,76 @@ TEST(BatchPackedInputTest, PackedProtoLazyUnpackRestoresSampleIdxes) {
                            input.sampling_params.filter_bitmask));
 }
 
-TEST(BatchPackedInputTest, PackedProtoPreservesDiTGenerationParams) {
+TEST(BatchPackedInputTest, PackedProtoAcceptsLegacyTokenLayout) {
+  ScopedContiguousInputBuffer contiguous_input_buffer(/*enabled=*/false);
   ForwardInput input;
-  DiTForwardInput& dit_input = input.input_params.dit_forward_input.emplace();
-  dit_input.batch_size = 1;
+  input.token_ids = torch::tensor({11, 23}, torch::kInt32);
+  input.positions = torch::tensor({0, 1}, torch::kInt32);
+  input.input_params.meta.num_sequences = 1;
+  input.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
+  input.input_params.attention.host.q_seq_lens = {2};
+  input.input_params.attention.host.q_cu_seq_lens = {0, 2};
+  input.input_params.attention.host.kv_seq_lens = {2};
+  input.sample_sequence_ids = {"legacy#0"};
+  input.sample_prior_output_rows = {-1};
+  proto::PackedForwardInput packed_input;
+  ASSERT_TRUE(forward_input_to_packed_proto(input, &packed_input));
+  ASSERT_GE(packed_input.payload().size(), 40u);
+
+  // V1 starts with the three layout sizes; remove the V2 prefix and rebase
+  // the aligned tensor arena without changing the token descriptor.
+  const uint64_t arena_offset =
+      read_packed_uint64(packed_input.payload(), /*offset=*/24);
+  ASSERT_GE(arena_offset, 40u);
+  std::string legacy_payload = packed_input.payload().substr(16);
+  overwrite_packed_uint64(legacy_payload, /*offset=*/8, arena_offset - 16);
+  proto::PackedForwardInput legacy_input;
+  legacy_input.set_payload(std::move(legacy_payload));
+
+  ForwardInput lazy_input;
+  ASSERT_TRUE(packed_proto_to_forward_input(
+      legacy_input, lazy_input, torch::Device(torch::kCPU), nullptr));
+  EXPECT_TRUE(lazy_input.runtime.input_host_buffer_has_layout);
+  const ForwardInput unpacked_input =
+      lazy_input.to(torch::Device(torch::kCPU), torch::kFloat32);
+  EXPECT_TRUE(
+      tensor_equals_vector<int32_t>(unpacked_input.token_ids, {11, 23}));
+  EXPECT_TRUE(tensor_equals_vector<int32_t>(unpacked_input.positions, {0, 1}));
+  EXPECT_EQ(unpacked_input.input_params.attention.host.kv_seq_lens,
+            std::vector<int32_t>({2}));
+  EXPECT_EQ(unpacked_input.sample_sequence_ids,
+            std::vector<std::string>({"legacy#0"}));
+  EXPECT_EQ(unpacked_input.sample_prior_output_rows,
+            std::vector<int32_t>({-1}));
+
+  DiTForwardInput dit_input;
+  EXPECT_FALSE(packed_proto_to_dit_forward_input(legacy_input, dit_input));
+}
+
+TEST(BatchPackedInputTest, PackedTokenDecoderRejectsNativeDiTDomain) {
+  DiTForwardInput input;
+  input.batch_size = 1;
+  input.prompts = {"prompt"};
+  input.tensor_sources.add("latent", torch::tensor({1.5f, 2.5f}));
+  proto::PackedForwardInput packed_input;
+  ASSERT_TRUE(dit_forward_input_to_packed_proto(input, &packed_input));
+
+  ForwardInput token_input;
+  EXPECT_FALSE(packed_proto_to_forward_input(
+      packed_input, token_input, torch::Device(torch::kCPU), nullptr));
+  EXPECT_FALSE(token_input.runtime.input_host_buffer.defined());
+}
+
+TEST(BatchPackedInputTest,
+     NativeDiTPackedProtoPreservesInputsAndGenerationParams) {
+  DiTForwardInput dit_input;
+  dit_input.batch_size = 2;
+  dit_input.prompts = {"first prompt", "second prompt"};
+  dit_input.prompts_2 = {"first detail", "second detail"};
+  dit_input.negative_prompts = {"first exclusion", "second exclusion"};
+  dit_input.negative_prompts_2 = {"first negative detail",
+                                  "second negative detail"};
+  dit_input.audio_prompt_text = "spoken prompt transcript";
   dit_input.image_sources.add(
       "unknown", torch::tensor({1, 2}, torch::dtype(torch::kUInt8)));
   dit_input.image_sources.add(
@@ -324,6 +537,7 @@ TEST(BatchPackedInputTest, PackedProtoPreservesDiTGenerationParams) {
       "mask_image", torch::tensor({5, 6}, torch::dtype(torch::kUInt8)));
   dit_input.tensor_sources.add("prompt_embed", torch::tensor({1.5f, 2.5f}));
   dit_input.tensor_sources.add("latent", torch::tensor({3.5f, 4.5f}));
+  dit_input.tensor_sources.add("prompt_audio", torch::tensor({0.25f, 0.5f}));
   DiTGenerationParams& params = dit_input.generation_params;
   params.width = 640;
   params.height = 480;
@@ -356,54 +570,159 @@ TEST(BatchPackedInputTest, PackedProtoPreservesDiTGenerationParams) {
   params.repetition_penalty = 1.2f;
 
   proto::PackedForwardInput packed_input;
-  ASSERT_TRUE(forward_input_to_packed_proto(input, &packed_input));
+  ASSERT_TRUE(dit_forward_input_to_packed_proto(dit_input, &packed_input));
+  ASSERT_GE(packed_input.payload().size(), 40u);
+  EXPECT_EQ(static_cast<uint8_t>(packed_input.payload()[10]), 4u);
 
-  ForwardInput lazy_input;
-  packed_proto_to_forward_input(
-      packed_input, lazy_input, torch::Device(torch::kCPU), nullptr);
-  ForwardInput unpacked_input;
-  ASSERT_TRUE(detail::unpack_from_input_host_buffer(lazy_input,
-                                                    torch::Device(torch::kCPU),
-                                                    torch::kFloat32,
-                                                    unpacked_input,
-                                                    false));
-
-  ASSERT_TRUE(unpacked_input.input_params.dit_forward_input.has_value());
-  const DiTForwardInput& unpacked_dit_input =
-      *unpacked_input.input_params.dit_forward_input;
-  EXPECT_EQ(unpacked_dit_input.generation_params, params);
-  ASSERT_EQ(unpacked_dit_input.image_sources.size(), 3u);
-  EXPECT_EQ(unpacked_dit_input.image_sources.at(0).name, "unknown");
-  EXPECT_EQ(unpacked_dit_input.image_sources.at(1).name, "unknown");
-  EXPECT_EQ(unpacked_dit_input.image_sources.at(2).name, "mask_image");
-  EXPECT_TRUE(torch::equal(unpacked_dit_input.image_sources.at(0).tensor,
-                           dit_input.image_sources.at(0).tensor));
-  ASSERT_EQ(unpacked_dit_input.tensor_sources.size(), 2u);
-  EXPECT_TRUE(
-      torch::equal(*unpacked_dit_input.tensor_sources.get("prompt_embed"),
-                   *dit_input.tensor_sources.get("prompt_embed")));
-  EXPECT_TRUE(torch::equal(*unpacked_dit_input.tensor_sources.get("latent"),
-                           *dit_input.tensor_sources.get("latent")));
+  DiTForwardInput unpacked_input;
+  ASSERT_TRUE(packed_proto_to_dit_forward_input(packed_input, unpacked_input));
+  expect_dit_forward_input_eq(unpacked_input, dit_input);
 
   proto::DiTForwardInput proto_input;
   ASSERT_TRUE(dit_forward_input_to_proto(dit_input, &proto_input));
   DiTForwardInput proto_input_round_trip;
   ASSERT_TRUE(proto_to_dit_forward_input(proto_input, proto_input_round_trip));
-  ASSERT_EQ(proto_input_round_trip.image_sources.size(), 3u);
-  EXPECT_EQ(proto_input_round_trip.image_sources.at(2).name, "mask_image");
-  EXPECT_TRUE(torch::equal(proto_input_round_trip.image_sources.at(1).tensor,
-                           dit_input.image_sources.at(1).tensor));
-  EXPECT_TRUE(
-      torch::equal(*proto_input_round_trip.tensor_sources.get("prompt_embed"),
-                   *dit_input.tensor_sources.get("prompt_embed")));
-  EXPECT_TRUE(torch::equal(*proto_input_round_trip.tensor_sources.get("latent"),
-                           *dit_input.tensor_sources.get("latent")));
+  expect_dit_forward_input_eq(proto_input_round_trip, dit_input);
 
   proto::DiTGenerationParams proto_params;
   ASSERT_TRUE(generation_params_to_proto(params, &proto_params));
   DiTGenerationParams proto_round_trip;
   ASSERT_TRUE(proto_to_generation_params(proto_params, proto_round_trip));
   EXPECT_EQ(proto_round_trip, params);
+}
+
+TEST(BatchPackedInputTest, NativeDiTPackedProtoOwnsSourcesAfterPayloadRelease) {
+  DiTForwardInput unpacked_input;
+  {
+    DiTForwardInput source;
+    source.batch_size = 1;
+    source.prompts = {"retained prompt"};
+    source.image_sources.add(
+        "image", torch::tensor({1, 2}, torch::dtype(torch::kUInt8)));
+    source.tensor_sources.add("latent", torch::tensor({1.5f, 2.5f}));
+    source.tensor_sources.add("prompt_audio", torch::tensor({0.25f, 0.5f}));
+    source.tensor_sources.add(
+        "empty", torch::empty({0, 2}, torch::dtype(torch::kFloat32)));
+    proto::PackedForwardInput packed_input;
+    ASSERT_TRUE(dit_forward_input_to_packed_proto(source, &packed_input));
+    ASSERT_TRUE(
+        packed_proto_to_dit_forward_input(packed_input, unpacked_input));
+    packed_input.mutable_payload()->assign(packed_input.payload().size(), '\0');
+  }
+
+  EXPECT_EQ(unpacked_input.prompts,
+            std::vector<std::string>({"retained prompt"}));
+  ASSERT_EQ(unpacked_input.image_sources.size(), 1u);
+  EXPECT_TRUE(torch::equal(unpacked_input.image_sources.at(0).tensor,
+                           torch::tensor({1, 2}, torch::dtype(torch::kUInt8))));
+  ASSERT_EQ(unpacked_input.tensor_sources.size(), 3u);
+  EXPECT_TRUE(torch::equal(unpacked_input.tensor_sources.entries()[0].tensor,
+                           torch::tensor({1.5f, 2.5f})));
+  EXPECT_TRUE(torch::equal(unpacked_input.tensor_sources.entries()[1].tensor,
+                           torch::tensor({0.25f, 0.5f})));
+  EXPECT_TRUE(unpacked_input.tensor_sources.entries()[2].tensor.defined());
+  EXPECT_EQ(unpacked_input.tensor_sources.entries()[2].tensor.sizes().vec(),
+            std::vector<int64_t>({0, 2}));
+
+  const DiTForwardInput prepared_input =
+      unpacked_input.to(torch::Device(torch::kCPU));
+  EXPECT_EQ(prepared_input.image_sources.at(0).tensor.scalar_type(),
+            torch::kUInt8);
+  EXPECT_EQ(prepared_input.tensor_sources.entries()[0].tensor.scalar_type(),
+            torch::kBFloat16);
+  EXPECT_EQ(prepared_input.tensor_sources.entries()[1].tensor.scalar_type(),
+            torch::kFloat32);
+  EXPECT_TRUE(torch::equal(prepared_input.tensor_sources.entries()[0].tensor,
+                           torch::tensor({1.5f, 2.5f}, torch::kBFloat16)));
+  EXPECT_TRUE(torch::equal(prepared_input.tensor_sources.entries()[1].tensor,
+                           torch::tensor({0.25f, 0.5f})));
+}
+
+TEST(BatchPackedInputTest, NativeDiTPackedProtoRoundTripsEmptyInput) {
+  DiTForwardInput input;
+  proto::PackedForwardInput packed_input;
+  ASSERT_TRUE(dit_forward_input_to_packed_proto(input, &packed_input));
+
+  DiTForwardInput unpacked_input;
+  ASSERT_TRUE(packed_proto_to_dit_forward_input(packed_input, unpacked_input));
+  expect_dit_forward_input_eq(unpacked_input, input);
+}
+
+TEST(BatchPackedInputTest, NativeDiTPackedProtoRejectsMalformedPayloads) {
+  DiTForwardInput input;
+  input.batch_size = 1;
+  input.prompts = {"prompt"};
+  input.tensor_sources.add("latent", torch::tensor({1.5f, 2.5f}));
+  proto::PackedForwardInput packed_input;
+  ASSERT_TRUE(dit_forward_input_to_packed_proto(input, &packed_input));
+  ASSERT_GT(packed_input.payload().size(), 40u);
+  const uint64_t descriptor_bytes =
+      read_packed_uint64(packed_input.payload(), /*offset=*/16);
+  const uint64_t arena_offset =
+      read_packed_uint64(packed_input.payload(), /*offset=*/24);
+  const uint64_t arena_bytes =
+      read_packed_uint64(packed_input.payload(), /*offset=*/32);
+
+  std::vector<std::pair<std::string, std::string>> malformed_payloads;
+  malformed_payloads.reserve(13);
+  malformed_payloads.emplace_back("empty", "");
+  malformed_payloads.emplace_back("truncated header",
+                                  packed_input.payload().substr(0, 39));
+  malformed_payloads.emplace_back("unknown version", packed_input.payload());
+  malformed_payloads.back().second[8] = 3;
+  malformed_payloads.emplace_back("token domain", packed_input.payload());
+  malformed_payloads.back().second[10] = 1;
+  malformed_payloads.emplace_back("reserved VLM domain",
+                                  packed_input.payload());
+  malformed_payloads.back().second[10] = 2;
+  malformed_payloads.emplace_back("reserved Rec domain",
+                                  packed_input.payload());
+  malformed_payloads.back().second[10] = 3;
+  malformed_payloads.emplace_back("unknown domain", packed_input.payload());
+  malformed_payloads.back().second[10] = 127;
+  malformed_payloads.emplace_back("overlapping arena", packed_input.payload());
+  overwrite_packed_uint64(malformed_payloads.back().second,
+                          /*offset=*/24,
+                          /*value=*/0);
+  malformed_payloads.emplace_back("arena beyond payload",
+                                  packed_input.payload());
+  overwrite_packed_uint64(
+      malformed_payloads.back().second,
+      /*offset=*/24,
+      static_cast<uint64_t>(packed_input.payload().size()) + 16);
+  malformed_payloads.emplace_back("overflowing descriptor",
+                                  packed_input.payload());
+  overwrite_packed_uint64(malformed_payloads.back().second,
+                          /*offset=*/16,
+                          std::numeric_limits<uint64_t>::max());
+  malformed_payloads.emplace_back(
+      "truncated arena",
+      packed_input.payload().substr(0, packed_input.payload().size() - 1));
+  malformed_payloads.emplace_back("unconsumed descriptor byte",
+                                  packed_input.payload());
+  malformed_payloads.back().second.insert(
+      static_cast<size_t>(40 + descriptor_bytes), /*count=*/16, /*ch=*/'\0');
+  overwrite_packed_uint64(malformed_payloads.back().second,
+                          /*offset=*/16,
+                          descriptor_bytes + 1);
+  overwrite_packed_uint64(malformed_payloads.back().second,
+                          /*offset=*/24,
+                          arena_offset + 16);
+  malformed_payloads.emplace_back("unconsumed arena byte",
+                                  packed_input.payload());
+  malformed_payloads.back().second += '\0';
+  overwrite_packed_uint64(malformed_payloads.back().second,
+                          /*offset=*/32,
+                          arena_bytes + 1);
+
+  for (const auto& [name, payload] : malformed_payloads) {
+    SCOPED_TRACE(name);
+    proto::PackedForwardInput malformed_input;
+    malformed_input.set_payload(payload);
+    DiTForwardInput unpacked_input;
+    EXPECT_FALSE(
+        packed_proto_to_dit_forward_input(malformed_input, unpacked_input));
+  }
 }
 
 TEST(BatchPackedInputTest, PackedProtoLazyToPreservesJsonMetadata) {

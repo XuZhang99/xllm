@@ -155,6 +155,10 @@ class WorkerService : public proto::DistributeWorker {
  private:
   friend class WorkerServiceTestPeer;
 
+  void step(const DiTForwardInput& input,
+            std::vector<torch::Tensor>& tensors,
+            std::vector<std::string>& text_output);
+
   void step(ForwardInput& fwd_input,
             torch::Tensor& next_tokens,
             torch::Tensor& logprobs,

@@ -160,13 +160,18 @@ folly::SemiFuture<bool> DiTWorkerImpl::init_model_async(
   return future;
 }
 
-std::optional<ForwardOutput> DiTWorkerImpl::step(const ForwardInput& inputs) {
+std::optional<ForwardOutput> DiTWorkerImpl::step(
+    const ForwardInput& /*inputs*/) {
+  LOG(FATAL) << "DiT worker requires native DiTForwardInput";
+  return std::nullopt;
+}
+
+std::optional<ForwardOutput> DiTWorkerImpl::step(
+    const DiTForwardInput& inputs) {
   torch::DeviceGuard device_guard(device_);
   Timer timer;
-  ForwardInput input_on_device = inputs.to(device_, dtype_);
-  CHECK(input_on_device.input_params.dit_forward_input.has_value());
-  DiTForwardOutput output = dit_model_executor_->forward(
-      *input_on_device.input_params.dit_forward_input);
+  DiTForwardInput input_on_device = inputs.to(device_);
+  DiTForwardOutput output = dit_model_executor_->forward(input_on_device);
 
   const int32_t ret = device_.synchronize_default_stream();
   CHECK_EQ(ret, 0) << "synchronize_default_stream failed";
@@ -183,7 +188,7 @@ std::optional<ForwardOutput> DiTWorkerImpl::step(const ForwardInput& inputs) {
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> DiTWorkerImpl::step_async(
-    const ForwardInput& inputs) {
+    const DiTForwardInput& inputs) {
   folly::Promise<std::optional<ForwardOutput>> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(

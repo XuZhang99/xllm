@@ -84,6 +84,10 @@ class CommChannel {
       const ForwardInput& input,
       folly::Promise<std::optional<RawForwardOutput>>& promise);
 
+  virtual void execute_model_async(
+      const DiTForwardInput& input,
+      folly::Promise<std::optional<RawForwardOutput>>& promise);
+
   virtual bool process_group_test();
 
   virtual bool allocate_kv_cache_with_transfer(
@@ -123,6 +127,10 @@ class CommChannel {
  protected:
   bool execute_model_with_brpc(
       const ForwardInput& input,
+      folly::Promise<std::optional<RawForwardOutput>>& promise);
+
+  bool execute_model_with_brpc(
+      const DiTForwardInput& input,
       folly::Promise<std::optional<RawForwardOutput>>& promise);
 
  private:

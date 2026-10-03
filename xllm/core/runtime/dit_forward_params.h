@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 
@@ -26,7 +27,8 @@ limitations under the License.
 namespace xllm {
 
 // dit related forward input params
-struct DiTForwardInput {
+class DiTForwardInput final {
+ public:
   void debug_print(std::ostream& os = std::cout) const {
     os << "=== DiTForwardInput Debug Info ===" << std::endl;
 
@@ -37,28 +39,36 @@ struct DiTForwardInput {
     os << "prompts: [";
     for (size_t i = 0; i < prompts.size(); ++i) {
       os << "\"" << prompts[i] << "\"";
-      if (i < prompts.size() - 1) os << ", ";
+      if (i < prompts.size() - 1) {
+        os << ", ";
+      }
     }
     os << "]" << std::endl;
 
     os << "prompts_2: [";
     for (size_t i = 0; i < prompts_2.size(); ++i) {
       os << "\"" << prompts_2[i] << "\"";
-      if (i < prompts_2.size() - 1) os << ", ";
+      if (i < prompts_2.size() - 1) {
+        os << ", ";
+      }
     }
     os << "]" << std::endl;
 
     os << "negative_prompts: [";
     for (size_t i = 0; i < negative_prompts.size(); ++i) {
       os << "\"" << negative_prompts[i] << "\"";
-      if (i < negative_prompts.size() - 1) os << ", ";
+      if (i < negative_prompts.size() - 1) {
+        os << ", ";
+      }
     }
     os << "]" << std::endl;
 
     os << "negative_prompts_2: [";
     for (size_t i = 0; i < negative_prompts_2.size(); ++i) {
       os << "\"" << negative_prompts_2[i] << "\"";
-      if (i < negative_prompts_2.size() - 1) os << ", ";
+      if (i < negative_prompts_2.size() - 1) {
+        os << ", ";
+      }
     }
     os << "]" << std::endl;
 
@@ -112,7 +122,7 @@ struct DiTForwardInput {
     return input;
   }
 
-  int batch_size = 0;
+  int32_t batch_size = 0;
 
   // Primary input text description for image generation
   std::vector<std::string> prompts;

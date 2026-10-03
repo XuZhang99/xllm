@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <memory>
 
-#include "dit_forward_params.h"
 #include "forward_params.h"
 #include "params_utils.h"
 #include "util/shared_memory_manager.h"
@@ -107,6 +106,9 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
 
     return true;
   };
+
+  bool input_write(const DiTForwardInput& input);
+  void input_read(DiTForwardInput& input);
 
   bool input_write(const ForwardInput& input);
   void input_read(ForwardInput& input,

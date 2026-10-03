@@ -1170,6 +1170,18 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
       input, processed_input, *prepare_stream_);
 }
 
+std::optional<ForwardOutput> WorkerImpl::step(
+    const DiTForwardInput& /*inputs*/) {
+  LOG(FATAL) << "Native DiT input requires a DiT worker";
+  return std::nullopt;
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
+    const DiTForwardInput& /*inputs*/) {
+  LOG(FATAL) << "Native DiT input requires a DiT worker";
+  return folly::makeSemiFuture(std::optional<ForwardOutput>{});
+}
+
 std::optional<ForwardOutput> WorkerImpl::execute_no_sync_on_stream(
     const ForwardInput& /*input*/,
     Stream& /*compute_stream*/) {

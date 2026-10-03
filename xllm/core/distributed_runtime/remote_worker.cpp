@@ -180,6 +180,23 @@ RemoteWorker::step_remote_async(const ForwardInput& input) {
   return future;
 }
 
+folly::SemiFuture<std::optional<ForwardOutput>> RemoteWorker::step_async(
+    const DiTForwardInput& /*input*/) {
+  LOG(FATAL) << "Native DiT remote execution requires step_remote_async";
+  return folly::makeSemiFuture(std::optional<ForwardOutput>{});
+}
+
+folly::SemiFuture<std::optional<RawForwardOutput>>
+RemoteWorker::step_remote_async(const DiTForwardInput& input) {
+  folly::Promise<std::optional<RawForwardOutput>> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule(
+      [this, input = input, promise = std::move(promise)]() mutable {
+        channel_->execute_model_async(input, promise);
+      });
+  return future;
+}
+
 folly::SemiFuture<folly::Unit> RemoteWorker::process_group_test_async() {
   folly::Promise<folly::Unit> promise;
   auto future = promise.getSemiFuture();

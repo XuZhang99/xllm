@@ -39,11 +39,19 @@ bool forward_input_to_packed_proto(
     const ForwardInput& input,
     proto::PackedForwardInput* packed_forward_input);
 
-void packed_proto_to_forward_input(
+bool packed_proto_to_forward_input(
     const proto::PackedForwardInput& packed_forward_input,
     ForwardInput& forward_input,
     const torch::Device& device,
     Stream* stream);
+
+bool dit_forward_input_to_packed_proto(
+    const DiTForwardInput& input,
+    proto::PackedForwardInput* packed_forward_input);
+
+bool packed_proto_to_dit_forward_input(
+    const proto::PackedForwardInput& packed_forward_input,
+    DiTForwardInput& input);
 
 void proto_to_forward_output(const proto::ForwardOutput& pb_output,
                              RawForwardOutput& raw_forward_output);

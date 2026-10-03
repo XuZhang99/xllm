@@ -18,6 +18,7 @@ limitations under the License.
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -92,11 +93,86 @@ inline bool is_aligned_for_cuda_zero_copy(const void* ptr) {
   return reinterpret_cast<std::uintptr_t>(ptr) % kCudaZeroCopyAlignment == 0;
 }
 
+// Domain values are stable across later forward-input migrations. TOKEN is the
+// temporary token contract; VLM=2 and REC=3 are reserved until their codecs
+// land.
+enum class PackedInputDomain : uint8_t { TOKEN = 1, DIT = 4 };
+constexpr uint64_t kPackedInputMagic = 0x584c4c4d494e5032;
+constexpr uint16_t kPackedInputSchemaVersion = 2;
+constexpr uint32_t kPackedInputHeaderBytes = 40;
+constexpr uint32_t kLegacyInputHeaderBytes = 24;
+
 struct RawInputLayoutHeader final {
   uint64_t descriptor_bytes = 0;
   uint64_t tensor_arena_offset = 0;
   uint64_t tensor_arena_bytes = 0;
+  uint32_t header_bytes = kPackedInputHeaderBytes;
 };
+
+// Validate the envelope before allocating pinned/device buffers. The legacy
+// reader is bounded to token payloads, whose descriptor ends with
+// has_dit=false.
+bool read_input_layout(const char* payload,
+                       uint64_t payload_size,
+                       PackedInputDomain expected_domain,
+                       RawInputLayoutHeader& layout) {
+  if (payload_size < kLegacyInputHeaderBytes ||
+      payload_size >
+          static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+    return false;
+  }
+  uint64_t magic = 0;
+  std::memcpy(&magic, payload, sizeof(magic));
+  uint64_t offset = 0;
+  auto read = [&]<typename Value>(Value& value) {
+    std::memcpy(&value, payload + offset, sizeof(value));
+    offset += sizeof(value);
+  };
+  if (magic == kPackedInputMagic) {
+    if (payload_size < kPackedInputHeaderBytes) {
+      return false;
+    }
+    uint16_t version = 0;
+    uint8_t domain = 0;
+    uint8_t flags = 0;
+    read(magic);
+    read(version);
+    read(domain);
+    read(flags);
+    read(layout.header_bytes);
+    if (version != kPackedInputSchemaVersion ||
+        domain != static_cast<uint8_t>(expected_domain) || flags != 0 ||
+        layout.header_bytes != kPackedInputHeaderBytes) {
+      return false;
+    }
+  } else {
+    if (expected_domain != PackedInputDomain::TOKEN) {
+      return false;
+    }
+    layout.header_bytes = kLegacyInputHeaderBytes;
+  }
+  read(layout.descriptor_bytes);
+  read(layout.tensor_arena_offset);
+  read(layout.tensor_arena_bytes);
+  if (layout.tensor_arena_offset < layout.header_bytes ||
+      layout.tensor_arena_offset > payload_size ||
+      layout.descriptor_bytes >
+          layout.tensor_arena_offset - layout.header_bytes ||
+      layout.tensor_arena_bytes != payload_size - layout.tensor_arena_offset ||
+      layout.tensor_arena_offset % kRawInputTensorArenaAlignment != 0) {
+    return false;
+  }
+  if (expected_domain == PackedInputDomain::TOKEN) {
+    // The removed DiT tail remains false in the temporary token descriptor so
+    // legacy token payloads remain readable without reintroducing DiT
+    // ownership.
+    if (layout.descriptor_bytes == 0 ||
+        payload[layout.header_bytes + layout.descriptor_bytes - 1] != 0) {
+      return false;
+    }
+  }
+  return true;
+}
 
 struct RawInputSectionCursor final {
   char* ptr = nullptr;
@@ -404,14 +480,14 @@ inline size_t get_dit_forward_output_size(const DiTForwardOutput& output) {
 
 template <typename T>
 inline void write_data(char*& buffer, const T& data) {
-  *reinterpret_cast<T*>(buffer) = data;
+  std::memcpy(buffer, &data, sizeof(data));
   buffer += type_size<T>;
 }
 
 template <typename T>
 inline void write_data(RawInputSectionCursor& cursor, const T& data) {
   if (cursor.ptr != nullptr) {
-    *reinterpret_cast<T*>(cursor.ptr) = data;
+    std::memcpy(cursor.ptr, &data, sizeof(data));
     cursor.ptr += type_size<T>;
   }
   cursor.size += type_size<T>;
@@ -1147,12 +1223,14 @@ inline void write_dit_forward_input(RawInputSerializeContext& context,
   write_string_vector(context.descriptor, input.negative_prompts);
   write_string_vector(context.descriptor, input.negative_prompts_2);
 
-  write_data(context.descriptor, input.image_sources.size());
+  write_data(context.descriptor,
+             static_cast<uint64_t>(input.image_sources.size()));
   for (const NamedTensor& source : input.image_sources.entries()) {
     write_string(context.descriptor, source.name);
     write_tensor(context, source.tensor);
   }
-  write_data(context.descriptor, input.tensor_sources.size());
+  write_data(context.descriptor,
+             static_cast<uint64_t>(input.tensor_sources.size()));
   for (const NamedTensor& tensor_input : input.tensor_sources.entries()) {
     write_string(context.descriptor, tensor_input.name);
     write_tensor(context, tensor_input.tensor);
@@ -1222,13 +1300,13 @@ inline void advance_tensor_cursors(ReadContext& context, size_t offset) {
 
 template <typename T>
 inline void read_data(const char*& buffer, T& data) {
-  data = *reinterpret_cast<const T*>(buffer);
+  std::memcpy(&data, buffer, sizeof(data));
   buffer += type_size<T>;
 }
 
 template <typename T>
 inline void read_data(ReadContext& context, T& data) {
-  data = *reinterpret_cast<const T*>(context.descriptor_cursor);
+  std::memcpy(&data, context.descriptor_cursor, sizeof(data));
   advance_descriptor_cursor(context, type_size<T>);
 }
 
@@ -1250,7 +1328,7 @@ template <typename T>
 inline void read_data(const char*& buffer,
                       T& data,
                       const char*& device_buffer) {
-  data = *reinterpret_cast<const T*>(buffer);
+  std::memcpy(&data, buffer, sizeof(data));
   buffer += type_size<T>;
   safe_advance_buffer(device_buffer, type_size<T>);
 }
@@ -2148,7 +2226,7 @@ inline void read_dit_forward_input(const char*& buffer,
   read_string_vector(buffer, input.negative_prompts);
   read_string_vector(buffer, input.negative_prompts_2);
 
-  size_t image_source_count = 0;
+  uint64_t image_source_count = 0;
   read_data(buffer, image_source_count);
   for (size_t index = 0; index < image_source_count; ++index) {
     std::string name;
@@ -2157,7 +2235,7 @@ inline void read_dit_forward_input(const char*& buffer,
     read_tensor(buffer, tensor);
     input.image_sources.add(std::move(name), std::move(tensor));
   }
-  size_t tensor_input_count = 0;
+  uint64_t tensor_input_count = 0;
   read_data(buffer, tensor_input_count);
   for (size_t index = 0; index < tensor_input_count; ++index) {
     std::string name;
@@ -2184,7 +2262,7 @@ inline void read_dit_forward_input(ReadContext& context,
   read_string_vector(context, input.negative_prompts);
   read_string_vector(context, input.negative_prompts_2);
 
-  size_t image_source_count = 0;
+  uint64_t image_source_count = 0;
   read_data(context, image_source_count);
   for (size_t index = 0; index < image_source_count; ++index) {
     std::string name;
@@ -2196,7 +2274,7 @@ inline void read_dit_forward_input(ReadContext& context,
                 /*force_host_materialize=*/true);
     input.image_sources.add(std::move(name), std::move(tensor));
   }
-  size_t tensor_input_count = 0;
+  uint64_t tensor_input_count = 0;
   read_data(context, tensor_input_count);
   for (size_t index = 0; index < tensor_input_count; ++index) {
     std::string name;
@@ -2214,6 +2292,184 @@ inline void read_dit_forward_input(ReadContext& context,
   if (stabilize_host_tensors) {
     stabilize_dit_forward_input_tensors(input);
   }
+}
+
+// Descriptor validation performs no tensor allocation and never reads outside
+// the advertised sections. Native DiT decoding only begins after it succeeds.
+class DiTDescriptorValidator final {
+ public:
+  DiTDescriptorValidator(const char* descriptor,
+                         uint64_t descriptor_bytes,
+                         uint64_t arena_bytes)
+      : descriptor_(descriptor),
+        remaining_(descriptor_bytes),
+        arena_remaining_(arena_bytes) {}
+
+  bool validate() {
+    int32_t batch_size = 0;
+    if (!read(batch_size) || batch_size < 0) {
+      return false;
+    }
+    for (uint32_t index = 0; index < 4; ++index) {
+      if (!skip_strings()) {
+        return false;
+      }
+    }
+    if (!skip_named_tensors() || !skip_named_tensors() || !skip_string()) {
+      return false;
+    }
+    return skip_generation_params() && remaining_ == 0 && arena_remaining_ == 0;
+  }
+
+ private:
+  template <typename Value>
+  bool read(Value& value) {
+    if (sizeof(value) > remaining_) {
+      return false;
+    }
+    std::memcpy(&value, descriptor_, sizeof(value));
+    return skip(sizeof(value));
+  }
+
+  bool skip(uint64_t bytes) {
+    if (bytes > remaining_) {
+      return false;
+    }
+    descriptor_ += bytes;
+    remaining_ -= bytes;
+    return true;
+  }
+
+  bool skip_string() {
+    uint64_t bytes = 0;
+    return read(bytes) && skip(bytes);
+  }
+
+  bool skip_strings() {
+    uint64_t count = 0;
+    if (!read(count) || count > remaining_ / sizeof(uint64_t)) {
+      return false;
+    }
+    for (uint64_t index = 0; index < count; ++index) {
+      if (!skip_string()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool skip_bool() {
+    if (sizeof(bool) > remaining_) {
+      return false;
+    }
+    const bool false_value = false;
+    const bool true_value = true;
+    if (std::memcmp(descriptor_, &false_value, sizeof(bool)) != 0 &&
+        std::memcmp(descriptor_, &true_value, sizeof(bool)) != 0) {
+      return false;
+    }
+    return skip(sizeof(bool));
+  }
+
+  bool skip_generation_params() {
+    const uint64_t before_cfg_renorm_bytes = 4 * sizeof(int32_t) +
+                                             3 * sizeof(float) +
+                                             sizeof(uint32_t) + sizeof(int64_t);
+    const uint64_t before_seed_is_set_bytes = 5 * sizeof(int32_t) +
+                                              7 * sizeof(float) +
+                                              sizeof(uint32_t) + sizeof(double);
+    return skip(before_cfg_renorm_bytes) && skip_bool() &&
+           skip(before_seed_is_set_bytes) && skip_bool() &&
+           skip(2 * sizeof(int32_t)) && skip_string() && skip(sizeof(int32_t));
+  }
+
+  bool skip_named_tensors() {
+    uint64_t count = 0;
+    if (!read(count) || count > remaining_ / (2 * sizeof(uint64_t))) {
+      return false;
+    }
+    for (uint64_t index = 0; index < count; ++index) {
+      if (!skip_string() || !skip_tensor()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool skip_tensor() {
+    uint64_t dimensions = 0;
+    if (!read(dimensions) || dimensions > 64 ||
+        dimensions > remaining_ / sizeof(int64_t)) {
+      return false;
+    }
+    if (dimensions == 0) {
+      return true;
+    }
+    uint64_t elements = 1;
+    for (uint64_t index = 0; index < dimensions; ++index) {
+      int64_t dimension = 0;
+      if (!read(dimension) || dimension < 0 ||
+          (elements != 0 &&
+           static_cast<uint64_t>(dimension) >
+               std::numeric_limits<uint64_t>::max() / elements)) {
+        return false;
+      }
+      elements *= static_cast<uint64_t>(dimension);
+    }
+    int8_t dtype = 0;
+    uint64_t bytes = 0;
+    if (!read(dtype) || dtype < 0 ||
+        dtype >= static_cast<int8_t>(torch::ScalarType::Undefined) ||
+        !read(bytes)) {
+      return false;
+    }
+    const torch::ScalarType scalar_type = static_cast<torch::ScalarType>(dtype);
+    // Quantized and packed types require storage metadata absent from this
+    // descriptor. Ordinary dense types follow the installed Torch type set.
+    if (!torch::isIntegralType(scalar_type, /*includeBool=*/true) &&
+        !torch::isFloatingType(scalar_type) &&
+        !torch::isComplexType(scalar_type)) {
+      return false;
+    }
+    const uint64_t element_bytes = torch::elementSize(scalar_type);
+    if (elements > std::numeric_limits<uint64_t>::max() / element_bytes ||
+        bytes != elements * element_bytes || bytes > arena_remaining_) {
+      return false;
+    }
+    const uint64_t aligned_bytes = get_aligned_tensor_arena_bytes(bytes);
+    if (aligned_bytes > arena_remaining_) {
+      return false;
+    }
+    arena_remaining_ -= aligned_bytes;
+    return true;
+  }
+
+  const char* descriptor_;
+  uint64_t remaining_;
+  uint64_t arena_remaining_;
+};
+
+bool deserialize_dit_input_payload(const char* payload,
+                                   uint64_t payload_size,
+                                   DiTForwardInput& input) {
+  RawInputLayoutHeader layout;
+  if (!read_input_layout(
+          payload, payload_size, PackedInputDomain::DIT, layout)) {
+    return false;
+  }
+  DiTDescriptorValidator validator(payload + layout.header_bytes,
+                                   layout.descriptor_bytes,
+                                   layout.tensor_arena_bytes);
+  if (!validator.validate()) {
+    return false;
+  }
+  ReadContext context{payload + layout.header_bytes,
+                      payload + layout.tensor_arena_offset};
+  DiTForwardInput decoded;
+  // Source storage is independent of RPC protobuf and SHM segment lifetimes.
+  read_dit_forward_input(context, decoded, /*stabilize_host_tensors=*/true);
+  input = std::move(decoded);
+  return true;
 }
 
 inline void read_dit_forward_output(const char*& buffer,
@@ -2341,22 +2597,13 @@ inline void deserialize_forward_input_payload(
     ForwardInput& forward_input,
     const torch::Device& device,
     Stream* stream,
-    bool materialize_device_buffer = true,
-    bool stabilize_dit_host_tensors = false) {
+    bool materialize_device_buffer = true) {
   const char* payload_base = buffer;
   RawInputLayoutHeader layout;
-  read_data(buffer, layout.descriptor_bytes);
-  read_data(buffer, layout.tensor_arena_offset);
-  read_data(buffer, layout.tensor_arena_bytes);
-  CHECK_GE(buffer_size, sizeof(RawInputLayoutHeader))
-      << "raw input layout header overflow";
-  CHECK_GE(layout.tensor_arena_offset,
-           sizeof(RawInputLayoutHeader) + layout.descriptor_bytes)
-      << "raw input tensor arena overlaps descriptor";
-  CHECK_LE(layout.tensor_arena_offset + layout.tensor_arena_bytes, buffer_size)
-      << "raw input layout overflow";
-  CHECK_EQ(layout.tensor_arena_offset % kRawInputTensorArenaAlignment, 0)
-      << "raw input tensor arena offset is not aligned";
+  CHECK(read_input_layout(
+      payload_base, buffer_size, PackedInputDomain::TOKEN, layout))
+      << "Invalid token input domain, schema, or layout";
+  buffer = payload_base + layout.header_bytes;
 
   DeviceBufferSession device_session;
   const char* descriptor_base = buffer;
@@ -2370,6 +2617,7 @@ inline void deserialize_forward_input_payload(
                                    layout.tensor_arena_offset,
                                    stream,
                                    materialize_device_buffer);
+  const char* tensor_arena_read_base = context.tensor_cursor;
 
   read_tensor_and_host(
       context, forward_input.token_ids, forward_input.token_ids_host, stream);
@@ -2541,15 +2789,14 @@ inline void deserialize_forward_input_payload(
     input_params.multi_block_tables.emplace_back(manager_table.clone());
   }
 
-  bool has_dit_forward_input = false;
-  read_data(context, has_dit_forward_input);
-  input_params.dit_forward_input.reset();
-  if (has_dit_forward_input) {
-    DiTForwardInput& dit_forward_input =
-        input_params.dit_forward_input.emplace();
-    read_dit_forward_input(
-        context, dit_forward_input, stabilize_dit_host_tensors);
-  }
+  bool has_legacy_dit_input = false;
+  read_data(context, has_legacy_dit_input);
+  CHECK(!has_legacy_dit_input) << "Legacy DiT requires native typed transport";
+  CHECK_EQ(context.descriptor_cursor, descriptor_base + layout.descriptor_bytes)
+      << "forward input descriptor was not consumed exactly";
+  CHECK_EQ(context.tensor_cursor,
+           tensor_arena_read_base + layout.tensor_arena_bytes)
+      << "forward input tensor arena was not consumed exactly";
 
   finalize_device_buffer_session(device_session, stream);
   forward_input.runtime.input_host_buffer_has_layout = true;
@@ -2564,7 +2811,7 @@ inline uint64_t get_input_layout_size(const RawInputLayoutHeader& layout) {
   return layout.tensor_arena_offset + layout.tensor_arena_bytes;
 }
 
-void packed_proto_to_forward_input_impl(
+bool packed_proto_to_forward_input_impl(
     const proto::PackedForwardInput& packed_forward_input,
     ForwardInput& forward_input,
     const torch::Device& device,
@@ -2572,8 +2819,10 @@ void packed_proto_to_forward_input_impl(
   (void)device;
   (void)stream;
   const std::string& payload = packed_forward_input.payload();
-  if (payload.empty()) {
-    return;
+  RawInputLayoutHeader layout;
+  if (!read_input_layout(
+          payload.data(), payload.size(), PackedInputDomain::TOKEN, layout)) {
+    return false;
   }
 
   forward_input.runtime.input_host_buffer =
@@ -2587,6 +2836,7 @@ void packed_proto_to_forward_input_impl(
               payload.size());
   forward_input.runtime.input_host_buffer_has_layout = true;
   forward_input.runtime.device_tensors_ready = false;
+  return true;
 }
 
 size_t calculate_raw_token_size(const RawToken& token) {
@@ -2967,11 +3217,22 @@ inline void serialize_forward_input_sections(
     write_tensor(context, manager_table);
   }
 
-  const bool has_dit_forward_input = input_params.dit_forward_input.has_value();
-  write_data(context.descriptor, has_dit_forward_input);
-  if (has_dit_forward_input) {
-    write_dit_forward_input(context, *input_params.dit_forward_input);
-  }
+  // Temporary legacy-token compatibility marker; removed after all token
+  // domains migrate to their independent descriptor contracts.
+  write_data(context.descriptor, /*has_legacy_dit_input=*/false);
+}
+
+inline void write_input_layout(char*& buffer,
+                               const RawInputLayoutHeader& layout,
+                               PackedInputDomain domain) {
+  write_data(buffer, kPackedInputMagic);
+  write_data(buffer, kPackedInputSchemaVersion);
+  write_data(buffer, static_cast<uint8_t>(domain));
+  write_data(buffer, static_cast<uint8_t>(0));
+  write_data(buffer, kPackedInputHeaderBytes);
+  write_data(buffer, layout.descriptor_bytes);
+  write_data(buffer, layout.tensor_arena_offset);
+  write_data(buffer, layout.tensor_arena_bytes);
 }
 
 inline RawInputLayoutHeader calculate_forward_input_layout(
@@ -2979,7 +3240,7 @@ inline RawInputLayoutHeader calculate_forward_input_layout(
   RawInputSerializeContext context;
   serialize_forward_input_sections(input, context);
   const uint64_t tensor_arena_offset =
-      align_up(sizeof(RawInputLayoutHeader) + context.descriptor.size,
+      align_up(kPackedInputHeaderBytes + context.descriptor.size,
                kRawInputTensorArenaAlignment);
   return RawInputLayoutHeader{
       context.descriptor.size, tensor_arena_offset, context.tensor_arena.size};
@@ -2989,9 +3250,7 @@ inline void serialize_forward_input(const ForwardInput& input,
                                     const RawInputLayoutHeader& layout,
                                     char*& buffer) {
   char* payload_base = buffer;
-  write_data(buffer, layout.descriptor_bytes);
-  write_data(buffer, layout.tensor_arena_offset);
-  write_data(buffer, layout.tensor_arena_bytes);
+  write_input_layout(buffer, layout, PackedInputDomain::TOKEN);
 
   RawInputSerializeContext context{
       {buffer, 0}, {payload_base + layout.tensor_arena_offset, 0}};
@@ -3004,12 +3263,39 @@ inline void serialize_forward_input(const ForwardInput& input,
 
   const uint64_t padding_bytes =
       layout.tensor_arena_offset -
-      (sizeof(RawInputLayoutHeader) + layout.descriptor_bytes);
+      (kPackedInputHeaderBytes + layout.descriptor_bytes);
   if (padding_bytes > 0) {
     std::memset(buffer + layout.descriptor_bytes,
                 0,
                 static_cast<size_t>(padding_bytes));
   }
+  buffer = payload_base + get_input_layout_size(layout);
+}
+
+RawInputLayoutHeader calculate_dit_input_layout(const DiTForwardInput& input) {
+  RawInputSerializeContext context;
+  write_dit_forward_input(context, input);
+  return RawInputLayoutHeader{
+      context.descriptor.size,
+      align_up(kPackedInputHeaderBytes + context.descriptor.size,
+               kRawInputTensorArenaAlignment),
+      context.tensor_arena.size};
+}
+
+void serialize_dit_input(const DiTForwardInput& input,
+                         const RawInputLayoutHeader& layout,
+                         char*& buffer) {
+  char* payload_base = buffer;
+  write_input_layout(buffer, layout, PackedInputDomain::DIT);
+  RawInputSerializeContext context{
+      {buffer, 0}, {payload_base + layout.tensor_arena_offset, 0}};
+  write_dit_forward_input(context, input);
+  CHECK_EQ(context.descriptor.size, layout.descriptor_bytes);
+  CHECK_EQ(context.tensor_arena.size, layout.tensor_arena_bytes);
+  const uint64_t padding_bytes = layout.tensor_arena_offset -
+                                 kPackedInputHeaderBytes -
+                                 layout.descriptor_bytes;
+  std::memset(buffer + layout.descriptor_bytes, 0, padding_bytes);
   buffer = payload_base + get_input_layout_size(layout);
 }
 
@@ -3163,6 +3449,14 @@ bool unpack_from_input_host_buffer(const ForwardInput& input,
     return false;
   }
 
+  RawInputLayoutHeader layout;
+  if (!read_input_layout(
+          static_cast<const char*>(input.runtime.input_host_buffer.data_ptr()),
+          input.runtime.input_host_buffer.numel(),
+          PackedInputDomain::TOKEN,
+          layout)) {
+    return false;
+  }
   output = input;
   output.runtime.device_tensors_ready = false;
   const char* payload_ptr =
@@ -3225,6 +3519,11 @@ bool forward_input_to_packed_proto(
     const ForwardInput& input,
     proto::PackedForwardInput* packed_forward_input) {
   CHECK(packed_forward_input != nullptr);
+  if (!std::holds_alternative<std::monostate>(input.input_params.rec_params) ||
+      input.step_decode.has_value()) {
+    LOG(ERROR) << "Rec input transport is not supported";
+    return false;
+  }
   const RawInputLayoutHeader layout = calculate_forward_input_layout(input);
   const uint64_t payload_size = get_input_layout_size(layout);
   std::string payload;
@@ -3239,13 +3538,32 @@ bool forward_input_to_packed_proto(
   return true;
 }
 
-void packed_proto_to_forward_input(
+bool packed_proto_to_forward_input(
     const proto::PackedForwardInput& packed_forward_input,
     ForwardInput& forward_input,
     const torch::Device& device,
     Stream* stream) {
-  packed_proto_to_forward_input_impl(
+  return packed_proto_to_forward_input_impl(
       packed_forward_input, forward_input, device, stream);
+}
+
+bool dit_forward_input_to_packed_proto(
+    const DiTForwardInput& input,
+    proto::PackedForwardInput* packed_forward_input) {
+  CHECK(packed_forward_input != nullptr);
+  const RawInputLayoutHeader layout = calculate_dit_input_layout(input);
+  std::string payload(get_input_layout_size(layout), '\0');
+  char* cursor = payload.data();
+  serialize_dit_input(input, layout, cursor);
+  packed_forward_input->mutable_payload()->swap(payload);
+  return true;
+}
+
+bool packed_proto_to_dit_forward_input(
+    const proto::PackedForwardInput& packed_forward_input,
+    DiTForwardInput& input) {
+  const std::string& payload = packed_forward_input.payload();
+  return deserialize_dit_input_payload(payload.data(), payload.size(), input);
 }
 
 ForwardSharedMemoryManager::ForwardSharedMemoryManager(const std::string& name,
@@ -3283,7 +3601,45 @@ std::string ForwardSharedMemoryManager::create_unique_name(
   return filename;
 }
 
+bool ForwardSharedMemoryManager::input_write(const DiTForwardInput& input) {
+  const RawInputLayoutHeader layout = calculate_dit_input_layout(input);
+  const uint64_t payload_size = get_input_layout_size(layout);
+  const uint64_t overhead = sizeof(ControlMetadata) + sizeof(uint64_t);
+  if (size() < overhead || payload_size > size() - overhead) {
+    LOG(ERROR) << "DiT input exceeds shared memory segment size";
+    return false;
+  }
+  char* cursor = static_cast<char*>(base_address()) + sizeof(ControlMetadata);
+  write_data(cursor, payload_size);
+  serialize_dit_input(input, layout, cursor);
+  std::atomic_thread_fence(std::memory_order_release);
+  control_ptr_->version = ++last_version_;
+  return true;
+}
+
+void ForwardSharedMemoryManager::input_read(DiTForwardInput& input) {
+  while (control_ptr_->version == last_version_) {
+    std::this_thread::sleep_for(std::chrono::nanoseconds(kNumWaitNanoseconds));
+  }
+  last_version_ = control_ptr_->version;
+  std::atomic_thread_fence(std::memory_order_acquire);
+  const char* cursor =
+      static_cast<const char*>(base_address()) + sizeof(ControlMetadata);
+  uint64_t payload_size = 0;
+  read_data(cursor, payload_size);
+  const uint64_t overhead = sizeof(ControlMetadata) + sizeof(uint64_t);
+  CHECK_GE(size(), overhead);
+  CHECK_LE(payload_size, size() - overhead);
+  CHECK(deserialize_dit_input_payload(cursor, payload_size, input))
+      << "Invalid native DiT input domain, schema, or layout";
+}
+
 bool ForwardSharedMemoryManager::input_write(const ForwardInput& input) {
+  if (!std::holds_alternative<std::monostate>(input.input_params.rec_params) ||
+      input.step_decode.has_value()) {
+    LOG(ERROR) << "Rec input transport is not supported";
+    return false;
+  }
   const RawInputLayoutHeader layout = calculate_forward_input_layout(input);
   const uint64_t payload_size = get_input_layout_size(layout);
   const uint64_t total_size =
@@ -3323,6 +3679,12 @@ void ForwardSharedMemoryManager::input_read(
       static_cast<char*>(base_address()) + sizeof(ControlMetadata);
   uint64_t total_size;
   read_data(data_ptr, total_size);
+  CHECK_LE(total_size, size() - sizeof(ControlMetadata) - sizeof(uint64_t))
+      << "Shared memory input payload exceeds the segment";
+  RawInputLayoutHeader layout;
+  CHECK(
+      read_input_layout(data_ptr, total_size, PackedInputDomain::TOKEN, layout))
+      << "Invalid token input domain, schema, or layout";
   bool materialize_device_buffer = false;
 #if defined(USE_NPU)
   materialize_device_buffer =
@@ -3353,8 +3715,7 @@ void ForwardSharedMemoryManager::input_read(
                                     input,
                                     device,
                                     stream_.get(),
-                                    materialize_device_buffer,
-                                    /*stabilize_dit_host_tensors=*/true);
+                                    materialize_device_buffer);
 
   return;
 }

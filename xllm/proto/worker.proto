@@ -342,10 +342,12 @@ message DiTGenerationParams {
 }
 
 message PackedForwardInput {
-  // Raw input payload encoded as:
-  // [RawInputLayoutHeader][descriptor bytes][tensor arena bytes].
-  // The descriptor records metadata/non-tensor fields; tensor arena stores all
-  // tensor payloads in one contiguous host buffer.
+  // Schema 2 raw payload: [magic:uint64][version:uint16][domain:uint8]
+  // [flags:uint8][header_bytes:uint32][descriptor_bytes:uint64]
+  // [tensor_arena_offset:uint64][tensor_arena_bytes:uint64][descriptor][arena].
+  // The arena is 16-byte aligned. Domain 1 is the temporary token contract;
+  // 2 (VLM) and 3 (Rec) are reserved; 4 is native DiT. New writers require
+  // matching worker versions. Readers retain legacy token-only layout support.
   bytes payload = 1;
 }
 

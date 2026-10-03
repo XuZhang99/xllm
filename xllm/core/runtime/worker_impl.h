@@ -159,6 +159,8 @@ class WorkerImpl {
   // Internal helper shared by worker pipelines before model execution.
   virtual void apply_kv_block_swaps(const ModelInputParams& input_params);
 
+  virtual std::optional<ForwardOutput> step(const DiTForwardInput& inputs);
+
   virtual std::optional<ForwardOutput> step(const ForwardInput& inputs) = 0;
 
   // Optional no-sync execution hook used by speculative LLM/VLM workers.
@@ -242,6 +244,9 @@ class WorkerImpl {
   // the future returns a successful status with no meaningful value
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const ForwardInput& inputs);
+
+  virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const DiTForwardInput& inputs);
 
   virtual folly::SemiFuture<folly::Unit> process_group_test_async();
 

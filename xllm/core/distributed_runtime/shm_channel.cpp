@@ -74,4 +74,20 @@ void ShmChannel::execute_model_async(
   }
   execute_model_with_brpc(input, promise);
 }
+void ShmChannel::execute_model_async(
+    const DiTForwardInput& input,
+    folly::Promise<std::optional<RawForwardOutput>>& promise) {
+  if (enable_shm_) {
+    if (input_shm_manager_ && !input_shm_manager_->input_write(input)) {
+      enable_shm_ = false;
+    } else {
+      RawForwardOutput output;
+      output_shm_manager_->raw_output_read(output);
+      promise.setValue(std::move(output));
+      return;
+    }
+  }
+  execute_model_with_brpc(input, promise);
+}
+
 }  // namespace xllm

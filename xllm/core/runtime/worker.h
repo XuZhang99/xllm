@@ -92,6 +92,8 @@ class Worker {
   ForwardInput prepare_inputs(Batch& batch);
   ForwardInput prepare_inputs(RecBatch& batch);
 
+  std::optional<ForwardOutput> step(const DiTForwardInput& inputs);
+
   std::optional<ForwardOutput> step(const ForwardInput& inputs);
 
   // initialize model, cache manager. async call
@@ -132,6 +134,9 @@ class Worker {
   // independent CPU results that are ready to read.
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const ForwardInput& inputs);
+
+  folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const DiTForwardInput& inputs);
 
   folly::SemiFuture<folly::Unit> process_group_test_async();
 

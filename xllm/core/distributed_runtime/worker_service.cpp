@@ -418,6 +418,23 @@ void WorkerService::set_worker(std::unique_ptr<Worker> worker) {
   initialized_ = true;
 }
 
+void WorkerService::step(const DiTForwardInput& input,
+                         std::vector<torch::Tensor>& tensors,
+                         std::vector<std::string>& text_output) {
+  auto result = std::move(worker_->step_async(input)).get();
+  if (!result.has_value()) {
+    return;
+  }
+  const DiTForwardOutput& output = result->dit_forward_output;
+  c10::StreamGuard stream_guard = stream_->set_stream_guard();
+  tensors.reserve(output.tensors.size());
+  for (const torch::Tensor& tensor : output.tensors) {
+    tensors.emplace_back(safe_to(tensor, torch::kCPU, /*non_blocking=*/true));
+  }
+  text_output = output.text_output;
+  stream_->synchronize();
+}
+
 void WorkerService::step(
     ForwardInput& fwd_input,
     torch::Tensor& next_tokens,
@@ -583,6 +600,7 @@ void WorkerService::create_polling_shm_thread(
         Timer timer;
         while (true) {
           ForwardInput fwd_input;
+          DiTForwardInput dit_input;
           // NPU graph task updates cannot safely overlap an H2D enqueue from
           // the SHM polling thread. Keep scheduler overlap, but defer device
           // materialization to WorkerImpl's ordered prepare stream.
@@ -592,8 +610,12 @@ void WorkerService::create_polling_shm_thread(
                        options_.enable_graph())
                   ? InputDeviceMaterializationPolicy::DEFER_TO_WORKER_PREPARE
                   : InputDeviceMaterializationPolicy::MATERIALIZE_ON_READ;
-          input_shm_manager->input_read(
-              fwd_input, device_, materialization_policy);
+          if (options_.backend() == "dit") {
+            input_shm_manager->input_read(dit_input);
+          } else {
+            input_shm_manager->input_read(
+                fwd_input, device_, materialization_policy);
+          }
           timer.reset();
           // model output variables
           torch::Tensor next_tokens;
@@ -614,22 +636,26 @@ void WorkerService::create_polling_shm_thread(
           torch::Tensor out_logprobs;
           std::vector<JsonObjectOutputError> json_object_errors;
 
-          step(fwd_input,
-               next_tokens,
-               logprobs,
-               top_tokens,
-               top_logprobs,
-               embeddings,
-               mm_embeddings,
-               speculative_token_stats,
-               dit_images,
-               dit_text_output,
-               expert_load_data,
-               prepared_token,
-               src_seq_idxes,
-               out_tokens,
-               out_logprobs,
-               json_object_errors);
+          if (options_.backend() == "dit") {
+            step(dit_input, dit_images, dit_text_output);
+          } else {
+            step(fwd_input,
+                 next_tokens,
+                 logprobs,
+                 top_tokens,
+                 top_logprobs,
+                 embeddings,
+                 mm_embeddings,
+                 speculative_token_stats,
+                 dit_images,
+                 dit_text_output,
+                 expert_load_data,
+                 prepared_token,
+                 src_seq_idxes,
+                 out_tokens,
+                 out_logprobs,
+                 json_object_errors);
+          }
 
           const bool shm_write_ok =
               output_shm_manager->raw_output_write(next_tokens,
@@ -997,12 +1023,25 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
 
         Timer timer;
         ForwardInput forward_input;
-        CHECK(pb_forward_input->has_packed_input())
-            << "ForwardInput must be sent via packed_input";
-        packed_proto_to_forward_input(pb_forward_input->packed_input(),
-                                      forward_input,
-                                      device_,
-                                      stream_.get());
+        DiTForwardInput dit_input;
+        if (!pb_forward_input->has_packed_input()) {
+          controller->SetFailed("ForwardInput requires a packed input payload");
+          return;
+        }
+        const proto::PackedForwardInput& packed_input =
+            pb_forward_input->packed_input();
+        // Dispatch follows the configured domain, including token-only VLM
+        // decode. A mismatched domain is rejected before tensor preparation.
+        const bool valid_input =
+            options_.backend() == "dit"
+                ? packed_proto_to_dit_forward_input(packed_input, dit_input)
+                : packed_proto_to_forward_input(
+                      packed_input, forward_input, device_, stream_.get());
+        if (!valid_input) {
+          controller->SetFailed(
+              "Invalid forward input domain, schema, or layout");
+          return;
+        }
 
         // model output
         torch::Tensor next_tokens;
@@ -1022,22 +1061,26 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
         torch::Tensor out_logprobs;
         std::vector<JsonObjectOutputError> json_object_errors;
 
-        step(forward_input,
-             next_tokens,
-             logprobs,
-             top_tokens,
-             top_logprobs,
-             embeddings,
-             mm_embeddings,
-             speculative_token_stats,
-             dit_images,
-             dit_text_output,
-             expert_load_data,
-             prepared_token,
-             src_seq_idxes,
-             out_tokens,
-             out_logprobs,
-             json_object_errors);
+        if (options_.backend() == "dit") {
+          step(dit_input, dit_images, dit_text_output);
+        } else {
+          step(forward_input,
+               next_tokens,
+               logprobs,
+               top_tokens,
+               top_logprobs,
+               embeddings,
+               mm_embeddings,
+               speculative_token_stats,
+               dit_images,
+               dit_text_output,
+               expert_load_data,
+               prepared_token,
+               src_seq_idxes,
+               out_tokens,
+               out_logprobs,
+               json_object_errors);
+        }
         // convert to proto output
         forward_output_to_proto(next_tokens,
                                 logprobs,
