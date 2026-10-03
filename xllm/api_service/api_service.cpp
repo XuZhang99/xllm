@@ -43,11 +43,6 @@ limitations under the License.
 #include "core/common/constants.h"
 #include "core/common/metrics.h"
 #include "core/common/types.h"
-#include "core/distributed_runtime/dit_master.h"
-#include "core/distributed_runtime/llm_master.h"
-#include "core/distributed_runtime/master_factory.h"
-#include "core/distributed_runtime/rec_master.h"
-#include "core/distributed_runtime/vlm_master.h"
 #include "core/framework/config/distributed_config.h"
 #include "core/framework/config/profile_config.h"
 #include "core/util/closure_guard.h"
@@ -116,29 +111,6 @@ void process_typed_brpc_request(std::unique_ptr<Service>& service_impl,
   service_impl->process_async(call);
 }
 
-bool link_p2p_master(Master* master,
-                     const std::vector<std::string>& remote_addrs) {
-  auto* llm_master = dynamic_cast<LLMMaster*>(master);
-  return llm_master != nullptr && llm_master->link_p2p(remote_addrs);
-}
-
-bool unlink_p2p_master(Master* master,
-                       const std::vector<std::string>& remote_addrs) {
-  auto* llm_master = dynamic_cast<LLMMaster*>(master);
-  return llm_master != nullptr && llm_master->unlink_p2p(remote_addrs);
-}
-
-template <typename Function>
-bool profile_master(Master* master, Function&& function) {
-  if (auto* llm_master = dynamic_cast<LLMMaster*>(master)) {
-    return function(*llm_master);
-  }
-  if (auto* vlm_master = dynamic_cast<VLMMaster*>(master)) {
-    return function(*vlm_master);
-  }
-  return false;
-}
-
 }  // namespace
 
 APIService::APIService(Master* master,
@@ -165,20 +137,6 @@ APIService::APIService(Master* master,
   ServiceImplFactory::create(
       this, master, model_names, model_repository_names, model_versions);
   register_chat_completions_handler();
-}
-
-bool APIService::has_model_master(const std::string& model_id) const {
-  return master_manager_->has_master(model_id);
-}
-
-bool APIService::add_model_master_if_absent(const std::string& model_id,
-                                            std::unique_ptr<Master> master) {
-  return master_manager_->register_master(model_id, std::move(master));
-}
-
-MasterManager::MasterHandle APIService::get_model_master(
-    const std::string& model_id) const {
-  return master_manager_->find_master(model_id);
 }
 
 void APIService::Completions(::google::protobuf::RpcController* controller,
@@ -1249,53 +1207,12 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
 
 bool APIService::do_fork_master(const proto::MasterInfos& request,
                                 std::string* error_message) {
-  std::lock_guard<std::mutex> lock(fork_master_mutex_);
-  const auto primary_master = master_manager_->default_master();
-  auto* llm_master = dynamic_cast<LLMMaster*>(primary_master.get());
-  if (llm_master == nullptr) {
-    *error_message = "fork master only supports LLM master";
-    return false;
-  }
-
   Options master_options;
   if (!ParseForkMasterRequest(&request, master_options)) {
     *error_message = "Failed to parse fork master request";
     return false;
   }
-
-  if (has_model_master(master_options.model_id())) {
-    *error_message =
-        "Master for model " + master_options.model_id() + " already exists";
-    LOG(INFO) << *error_message;
-    return true;
-  }
-
-  auto master = fork_llm_master(llm_master, master_options);
-  if (!master) {
-    *error_message = "Failed to fork master: " + master_options.model_id();
-    return false;
-  }
-
-  // CAS: only succeed if num_concurrent_requests == 0.
-  if (master->is_sleeping() &&
-      !master->get_rate_limiter()->try_set_sleeping()) {
-    // Notice: this branch is only entered in exceptional cases.
-    int32_t num_requests =
-        master->get_rate_limiter()->get_num_concurrent_requests();
-    LOG(FATAL) << "Cannot sleep model " << request.model_id() << " with "
-               << num_requests << " in-flight requests";
-    *error_message = "Cannot sleep model with in-flight requests";
-    return false;
-  }
-
-  if (!add_model_master_if_absent(master_options.model_id(),
-                                  std::move(master))) {
-    *error_message =
-        "Master for model " + master_options.model_id() + " already exists";
-    LOG(INFO) << *error_message;
-    return true;
-  }
-  return true;
+  return master_manager_->fork_master(master_options, error_message);
 }
 
 void APIService::ForkMaster(::google::protobuf::RpcController* controller,
@@ -1509,18 +1426,11 @@ void APIService::StartProfileHttp(::google::protobuf::RpcController* controller,
         "--enable_online_profile=true.");
     return;
   }
-  const auto master = master_manager_->default_master();
-  if (master == nullptr) {
-    LOG(ERROR) << "No master available to start profiling.";
-    ctrl->SetFailed("No master available to start profiling.");
-    return;
-  }
-
   LOG(INFO) << "Starting profiler.";
-  if (!profile_master(master.get(),
-                      [](auto& master) { return master.start_profile(); })) {
-    LOG(ERROR) << "Failed to start profiler.";
-    ctrl->SetFailed("Failed to start profiler.");
+  std::string error_message;
+  if (!master_manager_->start_profile(&error_message)) {
+    LOG(ERROR) << error_message;
+    ctrl->SetFailed(error_message);
     return;
   }
   LOG(INFO) << "Profiler started.";
@@ -1547,18 +1457,11 @@ void APIService::StopProfileHttp(::google::protobuf::RpcController* controller,
         "--enable_online_profile=true.");
     return;
   }
-  const auto master = master_manager_->default_master();
-  if (master == nullptr) {
-    LOG(ERROR) << "No master available to stop profiling.";
-    ctrl->SetFailed("No master available to stop profiling.");
-    return;
-  }
-
   LOG(INFO) << "Stopping profiler.";
-  if (!profile_master(master.get(),
-                      [](auto& master) { return master.stop_profile(); })) {
-    LOG(ERROR) << "Failed to stop profiler.";
-    ctrl->SetFailed("Failed to stop profiler.");
+  std::string error_message;
+  if (!master_manager_->stop_profile(&error_message)) {
+    LOG(ERROR) << error_message;
+    ctrl->SetFailed(error_message);
     return;
   }
   LOG(INFO) << "Profiler stopped.";
@@ -1575,16 +1478,15 @@ void APIService::LinkP2P(::google::protobuf::RpcController* controller,
     return;
   }
 
-  auto master = get_model_master(request->model_id());
-  if (master == nullptr) {
-    LOG(ERROR) << "Master for model " << request->model_id() << " not found";
-    response->set_ok(false);
-    return;
+  std::string error_message;
+  const bool ok = master_manager_->link_p2p(
+      request->model_id(),
+      {request->remote_addrs().begin(), request->remote_addrs().end()},
+      &error_message);
+  if (!ok) {
+    LOG(ERROR) << error_message;
   }
-  bool status = link_p2p_master(
-      master.get(),
-      {request->remote_addrs().begin(), request->remote_addrs().end()});
-  response->set_ok(status);
+  response->set_ok(ok);
 }
 
 void APIService::LinkP2PHttp(::google::protobuf::RpcController* controller,
@@ -1615,16 +1517,15 @@ void APIService::LinkP2PHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  auto master = get_model_master(req_pb->model_id());
-  if (master == nullptr) {
-    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
-    ctrl->SetFailed("Master for model not found");
-    return;
+  std::string error_message;
+  const bool ok = master_manager_->link_p2p(
+      req_pb->model_id(),
+      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()},
+      &error_message);
+  if (!ok) {
+    LOG(ERROR) << error_message;
   }
-  bool status = link_p2p_master(
-      master.get(),
-      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
-  resp_pb->set_ok(status);
+  resp_pb->set_ok(ok);
 
   json2pb::Pb2JsonOptions json_options;
   json_options.bytes_to_base64 = false;
@@ -1647,16 +1548,15 @@ void APIService::UnlinkP2P(::google::protobuf::RpcController* controller,
     return;
   }
 
-  auto master = get_model_master(request->model_id());
-  if (master == nullptr) {
-    LOG(ERROR) << "Master for model " << request->model_id() << " not found";
-    response->set_ok(false);
-    return;
+  std::string error_message;
+  const bool ok = master_manager_->unlink_p2p(
+      request->model_id(),
+      {request->remote_addrs().begin(), request->remote_addrs().end()},
+      &error_message);
+  if (!ok) {
+    LOG(ERROR) << error_message;
   }
-  bool status = unlink_p2p_master(
-      master.get(),
-      {request->remote_addrs().begin(), request->remote_addrs().end()});
-  response->set_ok(status);
+  response->set_ok(ok);
 }
 
 void APIService::UnlinkP2PHttp(::google::protobuf::RpcController* controller,
@@ -1687,16 +1587,15 @@ void APIService::UnlinkP2PHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  auto master = get_model_master(req_pb->model_id());
-  if (master == nullptr) {
-    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
-    ctrl->SetFailed("Master for model not found");
-    return;
+  std::string error_message;
+  const bool ok = master_manager_->unlink_p2p(
+      req_pb->model_id(),
+      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()},
+      &error_message);
+  if (!ok) {
+    LOG(ERROR) << error_message;
   }
-  bool status = unlink_p2p_master(
-      master.get(),
-      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
-  resp_pb->set_ok(status);
+  resp_pb->set_ok(ok);
 
   json2pb::Pb2JsonOptions json_options;
   json_options.bytes_to_base64 = false;

@@ -22,6 +22,8 @@ limitations under the License.
 
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/master.h"
+#include "core/distributed_runtime/master_factory.h"
+#include "core/distributed_runtime/vlm_master.h"
 
 namespace xllm {
 
@@ -127,6 +129,77 @@ bool MasterManager::set_default_model(const std::string& model_id) {
   return true;
 }
 
+bool MasterManager::fork_master(const Options& options,
+                                std::string* error_message) {
+  if (options.model_id().empty()) {
+    if (error_message != nullptr) {
+      *error_message = "Forked master model id is empty";
+    }
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+  const MasterHandle primary_master = default_master();
+  auto* llm_master = dynamic_cast<LLMMaster*>(primary_master.get());
+  if (llm_master == nullptr) {
+    if (error_message != nullptr) {
+      *error_message = "fork master only supports LLM master";
+    }
+    return false;
+  }
+
+  {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    if (shutdown_started_) {
+      if (error_message != nullptr) {
+        *error_message = "Master manager has been shut down";
+      }
+      return false;
+    }
+    if (masters_.contains(options.model_id())) {
+      LOG(INFO) << "Master for model " << options.model_id()
+                << " already exists";
+      return true;
+    }
+  }
+
+  auto master = fork_llm_master(llm_master, options);
+  if (master == nullptr) {
+    if (error_message != nullptr) {
+      *error_message = "Failed to fork master: " + options.model_id();
+    }
+    return false;
+  }
+
+  // A forked master may start in a sleeping state. Reserve the sleeping
+  // sentinel before publishing it so requests cannot race initialization.
+  if (master->is_sleeping() &&
+      !master->get_rate_limiter()->try_set_sleeping()) {
+    const int32_t num_requests =
+        master->get_rate_limiter()->get_num_concurrent_requests();
+    LOG(ERROR) << "Cannot sleep model " << options.model_id() << " with "
+               << num_requests << " in-flight requests";
+    if (error_message != nullptr) {
+      *error_message = "Cannot sleep model with in-flight requests";
+    }
+    return false;
+  }
+
+  MasterHandle handle(std::move(master));
+  std::unique_lock<std::shared_mutex> lock(mutex_);
+  if (shutdown_started_) {
+    if (error_message != nullptr) {
+      *error_message = "Master manager has been shut down";
+    }
+    return false;
+  }
+  if (!masters_.emplace(options.model_id(), std::move(handle)).second) {
+    LOG(INFO) << "Master for model " << options.model_id()
+              << " already exists";
+  }
+  return true;
+}
+
 bool MasterManager::sleep(const std::string& model_id,
                           MasterStatus master_status,
                           std::string* error_message) {
@@ -182,13 +255,9 @@ bool MasterManager::sleep(const std::string& model_id,
     return true;
   }
 
-  // Keep the sleep marker after a failed engine transition. The allocator can
-  // have released only part of the resources, so admitting requests here
-  // could send them to an incompletely sleeping engine. A later wakeup can
-  // retry the transition using the requested sleep mode.
+  llm_master->set_master_status(previous_status);
   LOG(ERROR) << "Failed to sleep model " << model_id << " from status "
-             << previous_status.to_proto()
-             << "; keeping the model unavailable for requests";
+             << previous_status.to_proto();
   if (error_message != nullptr) {
     *error_message = "Failed to sleep model";
   }
@@ -258,6 +327,108 @@ bool MasterManager::wakeup(const std::string& model_id,
 
   llm_master->set_master_status(MasterStatus::WAKEUP);
   return true;
+}
+
+bool MasterManager::link_p2p(
+    const std::string& model_id,
+    const std::vector<std::string>& remote_addrs,
+    std::string* error_message) {
+  std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+  const MasterHandle master = find_master(model_id);
+  if (master == nullptr) {
+    if (error_message != nullptr) {
+      *error_message = "Master for model not found";
+    }
+    return false;
+  }
+
+  auto* llm_master = dynamic_cast<LLMMaster*>(master.get());
+  if (llm_master == nullptr) {
+    if (error_message != nullptr) {
+      *error_message = "P2P linking is only supported for LLM masters";
+    }
+    return false;
+  }
+  if (!llm_master->link_p2p(remote_addrs)) {
+    if (error_message != nullptr) {
+      *error_message = "Failed to link P2P peers";
+    }
+    return false;
+  }
+  return true;
+}
+
+bool MasterManager::unlink_p2p(
+    const std::string& model_id,
+    const std::vector<std::string>& remote_addrs,
+    std::string* error_message) {
+  std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+  const MasterHandle master = find_master(model_id);
+  if (master == nullptr) {
+    if (error_message != nullptr) {
+      *error_message = "Master for model not found";
+    }
+    return false;
+  }
+
+  auto* llm_master = dynamic_cast<LLMMaster*>(master.get());
+  if (llm_master == nullptr) {
+    if (error_message != nullptr) {
+      *error_message = "P2P unlinking is only supported for LLM masters";
+    }
+    return false;
+  }
+  if (!llm_master->unlink_p2p(remote_addrs)) {
+    if (error_message != nullptr) {
+      *error_message = "Failed to unlink P2P peers";
+    }
+    return false;
+  }
+  return true;
+}
+
+bool MasterManager::start_profile(std::string* error_message) {
+  std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+  const MasterHandle master = default_master();
+  if (master == nullptr) {
+    if (error_message != nullptr) {
+      *error_message = "No master available to start profiling";
+    }
+    return false;
+  }
+
+  bool started = false;
+  if (auto* llm_master = dynamic_cast<LLMMaster*>(master.get())) {
+    started = llm_master->start_profile();
+  } else if (auto* vlm_master = dynamic_cast<VLMMaster*>(master.get())) {
+    started = vlm_master->start_profile();
+  }
+  if (!started && error_message != nullptr) {
+    *error_message = "Failed to start profiler";
+  }
+  return started;
+}
+
+bool MasterManager::stop_profile(std::string* error_message) {
+  std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+  const MasterHandle master = default_master();
+  if (master == nullptr) {
+    if (error_message != nullptr) {
+      *error_message = "No master available to stop profiling";
+    }
+    return false;
+  }
+
+  bool stopped = false;
+  if (auto* llm_master = dynamic_cast<LLMMaster*>(master.get())) {
+    stopped = llm_master->stop_profile();
+  } else if (auto* vlm_master = dynamic_cast<VLMMaster*>(master.get())) {
+    stopped = vlm_master->stop_profile();
+  }
+  if (!stopped && error_message != nullptr) {
+    *error_message = "Failed to stop profiler";
+  }
+  return stopped;
 }
 
 void MasterManager::shutdown() {

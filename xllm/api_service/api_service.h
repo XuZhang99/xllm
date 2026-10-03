@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -237,11 +236,6 @@ class APIService : public proto::XllmAPIService {
 
   bool ParseForkMasterRequest(const proto::MasterInfos* request,
                               Options& options);
-  bool has_model_master(const std::string& model_id) const;
-  bool add_model_master_if_absent(const std::string& model_id,
-                                  std::unique_ptr<Master> master);
-  MasterManager::MasterHandle get_model_master(
-      const std::string& model_id) const;
 
   // Core action helpers shared between brpc-typed and Http variants.
   // Each returns true on success. On failure, the human readable reason is
@@ -256,7 +250,6 @@ class APIService : public proto::XllmAPIService {
   std::string default_model_;
   std::string system_fingerprint_;
   ChatHttpHandler chat_completions_handler_;
-  std::mutex fork_master_mutex_;
   std::unique_ptr<AnthropicServiceImpl> anthropic_service_impl_;
   std::unique_ptr<CompletionServiceImpl> completion_service_impl_;
   std::unique_ptr<SampleServiceImpl> sample_service_impl_;

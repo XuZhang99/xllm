@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/macros.h"
+#include "core/common/options.h"
 #include "core/common/types.h"
 
 namespace xllm {
@@ -54,6 +55,11 @@ class MasterManager final {
 
   bool set_default_model(const std::string& model_id);
 
+  // Forks and registers an LLM master from the current default master.
+  // The duplicate check, creation, initial rate limiter state, and registry
+  // insertion are performed as one lifecycle operation.
+  bool fork_master(const Options& options, std::string* error_message);
+
   // Transitions an LLM master to a sleep state after confirming that it has
   // no in-flight requests.
   bool sleep(const std::string& model_id,
@@ -65,6 +71,18 @@ class MasterManager final {
   bool wakeup(const std::string& model_id,
               const WakeupOptions& options,
               std::string* error_message);
+
+  // Links or unlinks P2P weight-transfer peers for an LLM master.
+  bool link_p2p(const std::string& model_id,
+                const std::vector<std::string>& remote_addrs,
+                std::string* error_message);
+  bool unlink_p2p(const std::string& model_id,
+                  const std::vector<std::string>& remote_addrs,
+                  std::string* error_message);
+
+  // Starts or stops profiling on the current default master.
+  bool start_profile(std::string* error_message);
+  bool stop_profile(std::string* error_message);
 
   // Releases all registered masters. Manager-owned masters are destroyed after
   // the registry is detached, allowing their destructors to stop worker
