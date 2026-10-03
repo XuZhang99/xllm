@@ -20,10 +20,11 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_utils.h"
 
-DEFINE_bool(enable_cpu_binding,
-            false,
-            "Bind each NPU serving process and its ACL/release threads to "
-            "dedicated CPUs within the startup cpuset (Ascend A2/A3 on ARM).");
+DEFINE_bool(
+    enable_cpu_binding,
+    false,
+    "Partition CPUs for each standalone device worker process within its "
+    "startup cpuset. Disabling preserves the backend default NUMA policy.");
 
 DEFINE_bool(enable_npu_irq_binding,
             false,

@@ -64,7 +64,6 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache_estimation.h"
 #include "core/platform/platform.h"
 #if defined(USE_NPU)
-#include "core/platform/npu/npu_cpu_binding.h"
 #include "core/platform/npu/npu_profiler.h"
 #include "core/platform/npu/npu_torch_profiler.h"
 #include "platform/npu/device_capture_lock.h"
@@ -2240,9 +2239,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 
   status_ = Status::LOADED;
-#if defined(USE_NPU)
-  npu::NpuCpuBinding::get_instance().refresh_threads();
-#endif
+  Platform::refresh_cpu_binding();
   if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     // todo: support xtensor
     int32_t num_layers = args.n_layers() - args.first_k_dense_replace();

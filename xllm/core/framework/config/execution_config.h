@@ -64,7 +64,7 @@ class ExecutionConfig final {
     return kOptionCategory;
   }
 
-  // NPU process/thread placement; IRQ tuning additionally changes host state.
+  // Dedicated process CPU pools; IRQ tuning additionally changes host state.
   PROPERTY(bool, enable_cpu_binding) = false;
   PROPERTY(bool, enable_npu_irq_binding) = false;
 
