@@ -4,6 +4,7 @@ cc_library(
   NAME 
     platform_npu
   HDRS
+    npu_cpu_binding.h
     npu_layer_synchronizer.h
     npu_batch_memcpy.h
     device_capture_lock.h
@@ -11,6 +12,8 @@ cc_library(
     npu_profiler.h
     npu_torch_profiler.h
   SRCS
+    npu_cpu_binding.cpp
+    npu_cpu_binding_plan.cpp
     npu_layer_synchronizer.cpp
     npu_batch_memcpy.cpp
     npu_profiler.cpp

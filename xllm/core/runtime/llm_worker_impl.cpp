@@ -15,6 +15,10 @@ limitations under the License.
 
 #include "llm_worker_impl.h"
 
+#if defined(USE_NPU)
+#include "core/platform/npu/npu_cpu_binding.h"
+#endif
+
 #include <c10/core/StreamGuard.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
@@ -286,6 +290,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   // call model executor forward to get hidden states
   auto model_output = model_executor_->forward(
       input.token_ids, input.positions, kv_caches_, input.input_params);
+#if defined(USE_NPU)
+  npu::NpuCpuBinding::get_instance().refresh_after_first_forward();
+#endif
   if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_executor_->finish_eplb_step();
   }

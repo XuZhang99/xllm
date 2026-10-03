@@ -15,8 +15,21 @@ limitations under the License.
 
 #include "core/framework/config/execution_config.h"
 
+#include <glog/logging.h>
+
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_utils.h"
+
+DEFINE_bool(enable_cpu_binding,
+            false,
+            "Bind each NPU serving process and its ACL/release threads to "
+            "dedicated CPUs within the startup cpuset (Ascend A2/A3 on ARM).");
+
+DEFINE_bool(enable_npu_irq_binding,
+            false,
+            "Also reserve and bind SQ/CQ IRQ CPUs for this NPU. Requires "
+            "enable_cpu_binding and writable IRQ affinity files; does not "
+            "stop irqbalance.");
 
 DEFINE_bool(enable_task_pipeline,
             false,
@@ -123,6 +136,8 @@ DEFINE_bool(
 namespace xllm {
 
 void ExecutionConfig::from_flags() {
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_cpu_binding);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_npu_irq_binding);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_task_pipeline);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_graph);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(disable_graph_warmup);
@@ -144,6 +159,8 @@ void ExecutionConfig::from_flags() {
 }
 
 void ExecutionConfig::from_json(const JsonReader& json) {
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_cpu_binding);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_npu_irq_binding);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_task_pipeline);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_graph);
   XLLM_CONFIG_ASSIGN_FROM_JSON(disable_graph_warmup);
@@ -167,6 +184,10 @@ void ExecutionConfig::from_json(const JsonReader& json) {
 void ExecutionConfig::append_config_json(
     nlohmann::ordered_json& config_json) const {
   const ExecutionConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_cpu_binding);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_npu_irq_binding);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_task_pipeline);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
@@ -215,6 +236,8 @@ void ExecutionConfig::initialize() {
   if (const auto& json_config = config::get_parsed_json_config()) {
     from_json(*json_config);
   }
+  CHECK(!enable_npu_irq_binding() || enable_cpu_binding())
+      << "enable_npu_irq_binding requires enable_cpu_binding";
 }
 
 }  // namespace xllm
