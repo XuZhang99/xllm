@@ -1356,50 +1356,8 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
 bool APIService::do_sleep(const proto::MasterInfos& request,
                           std::string* error_message) {
   const auto req_master_status = MasterStatus(request.master_status());
-  if (req_master_status != MasterStatus::LIGHT_SLEEP &&
-      req_master_status != MasterStatus::DEEP_SLEEP) {
-    LOG(ERROR) << "Invalid sleep status: " << request.master_status();
-    *error_message = "Invalid sleep status";
-    return false;
-  }
-
-  auto master = get_model_master(request.model_id());
-  if (master == nullptr) {
-    LOG(ERROR) << "Master for model " << request.model_id() << " not found";
-    *error_message = "Master for model not found";
-    return false;
-  }
-  auto* llm_master = dynamic_cast<LLMMaster*>(master.get());
-  if (llm_master == nullptr) {
-    *error_message = "Sleep is only supported for LLM masters";
-    return false;
-  }
-  if (llm_master->is_sleeping()) {
-    LOG(INFO) << "Master for model " << request.model_id()
-              << " is already sleeping";
-    *error_message = "Master for model is already sleeping";
-    return false;
-  }
-
-  // CAS: only succeed if num_concurrent_requests == 0.
-  if (!master->get_rate_limiter()->try_set_sleeping()) {
-    int32_t num_requests =
-        master->get_rate_limiter()->get_num_concurrent_requests();
-    LOG(ERROR) << "Cannot sleep model " << request.model_id() << " with "
-               << num_requests << " in-flight requests";
-    *error_message = "Cannot sleep model with in-flight requests";
-    return false;
-  }
-
-  const MasterStatus master_status = llm_master->get_master_status();
-  llm_master->set_master_status(req_master_status);
-  if (!llm_master->sleep()) {
-    llm_master->set_master_status(master_status);
-    LOG(ERROR) << "Failed to sleep model " << request.model_id();
-    *error_message = "Failed to sleep model";
-    return false;
-  }
-  return true;
+  return master_manager_->sleep(request.model_id(), req_master_status,
+                                error_message);
 }
 
 void APIService::Sleep(::google::protobuf::RpcController* controller,
@@ -1457,27 +1415,10 @@ void APIService::SleepHttp(::google::protobuf::RpcController* controller,
 
 bool APIService::do_wakeup(const proto::MasterInfos& request,
                            std::string* error_message) {
-  auto master = get_model_master(request.model_id());
-  if (master == nullptr) {
-    LOG(ERROR) << "Master for model " << request.model_id() << " not found";
-    *error_message = "Master for model not found";
-    return false;
-  }
-  auto* llm_master = dynamic_cast<LLMMaster*>(master.get());
-  if (llm_master == nullptr) {
-    *error_message = "Wakeup is only supported for LLM masters";
-    return false;
-  }
-  if (!llm_master->is_sleeping()) {
-    LOG(INFO) << "Master for model " << request.model_id()
-              << " is already awake";
-    *error_message = "Master for model is already awake";
-    return false;
-  }
-
-  // Check if remote weight transfer is requested
+  // Parse remote weight transfer parameters before handing over lifecycle
+  // control to the manager.
+  WakeupOptions wakeup_options;
   if (request.remote_addrs_size() > 0) {
-    WakeupOptions wakeup_options;
     wakeup_options.remote_addrs.assign(request.remote_addrs().begin(),
                                        request.remote_addrs().end());
     if (request.src_weight_segments_size() > 0) {
@@ -1490,30 +1431,9 @@ bool APIService::do_wakeup(const proto::MasterInfos& request,
         wakeup_options.src_weight_segments.push_back(std::move(segments));
       }
     }
-    if (!llm_master->wakeup(wakeup_options)) {
-      LOG(ERROR) << "Failed to wakeup model " << request.model_id()
-                 << " with remote weight transfer";
-      *error_message = "Failed to wakeup model with remote weight transfer";
-      return false;
-    }
-  } else {
-    if (!llm_master->wakeup()) {
-      LOG(ERROR) << "Failed to wakeup model " << request.model_id();
-      *error_message = "Failed to wakeup model";
-      return false;
-    }
   }
-
-  // Restore rate limiter from sleeping state
-  if (!master->get_rate_limiter()->try_wakeup()) {
-    LOG(ERROR) << "Failed to restore rate limiter for model "
-               << request.model_id();
-    *error_message = "Failed to restore rate limiter";
-    return false;
-  }
-
-  llm_master->set_master_status(MasterStatus::WAKEUP);
-  return true;
+  return master_manager_->wakeup(request.model_id(), wakeup_options,
+                                 error_message);
 }
 
 void APIService::Wakeup(::google::protobuf::RpcController* controller,

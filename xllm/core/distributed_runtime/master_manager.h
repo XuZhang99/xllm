@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/macros.h"
+#include "core/common/types.h"
 
 namespace xllm {
 
@@ -52,6 +53,18 @@ class MasterManager final {
   std::vector<std::string> model_ids() const;
 
   bool set_default_model(const std::string& model_id);
+
+  // Transitions an LLM master to a sleep state after confirming that it has
+  // no in-flight requests.
+  bool sleep(const std::string& model_id,
+             MasterStatus master_status,
+             std::string* error_message);
+
+  // Wakes an LLM master and restores request admission after the engine is
+  // ready to serve requests again.
+  bool wakeup(const std::string& model_id,
+              const WakeupOptions& options,
+              std::string* error_message);
 
   // Releases all registered masters. Manager-owned masters are destroyed after
   // the registry is detached, allowing their destructors to stop worker
