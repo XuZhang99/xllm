@@ -19,6 +19,7 @@ cc_library(
     npu_profiler.cpp
     npu_torch_profiler.cpp
   DEPS
+    :numa_utils
     torch_npu
     glog::glog
     torch

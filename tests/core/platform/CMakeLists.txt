@@ -1,5 +1,18 @@
 include(cc_test)
 
+if(USE_NPU OR USE_CUDA OR USE_MUSA OR USE_MLU OR USE_DCU)
+  cc_test(
+    NAME
+      numa_utils_test
+    NO_NPU_RUNTIME
+    SRCS
+      numa_utils_test.cpp
+    DEPS
+      :numa_utils
+      GTest::gtest_main
+  )
+endif()
+
 if(USE_NPU)
   cc_test(
     NAME
@@ -10,6 +23,7 @@ if(USE_NPU)
       ${PROJECT_SOURCE_DIR}/xllm/core/platform/npu/npu_cpu_binding_plan.cpp
       ${PROJECT_SOURCE_DIR}/xllm/core/platform/npu/npu_cpu_binding.cpp
     DEPS
+      :numa_utils
       GTest::gtest_main
       glog::glog
   )

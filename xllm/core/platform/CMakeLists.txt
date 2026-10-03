@@ -1,5 +1,26 @@
 include(cc_library)
 
+# Share host placement across accelerator backends without pulling the serving
+# runtime into CPU affinity tests.
+if(USE_NPU OR USE_CUDA OR USE_MUSA OR USE_MLU OR USE_DCU)
+  cc_library(
+    NAME
+      numa_utils
+    HDRS
+      numa_utils.h
+    SRCS
+      numa_utils.cpp
+    DEPS
+      glog::glog
+      numa
+      $<$<BOOL:${USE_CUDA}>:CUDA::cudart>
+      $<$<BOOL:${USE_MUSA}>:musa>
+      $<$<BOOL:${USE_MUSA}>:musart>
+      $<$<BOOL:${USE_MLU}>:cnrt>
+      $<$<BOOL:${USE_DCU}>:hip::host>
+  )
+endif()
+
 if(USE_NPU)
   add_subdirectory(npu)
 endif()
@@ -28,7 +49,6 @@ cc_library(
     $<$<BOOL:${USE_MUSA}>:musa/musa_utils.h>
     $<$<BOOL:${USE_CUDA}>:cuda_profiler.h>
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_DCU}>,$<BOOL:${USE_MUSA}>>:torch_profiler.h>
-    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MUSA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:numa_utils.h>
   SRCS
     stream.cpp
     model_stream_registry.cpp
@@ -46,13 +66,13 @@ cc_library(
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_DCU}>,$<BOOL:${USE_MUSA}>>:torch_profiler.cpp>
     $<$<BOOL:${USE_DCU}>:dcu/dcu_layer_synchronizer.cpp>
     $<$<BOOL:${USE_DCU}>:dcu/dcu_tensor_alloc.cpp>
-    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MUSA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:numa_utils.cpp>
   DEPS
     :config
     absl::strings
     torch
     glog::glog
     :util
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MUSA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:numa_utils>
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:ascendcl>
     $<$<BOOL:${USE_MLU}>:torch_mlu>
