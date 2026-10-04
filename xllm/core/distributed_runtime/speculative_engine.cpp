@@ -50,13 +50,14 @@ SpeculativeEngineBase<TargetEngine>::SpeculativeEngineBase(
   runtime::Options dist_options = options;
   dist_options.num_decoding_tokens(options.num_speculative_tokens() + 1);
   dist_options.enable_speculative_decode(true);
-  dist_manager_ = std::make_shared<DistManager>(dist_options);
+  distributed_worker_manager_ =
+      std::make_shared<DistributedWorkerManager>(dist_options);
 
   runtime::Options target_engine_options = options_;
   target_engine_options.num_decoding_tokens(options.num_speculative_tokens() +
                                             1);
-  engine_ =
-      std::make_unique<TargetEngine>(target_engine_options, dist_manager_);
+  engine_ = std::make_unique<TargetEngine>(target_engine_options,
+                                           distributed_worker_manager_);
 
   if (use_draft_engine_) {
     // draft engine
@@ -71,8 +72,8 @@ SpeculativeEngineBase<TargetEngine>::SpeculativeEngineBase(
         .enable_speculative_decode(/*enable_speculative_decode=*/false)
         .enable_graph(/*enable_graph=*/false)
         .is_draft_engine(true);
-    draft_engine_ =
-        std::make_unique<LLMEngine>(draft_engine_options, dist_manager_);
+    draft_engine_ = std::make_unique<LLMEngine>(draft_engine_options,
+                                                distributed_worker_manager_);
   }
 }
 

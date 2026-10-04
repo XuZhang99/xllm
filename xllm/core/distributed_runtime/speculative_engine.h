@@ -119,7 +119,8 @@ class SpeculativeEngineBase : public Engine {
 
   ModelArgs model_args_;
 
-  std::shared_ptr<DistManager> dist_manager_ = nullptr;
+  std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_ =
+      nullptr;
 };
 
 class SuffixSpeculativeEngine : public SpeculativeEngineBase<LLMEngine> {

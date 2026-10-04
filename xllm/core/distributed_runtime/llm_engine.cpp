@@ -29,6 +29,7 @@ limitations under the License.
 #include <map>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "common/device_monitor.h"
 #include "common/metrics.h"
@@ -91,9 +92,11 @@ bool contains_graph_warmup(const BatchGroup& batches) {
 // Extra weight pages reserved for mapping/alignment overhead.
 constexpr size_t kXTensorWeightPageSafetyMargin = 20;
 
-LLMEngine::LLMEngine(const runtime::Options& options,
-                     std::shared_ptr<DistManager> dist_manager)
-    : options_(options), dist_manager_(dist_manager) {
+LLMEngine::LLMEngine(
+    const runtime::Options& options,
+    std::shared_ptr<DistributedWorkerManager> distributed_worker_manager)
+    : options_(options),
+      distributed_worker_manager_(std::move(distributed_worker_manager)) {
   auto master_node_addr = options.master_node_addr().value_or("");
   CHECK(!master_node_addr.empty())
       << " LLM need to set master node addr, Please set --master_node_addr.";
@@ -1295,10 +1298,11 @@ std::vector<int64_t> LLMEngine::get_active_activation_memory() const {
 }
 
 void LLMEngine::setup_workers(const runtime::Options& options) {
-  if (!dist_manager_) {
-    dist_manager_ = std::make_shared<DistManager>(options);
+  if (!distributed_worker_manager_) {
+    distributed_worker_manager_ =
+        std::make_shared<DistributedWorkerManager>(options);
   }
-  worker_clients_ = dist_manager_->get_worker_clients();
+  worker_clients_ = distributed_worker_manager_->get_worker_clients();
 }
 
 void LLMEngine::process_eplb_data(

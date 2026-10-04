@@ -19,6 +19,8 @@ limitations under the License.
 #include <glog/logging.h>
 #include <sys/sysinfo.h>
 
+#include <utility>
+
 #include "common/device_monitor.h"
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
@@ -32,9 +34,11 @@ limitations under the License.
 #include "util/timer.h"
 
 namespace xllm {
-DiTEngine::DiTEngine(const runtime::Options& options,
-                     std::shared_ptr<DistManager> dist_manager)
-    : options_(options), dist_manager_(dist_manager) {
+DiTEngine::DiTEngine(
+    const runtime::Options& options,
+    std::shared_ptr<DistributedWorkerManager> distributed_worker_manager)
+    : options_(options),
+      distributed_worker_manager_(std::move(distributed_worker_manager)) {
   auto master_node_addr = options.master_node_addr().value_or("");
   CHECK(!master_node_addr.empty())
       << " DIT need to set master node addr, Please set --master_node_addr.";
@@ -68,10 +72,11 @@ DiTEngine::DiTEngine(const runtime::Options& options,
 }
 
 void DiTEngine::setup_workers(const runtime::Options& options) {
-  if (!dist_manager_) {
-    dist_manager_ = std::make_shared<DistManager>(options);
+  if (!distributed_worker_manager_) {
+    distributed_worker_manager_ =
+        std::make_shared<DistributedWorkerManager>(options);
   }
-  worker_clients_ = dist_manager_->get_worker_clients();
+  worker_clients_ = distributed_worker_manager_->get_worker_clients();
 }
 
 bool DiTEngine::init() {

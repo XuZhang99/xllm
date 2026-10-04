@@ -21,7 +21,7 @@ limitations under the License.
 #include <memory>
 
 #include "common/macros.h"
-#include "dist_manager.h"
+#include "core/distributed_runtime/distributed_worker_manager.h"
 #include "engine.h"
 #include "framework/batch/dit_batch.h"
 #include "framework/parallel_state/process_group.h"
@@ -33,7 +33,8 @@ namespace xllm {
 class DiTEngine : public Engine {
  public:
   DiTEngine(const runtime::Options& options,
-            std::shared_ptr<DistManager> dist_manager = nullptr);
+            std::shared_ptr<DistributedWorkerManager>
+                distributed_worker_manager = nullptr);
 
   ~DiTEngine() = default;
 
@@ -46,7 +47,10 @@ class DiTEngine : public Engine {
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const;
 
-  std::shared_ptr<DistManager> get_dist_manager() { return dist_manager_; }
+  std::shared_ptr<DistributedWorkerManager> get_distributed_worker_manager()
+      const {
+    return distributed_worker_manager_;
+  }
 
  protected:
   // worker client which is used for call worker
@@ -61,7 +65,8 @@ class DiTEngine : public Engine {
   // create process group. And workers send worker brpc server
   // address to engine, engine will create WorkerClient for each worker.
   // Engine call workers to step via these WorkerClients.
-  std::shared_ptr<DistManager> dist_manager_ = nullptr;
+  std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_ =
+      nullptr;
 
   std::unique_ptr<ThreadPool> threadpool_ = nullptr;
 

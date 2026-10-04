@@ -28,8 +28,8 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
+#include "core/distributed_runtime/distributed_worker_manager.h"
 #include "core/distributed_runtime/master.h"
-#include "dist_manager.h"
 #include "engine.h"
 #include "framework/batch/batch_group.h"
 #include "framework/block/block_manager_pool.h"
@@ -51,7 +51,8 @@ class LLMEngine : public Engine {
  public:
   // create an engine with the given devices
   LLMEngine(const runtime::Options& options,
-            std::shared_ptr<DistManager> dist_manager = nullptr);
+            std::shared_ptr<DistributedWorkerManager>
+                distributed_worker_manager = nullptr);
 
   virtual ~LLMEngine() = default;
 
@@ -122,7 +123,10 @@ class LLMEngine : public Engine {
 
   bool unlink_p2p(const std::vector<std::string>& remote_addrs) override;
 
-  std::shared_ptr<DistManager> get_dist_manager() { return dist_manager_; };
+  std::shared_ptr<DistributedWorkerManager> get_distributed_worker_manager()
+      const {
+    return distributed_worker_manager_;
+  }
 
   bool sleep(MasterStatus master_status) override;
 
@@ -200,7 +204,8 @@ class LLMEngine : public Engine {
   // create process group. And workers send worker brpc server
   // address to engine, engine will create WorkerClient for each worker.
   // Engine call workers to step via these WorkerClients.
-  std::shared_ptr<DistManager> dist_manager_ = nullptr;
+  std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_ =
+      nullptr;
 
   torch::Tensor expert_load_data_;
   std::unique_ptr<EplbManager> eplb_manager_ = nullptr;

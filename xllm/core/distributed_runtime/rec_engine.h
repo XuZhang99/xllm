@@ -20,7 +20,7 @@ limitations under the License.
 #include <memory>
 
 #include "common/macros.h"
-#include "distributed_runtime/dist_manager.h"
+#include "core/distributed_runtime/distributed_worker_manager.h"
 #include "engine.h"
 #include "framework/batch/rec_batch_group.h"
 #include "framework/block/block_manager_pool.h"
@@ -39,7 +39,8 @@ class KVCacheShape;
 class RecEngine : public Engine {
  public:
   RecEngine(const runtime::Options& options,
-            std::shared_ptr<DistManager> dist_manager = nullptr);
+            std::shared_ptr<DistributedWorkerManager>
+                distributed_worker_manager = nullptr);
 
   virtual ~RecEngine() = default;
 
@@ -50,8 +51,8 @@ class RecEngine : public Engine {
   bool init() override;
 
   // Start local WorkerServers without loading weights. Non-leader ranks
-  // call this so rank 0's DistManager can collect the cluster; LlmRec
-  // otherwise creates DistManager only inside init().
+  // call this so rank 0's DistributedWorkerManager can collect the cluster;
+  // LlmRec otherwise creates DistributedWorkerManager only inside init().
   void setup_distributed_workers();
 
   std::vector<int64_t> get_active_activation_memory() const override;
@@ -87,7 +88,7 @@ class RecEngine : public Engine {
   };
 
   // ============================================================
-  // LlmRecEnginePipeline: kLlmRec (qwen2/qwen3) via DistManager
+  // LlmRecEnginePipeline: kLlmRec (qwen2/qwen3) via DistributedWorkerManager
   // ============================================================
   class LlmRecEnginePipeline final : public RecEnginePipeline {
    public:
@@ -187,10 +188,11 @@ class RecEngine : public Engine {
   // ============================================================
   bool init_model();
   // Reject REC configurations that cannot run across multiple nodes. Only the
-  // single-round LlmRec pipeline coordinates workers through DistManager;
-  // OneRec and LlmRec multi-round pipelines are local-only. This runs in
-  // common initialization (before pipeline selection) so the leader rejects
-  // the configuration too, not just secondary ranks. No-op when nnodes <= 1.
+  // single-round LlmRec pipeline coordinates workers through
+  // DistributedWorkerManager; OneRec and LlmRec multi-round pipelines are
+  // local-only. This runs in common initialization (before pipeline selection)
+  // so the leader rejects the configuration too, not just secondary ranks.
+  // No-op when nnodes <= 1.
   void validate_multi_node_support() const;
   KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);
@@ -207,7 +209,7 @@ class RecEngine : public Engine {
   RecModelKind rec_model_kind_ = RecModelKind::kNone;
 
   // Shared by both pipelines
-  std::shared_ptr<DistManager> dist_manager_;
+  std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_;
   std::unique_ptr<ThreadPool> threadpool_;
 
   // LlmRec specific (managed by LlmRecEnginePipeline)

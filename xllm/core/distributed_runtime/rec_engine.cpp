@@ -22,6 +22,7 @@ limitations under the License.
 #include <functional>
 #include <map>
 #include <memory>
+#include <utility>
 
 #include "common/metrics.h"
 #include "core/common/global_flags.h"
@@ -52,9 +53,11 @@ constexpr int64_t kMinimalOneRecMetadataKVBlocks = 2;
 // RecEngine Implementation
 // ============================================================
 
-RecEngine::RecEngine(const runtime::Options& options,
-                     std::shared_ptr<DistManager> dist_manager)
-    : options_(options), dist_manager_(dist_manager) {
+RecEngine::RecEngine(
+    const runtime::Options& options,
+    std::shared_ptr<DistributedWorkerManager> distributed_worker_manager)
+    : options_(options),
+      distributed_worker_manager_(std::move(distributed_worker_manager)) {
   const auto& devices = options_.devices();
   CHECK_GT(devices.size(), 0) << "At least one device is required";
 
@@ -72,11 +75,12 @@ void RecEngine::validate_multi_node_support() const {
     return;
   }
 
-  // Only the single-round LlmRec pipeline drives workers through DistManager.
-  // OneRec runs on local workers, and LlmRec multi-round mode selects
-  // RecMultiRoundEnginePipeline whose setup_workers() is local-only. For those
-  // kinds secondary ranks would spawn workers that rank 0 never collects, so
-  // fail fast instead of serving from an incomplete cluster.
+  // Only the single-round LlmRec pipeline drives workers through
+  // DistributedWorkerManager. OneRec runs on local workers, and LlmRec
+  // multi-round mode selects RecMultiRoundEnginePipeline whose setup_workers()
+  // is local-only. For those kinds secondary ranks would spawn workers that
+  // rank 0 never collects, so fail fast instead of serving from an incomplete
+  // cluster.
   const std::string model_type =
       util::get_model_type(options_.model_path(), options_.backend());
   const RecModelKind rec_model_kind = get_rec_model_kind(model_type);
@@ -97,8 +101,9 @@ void RecEngine::setup_distributed_workers() {
   FLAGS_enable_atb_comm_multiprocess =
       options_.enable_offline_inference() || (options_.nnodes() > 1);
 #endif
-  if (!dist_manager_) {
-    dist_manager_ = std::make_shared<DistManager>(options_);
+  if (!distributed_worker_manager_) {
+    distributed_worker_manager_ =
+        std::make_shared<DistributedWorkerManager>(options_);
   }
 }
 
@@ -287,7 +292,8 @@ RecEngine::LlmRecEnginePipeline::LlmRecEnginePipeline(RecEngine& engine)
 
 void RecEngine::LlmRecEnginePipeline::setup_workers() {
   engine_.setup_distributed_workers();
-  engine_.worker_clients_ = engine_.dist_manager_->get_worker_clients();
+  engine_.worker_clients_ =
+      engine_.distributed_worker_manager_->get_worker_clients();
   engine_.dp_size_ = engine_.options_.dp_size();
   engine_.worker_clients_num_ = engine_.worker_clients_.size();
   engine_.dp_local_tp_size_ = engine_.worker_clients_num_ / engine_.dp_size_;
@@ -589,7 +595,7 @@ RecEngine::OneRecLocalEnginePipeline::OneRecLocalEnginePipeline(
     : RecEnginePipeline(engine) {}
 
 void RecEngine::OneRecLocalEnginePipeline::setup_workers() {
-  // OneRec uses local workers, no DistManager setup needed
+  // OneRec uses local workers, no DistributedWorkerManager setup needed
 }
 
 void RecEngine::OneRecLocalEnginePipeline::process_group_test() {
@@ -1037,7 +1043,7 @@ RecEngine::RecMultiRoundEnginePipeline::RecMultiRoundEnginePipeline(
     : RecEnginePipeline(engine) {}
 
 void RecEngine::RecMultiRoundEnginePipeline::setup_workers() {
-  // RecMultiRound uses local workers, no DistManager setup needed
+  // RecMultiRound uses local workers, no DistributedWorkerManager setup needed
 }
 
 void RecEngine::RecMultiRoundEnginePipeline::process_group_test() {

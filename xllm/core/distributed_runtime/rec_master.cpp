@@ -125,8 +125,8 @@ RecMaster::RecMaster(const Options& options) : Master(options) {
       .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
   rec_engine_ = std::make_unique<RecEngine>(engine_options);
   if (!is_leader()) {
-    // RecEngine does not create DistManager in its constructor. LlmRec
-    // starts workers in init(); skip that on non-leaders but still host
+    // RecEngine does not create DistributedWorkerManager in its constructor.
+    // LlmRec starts workers in init(); skip that on non-leaders but still host
     // the local WorkerServer so rank 0 can collect the cluster.
     rec_engine_->setup_distributed_workers();
     return;

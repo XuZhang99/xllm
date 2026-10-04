@@ -21,7 +21,7 @@ limitations under the License.
 #include <memory>
 
 #include "common/macros.h"
-#include "core/distributed_runtime/dist_manager.h"
+#include "core/distributed_runtime/distributed_worker_manager.h"
 #include "engine.h"
 #include "framework/batch/batch_group.h"
 #include "framework/block/block_manager_pool.h"
@@ -38,7 +38,8 @@ class VLMEngine : public Engine {
  public:
   // create an engine with the given devices
   VLMEngine(const runtime::Options& options,
-            std::shared_ptr<DistManager> dist_manager = nullptr);
+            std::shared_ptr<DistributedWorkerManager>
+                distributed_worker_manager = nullptr);
 
   virtual ~VLMEngine() = default;
 
@@ -84,7 +85,8 @@ class VLMEngine : public Engine {
   uint32_t worker_clients_num_;
   uint32_t dp_local_tp_size_;
 
-  std::shared_ptr<DistManager> dist_manager_ = nullptr;
+  std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_ =
+      nullptr;
 
   std::unique_ptr<ThreadPool> threadpool_ = nullptr;
 

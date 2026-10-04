@@ -27,6 +27,7 @@ limitations under the License.
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "common/device_monitor.h"
 #include "common/metrics.h"
@@ -51,9 +52,11 @@ limitations under the License.
 #include "util/utils.h"
 namespace xllm {
 
-VLMEngine::VLMEngine(const runtime::Options& options,
-                     std::shared_ptr<DistManager> dist_manager)
-    : options_(options), dist_manager_(dist_manager) {
+VLMEngine::VLMEngine(
+    const runtime::Options& options,
+    std::shared_ptr<DistributedWorkerManager> distributed_worker_manager)
+    : options_(options),
+      distributed_worker_manager_(std::move(distributed_worker_manager)) {
   auto master_node_addr = options.master_node_addr().value_or("");
   CHECK(!master_node_addr.empty())
       << " VLM need to set master node addr, Please set --master_node_addr.";
@@ -488,10 +491,11 @@ void VLMEngine::update_last_step_result(BatchGroup& last_batch) {
 }
 
 void VLMEngine::setup_workers(const runtime::Options& options) {
-  if (!dist_manager_) {
-    dist_manager_ = std::make_shared<DistManager>(options);
+  if (!distributed_worker_manager_) {
+    distributed_worker_manager_ =
+        std::make_shared<DistributedWorkerManager>(options);
   }
-  worker_clients_ = dist_manager_->get_worker_clients();
+  worker_clients_ = distributed_worker_manager_->get_worker_clients();
 }
 
 std::vector<int64_t> VLMEngine::get_active_activation_memory() const {
