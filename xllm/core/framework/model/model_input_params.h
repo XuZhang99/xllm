@@ -261,6 +261,7 @@ class ModelInputParams final {
   ModelInputParams& operator=(const ModelInputParams&) = delete;
   ModelInputParams& operator=(ModelInputParams&&) = delete;
   ModelInputSnapshot clone() const;
+  ModelInputSnapshot to(const torch::Device& device) const;
   bool has_multimodal() const { return multimodal_ != nullptr; }
   VlmVisionInput& multimodal() const {
     CHECK(multimodal_ != nullptr) << "vision input requires VLM parameters";
@@ -540,6 +541,29 @@ inline ModelInputSnapshot ModelInputSnapshot::to(
     const torch::Device& device) const {
   CHECK(owner_ != nullptr);
   return ModelInputSnapshot(owner_->to(device));
+}
+inline ModelInputSnapshot ModelInputParams::to(
+    const torch::Device& device) const {
+  CHECK(native_owner_ != nullptr);
+  if (snapshot_owner_ != nullptr) {
+    return ModelInputSnapshot(snapshot_owner_->to(device));
+  }
+  switch (domain_) {
+    case Domain::LLM:
+      return ModelInputSnapshot(
+          static_cast<LlmModelParams*>(native_owner_)->to(device));
+    case Domain::VLM:
+      return ModelInputSnapshot(
+          static_cast<VlmModelParams*>(native_owner_)->to(device));
+    case Domain::REC:
+      CHECK(rec_execution_state_ != nullptr);
+      return ModelInputSnapshot(std::shared_ptr<ModelInputSnapshotOwner>(
+          std::make_shared<NativeModelInputSnapshotOwner<RecModelParams>>(
+              static_cast<RecModelParams*>(native_owner_)->to(device),
+              detail::spec_execution_state_to(*rec_execution_state_, device))));
+  }
+  LOG(FATAL) << "unknown model input domain";
+  return ModelInputSnapshot();
 }
 inline ModelInputSnapshot ModelInputParams::clone() const {
   switch (domain_) {

@@ -775,7 +775,7 @@ TEST_F(AclGraphTaskUpdateTest, Qwen35DpPrepareSkipsUnsupportedDecodeSteps) {
   input = input.to(*device_, kDtype);
   populate_query_start_loc(input.input_params);
 
-  const auto set_dp_layout = [](ModelInputParams& params,
+  const auto set_dp_layout = [](LlmModelParams& params,
                                 const std::vector<int32_t>& token_counts) {
     params.parallel.dp_global_token_nums = token_counts;
     params.parallel.raw_dp_global_token_nums = token_counts;
@@ -788,38 +788,42 @@ TEST_F(AclGraphTaskUpdateTest, Qwen35DpPrepareSkipsUnsupportedDecodeSteps) {
   auto kv_graph = create_hybrid_kv_caches();
   auto graph_exec = std::make_unique<npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
-  (void)graph_exec->run(
-      input.token_ids, input.positions, kv_graph, input.input_params);
+  (void)graph_exec->run(input.token_ids,
+                        input.positions,
+                        kv_graph,
+                        ModelInputParams(input.input_params));
 
-  auto second_input = input;
+  auto second_input = input.clone();
   second_input.token_ids.add_(1);
   second_input.positions.add_(1);
   (void)graph_exec->run(second_input.token_ids,
                         second_input.positions,
                         kv_graph,
-                        second_input.input_params);
+                        ModelInputParams(second_input.input_params));
   ASSERT_EQ(graph_exec->get_graph_count(), 2);
   ASSERT_FALSE(graph_exec->graph_slot_prepared_for_test(/*slot_idx=*/0));
 
-  auto prepared_input = second_input;
+  auto prepared_input = second_input.clone();
   prepared_input.token_ids.add_(1);
   prepared_input.positions.add_(1);
   for (const std::vector<int32_t>& unsupported_token_counts :
        {std::vector<int32_t>{kLocalBatchSize, kLocalBatchSize - 1},
         std::vector<int32_t>{kLocalBatchSize, 0}}) {
     set_dp_layout(prepared_input.input_params, unsupported_token_counts);
-    graph_exec->prepare_graph_input(prepared_input.token_ids,
-                                    prepared_input.positions,
-                                    kv_graph,
-                                    prepared_input.input_params);
+    graph_exec->prepare_graph_input(
+        prepared_input.token_ids,
+        prepared_input.positions,
+        kv_graph,
+        ModelInputParams(prepared_input.input_params));
     EXPECT_FALSE(graph_exec->graph_slot_prepared_for_test(/*slot_idx=*/0));
   }
 
   set_dp_layout(prepared_input.input_params, balanced_token_counts);
-  graph_exec->prepare_graph_input(prepared_input.token_ids,
-                                  prepared_input.positions,
-                                  kv_graph,
-                                  prepared_input.input_params);
+  graph_exec->prepare_graph_input(
+      prepared_input.token_ids,
+      prepared_input.positions,
+      kv_graph,
+      ModelInputParams(prepared_input.input_params));
   EXPECT_TRUE(graph_exec->graph_slot_prepared_for_test(/*slot_idx=*/0));
 }
 
@@ -845,13 +849,19 @@ TEST_F(AclGraphTaskUpdateTest, CaptureReplayVsEagerDecodeBranch) {
     for (int32_t step = 0; step < 3; ++step) {
       SCOPED_TRACE(step);
       if (step == 2) {
-        graph_exec->prepare_graph_input(
-            input.token_ids, input.positions, kv_graph, input.input_params);
+        graph_exec->prepare_graph_input(input.token_ids,
+                                        input.positions,
+                                        kv_graph,
+                                        ModelInputParams(input.input_params));
       }
-      auto eager_out = model_->forward(
-          input.token_ids, input.positions, kv_eager, input.input_params);
-      auto graph_out = graph_exec->run(
-          input.token_ids, input.positions, kv_graph, input.input_params);
+      auto eager_out = model_->forward(input.token_ids,
+                                       input.positions,
+                                       kv_eager,
+                                       ModelInputParams(input.input_params));
+      auto graph_out = graph_exec->run(input.token_ids,
+                                       input.positions,
+                                       kv_graph,
+                                       ModelInputParams(input.input_params));
       EXPECT_TRUE(torch::allclose(eager_out.hidden_states.to(torch::kFloat32),
                                   graph_out.hidden_states.to(torch::kFloat32),
                                   /*rtol=*/1e-2,
@@ -893,19 +903,21 @@ TEST_F(AclGraphTaskUpdateTest, DcpReplayUpdatesZeroShardAcrossBlockBoundary) {
   graph_exec->run(capture_input.token_ids,
                   capture_input.positions,
                   kv_graph,
-                  capture_input.input_params);
+                  ModelInputParams(capture_input.input_params));
 
   reset_sequences();
   auto replay_input = make_input(/*prompt_size=*/128, /*token_seed=*/300);
   auto kv_eager = clone_kv_caches(kv_graph);
-  const ModelOutput graph_output = graph_exec->run(replay_input.token_ids,
-                                                   replay_input.positions,
-                                                   kv_graph,
-                                                   replay_input.input_params);
-  const ModelOutput eager_output = model_->forward(replay_input.token_ids,
-                                                   replay_input.positions,
-                                                   kv_eager,
-                                                   replay_input.input_params);
+  const ModelOutput graph_output =
+      graph_exec->run(replay_input.token_ids,
+                      replay_input.positions,
+                      kv_graph,
+                      ModelInputParams(replay_input.input_params));
+  const ModelOutput eager_output =
+      model_->forward(replay_input.token_ids,
+                      replay_input.positions,
+                      kv_eager,
+                      ModelInputParams(replay_input.input_params));
 
   EXPECT_TRUE(torch::allclose(eager_output.hidden_states.to(torch::kFloat32),
                               graph_output.hidden_states.to(torch::kFloat32),

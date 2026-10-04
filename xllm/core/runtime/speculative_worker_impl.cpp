@@ -612,7 +612,7 @@ SpeculativeWorkerImpl<TargetInput>::update_input_by_last_step_output(
   input_params.attention.rebuild_device_buffer(device_);
   new_inputs.runtime.device_tensors_ready = true;
 
-  return new_inputs.clone();
+  return std::move(new_inputs);
 }
 
 template <typename TargetInput>

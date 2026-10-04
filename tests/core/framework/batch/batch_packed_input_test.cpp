@@ -344,7 +344,7 @@ TEST(BatchPackedInputTest, MaterializedShmReadRebindsTaggedTensorArena) {
   proto::PackedForwardInput packed_input;
   ASSERT_TRUE(forward_input_to_packed_proto(source, &packed_input));
   ASSERT_GE(packed_input.payload().size(), 40u);
-  EXPECT_EQ(static_cast<uint8_t>(packed_input.payload()[8]), 2u);
+  EXPECT_EQ(static_cast<uint8_t>(packed_input.payload()[8]), 3u);
   EXPECT_EQ(static_cast<uint8_t>(packed_input.payload()[10]), 1u);
   const uint64_t arena_offset =
       read_packed_uint64(packed_input.payload(), /*offset=*/24);
@@ -1168,6 +1168,8 @@ TEST(BatchPackedInputTest, NativeDiTPackedProtoRejectsMalformedPayloads) {
   input.tensor_sources.add("latent", torch::tensor({1.5f, 2.5f}));
   proto::PackedForwardInput packed_input;
   ASSERT_TRUE(dit_forward_input_to_packed_proto(input, &packed_input));
+  DiTForwardInput baseline;
+  ASSERT_TRUE(packed_proto_to_dit_forward_input(packed_input, baseline));
   ASSERT_GT(packed_input.payload().size(), 40u);
   const uint64_t descriptor_bytes =
       read_packed_uint64(packed_input.payload(), /*offset=*/16);

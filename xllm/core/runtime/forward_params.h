@@ -385,7 +385,8 @@ class LlmForwardInput final {
 
   LlmForwardInput clone() const {
     LlmForwardInput inputs;
-    copy_metadata_to(inputs);
+    inputs.runtime = runtime;
+    copy_non_runtime_metadata_to(inputs);
     inputs.token_ids = token_ids;
     inputs.positions = positions;
     inputs.token_ids_host = token_ids_host;
@@ -394,7 +395,6 @@ class LlmForwardInput final {
     inputs.sampling_params = sampling_params;
     inputs.json_object_invalid_draft = json_object_invalid_draft;
     inputs.json_object_errors = json_object_errors;
-    inputs.runtime = runtime;
     return inputs;
   }
 
@@ -500,12 +500,16 @@ class LlmForwardInput final {
   }
 
   void copy_metadata_to(LlmForwardInput& inputs) const {
-    inputs.transfer_kv_infos = transfer_kv_infos;
-    inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
-    inputs.return_selected_hidden = return_selected_hidden;
+    copy_non_runtime_metadata_to(inputs);
     inputs.runtime.kv_slot_layout = runtime.kv_slot_layout;
     inputs.runtime.metadata_ready_event = runtime.metadata_ready_event;
     inputs.runtime.retained_device_tensors = runtime.retained_device_tensors;
+  }
+
+  void copy_non_runtime_metadata_to(LlmForwardInput& inputs) const {
+    inputs.transfer_kv_infos = transfer_kv_infos;
+    inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
+    inputs.return_selected_hidden = return_selected_hidden;
     inputs.sample_sequence_ids = sample_sequence_ids;
     inputs.sample_prior_output_rows = sample_prior_output_rows;
     inputs.json_object_states = json_object_states;

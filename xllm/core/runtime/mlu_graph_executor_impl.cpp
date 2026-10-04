@@ -299,7 +299,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
 void GraphPersistentParam::init_params(const ModelInputParams& params,
                                        uint32_t padding_num_tokens,
                                        uint32_t padding_needed) {
-  params_.emplace(params.clone().to(tokens_.device()).view());
+  params_.emplace(params.to(tokens_.device()).view());
   params_->enable_graph = true;
   params_->attention.device.q_seq_lens = q_seq_lens_.slice(
       0, 0, params.attention.device.q_seq_lens.size(0) + padding_needed);

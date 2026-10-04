@@ -45,6 +45,11 @@ class ShmChannel : public CommChannel {
       folly::Promise<std::optional<RawForwardOutput>>& promise) override;
 
  private:
+  template <typename Input>
+  void execute_model_async_impl(
+      const Input& input,
+      folly::Promise<std::optional<RawForwardOutput>>& promise);
+
   bool execute_model_with_shm(const LlmForwardInput& input,
                               RawForwardOutput& raw_output);
 

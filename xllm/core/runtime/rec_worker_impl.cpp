@@ -1359,7 +1359,9 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
     auto model_output = runtime_.executor->forward(
         token_ids, positions, runtime_.worker.kv_caches_, input_params);
     rec_params.is_encoder_forward = original_encoder_forward;
-    rec_params.has_encoder_output = original_encoder_output;
+    rec_params.has_encoder_output =
+        original_encoder_output || has_encoder_output ||
+        (is_encoder_forward && model_output.hidden_states.defined());
     rec_params.is_hybrid_mode = original_hybrid_mode;
     return model_output;
   };

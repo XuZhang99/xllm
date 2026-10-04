@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <glog/logging.h>
+
 #include "core/framework/model/vlm_model_params.h"
 #include "core/runtime/forward_params.h"
 
@@ -47,7 +49,8 @@ class VlmForwardInput final {
 
   VlmForwardInput clone() const {
     VlmForwardInput inputs;
-    copy_metadata_to(inputs);
+    inputs.runtime = runtime;
+    copy_non_runtime_metadata_to(inputs);
     inputs.token_ids = token_ids;
     inputs.positions = positions;
     inputs.token_ids_host = token_ids_host;
@@ -56,7 +59,6 @@ class VlmForwardInput final {
     inputs.sampling_params = sampling_params;
     inputs.json_object_invalid_draft = json_object_invalid_draft;
     inputs.json_object_errors = json_object_errors;
-    inputs.runtime = runtime;
     return inputs;
   }
 
@@ -163,12 +165,16 @@ class VlmForwardInput final {
   }
 
   void copy_metadata_to(VlmForwardInput& inputs) const {
-    inputs.transfer_kv_infos = transfer_kv_infos;
-    inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
-    inputs.return_selected_hidden = return_selected_hidden;
+    copy_non_runtime_metadata_to(inputs);
     inputs.runtime.kv_slot_layout = runtime.kv_slot_layout;
     inputs.runtime.metadata_ready_event = runtime.metadata_ready_event;
     inputs.runtime.retained_device_tensors = runtime.retained_device_tensors;
+  }
+
+  void copy_non_runtime_metadata_to(VlmForwardInput& inputs) const {
+    inputs.transfer_kv_infos = transfer_kv_infos;
+    inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
+    inputs.return_selected_hidden = return_selected_hidden;
     inputs.sample_sequence_ids = sample_sequence_ids;
     inputs.sample_prior_output_rows = sample_prior_output_rows;
     inputs.json_object_states = json_object_states;
@@ -241,6 +247,10 @@ inline LlmForwardInput make_llm_draft_input(const LlmForwardInput& target) {
 }
 
 inline LlmForwardInput make_llm_draft_input(const VlmForwardInput& target) {
+  CHECK(!target.runtime.input_host_buffer_has_layout ||
+        target.runtime.device_tensors_ready)
+      << "Cannot create an LLM draft input from an unmaterialized packed VLM "
+         "input.";
   LlmForwardInput draft;
   draft.token_ids = target.token_ids;
   draft.positions = target.positions;
