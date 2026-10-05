@@ -685,6 +685,25 @@ int64_t estimate_layerwise_split_block_count(
                                      additional_block_bytes);
 }
 
+KVCacheCapacity KVCacheEstimator::estimate(
+    KVCacheEstimateOptions options) const {
+  CHECK_GT(options.world_size, 0) << "world_size must be positive";
+  const int64_t n_heads = model_args_.n_heads();
+  const int64_t n_kv_heads = model_args_.n_kv_heads().value_or(n_heads);
+  options.n_local_kv_heads =
+      std::max<int64_t>(1, n_kv_heads / options.world_size);
+  if (model_args_.linear_num_value_heads() > 0) {
+    options.n_local_linear_k_heads = std::max<int64_t>(
+        1, model_args_.linear_num_key_heads() / options.world_size);
+    options.n_local_linear_v_heads = std::max<int64_t>(
+        1, model_args_.linear_num_value_heads() / options.world_size);
+  } else {
+    options.n_local_linear_k_heads = 0;
+    options.n_local_linear_v_heads = 0;
+  }
+  return estimate_kv_cache_capacity(model_args_, options);
+}
+
 KVCacheCapacity estimate_kv_cache_capacity(
     const ModelArgs& model_args,
     const KVCacheEstimateOptions& options) {

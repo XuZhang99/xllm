@@ -48,7 +48,7 @@ limitations under the License.
 #include "core/platform/platform.h"
 #include "core/util/model_config_utils.h"
 #include "framework/block/block_utils.h"
-#include "framework/block/hierarchy_block_manager_pool.h"
+#include "framework/block/kv_cache_manager_factory.h"
 #include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/kv_cache/kv_cache_utils.h"
@@ -261,28 +261,9 @@ bool LLMEngine::init_model(MasterStatus master_status) {
     tokenizer_args_ = model_loader->tokenizer_args();
   }
 
-  // compute the number of local kv heads and head dim
-  const uint32_t world_size = dp_local_tp_size_;
-  const int64_t n_heads = args_.n_heads();
-  const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
-  n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
-  n_local_q_heads_ = std::max<int64_t>(1, n_heads / world_size);
-  head_dim_ = args_.head_dim();
   dtype_ = util::parse_dtype(args_.dtype(), options_.devices()[0]);
-  // For qwen3_next hybrid attention.
-  if (has_linear_attention_layers(args_)) {
-    const int64_t linear_n_k_heads = args_.linear_num_key_heads();
-    const int64_t linear_n_v_heads = args_.linear_num_value_heads();
-    n_local_linear_k_heads_ =
-        std::max<int64_t>(1, linear_n_k_heads / world_size);
-    n_local_linear_v_heads_ =
-        std::max<int64_t>(1, linear_n_v_heads / world_size);
-  }
-  // key + value for all layers
   LOG(INFO) << "Block info, block_size: " << options_.block_size()
-            << ", n_local_kv_heads: " << n_local_kv_heads_
-            << ", head_dim: " << head_dim_ << ", n_layers: " << args_.n_layers()
-            << ", dtype: " << dtype_
+            << ", n_layers: " << args_.n_layers() << ", dtype: " << dtype_
             << ", kv_cache_dtype: " << options_.kv_cache_dtype();
 
   if (tokenizer_ != nullptr) {
@@ -517,9 +498,6 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   estimate_options.cache_size_in_bytes = cache_size_in_bytes;
   estimate_options.block_size = options_.block_size();
   estimate_options.world_size = dp_local_tp_size_;
-  estimate_options.n_local_kv_heads = n_local_kv_heads_;
-  estimate_options.n_local_linear_k_heads = n_local_linear_k_heads_;
-  estimate_options.n_local_linear_v_heads = n_local_linear_v_heads_;
   estimate_options.max_seqs_per_batch =
       static_cast<int64_t>(options_.max_seqs_per_batch());
   estimate_options.max_concurrent_requests = static_cast<int64_t>(
@@ -548,10 +526,6 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
       ::xllm::SchedulerConfig::get_instance().enable_dp_fair_token_budget();
   if (options_.enable_mtp_draft_body_tp1() && options_.is_draft_engine()) {
     estimate_options.world_size = 1;
-    estimate_options.n_local_kv_heads =
-        args_.n_kv_heads().value_or(args_.n_heads());
-    estimate_options.n_local_linear_k_heads = args_.linear_num_key_heads();
-    estimate_options.n_local_linear_v_heads = args_.linear_num_value_heads();
   }
   estimate_options.layerwise_split_size =
       options_.is_draft_engine()
@@ -577,7 +551,7 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
 
   KVCacheCapacity kv_cache_cap =
-      ::xllm::estimate_kv_cache_capacity(args_, estimate_options);
+      KVCacheEstimator(args_).estimate(std::move(estimate_options));
   GAUGE_SET(total_kv_cache_size_in_kilobytes,
             kv_cache_cap.cache_size_in_bytes() / 1024);
 
@@ -618,8 +592,8 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   const bool enable_gdn_attention = has_linear_attention_layers(args_);
 
   // Validate host offload before constructing block managers or asking workers
-  // to allocate potentially large pinned host tensors.
-  const KVCacheShape kv_cache_shape(kv_cache_cap, args_, dp_local_tp_size_);
+  // to allocate potentially large pinned host tensors. The factory fills the
+  // shape-dependent validation fields.
   HostCacheValidationOptions host_cache_validation_options{
       .host_blocks_factor = options_.host_blocks_factor(),
       .device_block_count = kv_cache_cap.n_blocks(),
@@ -628,22 +602,12 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .enable_disagg_pd = options_.enable_disagg_pd(),
       .enable_kvcache_store = options_.enable_kvcache_store(),
       .instance_role = options_.instance_role(),
-      .has_key_cache_shape = kv_cache_shape.has_key_cache_shape(),
-      .has_grouped_cache_layout = kv_cache_shape.has_grouped_cache_layout(),
       .supports_grouped_cache_offload =
           util::is_deepseek_v4_model_type(args_.model_type()),
-      .has_conv_cache_shape = kv_cache_shape.has_conv_cache_shape(),
-      .has_ssm_cache_shape = kv_cache_shape.has_ssm_cache_shape(),
       .kv_cache_dtype = options_.kv_cache_dtype(),
       .indexer_cache_dtype = kv_cache_config.indexer_cache_dtype(),
       .model_type = args_.model_type(),
   };
-  const std::optional<std::string> host_cache_error =
-      validate_host_cache_options(host_cache_validation_options);
-  if (host_cache_error.has_value()) {
-    LOG(FATAL) << *host_cache_error;
-  }
-
   // DECODE-side skips LINEAR prefix cache by role (see
   // composite_block_manager.cpp::leaf_participates_in_prefix_cache), so the
   // chunked-prefill + chunk-stride guards below are only meaningful for
@@ -662,9 +626,6 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
         << scheduler_config.max_tokens_per_chunk_for_prefill()
         << ") must be a multiple of block_size (" << block_size << ").";
   }
-
-  // init kv cache for each worker
-  kv_cache_shape.print_shapes();
 
   // initialize block manager
   // Logical block_size *= kv_split_size.
@@ -688,8 +649,6 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .model_id(options_.model_id())
       .max_seqs_per_batch(options_.max_seqs_per_batch())
       .num_speculative_tokens(options_.num_speculative_tokens())
-      .num_embedding_blocks(
-          static_cast<uint32_t>(kv_cache_shape.key_cache_shape()[0]))
       // DECODE-side prefix cache participation is per-leaf and gated by the
       // predicate in composite_block_manager.cpp. P and MIX are treated
       // identically (both admit prefix cache on every leaf).
@@ -787,11 +746,19 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       options.host_num_blocks_by_type(std::move(host_capacities));
     }
     options.enable_host_offload(true);
-    kv_cache_manager_ =
-        std::make_unique<HierarchyBlockManagerPool>(options, this, dp_size_);
-  } else {
-    kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
   }
+
+  auto factory_result =
+      KVCacheManagerFactory::create(kv_cache_cap,
+                                    args_,
+                                    dp_local_tp_size_,
+                                    std::move(options),
+                                    this,
+                                    dp_size_,
+                                    std::move(host_cache_validation_options));
+  factory_result.shape.print_shapes();
+  KVCacheShape kv_cache_shape = std::move(factory_result.shape);
+  kv_cache_manager_ = std::move(factory_result.manager);
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;

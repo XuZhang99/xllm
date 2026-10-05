@@ -38,6 +38,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/service_config.h"
 #include "core/framework/model_loader/model_loader.h"
+#include "framework/block/kv_cache_manager_factory.h"
 #include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/kv_cache/kv_cache_utils.h"
@@ -145,29 +146,9 @@ bool VLMEngine::init_model(MasterStatus master_status) {
   quant_args_ = model_loader->quant_args();
   tokenizer_args_ = model_loader->tokenizer_args();
 
-  // compute the number of local kv heads and head dim
-  const int world_size = dp_size_ > 1 ? (dp_local_tp_size_)
-                                      : static_cast<int>(worker_clients_num_);
-  const int64_t n_heads = args_.n_heads();
-  const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
-
-  n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
-  head_dim_ = args_.head_dim();
   dtype_ = util::parse_dtype(args_.dtype(), options_.devices()[0]);
-  if (has_linear_attention_layers(args_)) {
-    const int64_t linear_n_k_heads = args_.linear_num_key_heads();
-    const int64_t linear_n_v_heads = args_.linear_num_value_heads();
-    n_local_linear_k_heads_ =
-        std::max<int64_t>(1, linear_n_k_heads / world_size);
-    n_local_linear_v_heads_ =
-        std::max<int64_t>(1, linear_n_v_heads / world_size);
-  }
-
-  // key + value for all layers
   LOG(INFO) << "Block info, block_size: " << options_.block_size()
-            << ", n_local_kv_heads: " << n_local_kv_heads_
-            << ", head_dim: " << head_dim_ << ", n_layers: " << args_.n_layers()
-            << ", dtype: " << dtype_;
+            << ", n_layers: " << args_.n_layers() << ", dtype: " << dtype_;
 
   const int64_t tokenizer_vocab_size =
       static_cast<int64_t>(tokenizer_->vocab_size());
@@ -268,9 +249,6 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   estimate_options.cache_size_in_bytes = cache_size_in_bytes;
   estimate_options.block_size = options_.block_size();
   estimate_options.world_size = dp_local_tp_size_;
-  estimate_options.n_local_kv_heads = n_local_kv_heads_;
-  estimate_options.n_local_linear_k_heads = n_local_linear_k_heads_;
-  estimate_options.n_local_linear_v_heads = n_local_linear_v_heads_;
   estimate_options.max_seqs_per_batch =
       static_cast<int64_t>(options_.max_seqs_per_batch());
   estimate_options.max_concurrent_requests = static_cast<int64_t>(
@@ -294,7 +272,7 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   estimate_options.instance_role = options_.instance_role();
 
   KVCacheCapacity kv_cache_cap =
-      ::xllm::estimate_kv_cache_capacity(args_, estimate_options);
+      KVCacheEstimator(args_).estimate(std::move(estimate_options));
   GAUGE_SET(total_kv_cache_size_in_kilobytes,
             kv_cache_cap.cache_size_in_bytes() / 1024);
 
@@ -344,10 +322,6 @@ bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
         << ") must be a multiple of block_size (" << block_size << ").";
   }
 
-  const KVCacheShape kv_cache_shape(kv_cache_cap, args_, dp_local_tp_size_);
-
-  kv_cache_shape.print_shapes();
-
   // initialize block manager
   BlockManagerPool::Options options;
   options.num_blocks(kv_cache_cap.n_blocks())
@@ -359,8 +333,6 @@ bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .hasher_type(BlockHasherType::MM)
       .max_seqs_per_batch(options_.max_seqs_per_batch())
       .num_speculative_tokens(options_.num_speculative_tokens())
-      .num_embedding_blocks(
-          static_cast<uint32_t>(kv_cache_shape.key_cache_shape()[0]))
       // DECODE-side prefix cache participation is per-leaf and gated by the
       // predicate in composite_block_manager.cpp; mirror llm_engine so a
       // linear-attention VLM decode instance disables the LINEAR prefix cache.
@@ -372,7 +344,15 @@ bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
     options.linear_state_num_slots(
         static_cast<int32_t>(kv_cache_cap.num_linear_state_blocks()));
   }
-  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
+  auto factory_result = KVCacheManagerFactory::create(kv_cache_cap,
+                                                      args_,
+                                                      dp_local_tp_size_,
+                                                      std::move(options),
+                                                      this,
+                                                      dp_size_);
+  factory_result.shape.print_shapes();
+  KVCacheShape kv_cache_shape = std::move(factory_result.shape);
+  kv_cache_manager_ = std::move(factory_result.manager);
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;

@@ -65,6 +65,20 @@ struct KVCacheEstimateOptions {
   const KVCacheEstimateOptions* draft_options = nullptr;
 };
 
+// Computes KV-cache capacity from model metadata and runtime constraints. The
+// estimator owns the model-derived local head counts so callers only provide
+// the effective tensor-parallel width and user/runtime options.
+class KVCacheEstimator final {
+ public:
+  explicit KVCacheEstimator(const ModelArgs& model_args)
+      : model_args_(model_args) {}
+
+  KVCacheCapacity estimate(KVCacheEstimateOptions options) const;
+
+ private:
+  const ModelArgs& model_args_;
+};
+
 struct Dsv4KVCacheEstimateCost {
   int64_t swa_count = 0;
   int64_t n_c4_layers = 0;

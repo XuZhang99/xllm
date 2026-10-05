@@ -20,6 +20,7 @@ cc_library(
     block_manager.h
     embedding_block_manager.h
     block_manager_pool.h
+    kv_cache_manager_factory.h
     linear_state_block_manager.h
     block_manager_impl.h
     concurrent_block_manager_impl.h
@@ -30,6 +31,7 @@ cc_library(
     block.cpp
     embedding_block_manager.cpp
     block_manager_pool.cpp
+    kv_cache_manager_factory.cpp
     linear_state_block_manager.cpp
     concurrent_block_manager_impl.cpp
     block_manager_impl.cpp

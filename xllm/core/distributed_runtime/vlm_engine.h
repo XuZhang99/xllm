@@ -90,12 +90,6 @@ class VLMEngine : public Engine {
       nullptr;
 
   std::unique_ptr<ThreadPool> threadpool_ = nullptr;
-
-  // config for kv cache
-  int64_t n_local_kv_heads_ = 0;
-  int64_t n_local_linear_v_heads_ = 0;
-  int64_t n_local_linear_k_heads_ = 0;
-  int64_t head_dim_ = 0;
 };
 
 }  // namespace xllm
