@@ -13,21 +13,35 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <brpc/channel.h>
-#include <brpc/server.h>
+#include <brpc/callback.h>
+#include <brpc/controller.h>
+#include <butil/fd_guard.h>
 #include <gtest/gtest.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
-#include "api_service/non_stream_call.h"
-#include "api_service/openai_batch.h"
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <nlohmann/json.hpp>
+#include <string>
+#include <thread>
+#include <tuple>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include "api_service/chat_request_decoder.h"
 #include "api_service/openai_json.h"
 #include "api_service/openai_request.h"
 #include "api_service/stream_call.h"
-#include "xllm_service.pb.h"
+#include "tests/api_service/http_protocol_test_fixture.h"
 
 namespace xllm::api_service {
 namespace {
 
-TEST(OpenAIRequestTest, ChatAliasesAndNullableDefaults) {
+TEST(ChatCompletionRequestTest, ChatAliasesAndNullableDefaults) {
   auto [status, body] = normalize_openai_request(
       R"({"messages":[{"role":"assistant","content":null,"reasoning":"why"}],
           "max_tokens":99,"max_completion_tokens":7,"stop":"END",
@@ -44,26 +58,7 @@ TEST(OpenAIRequestTest, ChatAliasesAndNullableDefaults) {
   EXPECT_FALSE(json.contains("tool_choice"));
 }
 
-TEST(OpenAIRequestTest, BatchedInputsKeepTheirTypesAndOrder) {
-  for (const auto& [endpoint, field, target] :
-       {std::tuple{OpenAIEndpoint::COMPLETION, "prompt", "prompts"},
-        std::tuple{OpenAIEndpoint::EMBEDDING, "input", "inputs"}}) {
-    for (const auto& input : {nlohmann::json::array({"a", "b"}),
-                              nlohmann::json::array({{1, 2}, {3}})}) {
-      auto [status, body] = normalize_openai_request(
-          nlohmann::json({{field, input}}).dump(), endpoint, "model");
-      ASSERT_TRUE(status.ok()) << status.message();
-      const auto json = nlohmann::json::parse(body);
-      ASSERT_EQ(json[target].size(), 2);
-      EXPECT_EQ(json[target][0][input[0].is_string() ? "text" : "token_ids"],
-                input[0]);
-      EXPECT_EQ(json[target][1][input[1].is_string() ? "text" : "token_ids"],
-                input[1]);
-    }
-  }
-}
-
-TEST(OpenAIRequestTest, InvalidParametersAreClientErrors) {
+TEST(ChatCompletionRequestTest, InvalidParametersAreClientErrors) {
   const auto base =
       nlohmann::json::parse(R"({"messages":[{"role":"user","content":"hi"}]})");
   for (const auto& patch :
@@ -88,66 +83,43 @@ TEST(OpenAIRequestTest, InvalidParametersAreClientErrors) {
   }
 }
 
-TEST(OpenAIRequestTest, GreedySamplingRequiresOneChoice) {
-  for (const OpenAIEndpoint endpoint :
-       {OpenAIEndpoint::CHAT, OpenAIEndpoint::COMPLETION}) {
-    for (const bool stream : {false, true}) {
-      for (const uint32_t n : {1U, 2U}) {
-        for (const auto& temperature : {nlohmann::json(0),
-                                        nlohmann::json(0.5),
-                                        nlohmann::json(1e-8),
-                                        nlohmann::json(nullptr)}) {
-          nlohmann::json request = {
-              {"prompt", {"hello", "world"}},
-              {"messages", {{{"role", "user"}, {"content", "hello"}}}},
-              {"temperature", temperature},
-              {"n", n},
-              {"stream", stream}};
-          std::string param = "stale";
-          const auto [status, body] = normalize_openai_request(
-              request.dump(), endpoint, "model", &param);
-          const bool greedy_multiple = temperature == 0 && n > 1;
-          EXPECT_EQ(status.ok(), !greedy_multiple) << request;
-          EXPECT_TRUE(param.empty());
-          if (status.ok() && temperature == 1e-8) {
-            EXPECT_EQ(nlohmann::json::parse(body)["temperature"], 0.01);
-          }
+TEST(ChatCompletionRequestTest, GreedySamplingRequiresOneChoice) {
+  for (const bool stream : {false, true}) {
+    for (const uint32_t n : {1U, 2U}) {
+      for (const auto& temperature : {nlohmann::json(0),
+                                      nlohmann::json(0.5),
+                                      nlohmann::json(1e-8),
+                                      nlohmann::json(nullptr)}) {
+        nlohmann::json request = {
+            {"prompt", {"hello", "world"}},
+            {"messages", {{{"role", "user"}, {"content", "hello"}}}},
+            {"temperature", temperature},
+            {"n", n},
+            {"stream", stream}};
+        std::string param = "stale";
+        const auto [status, body] = normalize_openai_request(
+            request.dump(), OpenAIEndpoint::CHAT, "model", &param);
+        const bool greedy_multiple = temperature == 0 && n > 1;
+        EXPECT_EQ(status.ok(), !greedy_multiple) << request;
+        EXPECT_TRUE(param.empty());
+        if (status.ok() && temperature == 1e-8) {
+          EXPECT_EQ(nlohmann::json::parse(body)["temperature"], 0.01);
         }
       }
     }
   }
 }
 
-TEST(OpenAIRequestTest, Vllm023AcceptsTemperaturesAboveTwo) {
-  for (const OpenAIEndpoint endpoint :
-       {OpenAIEndpoint::CHAT, OpenAIEndpoint::COMPLETION}) {
-    const auto [status, body] = normalize_openai_request(
-        R"({"prompt":"hi","messages":[{"role":"user","content":"hi"}],"temperature":3})",
-        endpoint,
-        "model");
-    ASSERT_TRUE(status.ok()) << status.message();
-    EXPECT_EQ(nlohmann::json::parse(body)["temperature"], 3);
-  }
+TEST(ChatCompletionRequestTest, Vllm023AcceptsTemperaturesAboveTwo) {
+  const auto [status, body] = normalize_openai_request(
+      R"({"prompt":"hi","messages":[{"role":"user","content":"hi"}],"temperature":3})",
+      OpenAIEndpoint::CHAT,
+      "model");
+  ASSERT_TRUE(status.ok()) << status.message();
+  EXPECT_EQ(nlohmann::json::parse(body)["temperature"], 3);
 }
 
-TEST(OpenAIRequestTest, SchemaAndSamplingErrorsHaveDistinctTypes) {
-  for (const auto& [body, expected_type] :
-       {std::pair{"{", "Bad Request"},
-        {R"({"prompt":[1,"hi"]})", "Bad Request"},
-        {R"({"prompt":[]})", "BadRequestError"},
-        {R"({"prompt":"hi","stream_options":{"include_usage":true}})",
-         "Bad Request"},
-        {R"({"prompt":"hi","temperature":-1})", "BadRequestError"},
-        {R"({"prompt":"hi","temperature":0,"n":2})", "BadRequestError"}}) {
-    bool schema_error = false;
-    std::string param;
-    const auto [status, normalized] = normalize_openai_request(
-        body, OpenAIEndpoint::COMPLETION, "model", &param, &schema_error);
-    ASSERT_FALSE(status.ok());
-    const auto error = nlohmann::json::parse(openai_error_json(
-        status.code(), status.message(), param, schema_error));
-    EXPECT_EQ(error["error"]["type"], expected_type);
-  }
+TEST(ChatCompletionRequestTest, SchemaAndSamplingErrorsHaveDistinctTypes) {
   bool schema_error = true;
   const auto [status, body] = normalize_openai_request(R"({"messages":[]})",
                                                        OpenAIEndpoint::CHAT,
@@ -158,7 +130,7 @@ TEST(OpenAIRequestTest, SchemaAndSamplingErrorsHaveDistinctTypes) {
   EXPECT_FALSE(schema_error);
 }
 
-TEST(OpenAIRequestTest, ValidationErrorsIdentifyTheirParameters) {
+TEST(ChatCompletionRequestTest, ValidationErrorsIdentifyTheirParameters) {
   const nlohmann::json base = {
       {"messages", {{{"role", "user"}, {"content", "hello"}}}}};
   for (const auto& [patch, expected] :
@@ -216,86 +188,9 @@ TEST(OpenAIRequestTest, ValidationErrorsIdentifyTheirParameters) {
   EXPECT_EQ(nlohmann::json::parse(body)["max_tokens"], 8);
 }
 
-TEST(OpenAIResponseTest, NamedToolChoicePreservesStopAndLength) {
-  for (const bool stream : {false, true}) {
-    for (const std::string reason : {"tool_calls", "length", "stop"}) {
-      proto::ChatResponse response;
-      response.set_object(stream ? "chat.completion.chunk" : "chat.completion");
-      response.add_choices()->set_finish_reason(reason);
-      const auto named = openai_response_json(response, true);
-      EXPECT_EQ(named["choices"][0]["finish_reason"],
-                reason == "tool_calls" ? "stop" : reason);
-      const auto automatic = openai_response_json(response);
-      EXPECT_EQ(automatic["choices"][0]["finish_reason"], reason);
-    }
-  }
-}
-
-TEST(OpenAIRequestTest, CompletionDefaultsAndExtendedStops) {
-  auto [status, body] = normalize_openai_request(
-      R"({"prompt":"hi","max_tokens":null,"stop":["1","2","3","4","5"],"frequency_penalty":-1})",
-      OpenAIEndpoint::COMPLETION,
-      "model");
-  ASSERT_TRUE(status.ok()) << status.message();
-  EXPECT_EQ(nlohmann::json::parse(body)["max_tokens"], 16);
-}
-
-TEST(OpenAIRequestTest, MalformedPromptBatchesAreRejected) {
-  for (const auto& input : {R"([])",
-                            R"([1,"x"])",
-                            R"([[-1]])",
-                            R"([[2147483648]])",
-                            R"(["a",[1]])"}) {
-    auto [status, body] =
-        normalize_openai_request(std::string("{\"input\":") + input + "}",
-                                 OpenAIEndpoint::EMBEDDING,
-                                 "model");
-    EXPECT_EQ(status.code(), StatusCode::INVALID_ARGUMENT) << input;
-  }
-}
-
-TEST(OpenAIRequestTest, UnsupportedSamplingControlsFailExplicitly) {
-  for (const char* field :
-       {"seed", "min_p", "min_tokens", "logit_bias", "structured_outputs"}) {
-    auto request = nlohmann::json({{"prompt", "hi"}, {field, 1}});
-    const auto [status, body] = normalize_openai_request(
-        request.dump(), OpenAIEndpoint::COMPLETION, "model");
-    EXPECT_EQ(status.code(), StatusCode::INVALID_ARGUMENT) << field;
-    EXPECT_NE(status.message().find(field), std::string::npos);
-  }
-}
-
-TEST(OpenAIRequestTest, InternalInputsAndOversizedBatchesAreRejected) {
-  for (const auto& request :
-       {nlohmann::json{{"prompt", "hi"}, {"prompts", {{{"text", "hidden"}}}}},
-        nlohmann::json{{"prompt", std::vector<std::string>(1025, "hi")}}}) {
-    EXPECT_EQ(normalize_openai_request(
-                  request.dump(), OpenAIEndpoint::COMPLETION, "model")
-                  .first.code(),
-              StatusCode::INVALID_ARGUMENT);
-  }
-  EXPECT_EQ(
-      normalize_openai_request(
-          R"({"input":"","token_ids":[1]})", OpenAIEndpoint::EMBEDDING, "model")
-          .first.code(),
-      StatusCode::INVALID_ARGUMENT);
-}
-
-TEST(OpenAIRequestTest, CompletionTokenInputPreservesExistingExtension) {
-  auto [status, body] = normalize_openai_request(
-      R"({"prompt":[1,2,3]})", OpenAIEndpoint::COMPLETION, "model");
-  ASSERT_TRUE(status.ok()) << status.message();
-  const auto json = nlohmann::json::parse(body);
-  EXPECT_EQ(json["token_ids"], nlohmann::json::array({1, 2, 3}));
-  EXPECT_FALSE(json.contains("prompts"));
-  std::tie(status, body) =
-      normalize_openai_request(R"({"prompt":"","token_ids":[1,2,3]})",
-                               OpenAIEndpoint::COMPLETION,
-                               "model");
-  EXPECT_TRUE(status.ok()) << status.message();
-}
-
-TEST(OpenAIRequestTest,
+// The body-length utility is shared; keep its regression with Chat-typed
+// ingress.
+TEST(ChatCompletionRequestTest,
      InferenceBodyLengthIsCheckedWithoutRequiringContentLength) {
   brpc::Controller controller;
   controller.request_attachment().append("{}binary");
@@ -314,7 +209,7 @@ TEST(OpenAIRequestTest,
   }
 }
 
-TEST(OpenAIRequestTest, CallPayloadParsingHandlesInvalidLengthHeaders) {
+TEST(ChatCompletionRequestTest, CallPayloadParsingHandlesInvalidLengthHeaders) {
   for (const char* value :
        {"-1", "9999", "nan", "2x", "184467440737095516160"}) {
     for (const char* header : {kInferContentLength, kContentLength}) {
@@ -347,15 +242,27 @@ TEST(OpenAIRequestTest, CallPayloadParsingHandlesInvalidLengthHeaders) {
   EXPECT_EQ(call.take_request_payload(), "binary");
 }
 
-TEST(OpenAIJsonTest, StopReasonsKeepTheirJsonTypes) {
+TEST(ChatCompletionResponseTest, NamedToolChoicePreservesStopAndLength) {
+  for (const bool stream : {false, true}) {
+    for (const std::string reason : {"tool_calls", "length", "stop"}) {
+      proto::ChatResponse response;
+      response.set_object(stream ? "chat.completion.chunk" : "chat.completion");
+      response.add_choices()->set_finish_reason(reason);
+      const auto named = openai_response_json(response, true);
+      EXPECT_EQ(named["choices"][0]["finish_reason"],
+                reason == "tool_calls" ? "stop" : reason);
+      const auto automatic = openai_response_json(response);
+      EXPECT_EQ(automatic["choices"][0]["finish_reason"], reason);
+    }
+  }
+}
+
+TEST(ChatCompletionResponseTest, StopReasonsKeepTheirJsonTypes) {
   for (const StopReason& reason : {StopReason{},
                                    StopReason{int32_t{123}},
                                    StopReason{std::string("END")}}) {
     proto::ChatResponse chat;
-    proto::CompletionResponse completion;
     set_proto_stop_reason(reason, chat.add_choices()->mutable_stop_reason());
-    set_proto_stop_reason(reason,
-                          completion.add_choices()->mutable_stop_reason());
     const nlohmann::json expected =
         std::holds_alternative<int32_t>(reason)       ? nlohmann::json(123)
         : std::holds_alternative<std::string>(reason) ? nlohmann::json("END")
@@ -363,17 +270,15 @@ TEST(OpenAIJsonTest, StopReasonsKeepTheirJsonTypes) {
     for (const bool stream : {false, true}) {
       chat.set_object(stream ? "chat.completion.chunk" : "chat.completion");
       chat.mutable_choices(0)->set_finish_reason("stop");
-      completion.mutable_choices(0)->set_finish_reason("stop");
       EXPECT_EQ(openai_response_json(chat)["choices"][0]["stop_reason"],
                 expected);
-      EXPECT_EQ(
-          openai_response_json(completion, stream)["choices"][0]["stop_reason"],
-          expected);
     }
   }
 }
 
-TEST(OpenAIJsonTest, FingerprintIsStableAndAppearsOnlyOnFinalStreamMessages) {
+// Fingerprints are shared by Chat and Text Completion; test the utility once.
+TEST(ChatCompletionResponseTest,
+     FingerprintIsStableAndAppearsOnlyOnFinalStreamMessages) {
   const std::string fingerprint = openai_system_fingerprint("model=a;tp=16");
   EXPECT_TRUE(fingerprint.starts_with("xllm-"));
   EXPECT_EQ(fingerprint, openai_system_fingerprint("model=a;tp=16"));
@@ -402,7 +307,7 @@ TEST(OpenAIJsonTest, FingerprintIsStableAndAppearsOnlyOnFinalStreamMessages) {
   EXPECT_EQ(full["system_fingerprint"], fingerprint);
 }
 
-TEST(OpenAIJsonTest, ChatFinishAndUsageChunksKeepRequiredFields) {
+TEST(ChatCompletionResponseTest, ChatFinishAndUsageChunksKeepRequiredFields) {
   proto::ChatResponse response;
   response.set_object("chat.completion.chunk");
   auto* choice = response.add_choices();
@@ -419,7 +324,7 @@ TEST(OpenAIJsonTest, ChatFinishAndUsageChunksKeepRequiredFields) {
   EXPECT_EQ(json["usage"]["prompt_tokens"], 2);
 }
 
-TEST(OpenAIJsonTest, ReasoningAndLogprobBytesMatchVllm) {
+TEST(ChatCompletionResponseTest, ReasoningAndLogprobBytesMatchVllm) {
   proto::ChatResponse response;
   auto* choice = response.add_choices();
   choice->mutable_message()->set_reasoning_content("why");
@@ -437,7 +342,7 @@ TEST(OpenAIJsonTest, ReasoningAndLogprobBytesMatchVllm) {
             nlohmann::json::array());
 }
 
-TEST(OpenAIJsonTest, FullChatPreservesNullsAndForcedToolContent) {
+TEST(ChatCompletionResponseTest, FullChatPreservesNullsAndForcedToolContent) {
   proto::ChatResponse response;
   response.set_object("chat.completion");
   auto* message = response.add_choices()->mutable_message();
@@ -467,21 +372,8 @@ TEST(OpenAIJsonTest, FullChatPreservesNullsAndForcedToolContent) {
   EXPECT_FALSE(json["usage"].contains("completion_tokens_details"));
 }
 
-TEST(OpenAIJsonTest, CompletionSeparatesFullAndStreamMetadata) {
-  proto::CompletionResponse response;
-  response.set_object("text_completion");
-  response.add_choices()->mutable_logprobs()->add_token_ids(42);
-  response.mutable_usage()->set_prompt_tokens(2);
-  for (const bool stream : {false, true}) {
-    const auto json = openai_response_json(response, stream);
-    EXPECT_EQ(json.contains("system_fingerprint"), !stream);
-    EXPECT_EQ(json["choices"][0].contains("prompt_logprobs"), !stream);
-    EXPECT_EQ(json["usage"].contains("prompt_tokens_details"), !stream);
-    EXPECT_FALSE(json["choices"][0]["logprobs"].contains("token_ids"));
-  }
-}
-
-TEST(OpenAIJsonTest, ToolArgumentDeltasOnlyRepeatIndexAndArguments) {
+TEST(ChatCompletionResponseTest,
+     ToolArgumentDeltasOnlyRepeatIndexAndArguments) {
   proto::ChatResponse response;
   response.set_object("chat.completion.chunk");
   auto* delta = response.add_choices()->mutable_delta();
@@ -502,81 +394,7 @@ TEST(OpenAIJsonTest, ToolArgumentDeltasOnlyRepeatIndexAndArguments) {
       (nlohmann::json{{"index", 0}, {"function", {{"arguments", "{}"}}}}));
 }
 
-TEST(OpenAIJsonTest, EmbeddingsUseFloat32LittleEndianBase64) {
-  proto::EmbeddingResponse response;
-  response.add_data()->add_embedding(1.0f);
-  response.mutable_data(0)->add_embedding(-2.0f);
-  const auto json = openai_embedding_json(response, "base64");
-  EXPECT_EQ(json["data"][0]["embedding"], "AACAPwAAAMA=");
-  EXPECT_FALSE(json["usage"].contains("completion_tokens"));
-  EXPECT_EQ(openai_embedding_json(response, "float")["data"][0]["embedding"],
-            nlohmann::json::array({1.0, -2.0}));
-}
-
-TEST(OpenAIBatchTest, ReordersChoicesAndSumsFinalUsage) {
-  OpenAIBatch batch(/*size=*/2, /*choices_per_prompt=*/2, /*streaming=*/false);
-  std::vector<RequestOutput> sent;
-  OutputCallback send = [&sent](RequestOutput output) {
-    sent.emplace_back(std::move(output));
-    return true;
-  };
-  for (size_t index : {1, 0}) {
-    RequestOutput output;
-    output.finished = true;
-    output.usage = Usage{3, 2, 5, 1};
-    output.outputs.resize(2);
-    output.outputs[0].index = 0;
-    output.outputs[1].index = 1;
-    batch.accept(index, std::move(output), send);
-  }
-  ASSERT_EQ(sent.size(), 1);
-  ASSERT_EQ(sent[0].outputs.size(), 4);
-  EXPECT_EQ(sent[0].outputs[0].index, 0);
-  EXPECT_EQ(sent[0].outputs[3].index, 3);
-  EXPECT_EQ(sent[0].usage->num_prompt_tokens, 6);
-  EXPECT_EQ(sent[0].usage->num_total_tokens, 10);
-  EXPECT_TRUE(sent[0].finished);
-}
-
-TEST(OpenAIBatchTest, StreamingWaitsForEveryPromptAndUsesLatestUsage) {
-  OpenAIBatch batch(/*size=*/2, /*choices_per_prompt=*/1, /*streaming=*/true);
-  std::vector<RequestOutput> sent;
-  OutputCallback send = [&sent](RequestOutput output) {
-    sent.emplace_back(std::move(output));
-    return true;
-  };
-  RequestOutput first;
-  first.usage = Usage{3, 1, 4, 0};
-  batch.accept(0, std::move(first), send);
-  RequestOutput second;
-  second.finished = true;
-  second.usage = Usage{4, 2, 6, 0};
-  batch.accept(1, std::move(second), send);
-  RequestOutput last;
-  last.finished = true;
-  last.usage = Usage{3, 3, 6, 0};
-  batch.accept(0, std::move(last), send);
-  ASSERT_EQ(sent.size(), 3);
-  EXPECT_FALSE(sent[0].finished);
-  EXPECT_FALSE(sent[1].finished);
-  EXPECT_TRUE(sent[2].finished);
-  EXPECT_EQ(sent[2].usage->num_total_tokens, 12);
-}
-
-TEST(OpenAIBatchTest, ErrorClosesAllRemainingCallbacks) {
-  OpenAIBatch batch(/*size=*/2, /*choices_per_prompt=*/1, /*streaming=*/true);
-  int32_t sent = 0;
-  OutputCallback send = [&sent](RequestOutput) {
-    ++sent;
-    return true;
-  };
-  EXPECT_FALSE(batch.accept(
-      0, RequestOutput(Status(StatusCode::INVALID_ARGUMENT, "bad")), send));
-  EXPECT_FALSE(batch.accept(1, RequestOutput(), send));
-  EXPECT_EQ(sent, 1);
-}
-
-class StreamTestService final : public proto::XllmAPIService {
+class ChatCompletionTestService final : public AdmissionTestService {
  public:
   void ChatCompletionsHttp(google::protobuf::RpcController* controller,
                            const proto::HttpRequest*,
@@ -584,6 +402,19 @@ class StreamTestService final : public proto::XllmAPIService {
                            google::protobuf::Closure* done) override {
     auto* ctrl = static_cast<brpc::Controller*>(controller);
     const std::string mode = ctrl->request_attachment().to_string();
+    if (ctrl->http_request().uri().path() == "/v1/chat/completions") {
+      chat_request(ctrl, done, mode);
+      return;
+    }
+    if (mode == "openai") {
+      proto::ChatRequest request;
+      request.set_stream(true);
+      proto::ChatResponse response;
+      StreamCall<proto::ChatRequest, proto::ChatResponse> call(
+          ctrl, done, &request, &response, /*use_arena=*/true);
+      call.finish();
+      return;
+    }
     proto::ChatRequest request;
     request.set_stream(mode != "named_full");
     request.mutable_stream_options()->set_include_usage(true);
@@ -603,10 +434,12 @@ class StreamTestService final : public proto::XllmAPIService {
         &response,
         /*use_arena=*/true,
         /*is_http_request=*/true);
-    if (mode == "invalid" || mode == "missing" || mode == "limited") {
-      call.finish_with_error(mode == "invalid" ? StatusCode::INVALID_ARGUMENT
-                             : mode == "missing"
-                                 ? StatusCode::NOT_FOUND
+    if (mode == "invalid" || mode == "missing" || mode == "limited" ||
+        mode == "exhausted") {
+      call.finish_with_error(mode == "invalid"   ? StatusCode::INVALID_ARGUMENT
+                             : mode == "missing" ? StatusCode::NOT_FOUND
+                             : mode == "limited"
+                                 ? StatusCode::RATE_LIMITED
                                  : StatusCode::RESOURCE_EXHAUSTED,
                              "failure",
                              mode == "missing" ? "model" : "");
@@ -640,40 +473,240 @@ class StreamTestService final : public proto::XllmAPIService {
     call.finish();
     call.finish();
   }
+
+ private:
+  void chat_request(brpc::Controller* controller,
+                    google::protobuf::Closure* done,
+                    const std::string& body) {
+    auto [status, normalized] =
+        normalize_openai_request(body, OpenAIEndpoint::CHAT, "fixture");
+    proto::ChatRequest request;
+    proto::ChatResponse response;
+    if (status.ok()) {
+      status = decode_chat_request(std::move(normalized), &request);
+    }
+    StreamCall<proto::ChatRequest, proto::ChatResponse> call(
+        controller,
+        done,
+        &request,
+        &response,
+        /*use_arena=*/true,
+        /*is_http_request=*/true);
+    if (!status.ok()) {
+      call.finish_with_error(status.code(), status.message());
+      return;
+    }
+    response.set_id("chatcmpl-fixture");
+    response.set_created(1);
+    response.set_model("fixture");
+    response.set_object(request.stream() ? "chat.completion.chunk"
+                                         : "chat.completion");
+    auto* choice = response.add_choices();
+    choice->set_index(0);
+    if (request.stream()) {
+      choice->mutable_delta()->set_role("assistant");
+      choice->mutable_delta()->set_content("hi");
+    } else {
+      choice->mutable_message()->set_role("assistant");
+      choice->mutable_message()->set_content("hi");
+    }
+    serve_admitted(
+        call,
+        request.messages(0).content(),
+        [&] { call.write(response); },
+        [&] {
+          if (request.stream()) {
+            choice->mutable_delta()->clear_content();
+            choice->set_finish_reason("stop");
+            call.write(response);
+            call.finish();
+          } else {
+            choice->set_finish_reason("stop");
+            response.mutable_usage()->set_prompt_tokens(1);
+            response.mutable_usage()->set_completion_tokens(1);
+            response.mutable_usage()->set_total_tokens(2);
+            call.write_and_finish(response);
+          }
+        });
+  }
 };
 
-class OpenAICallTest : public testing::Test {
+class ChatCompletionProtocolTest : public HttpProtocolTestFixture {
  protected:
   void SetUp() override {
-    ASSERT_EQ(server_.AddService(&service_,
-                                 brpc::SERVER_DOESNT_OWN_SERVICE,
-                                 "/test => ChatCompletionsHttp"),
-              0);
-    ASSERT_EQ(server_.Start(/*port=*/0, /*options=*/nullptr), 0);
-    brpc::ChannelOptions options;
-    options.protocol = brpc::PROTOCOL_HTTP;
-    options.timeout_ms = 5000;
-    options.max_retry = 0;
-    ASSERT_EQ(channel_.Init(server_.listen_address(), &options), 0);
-  }
-  void TearDown() override {
-    server_.Stop(/*timeout_ms=*/0);
-    server_.Join();
+    start_service(service_,
+                  "/test => ChatCompletionsHttp,"
+                  "/v1/chat/completions => ChatCompletionsHttp");
   }
   void request(const std::string& mode, brpc::Controller& controller) {
-    controller.http_request().uri() = "/test";
-    controller.http_request().set_method(brpc::HTTP_METHOD_POST);
-    controller.request_attachment().append(mode);
-    channel_.CallMethod(nullptr, &controller, nullptr, nullptr, nullptr);
+    post("/test", mode, controller, /*content_type=*/nullptr);
   }
-  StreamTestService service_;
-  brpc::Server server_;
-  brpc::Channel channel_;
+  std::string chat_body(bool stream, const std::string& content = "hi") const {
+    return nlohmann::json(
+               {{"model", "fixture"},
+                {"stream", stream},
+                {"messages", {{{"role", "user"}, {"content", content}}}}})
+        .dump();
+  }
+  void chat(bool stream, brpc::Controller& controller) {
+    post("/v1/chat/completions", chat_body(stream), controller);
+  }
+  int32_t open_socket(bool stream, const std::string& content) {
+    return HttpProtocolTestFixture::open_socket("/v1/chat/completions",
+                                                chat_body(stream, content));
+  }
+  void check_success(bool stream) {
+    brpc::Controller controller;
+    chat(stream, controller);
+    ASSERT_FALSE(controller.Failed()) << controller.ErrorText();
+    EXPECT_EQ(controller.http_response().status_code(), 200);
+    const std::string body = controller.response_attachment().to_string();
+    if (stream) {
+      EXPECT_EQ(controller.http_response().content_type(),
+                "text/event-stream; charset=utf-8");
+      EXPECT_NE(body.find("\"content\":\"hi\""), std::string::npos);
+      EXPECT_TRUE(body.ends_with("data: [DONE]\n\n"));
+      EXPECT_EQ(body.find("[DONE]"), body.rfind("[DONE]"));
+    } else {
+      EXPECT_EQ(controller.http_response().content_type(), "application/json");
+      const auto json = nlohmann::json::parse(body);
+      EXPECT_EQ(json["choices"][0]["message"]["content"], "hi");
+    }
+    ASSERT_TRUE(service_.wait_released());
+    EXPECT_EQ(service_.rate_limiter().get_num_concurrent_requests(), 0);
+  }
+  ChatCompletionTestService service_;
 };
 
-TEST_F(OpenAICallTest, PreStreamErrorsUseJsonAndCorrectHttpStatus) {
-  for (const auto& [mode, code] :
-       {std::pair{"invalid", 400}, {"missing", 404}, {"limited", 429}}) {
+TEST_F(ChatCompletionProtocolTest,
+       RealAdmissionRejectsBothModesBeforeSseAndRecovers) {
+  check_success(/*stream=*/false);
+  check_success(/*stream=*/true);
+  butil::fd_guard held(open_socket(/*stream=*/true, "hold"));
+  ASSERT_GE(static_cast<int32_t>(held), 0);
+  ASSERT_TRUE(service_.wait_held());
+  pollfd readable{held, POLLIN, 0};
+  EXPECT_EQ(poll(&readable, 1, 0), 0) << "SSE headers committed before output";
+  EXPECT_EQ(service_.rate_limiter().get_num_concurrent_requests(), 1);
+  for (const bool stream : {false, true, false, true}) {
+    brpc::Controller controller;
+    chat(stream, controller);
+    EXPECT_EQ(controller.http_response().status_code(), 429);
+    EXPECT_EQ(controller.http_response().content_type(), "application/json");
+    EXPECT_EQ(controller.http_response().GetHeader("Retry-After"), nullptr);
+    const std::string body = controller.response_attachment().to_string();
+    const auto json = nlohmann::json::parse(body);
+    const std::string message =
+        "The number of concurrent requests has reached the limit.";
+    EXPECT_EQ(json,
+              nlohmann::json({{"error",
+                               {{"message", message},
+                                {"type", "RateLimitError"},
+                                {"param", nullptr},
+                                {"code", 429}}}}));
+    EXPECT_EQ(body.find("data:"), std::string::npos);
+    EXPECT_EQ(body.find("[DONE]"), std::string::npos);
+    EXPECT_EQ(service_.rate_limiter().get_num_concurrent_requests(), 1);
+  }
+  service_.release();
+  ASSERT_TRUE(service_.wait_released());
+  check_success(/*stream=*/false);
+  check_success(/*stream=*/true);
+}
+
+TEST_F(ChatCompletionProtocolTest,
+       SleepingAdmissionIsUnavailableNotRateLimited) {
+  ASSERT_TRUE(service_.rate_limiter().try_set_sleeping());
+  for (const bool stream : {false, true}) {
+    brpc::Controller controller;
+    chat(stream, controller);
+    EXPECT_EQ(controller.http_response().status_code(), 503);
+    EXPECT_EQ(controller.http_response().content_type(), "application/json");
+    const auto error = nlohmann::json::parse(
+        controller.response_attachment().to_string())["error"];
+    EXPECT_EQ(error["type"], "ServiceUnavailableError");
+    EXPECT_EQ(error["message"], "Model is currently in sleep state.");
+    EXPECT_EQ(error["code"], 503);
+    EXPECT_TRUE(service_.rate_limiter().is_sleeping());
+  }
+  EXPECT_TRUE(service_.rate_limiter().try_wakeup());
+  check_success(/*stream=*/true);
+}
+
+TEST_F(ChatCompletionProtocolTest,
+       ExplicitCancellationReleasesHeldRequestOnce) {
+  for (const bool stream : {false, true}) {
+    butil::fd_guard held(open_socket(stream, "hold"));
+    ASSERT_GE(static_cast<int32_t>(held), 0);
+    ASSERT_TRUE(service_.wait_held());
+    service_.release(/*cancel=*/true);
+    ASSERT_TRUE(service_.wait_released());
+    EXPECT_EQ(service_.rate_limiter().get_num_concurrent_requests(), 0);
+    service_.release(/*cancel=*/true);
+    EXPECT_EQ(service_.rate_limiter().get_num_concurrent_requests(), 0);
+    check_success(stream);
+  }
+}
+
+TEST_F(ChatCompletionProtocolTest,
+       SocketDisconnectBeforeAndAfterSseReleasesRequest) {
+  for (const auto& [stream, content] :
+       {std::pair{false, "hold"}, {true, "hold"}, {true, "hold_started"}}) {
+    butil::fd_guard held(open_socket(stream, content));
+    ASSERT_GE(static_cast<int32_t>(held), 0);
+    ASSERT_TRUE(service_.wait_held());
+    pollfd readable{held, POLLIN, 0};
+    if (std::string(content) == "hold_started") {
+      ASSERT_EQ(poll(&readable, 1, 5000), 1);
+      char buffer[4096];
+      const ssize_t size = recv(held, buffer, sizeof(buffer), 0);
+      ASSERT_GT(size, 0);
+      EXPECT_NE(
+          std::string(buffer, static_cast<size_t>(size)).find("HTTP/1.1 200"),
+          std::string::npos);
+    } else {
+      EXPECT_EQ(poll(&readable, 1, 0), 0);
+    }
+    linger reset{1, 0};
+    ASSERT_EQ(setsockopt(held, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+              0);
+    held.reset(-1);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    bool cancelled = service_.observe_disconnect();
+    while (!cancelled && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      cancelled = service_.observe_disconnect();
+    }
+    EXPECT_TRUE(cancelled);
+    EXPECT_EQ(service_.rate_limiter().get_num_concurrent_requests(), 1);
+    service_.release();
+    ASSERT_TRUE(service_.wait_released());
+    check_success(stream);
+  }
+}
+
+TEST_F(ChatCompletionProtocolTest, DISABLED_OfficialSdkCompatibility) {
+  const std::string url = base_url() + "/v1";
+  run_sdk(XLLM_CHAT_COMPLETION_SDK_CLIENT, url, "success");
+  ASSERT_TRUE(service_.wait_released());
+  butil::fd_guard held(open_socket(/*stream=*/true, "hold"));
+  ASSERT_GE(static_cast<int32_t>(held), 0);
+  ASSERT_TRUE(service_.wait_held());
+  run_sdk(XLLM_CHAT_COMPLETION_SDK_CLIENT, url, "limited");
+  EXPECT_EQ(service_.rate_limiter().get_num_concurrent_requests(), 1);
+  service_.release();
+  ASSERT_TRUE(service_.wait_released());
+  run_sdk(XLLM_CHAT_COMPLETION_SDK_CLIENT, url, "success");
+  ASSERT_TRUE(service_.wait_released());
+  EXPECT_EQ(service_.rate_limiter().get_num_concurrent_requests(), 0);
+}
+
+TEST_F(ChatCompletionProtocolTest, PreStreamErrorsUseJsonAndCorrectHttpStatus) {
+  for (const auto& [mode, code] : {std::pair{"invalid", 400},
+                                   {"missing", 404},
+                                   {"limited", 429},
+                                   {"exhausted", 500}}) {
     brpc::Controller controller;
     request(mode, controller);
     EXPECT_EQ(controller.http_response().status_code(), code);
@@ -681,13 +714,16 @@ TEST_F(OpenAICallTest, PreStreamErrorsUseJsonAndCorrectHttpStatus) {
     const auto json =
         nlohmann::json::parse(controller.response_attachment().to_string());
     EXPECT_EQ(json["error"]["code"], code);
+    if (std::string(mode) == "exhausted") {
+      EXPECT_EQ(json["error"]["type"], "InternalServerError");
+    }
     EXPECT_EQ(json["error"]["param"],
               std::string(mode) == "missing" ? nlohmann::json("model")
                                              : nlohmann::json(nullptr));
   }
 }
 
-TEST_F(OpenAICallTest, NamedToolChoiceIsAppliedToHttpAndSse) {
+TEST_F(ChatCompletionProtocolTest, NamedToolChoiceIsAppliedToHttpAndSse) {
   for (const std::string mode :
        {"named_full", "named_stream", "required_stream"}) {
     brpc::Controller controller;
@@ -701,7 +737,8 @@ TEST_F(OpenAICallTest, NamedToolChoiceIsAppliedToHttpAndSse) {
   }
 }
 
-TEST_F(OpenAICallTest, StreamsEndWithExactlyOneDoneAndUsageChoicesArray) {
+TEST_F(ChatCompletionProtocolTest,
+       StreamsEndWithExactlyOneDoneAndUsageChoicesArray) {
   brpc::Controller controller;
   request("stream", controller);
   ASSERT_FALSE(controller.Failed()) << controller.ErrorText();
@@ -715,7 +752,8 @@ TEST_F(OpenAICallTest, StreamsEndWithExactlyOneDoneAndUsageChoicesArray) {
   EXPECT_EQ(body.find("[DONE]", done + 12), std::string::npos);
 }
 
-TEST_F(OpenAICallTest, ContinuousUsageIncludesCountsOnContentChunks) {
+TEST_F(ChatCompletionProtocolTest,
+       ContinuousUsageIncludesCountsOnContentChunks) {
   brpc::Controller controller;
   request("continuous", controller);
   ASSERT_FALSE(controller.Failed()) << controller.ErrorText();
@@ -727,7 +765,7 @@ TEST_F(OpenAICallTest, ContinuousUsageIncludesCountsOnContentChunks) {
   EXPECT_EQ(first["choices"].size(), 1);
 }
 
-TEST_F(OpenAICallTest, GenerationErrorsAreSseJsonAndCloseStream) {
+TEST_F(ChatCompletionProtocolTest, GenerationErrorsAreSseJsonAndCloseStream) {
   brpc::Controller controller;
   request("stream_error", controller);
   ASSERT_FALSE(controller.Failed()) << controller.ErrorText();
@@ -735,6 +773,13 @@ TEST_F(OpenAICallTest, GenerationErrorsAreSseJsonAndCloseStream) {
   EXPECT_NE(body.find("data: {\"error\":"), std::string::npos);
   EXPECT_NE(body.find("generation failed"), std::string::npos);
   EXPECT_TRUE(body.ends_with("data: [DONE]\n\n"));
+}
+
+TEST_F(ChatCompletionProtocolTest, OpenAiStreamStillEmitsDoneSentinel) {
+  brpc::Controller controller;
+  request("openai", controller);
+  ASSERT_FALSE(controller.Failed()) << controller.ErrorText();
+  EXPECT_EQ(controller.response_attachment().to_string(), "data: [DONE]\n\n");
 }
 
 }  // namespace
