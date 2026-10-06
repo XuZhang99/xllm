@@ -144,7 +144,7 @@ TEST(KVCacheEstimationTest, DraftTp1OverridesTensorParallelHeadDerivation) {
 
 TEST(KVCacheEstimationTest, SpeculativeEmbeddingCostDependsOnAlgorithm) {
   ModelArgs model_args = make_standard_args();
-  model_args.hidden_size(8);
+  model_args.hidden_size(64);
   runtime::Options runtime_options;
   runtime_options.block_size(16)
       .enable_task_pipeline(true)

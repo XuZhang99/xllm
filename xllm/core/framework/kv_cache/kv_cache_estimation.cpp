@@ -16,6 +16,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache_estimation.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <utility>
@@ -727,7 +728,7 @@ int64_t KVCacheEstimator::estimate_memory_budget(
     GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
     if (options.max_memory_utilization() < 1.0) {
       const int64_t buffer_memory = static_cast<int64_t>(
-          total_memory * (1.0 - options.max_memory_utilization()));
+          std::ceil(total_memory * (1.0 - options.max_memory_utilization())));
       available_memory -= buffer_memory;
     }
     if (options.max_cache_size() > 0) {
