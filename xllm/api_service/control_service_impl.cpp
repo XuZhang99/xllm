@@ -47,10 +47,9 @@ bool parse_fork_master_request(const proto::MasterInfos* request,
       std::filesystem::path(request->model_path()).lexically_normal();
   std::string model_id;
   if (model_path.has_filename()) {
-    model_id = std::filesystem::path(request->model_path()).filename();
+    model_id = model_path.filename().string();
   } else {
-    model_id =
-        std::filesystem::path(request->model_path()).parent_path().filename();
+    model_id = model_path.parent_path().filename().string();
   }
   options.model_id() = model_id;
   options.master_node_addr() = request->master_node_addr();
