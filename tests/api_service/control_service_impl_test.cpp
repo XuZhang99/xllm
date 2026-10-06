@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "api_service/control_request_utils.h"
+#include "api_service/control_service_impl.h"
 
 #include <gtest/gtest.h>
 
@@ -25,11 +25,19 @@ limitations under the License.
 
 #include "core/common/options.h"
 
-namespace xllm::api_service {
-namespace {
+namespace xllm {
 
-class ControlRequestUtilsTest : public testing::Test {
+class ControlServiceImplTest : public testing::Test {
  protected:
+  static Status parse_fork_master_request(const proto::MasterInfos& request,
+                                          Options& options) {
+    return ControlServiceImpl::parse_fork_master_request(request, options);
+  }
+
+  static WakeupOptions parse_wakeup_options(const proto::MasterInfos& request) {
+    return ControlServiceImpl::parse_wakeup_options(request);
+  }
+
   void SetUp() override {
     std::string directory_template =
         (std::filesystem::temp_directory_path() / "xllm-control-request-XXXXXX")
@@ -58,7 +66,7 @@ class ControlRequestUtilsTest : public testing::Test {
   std::filesystem::path model_path_;
 };
 
-TEST_F(ControlRequestUtilsTest,
+TEST_F(ControlServiceImplTest,
        NormalizesModelIdWithoutChangingRequestedModelPath) {
   const std::string model_path = model_path_.string();
   const std::vector<std::string> paths = {
@@ -83,7 +91,7 @@ TEST_F(ControlRequestUtilsTest,
   }
 }
 
-TEST_F(ControlRequestUtilsTest, CopiesForkStatusAndMasterNodeAddress) {
+TEST_F(ControlServiceImplTest, CopiesForkStatusAndMasterNodeAddress) {
   proto::MasterInfos request = fork_request();
   request.set_model_id("unused-request-alias");
   request.set_master_node_addr("127.0.0.1:9000");
@@ -97,7 +105,7 @@ TEST_F(ControlRequestUtilsTest, CopiesForkStatusAndMasterNodeAddress) {
   EXPECT_EQ(options.master_status(), MasterStatus::DEEP_SLEEP);
 }
 
-TEST_F(ControlRequestUtilsTest, UsesDefaultParallelSizesForOmittedFields) {
+TEST_F(ControlServiceImplTest, UsesDefaultParallelSizesForOmittedFields) {
   const proto::MasterInfos request = fork_request();
   Options options;
 
@@ -106,7 +114,7 @@ TEST_F(ControlRequestUtilsTest, UsesDefaultParallelSizesForOmittedFields) {
   EXPECT_EQ(options.dp_size(), 1);
 }
 
-TEST_F(ControlRequestUtilsTest, AppliesPositiveParallelOverrides) {
+TEST_F(ControlServiceImplTest, AppliesPositiveParallelOverrides) {
   proto::MasterInfos request = fork_request();
   request.set_nnodes(8);
   request.set_dp_size(2);
@@ -117,7 +125,7 @@ TEST_F(ControlRequestUtilsTest, AppliesPositiveParallelOverrides) {
   EXPECT_EQ(options.dp_size(), 2);
 }
 
-TEST_F(ControlRequestUtilsTest, AppliesParallelOverridesIndependently) {
+TEST_F(ControlServiceImplTest, AppliesParallelOverridesIndependently) {
   proto::MasterInfos request = fork_request();
   request.set_nnodes(8);
   Options node_options;
@@ -133,7 +141,7 @@ TEST_F(ControlRequestUtilsTest, AppliesParallelOverridesIndependently) {
   EXPECT_EQ(data_parallel_options.dp_size(), 2);
 }
 
-TEST_F(ControlRequestUtilsTest, PreservesParallelOptionsForNonpositiveFields) {
+TEST_F(ControlServiceImplTest, PreservesParallelOptionsForNonpositiveFields) {
   for (const int32_t requested_size : {0, -1}) {
     SCOPED_TRACE(requested_size);
     proto::MasterInfos request = fork_request();
@@ -149,7 +157,7 @@ TEST_F(ControlRequestUtilsTest, PreservesParallelOptionsForNonpositiveFields) {
   }
 }
 
-TEST_F(ControlRequestUtilsTest, RejectsEmptyModelPath) {
+TEST_F(ControlServiceImplTest, RejectsEmptyModelPath) {
   proto::MasterInfos request;
   Options options;
 
@@ -159,7 +167,7 @@ TEST_F(ControlRequestUtilsTest, RejectsEmptyModelPath) {
   EXPECT_EQ(status.message(), "Failed to parse fork master request");
 }
 
-TEST_F(ControlRequestUtilsTest,
+TEST_F(ControlServiceImplTest,
        RejectsMissingModelPathWithoutChangingExistingOptions) {
   proto::MasterInfos request = fork_request();
   request.set_model_path((temp_directory_ / "missing-model").string());
@@ -185,7 +193,7 @@ TEST_F(ControlRequestUtilsTest,
   EXPECT_EQ(options.dp_size(), 1);
 }
 
-TEST(ControlWakeupOptionsTest, EmptyRequestUsesLocalWakeupDefaults) {
+TEST_F(ControlServiceImplTest, EmptyRequestUsesLocalWakeupDefaults) {
   const proto::MasterInfos request;
 
   const WakeupOptions options = parse_wakeup_options(request);
@@ -194,7 +202,7 @@ TEST(ControlWakeupOptionsTest, EmptyRequestUsesLocalWakeupDefaults) {
   EXPECT_TRUE(options.src_weight_segments.empty());
 }
 
-TEST(ControlWakeupOptionsTest, PreservesRemoteAddressesWithoutSegments) {
+TEST_F(ControlServiceImplTest, PreservesRemoteAddressesWithoutSegments) {
   proto::MasterInfos request;
   request.add_remote_addrs("second:9000");
   request.add_remote_addrs("first:9000");
@@ -205,7 +213,7 @@ TEST(ControlWakeupOptionsTest, PreservesRemoteAddressesWithoutSegments) {
   EXPECT_TRUE(options.src_weight_segments.empty());
 }
 
-TEST(ControlWakeupOptionsTest, PreservesRemoteAndWeightSegmentOrder) {
+TEST_F(ControlServiceImplTest, PreservesRemoteAndWeightSegmentOrder) {
   proto::MasterInfos request;
   request.add_remote_addrs("second:9000");
   request.add_remote_addrs("first:9000");
@@ -241,7 +249,7 @@ TEST(ControlWakeupOptionsTest, PreservesRemoteAndWeightSegmentOrder) {
   EXPECT_TRUE(options.src_weight_segments[2].empty());
 }
 
-TEST(ControlWakeupOptionsTest, IgnoresSourceSegmentsWithoutRemoteAddresses) {
+TEST_F(ControlServiceImplTest, IgnoresSourceSegmentsWithoutRemoteAddresses) {
   proto::MasterInfos request;
   auto* segment = request.add_src_weight_segments()->add_segments();
   segment->set_offset(256);
@@ -252,5 +260,4 @@ TEST(ControlWakeupOptionsTest, IgnoresSourceSegmentsWithoutRemoteAddresses) {
   EXPECT_TRUE(options.src_weight_segments.empty());
 }
 
-}  // namespace
-}  // namespace xllm::api_service
+}  // namespace xllm

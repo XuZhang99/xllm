@@ -95,16 +95,13 @@ cc_test(
 
 cc_test(
   NAME
-    control_request_utils_test
+    control_service_impl_test
   NO_NPU_RUNTIME
   SRCS
-    control_request_utils_test.cpp
-    ../../xllm/api_service/control_request_utils.cpp
+    control_service_impl_test.cpp
   DEPS
-    proto::xllm_proto
+    api_service
     GTest::gtest_main
-    glog::glog
-    nlohmann_json::nlohmann_json
 )
 
 cc_test(

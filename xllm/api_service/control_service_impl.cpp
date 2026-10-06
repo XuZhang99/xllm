@@ -17,15 +17,70 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <filesystem>
 #include <string>
 #include <utility>
+#include <vector>
 
-#include "api_service/control_request_utils.h"
 #include "core/common/options.h"
 #include "core/distributed_runtime/master_manager.h"
 #include "core/framework/config/profile_config.h"
 
 namespace xllm {
+
+Status ControlServiceImpl::parse_fork_master_request(
+    const proto::MasterInfos& request,
+    Options& options) {
+  if (!std::filesystem::exists(request.model_path())) {
+    LOG(ERROR) << "Model path " << request.model_path() << " does not exist.";
+    return {StatusCode::INVALID_ARGUMENT,
+            "Failed to parse fork master request"};
+  }
+
+  const std::filesystem::path model_path =
+      std::filesystem::path(request.model_path()).lexically_normal();
+  std::string model_id;
+  if (model_path.has_filename()) {
+    model_id = model_path.filename().string();
+  } else {
+    model_id = model_path.parent_path().filename().string();
+  }
+  options.model_id() = std::move(model_id);
+  options.master_node_addr() = request.master_node_addr();
+  options.model_path() = request.model_path();
+  options.master_status() = MasterStatus(request.master_status());
+
+  // The engine derives tp_size from nnodes / dp_size.
+  if (request.nnodes() > 0) {
+    options.nnodes() = request.nnodes();
+  }
+  if (request.dp_size() > 0) {
+    options.dp_size() = request.dp_size();
+  }
+
+  return {};
+}
+
+WakeupOptions ControlServiceImpl::parse_wakeup_options(
+    const proto::MasterInfos& request) {
+  WakeupOptions options;
+  if (request.remote_addrs_size() == 0) {
+    return options;
+  }
+
+  options.remote_addrs.assign(request.remote_addrs().begin(),
+                              request.remote_addrs().end());
+  options.src_weight_segments.reserve(request.src_weight_segments_size());
+  for (const auto& segment_list : request.src_weight_segments()) {
+    std::vector<WeightSegment> segments;
+    segments.reserve(segment_list.segments_size());
+    for (const auto& segment : segment_list.segments()) {
+      segments.emplace_back(segment.offset(), segment.size());
+    }
+    options.src_weight_segments.emplace_back(std::move(segments));
+  }
+  return options;
+}
 
 ControlServiceImpl::ControlServiceImpl(
     std::shared_ptr<MasterManager> master_manager)
@@ -35,8 +90,7 @@ ControlServiceImpl::ControlServiceImpl(
 
 Status ControlServiceImpl::fork_master(const proto::MasterInfos& request) {
   Options master_options;
-  const Status status =
-      api_service::parse_fork_master_request(request, master_options);
+  const Status status = parse_fork_master_request(request, master_options);
   if (!status.ok()) {
     LOG(ERROR) << "fork_master failed: " << status.message();
     return status;
@@ -60,8 +114,7 @@ Status ControlServiceImpl::sleep(const proto::MasterInfos& request) {
 }
 
 Status ControlServiceImpl::wakeup(const proto::MasterInfos& request) {
-  const WakeupOptions wakeup_options =
-      api_service::parse_wakeup_options(request);
+  const WakeupOptions wakeup_options = parse_wakeup_options(request);
   std::string error_message;
   if (!master_manager_->wakeup(
           request.model_id(), wakeup_options, &error_message)) {

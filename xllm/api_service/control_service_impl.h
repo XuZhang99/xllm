@@ -23,6 +23,7 @@ limitations under the License.
 namespace xllm {
 
 class MasterManager;
+class Options;
 
 // Processes typed control requests using the shared master manager.
 // MasterManager owns lifecycle transitions and request admission state.
@@ -39,6 +40,12 @@ class ControlServiceImpl final {
   Status unlink_p2p(const proto::P2PLinkRequest& request);
 
  private:
+  friend class ControlServiceImplTest;
+
+  static Status parse_fork_master_request(const proto::MasterInfos& request,
+                                          Options& options);
+  static WakeupOptions parse_wakeup_options(const proto::MasterInfos& request);
+
   std::shared_ptr<MasterManager> master_manager_;
 };
 
