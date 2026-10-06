@@ -33,7 +33,7 @@ limitations under the License.
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/rec_config.h"
 #include "core/framework/config/scheduler_config.h"
-#include "core/framework/model_loader.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "core/util/cpu_affinity.h"
 #include "helper.h"
 

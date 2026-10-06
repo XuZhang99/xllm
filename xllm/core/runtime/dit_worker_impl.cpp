@@ -30,7 +30,7 @@ limitations under the License.
 #include "common/types.h"
 #include "core/common/global_flags.h"
 #include "core/framework/config/dit_config.h"
-#include "core/framework/dit_model_loader.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/platform/device.h"
 #include "framework/dit_cache/dit_cache.h"
 #include "framework/state_dict/state_dict.h"

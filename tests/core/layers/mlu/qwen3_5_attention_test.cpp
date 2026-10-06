@@ -27,7 +27,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_state.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "layers/mlu/tests_utils.h"

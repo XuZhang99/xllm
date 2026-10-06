@@ -14,51 +14,17 @@ add_subdirectory(chat_template)
 add_subdirectory(kv_cache)
 add_subdirectory(kv_cache_transfer)
 add_subdirectory(model)
+add_subdirectory(model_context)
+add_subdirectory(model_loader)
 add_subdirectory(parallel_state)
 add_subdirectory(prefix_cache)
 add_subdirectory(multimodal)
 add_subdirectory(encoder_cache)
 add_subdirectory(state_dict)
+add_subdirectory(quantization)
 add_subdirectory(tokenizer)
 add_subdirectory(sampling)
 add_subdirectory(request)
 add_subdirectory(eplb)
 add_subdirectory(dit_cache)
 add_subdirectory(speculative)
-
-
-cc_library(
-  NAME
-    model_loader
-  HDRS
-    hf_model_loader.h
-    dit_model_context.h
-    dit_model_loader.h
-    model_loader.h
-  SRCS
-    hf_model_loader.cpp
-    dit_model_context.cpp
-    dit_model_loader.cpp
-    model_loader.cpp
-  DEPS
-    :common
-    :model
-    :model_context
-    :models
-    $<$<BOOL:${USE_NPU}>:npu_layers>
-    :tokenizer
-    torch
-)
-
-cc_library(
-  NAME
-    model_context
-  HDRS
-    model_context.h
-  SRCS
-    model_context.cpp
-  DEPS
-    :platform
-    torch
-    $<$<BOOL:${USE_NPU}>:torch_npu>
-)

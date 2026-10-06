@@ -69,6 +69,7 @@ cc_library(
     :block
     :prefix_cache
     :parallel_state
+    :quantization
     :state_dict
     :model
     :kernels

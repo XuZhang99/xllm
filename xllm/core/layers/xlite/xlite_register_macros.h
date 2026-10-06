@@ -19,7 +19,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/layers/xlite/xlite_causal_lm_base.h"
 #include "models/model_registry.h"
 

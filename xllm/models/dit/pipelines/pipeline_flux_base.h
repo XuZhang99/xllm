@@ -24,8 +24,8 @@ limitations under the License.
 #include <memory>
 #include <string>
 
-#include "core/framework/dit_model_loader.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/request/dit_request_state.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"

@@ -22,7 +22,7 @@ limitations under the License.
 #include <tuple>
 
 #include "framework/model/model_args.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "framework/state_dict/state_dict.h"
 
 namespace xllm {

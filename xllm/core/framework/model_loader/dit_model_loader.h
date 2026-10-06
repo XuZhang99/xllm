@@ -20,11 +20,11 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/model/model_args.h"
-#include "core/framework/quant_args.h"
+#include "core/framework/model_loader/model_loader.h"
+#include "core/framework/quantization/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/framework/tokenizer/tokenizer_args.h"
-#include "model_loader.h"
 namespace xllm {
 class DiTFolderLoader : public ModelLoader {
  public:

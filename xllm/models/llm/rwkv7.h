@@ -40,8 +40,8 @@ limitations under the License.
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
-#include "core/framework/model_context.h"
-#include "core/framework/model_loader.h"
+#include "core/framework/model_context/model_context.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "core/layers/rwkv7_decoder_layer.h"
 #include "models/model_registry.h"
 

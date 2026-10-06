@@ -23,11 +23,11 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "core/framework/model_loader/model_loader.h"
 #include "core/kernels/ops_api.h"
 #include "core/layers/npu/npu_column_parallel_linear_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/rotary_embedding.h"
-#include "framework/model_loader.h"
 #include "models/llm/npu/qwen3.h"
 #include "models/model_registry.h"
 

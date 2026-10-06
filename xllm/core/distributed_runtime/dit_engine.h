@@ -25,7 +25,7 @@ limitations under the License.
 #include "engine.h"
 #include "framework/batch/dit_batch.h"
 #include "framework/parallel_state/process_group.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "runtime/dit_worker_impl.h"
 
 namespace xllm {

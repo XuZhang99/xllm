@@ -30,7 +30,7 @@ limitations under the License.
 #include "atb/atb_infer.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"

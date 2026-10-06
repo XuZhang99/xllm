@@ -25,7 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "framework/model/model_input_params.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "npu_base_layer.h"
 #include "xllm_atb_layers/core/include/atb_speed/base/hosttensor_binder.h"

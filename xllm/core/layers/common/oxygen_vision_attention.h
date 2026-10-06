@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "qwen2_vision_attention.h"
 
 namespace xllm {

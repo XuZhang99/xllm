@@ -20,7 +20,7 @@ limitations under the License.
 #include <algorithm>
 #include <tuple>
 
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "kernels/musa/musa_ops_api.h"
 

@@ -23,7 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/config/speculative_config.h"
-#include "core/framework/model_loader.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "core/layers/common/linear.h"
 #include "core/layers/common/rms_norm.h"
 #include "models/llm/deepseek_v4.h"

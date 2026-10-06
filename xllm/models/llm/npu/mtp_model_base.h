@@ -30,7 +30,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/framework/parallel_state/npu_dp_ep_padding.h"
 #include "core/layers/common/attention_mask.h"
 #include "core/layers/npu/npu_block_copy_impl.h"

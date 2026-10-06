@@ -1,0 +1,17 @@
+include(cc_library)
+
+cc_library(
+  NAME
+    model_context
+  HDRS
+    model_context.h
+    dit_model_context.h
+  SRCS
+    model_context.cpp
+    dit_model_context.cpp
+  DEPS
+    :platform
+    :quantization
+    torch
+    $<$<BOOL:${USE_NPU}>:torch_npu>
+)

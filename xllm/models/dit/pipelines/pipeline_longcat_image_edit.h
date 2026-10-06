@@ -23,8 +23,8 @@
 #include <utility>
 #include <vector>
 
-#include "core/framework/dit_model_loader.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/multimodal/mm_batch_data.h"
 #include "core/framework/multimodal/mm_input.h"
 #include "core/framework/parallel_state/parallel_args.h"

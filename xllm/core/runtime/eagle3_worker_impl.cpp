@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "framework/model_loader.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "runtime/llm_worker_impl.h"
 
 namespace xllm {

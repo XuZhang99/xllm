@@ -23,7 +23,7 @@ limitations under the License.
 #include <map>
 #include <vector>
 
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "models/dit/autoencoders/autoencoder_kl.h"
 
 namespace xllm {

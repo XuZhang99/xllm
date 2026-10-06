@@ -25,7 +25,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/framework/parallel_state/process_group.h"
 #include "framework/parallel_state/parallel_state.h"
 

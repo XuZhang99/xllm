@@ -21,9 +21,9 @@ limitations under the License.
 #include <memory>
 #include <tuple>
 
+#include "core/framework/quantization/quant_args.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
-#include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 #include "layers/common/attention_metadata.h"

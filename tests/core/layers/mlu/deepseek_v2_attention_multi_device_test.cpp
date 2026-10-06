@@ -30,14 +30,14 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/config/kv_cache_config.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/framework/parallel_state/parallel_topology.h"
 #include "framework/batch/batch_forward_type.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/process_group.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/mlu/deepseek_v2_attention.h"
 #include "layers/mlu/deepseek_v32_cp_context.h"

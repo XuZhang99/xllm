@@ -20,8 +20,8 @@ limitations under the License.
 #include <memory>
 #include <string>
 
-#include "core/framework/dit_model_loader.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/parallel_state/parallel_args.h"
 #include "core/framework/parallel_state/process_group.h"
 #include "core/framework/request/dit_request_state.h"

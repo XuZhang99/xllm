@@ -27,11 +27,11 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/layers/common/add_matmul.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "models/dit/processors/vae_image_processor.h"
 #include "models/dit/utils/diagonal_gaussian_distribution.h"
 #include "models/dit/utils/util.h"

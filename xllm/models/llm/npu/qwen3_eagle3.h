@@ -30,7 +30,7 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/layers/common/attention_mask.h"
 #include "core/layers/common/rotary_embedding_util.h"

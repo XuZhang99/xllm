@@ -25,7 +25,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/framework/parallel_state/parallel_args.h"
 #include "core/framework/state_dict/state_dict.h"
 

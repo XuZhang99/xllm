@@ -28,9 +28,9 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/dit_model_loader.h"
 #include "core/framework/model/dit_model.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer_args.h"
 #include "core/util/json_reader.h"

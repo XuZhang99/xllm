@@ -22,12 +22,12 @@ limitations under the License.
 #include <unordered_map>
 
 #include "core/common/options.h"
-#include "core/framework/dit_model_context.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/causal_vlm.h"
 #include "core/framework/model/dit_model.h"
 #include "core/framework/model/rec_causal_lm.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/dit_model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/framework/tokenizer/tokenizer_args.h"
 #include "core/util/json_reader.h"
 #include "core/util/type_traits.h"  // IWYU pragma: keep

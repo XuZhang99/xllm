@@ -18,7 +18,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/common/linear.h"
 #include "core/layers/npu/rotary_embedding.h"

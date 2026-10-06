@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 
 #include <torch/torch.h>
 

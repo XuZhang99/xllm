@@ -17,7 +17,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "framework/model/model_input_params.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "layers/common/dsa_metadata_builder.h"
 #include "layers/npu_torch/deepseek_sparse_attention.h"
 #include "layers/npu_torch/deepseek_v4_indexer.h"

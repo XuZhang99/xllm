@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "hf_model_loader.h"
+#include "core/framework/model_loader/hf_model_loader.h"
 
 #include <absl/strings/match.h>
 #include <absl/strings/str_replace.h>

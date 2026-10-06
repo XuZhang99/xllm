@@ -36,7 +36,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/layers/common/dsa_topk_share_plan.h"
 #include "framework/parallel_state/npu_cp_plan.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "loader/deepseek_v32_decoder_loader.h"
 

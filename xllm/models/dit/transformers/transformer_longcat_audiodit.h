@@ -41,8 +41,8 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/dit_model_loader.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/request/dit_request_state.h"
 #include "models/dit/autoencoders/autoencoder_kl.h"  // randn_tensor
 #include "models/dit/encoders/umt5_encoder.h"

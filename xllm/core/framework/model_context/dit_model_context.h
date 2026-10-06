@@ -23,8 +23,8 @@ limitations under the License.
 
 #include "core/framework/dit_cache/dit_cache_config.h"
 #include "core/framework/model/model_args.h"
-#include "core/framework/model_context.h"
-#include "core/framework/quant_args.h"
+#include "core/framework/model_context/model_context.h"
+#include "core/framework/quantization/quant_args.h"
 #include "framework/parallel_state/parallel_args.h"
 
 namespace xllm {

@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <string>
 
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/layers/common/rms_norm.h"
 #include "core/layers/npu_torch/fused_moe.h"
 #include "minimax_m2_attention.h"

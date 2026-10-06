@@ -22,7 +22,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/mlu/deepseek_v2_attention.h"
 #include "layers/mlu/tests_utils.h"

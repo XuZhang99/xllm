@@ -24,7 +24,7 @@ limitations under the License.
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/layers/common/quant_utils.h"
 #include "kernels/ops_api.h"
 #include "layers/common/dp_utils.h"

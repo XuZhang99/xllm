@@ -16,7 +16,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/layers/common/linear.h"
 #include "core/layers/mlu/fused_moe.h"
 #include "layers/mlu/tests_utils.h"

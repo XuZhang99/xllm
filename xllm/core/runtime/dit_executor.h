@@ -21,7 +21,7 @@ limitations under the License.
 #include <memory>
 
 #include "common/macros.h"
-#include "core/framework/dit_model_loader.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "forward_params.h"
 #include "framework/batch/dit_batch.h"
 #include "framework/model/dit_model.h"

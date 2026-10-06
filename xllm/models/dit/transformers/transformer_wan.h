@@ -30,8 +30,8 @@ limitations under the License.
 #include "core/framework/config/dit_config.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
-#include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
 #include "core/layers/common/ada_layer_norm.h"
@@ -47,14 +47,14 @@ limitations under the License.
 #include "core/layers/npu/loader/rolling_load_manager.h"
 #include "core/layers/npu/loader/rolling_weight_buffer.h"
 #endif
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "models/dit/transformers/transformer_flux.h"
 #if defined(USE_NPU)
 #include "core/kernels/npu/xllm_ops/xllm_ops_api.h"
 #include "models/dit/utils/dit_block_weight_manager.h"
 #include "torch_npu/csrc/aten/CustomFunctions.h"
 #endif
-#include "core/framework/quant_args.h"
+#include "core/framework/quantization/quant_args.h"
 #include "models/model_registry.h"
 
 namespace xllm {

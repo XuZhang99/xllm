@@ -19,7 +19,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/model/aux_hidden_capture.h"
 #include "core/framework/model/model_output.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/framework/parallel_state/npu_dp_ep_padding.h"
 #include "core/layers/npu/npu_qwen3_moe_decoder_layer_impl.h"
 #include "llm_model_base.h"

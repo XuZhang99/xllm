@@ -24,11 +24,11 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "core/framework/model_loader/model_loader.h"
 #include "core/kernels/ops_api.h"
 #include "core/layers/common/add_matmul.h"
 #include "core/layers/common/rms_norm.h"
 #include "core/layers/npu/rotary_embedding.h"
-#include "framework/model_loader.h"
 #include "models/llm/qwen3.h"
 #include "models/model_registry.h"
 

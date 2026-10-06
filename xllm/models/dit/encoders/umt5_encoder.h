@@ -31,11 +31,11 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "models/dit/encoders/t5_encoder.h"  // reuse T5LayerNorm, T5DenseInterface, T5LayerFFN
 #include "models/model_registry.h"
 

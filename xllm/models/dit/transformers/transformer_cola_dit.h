@@ -24,8 +24,8 @@ limitations under the License.
 #include <cmath>
 #include <vector>
 
-#include "core/framework/dit_model_loader.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "models/dit/utils/cola_block_causal_mask.h"
 #include "models/dit/utils/cola_weight_loader.h"
 #include "models/model_registry.h"

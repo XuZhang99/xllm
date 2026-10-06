@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 

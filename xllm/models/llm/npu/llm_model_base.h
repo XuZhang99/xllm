@@ -31,7 +31,7 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model/model_traits.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/layers/common/attention_mask.h"
 #include "core/layers/npu/loader/base_loader.h"
 #include "core/layers/npu/loader/rolling_load_manager.h"

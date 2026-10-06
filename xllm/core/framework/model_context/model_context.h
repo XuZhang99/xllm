@@ -27,7 +27,7 @@ limitations under the License.
 #include "core/common/flash_comm1_context.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/parallel_state/parallel_args.h"
-#include "core/framework/quant_args.h"
+#include "core/framework/quantization/quant_args.h"
 #include "core/platform/model_stream_registry.h"
 #include "framework/parallel_state/parallel_args.h"
 

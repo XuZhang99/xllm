@@ -26,7 +26,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/config/eplb_config.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/platform/device.h"
 
 namespace xllm::npu::model {

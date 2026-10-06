@@ -27,11 +27,11 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/config/scheduler_config.h"
-#include "core/framework/hf_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
-#include "core/framework/model_context.h"
-#include "core/framework/model_loader.h"
+#include "core/framework/model_context/model_context.h"
+#include "core/framework/model_loader/hf_model_loader.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "core/layers/common/attention_mask.h"
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/common/lm_head.h"

@@ -47,7 +47,7 @@ limitations under the License.
 #include "platform/npu/device_capture_lock.h"
 #endif
 #include "common/version_singleton.h"
-#include "framework/model_loader.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "framework/sampling/rec_constrained_decoding.h"
 #include "framework/sampling/rec_sampler.h"
 #include "framework/state_dict/rec_vocab_dict.h"

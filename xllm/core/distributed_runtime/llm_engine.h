@@ -36,7 +36,7 @@ limitations under the License.
 #include "framework/eplb/eplb_manager.h"
 #include "framework/eplb/eplb_policy.h"
 #include "framework/kv_cache/kv_cache_utils.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/worker.h"

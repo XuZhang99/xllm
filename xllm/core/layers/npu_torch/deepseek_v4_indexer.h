@@ -20,7 +20,7 @@ limitations under the License.
 #include <optional>
 #include <tuple>
 
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/attention_metadata.h"
 #include "layers/common/linear.h"

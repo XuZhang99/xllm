@@ -80,6 +80,7 @@ limitations under the License.
 #include "platform/cuda_profiler.h"
 #endif
 #include "core/distributed_runtime/master.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "core/runtime/decode_graph_bucket.h"
 #include "core/runtime/worker_rendezvous.h"
 #include "framework/eplb/eplb_utils.h"
@@ -87,7 +88,6 @@ limitations under the License.
 #include "framework/kv_cache/layerwise_split_layout.h"
 #include "framework/kv_cache/linear_state_restore.h"
 #include "framework/model/model_input_params.h"
-#include "framework/model_loader.h"
 #include "framework/parallel_state/npu_cp_plan.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"

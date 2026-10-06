@@ -21,7 +21,7 @@ limitations under the License.
 
 #include <vector>
 
-#include "core/framework/dit_model_loader.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/runtime/dit_forward_params.h"
 namespace xllm {
 

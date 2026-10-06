@@ -33,7 +33,7 @@ limitations under the License.
 #include "core/framework/kv_cache/linear_state_restore.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_output.h"
-#include "core/framework/model_loader.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "core/framework/parallel_state/process_group.h"
 #include "core/framework/request/sequence.h"
 #include "core/framework/request/stopping_checker.h"

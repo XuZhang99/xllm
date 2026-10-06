@@ -25,7 +25,7 @@ limitations under the License.
 
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/attention_metadata.h"
 #include "layers/common/dsa_metadata.h"

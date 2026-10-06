@@ -25,7 +25,7 @@ limitations under the License.
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/causal_vlm.h"
 #include "core/framework/model/model_args.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 
 namespace xllm {
 

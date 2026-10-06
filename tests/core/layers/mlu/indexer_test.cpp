@@ -25,7 +25,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/kv_shard_batch_metadata.h"
 #include "layers/mlu/attention.h"

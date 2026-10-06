@@ -22,7 +22,7 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 
-#include "core/framework/dit_model_loader.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 
 namespace xllm {
 

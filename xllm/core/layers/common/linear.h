@@ -19,9 +19,9 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "common/flash_comm1_context.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 

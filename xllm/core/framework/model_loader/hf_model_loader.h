@@ -20,10 +20,10 @@ limitations under the License.
 
 #include <vector>
 
+#include "core/framework/model_loader/model_loader.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/util/json_reader.h"
 #include "core/util/threadpool.h"
-#include "model_loader.h"
 
 namespace xllm {
 

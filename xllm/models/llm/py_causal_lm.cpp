@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/model/model_output.h"
-#include "core/framework/model_loader.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/util/pybind_helper.h"
 #include "models/py_model_helper.h"

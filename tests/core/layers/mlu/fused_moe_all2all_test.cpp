@@ -31,7 +31,7 @@ limitations under the License.
 #include "core/framework/config/eplb_config.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/mlu/fused_moe.h"
 #include "layers/mlu/tests_utils.h"

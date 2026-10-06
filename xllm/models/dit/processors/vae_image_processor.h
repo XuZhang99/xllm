@@ -22,7 +22,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "models/dit/utils/util.h"
 
 namespace xllm {

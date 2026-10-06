@@ -24,7 +24,7 @@ limitations under the License.
 #include "framework/eplb/expert_buffer_manager.h"
 #include "framework/eplb/expert_weight_buffer_shm.h"
 #include "framework/model/model_input_params.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "framework/parallel_state/mega_moe_comm_resource.h"
 #include "framework/parallel_state/npu_dp_ep_padding.h"
 #include "framework/state_dict/state_dict.h"

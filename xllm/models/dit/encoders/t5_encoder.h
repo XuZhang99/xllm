@@ -26,11 +26,11 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "models/model_registry.h"
 #include "xllm/core/layers/common/add_matmul.h"
 

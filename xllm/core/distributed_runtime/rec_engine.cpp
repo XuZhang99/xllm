@@ -27,9 +27,9 @@ limitations under the License.
 #include "common/metrics.h"
 #include "core/common/global_flags.h"
 #include "core/framework/config/execution_config.h"
+#include "core/framework/model_loader/model_loader.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
-#include "framework/model_loader.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/request/rec_type.h"
 #include "master.h"  // For MasterStatus::WAKEUP constant

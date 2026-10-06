@@ -20,9 +20,9 @@ limitations under the License.
 #include <vector>
 
 #include "framework/model/model_args.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
-#include "framework/quant_args.h"
+#include "framework/quantization/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "linear.h"
 #if defined(USE_NPU)

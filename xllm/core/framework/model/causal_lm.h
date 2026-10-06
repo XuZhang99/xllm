@@ -35,8 +35,8 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model_loader.h"
-#include "core/framework/quant_args.h"
+#include "core/framework/model_loader/model_loader.h"
+#include "core/framework/quantization/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "model_args.h"
 #include "model_input_params.h"

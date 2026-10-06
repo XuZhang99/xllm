@@ -24,9 +24,9 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/model/model_args.h"
-#include "core/framework/model_context.h"
+#include "core/framework/model_context/model_context.h"
 #include "core/framework/parallel_state/parallel_args.h"
-#include "core/framework/quant_args.h"               // QuantArgs (IsW8A8)
+#include "core/framework/quantization/quant_args.h"  // QuantArgs (IsW8A8)
 #include "core/layers/common/dsa_topk_share_plan.h"  // DsaTopkSharePlan
 #include "core/layers/xlite/xlite_init_utils.h"      // XliteTpSize
 

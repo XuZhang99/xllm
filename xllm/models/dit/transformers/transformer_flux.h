@@ -27,13 +27,13 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/dit_cache/dit_cache.h"
-#include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_loader/dit_model_loader.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
 #include "core/layers/common/add_matmul.h"
 #include "core/layers/common/rms_norm.h"
-#include "framework/model_context.h"
+#include "framework/model_context/model_context.h"
 #include "models/dit/utils/dit_cache_mixin.h"
 #include "models/model_registry.h"
 #if defined(USE_NPU)

@@ -24,7 +24,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/quant_args.h"
+#include "core/framework/quantization/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "kernels/ops_api.h"
 
