@@ -44,7 +44,9 @@ cc_library(
     :kv_cache
     :xtensor
     :common
+    :config
     :runtime
+    :util
     Folly::folly
     :models
 )
