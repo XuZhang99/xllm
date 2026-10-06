@@ -768,9 +768,12 @@ KVCacheCapacity KVCacheEstimator::estimate(
   estimate_options.enable_chunked_prefill = options.enable_chunked_prefill();
   estimate_options.enable_schedule_overlap = options.enable_schedule_overlap();
   const KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
-  estimate_options.enable_prefix_cache =
-      kv_cache_config.enable_prefix_cache() &&
-      !kv_cache_config.enable_xtensor();
+  const bool is_mtp_draft_engine =
+      options.is_draft_engine() &&
+      SpeculativeConfig::is_mtp_algorithm(options.speculative_algorithm());
+  estimate_options.enable_prefix_cache = options.enable_prefix_cache() &&
+                                         !kv_cache_config.enable_xtensor() &&
+                                         !is_mtp_draft_engine;
   estimate_options.enable_disagg_pd = options.enable_disagg_pd();
   estimate_options.instance_role = options.instance_role();
   if (!context.is_multimodal) {
