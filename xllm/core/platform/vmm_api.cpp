@@ -279,13 +279,18 @@ void map(VirPtr& vir_ptr,
 }
 
 void unmap(VirPtr& vir_ptr, size_t aligned_size) {
+  unmap(vir_ptr,
+        aligned_size,
+        static_cast<size_t>(
+            ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size()));
+}
+
+void unmap(VirPtr& vir_ptr, size_t aligned_size, size_t granularity_size) {
 #if defined(USE_NPU)
   // For NPU, `aclrtUnmapMem` unmaps the range previously mapped by
   // `aclrtMapMem` at the given virtual address. Since we map per-physical-page
   // (granularity_size) at different offsets, we must unmap each mapped segment
   // before releasing the reserved virtual address range.
-  size_t granularity_size = static_cast<size_t>(
-      ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size());
   if (granularity_size == 0) {
     granularity_size = aligned_size;
   }

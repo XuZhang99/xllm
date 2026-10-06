@@ -17,12 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include <algorithm>
-#include <mutex>
-
 #include "core/framework/xtensor/global_xtensor.h"
 #include "core/framework/xtensor/phy_page_pool.h"
-#include "core/platform/vmm_api.h"
 
 namespace xllm {
 
@@ -32,31 +28,9 @@ class XTensorTestPeer final {
   // Environment shuts down the runtime. Singleton destruction runs too late.
   static void release_resources() {
     auto& global_tensor = GlobalXTensor::get_instance();
-    CHECK(!global_tensor.mooncake_registered_);
-    if (!is_null_vir_ptr(global_tensor.vaddr_)) {
-      CHECK(global_tensor.initialized_);
-      vmm::unmap(global_tensor.vaddr_, global_tensor.total_size_);
-      vmm::release_vir_ptr(global_tensor.vaddr_, global_tensor.total_size_);
-    }
-    global_tensor.vaddr_ = {};
-    global_tensor.total_size_ = 0;
-    global_tensor.page_size_ = 0;
-    global_tensor.num_total_pages_ = 0;
-    global_tensor.initialized_ = false;
-
-    auto& pool = PhyPagePool::get_instance();
-    std::lock_guard<std::mutex> lock(pool.mtx_);
-    CHECK_EQ(pool.free_page_ids_.size(), pool.num_total_pages_);
-    CHECK(std::all_of(pool.all_pages_.begin(),
-                      pool.all_pages_.end(),
-                      [](const auto& page) { return page != nullptr; }));
-    pool.all_page_ptrs_.clear();
-    pool.all_pages_.clear();
-    pool.free_page_ids_.clear();
-    pool.page_allocated_.clear();
-    pool.num_total_pages_ = 0;
-    pool.device_ = torch::Device(torch::kCPU);
-    pool.initialized_ = false;
+    CHECK(!global_tensor.is_mooncake_registered());
+    global_tensor.reset();
+    CHECK(PhyPagePool::get_instance().reset());
   }
 };
 

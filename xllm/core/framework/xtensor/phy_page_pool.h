@@ -48,6 +48,10 @@ class PhyPagePool {
   // num_pages: number of physical pages to pre-allocate
   void init(const torch::Device& device, size_t num_pages);
 
+  // Release all pages and make the singleton reusable. Returns false when a
+  // caller still owns pages from this pool.
+  bool reset();
+
   // Check if initialized
   bool is_initialized() const { return initialized_; }
 

@@ -61,6 +61,30 @@ void GlobalXTensor::init(const torch::Device& device) {
             << total_size_ << " bytes";
 }
 
+void GlobalXTensor::reset() {
+  if (!initialized_) {
+    return;
+  }
+
+  CHECK(!mooncake_registered_)
+      << "GlobalXTensor must be unregistered before reset";
+
+  auto& pool = PhyPagePool::get_instance();
+  const auto& pages = pool.get_all_pages();
+  for (size_t page_id = 0; page_id < pages.size(); ++page_id) {
+    VirPtr address = add_vir_ptr_offset(vaddr_, page_id * page_size_);
+    vmm::unmap(address, page_size_, page_size_);
+  }
+  vmm::release_vir_ptr(vaddr_, total_size_);
+
+  vaddr_ = {};
+  total_size_ = 0;
+  page_size_ = 0;
+  num_total_pages_ = 0;
+  mooncake_registered_ = false;
+  initialized_ = false;
+}
+
 bool GlobalXTensor::map_page(PhyPage* page, size_t offset) {
   CHECK(page) << "Page is null";
   CHECK(offset % page_size_ == 0) << "Offset not aligned to page size";
@@ -68,7 +92,7 @@ bool GlobalXTensor::map_page(PhyPage* page, size_t offset) {
 
   VirPtr vaddr = add_vir_ptr_offset(vaddr_, offset);
   PhyMemHandle phy_handle = page->get_phy_handle();
-  vmm::map(vaddr, phy_handle, page->device().index());
+  vmm::map(vaddr, phy_handle, page_size_, page->device().index());
   return true;
 }
 

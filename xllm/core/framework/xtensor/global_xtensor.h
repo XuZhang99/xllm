@@ -46,6 +46,9 @@ class GlobalXTensor {
   // Initialize (must be called after PhyPagePool::init)
   void init(const torch::Device& device);
 
+  // Release all virtual mappings and make the singleton reusable.
+  void reset();
+
   bool is_initialized() const { return initialized_; }
 
   // Get virtual address for a given page_id

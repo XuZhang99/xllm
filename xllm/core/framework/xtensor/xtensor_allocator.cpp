@@ -60,8 +60,30 @@ XTensorAllocator::~XTensorAllocator() {
 
 void XTensorAllocator::destroy() {
   std::lock_guard<std::mutex> lock(mtx_);
+
+  // Release model-owned mappings before tearing down the global address space.
+  for (const auto& [model_id, model] : model_store_.models()) {
+    if (model.weight.num_pages() == 0) {
+      continue;
+    }
+    if (model.weight.is_fragmented()) {
+      continue;
+    }
+
+    std::vector<page_id_t> page_ids;
+    page_ids.reserve(model.weight.num_pages());
+    for (size_t i = 0; i < model.weight.num_pages(); ++i) {
+      page_ids.push_back(model.weight.start_page_id() +
+                         static_cast<page_id_t>(i));
+    }
+    PhyPagePool::get_instance().free_weight_pages(page_ids);
+    VLOG(1) << "Released weight pages for model " << model_id;
+  }
   model_store_.clear();
   cluster_.clear();
+  GlobalXTensor::get_instance().reset();
+  CHECK(PhyPagePool::get_instance().reset())
+      << "Cannot reset physical page pool while pages are in use";
   initialized_ = false;
 }
 

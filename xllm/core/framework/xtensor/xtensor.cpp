@@ -78,7 +78,7 @@ void unmap_pages(
   for (const auto& entry : mapping) {
     VirPtr addr =
         add_vir_ptr_offset(vaddr, static_cast<size_t>(entry.first) * page_size);
-    vmm::unmap(addr, page_size);
+    vmm::unmap(addr, page_size, page_size);
   }
 }
 
@@ -152,7 +152,7 @@ XTensor::~XTensor() {
   if (use_preallocated_pages_) {
     for (size_t i = 0; i < mapped_preallocated_pages_; ++i) {
       VirPtr addr = add_vir_ptr_offset(vaddr_, i * page_size_);
-      vmm::unmap(addr, page_size_);
+      vmm::unmap(addr, page_size_, page_size_);
     }
     release_virtual_mem(vaddr_, size_);
     free_preallocated_weight_pages(preallocated_page_ids_);
@@ -209,7 +209,7 @@ bool XTensor::map_pages(
     auto [tensor, offset] = missing[i];
     VirPtr addr = add_vir_ptr_offset(tensor->vaddr_, offset);
     PhyMemHandle handle = pages[i]->get_phy_handle();
-    vmm::map(addr, handle, tensor->dev_.index());
+    vmm::map(addr, handle, tensor->page_size_, tensor->dev_.index());
     tensor->mapping_.emplace(offset / tensor->page_size_, std::move(pages[i]));
   }
   return true;
@@ -230,7 +230,7 @@ bool XTensor::unmap(offset_t offset) {
   }
 
   VirPtr vaddr = add_vir_ptr_offset(vaddr_, offset);
-  vmm::unmap(vaddr, page_size_);
+  vmm::unmap(vaddr, page_size_, page_size_);
 
   // Return the physical page to pool
   std::vector<std::unique_ptr<PhyPage>> pages_to_return;
@@ -290,7 +290,7 @@ bool XTensor::map_with_page_ids(const std::vector<page_id_t>& page_ids) {
   for (size_t i = 0; i < page_ids.size(); ++i) {
     VirPtr addr = add_vir_ptr_offset(vaddr_, i * page_size_);
     PhyMemHandle handle = all_pages[page_ids[i]]->get_phy_handle();
-    vmm::map(addr, handle, dev_.index());
+    vmm::map(addr, handle, page_size_, dev_.index());
     ++mapped_preallocated_pages_;
   }
   return true;

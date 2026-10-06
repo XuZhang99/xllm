@@ -119,6 +119,9 @@ void map(VirPtr& vir_ptr,
 
 // unmap a virtual memory pointer with a specific aligned size
 void unmap(VirPtr& vir_ptr, size_t aligned_size);
+void unmap(VirPtr& vir_ptr,
+           size_t aligned_size,
+           size_t granularity_size);
 
 // unmap a single contiguous chunk that was mapped by ONE map() call covering
 // the whole `size` (as opposed to per-granularity-page mapping). On NPU this

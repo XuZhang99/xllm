@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "phy_page_pool.h"
+#include "core/framework/xtensor/phy_page_pool.h"
 
 #include <glog/logging.h>
 
@@ -52,6 +52,29 @@ void PhyPagePool::init(const torch::Device& device, size_t num_pages) {
 
   LOG(INFO) << "PhyPagePool: successfully pre-allocated " << num_pages
             << " physical pages (page_id 0-" << (num_pages - 1) << ")";
+}
+
+bool PhyPagePool::reset() {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  if (!initialized_) {
+    return true;
+  }
+  if (free_page_ids_.size() != num_total_pages_) {
+    LOG(ERROR) << "PhyPagePool reset requested with "
+               << (num_total_pages_ - free_page_ids_.size())
+               << " pages still in use";
+    return false;
+  }
+
+  free_page_ids_.clear();
+  all_page_ptrs_.clear();
+  all_pages_.clear();
+  page_allocated_.clear();
+  num_total_pages_ = 0;
+  device_ = torch::Device(torch::kCPU);
+  initialized_ = false;
+  return true;
 }
 
 std::unique_ptr<PhyPage> PhyPagePool::get() {
