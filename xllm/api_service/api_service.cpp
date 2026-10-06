@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "api_service.h"
 
+#include <brpc/closure_guard.h>
+#include <brpc/controller.h>
+#include <butil/iobuf.h>
 #include <glog/logging.h>
 #include <google/protobuf/io/zero_copy_stream_impl_lite.h>
 #include <google/protobuf/util/json_util.h>
@@ -106,6 +109,38 @@ void process_typed_brpc_request(std::unique_ptr<Service>& service_impl,
   std::shared_ptr<Call> call = std::make_shared<CallT>(
       ctrl, done_guard.release(), req_pb, response, arena != nullptr);
   service_impl->process_async(call);
+}
+
+bool parse_control_http_request(brpc::Controller* controller,
+                                google::protobuf::Message* request) {
+  std::string error;
+  json2pb::Json2PbOptions options;
+  butil::IOBufAsZeroCopyInputStream input(controller->request_attachment());
+  if (!json2pb::JsonToProtoMessage(&input, request, options, &error)) {
+    controller->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << error;
+    return false;
+  }
+  return true;
+}
+
+void write_control_http_status(brpc::Controller* controller,
+                               const Status& status) {
+  // P2P operation failures return ok=false; a missing model fails the HTTP
+  // call.
+  if (status.code() == StatusCode::NOT_FOUND) {
+    controller->SetFailed(status.message());
+    return;
+  }
+  proto::Status response;
+  response.set_ok(status.ok());
+  json2pb::Pb2JsonOptions options;
+  options.bytes_to_base64 = false;
+  std::string error;
+  butil::IOBufAsZeroCopyOutputStream output(&controller->response_attachment());
+  if (!json2pb::ProtoMessageToJson(response, &output, options, &error)) {
+    LOG(ERROR) << "proto to json failed: " << error;
+  }
 }
 
 }  // namespace
@@ -1176,85 +1211,202 @@ void APIService::ForkMaster(::google::protobuf::RpcController* controller,
                             const proto::MasterInfos* request,
                             proto::Status* response,
                             ::google::protobuf::Closure* done) {
-  control_service_impl_->fork_master(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  const Status status = control_service_impl_->fork_master(*request);
+  response->set_ok(status.ok());
+  if (!status.ok()) {
+    static_cast<brpc::Controller*>(controller)->SetFailed(status.message());
+  }
 }
 
 void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
                                 const proto::HttpRequest* request,
                                 proto::HttpResponse* response,
                                 ::google::protobuf::Closure* done) {
-  control_service_impl_->fork_master_http(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  auto* ctrl = static_cast<brpc::Controller*>(controller);
+  proto::MasterInfos parsed_request;
+  if (!parse_control_http_request(ctrl, &parsed_request)) {
+    return;
+  }
+  const Status status = control_service_impl_->fork_master(parsed_request);
+  if (!status.ok()) {
+    ctrl->SetFailed(status.message());
+  }
 }
 
 void APIService::Sleep(::google::protobuf::RpcController* controller,
                        const proto::MasterInfos* request,
                        proto::Status* response,
                        ::google::protobuf::Closure* done) {
-  control_service_impl_->sleep(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  const Status status = control_service_impl_->sleep(*request);
+  response->set_ok(status.ok());
+  if (!status.ok()) {
+    static_cast<brpc::Controller*>(controller)->SetFailed(status.message());
+  }
 }
 
 void APIService::SleepHttp(::google::protobuf::RpcController* controller,
                            const proto::HttpRequest* request,
                            proto::HttpResponse* response,
                            ::google::protobuf::Closure* done) {
-  control_service_impl_->sleep_http(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  auto* ctrl = static_cast<brpc::Controller*>(controller);
+  proto::MasterInfos parsed_request;
+  if (!parse_control_http_request(ctrl, &parsed_request)) {
+    return;
+  }
+  const Status status = control_service_impl_->sleep(parsed_request);
+  if (!status.ok()) {
+    ctrl->SetFailed(status.message());
+  }
 }
 
 void APIService::Wakeup(::google::protobuf::RpcController* controller,
                         const proto::MasterInfos* request,
                         proto::Status* response,
                         ::google::protobuf::Closure* done) {
-  control_service_impl_->wakeup(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  const Status status = control_service_impl_->wakeup(*request);
+  response->set_ok(status.ok());
+  if (!status.ok()) {
+    static_cast<brpc::Controller*>(controller)->SetFailed(status.message());
+  }
 }
 
 void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
                             const proto::HttpRequest* request,
                             proto::HttpResponse* response,
                             ::google::protobuf::Closure* done) {
-  control_service_impl_->wakeup_http(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  auto* ctrl = static_cast<brpc::Controller*>(controller);
+  proto::MasterInfos parsed_request;
+  if (!parse_control_http_request(ctrl, &parsed_request)) {
+    return;
+  }
+  const Status status = control_service_impl_->wakeup(parsed_request);
+  if (!status.ok()) {
+    ctrl->SetFailed(status.message());
+  }
 }
 
 void APIService::StartProfileHttp(::google::protobuf::RpcController* controller,
                                   const proto::HttpRequest* request,
                                   proto::HttpResponse* response,
                                   ::google::protobuf::Closure* done) {
-  control_service_impl_->start_profile_http(
-      controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  auto* ctrl = static_cast<brpc::Controller*>(controller);
+  const Status status = control_service_impl_->start_profile();
+  if (!status.ok()) {
+    ctrl->SetFailed(status.message());
+  }
 }
 
 void APIService::StopProfileHttp(::google::protobuf::RpcController* controller,
                                  const proto::HttpRequest* request,
                                  proto::HttpResponse* response,
                                  ::google::protobuf::Closure* done) {
-  control_service_impl_->stop_profile_http(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  auto* ctrl = static_cast<brpc::Controller*>(controller);
+  const Status status = control_service_impl_->stop_profile();
+  if (!status.ok()) {
+    ctrl->SetFailed(status.message());
+  }
 }
 
 void APIService::LinkP2P(::google::protobuf::RpcController* controller,
                          const proto::P2PLinkRequest* request,
                          proto::Status* response,
                          ::google::protobuf::Closure* done) {
-  control_service_impl_->link_p2p(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  const Status status = control_service_impl_->link_p2p(*request);
+  response->set_ok(status.ok());
 }
 
 void APIService::LinkP2PHttp(::google::protobuf::RpcController* controller,
                              const proto::HttpRequest* request,
                              proto::HttpResponse* response,
                              ::google::protobuf::Closure* done) {
-  control_service_impl_->link_p2p_http(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  auto* ctrl = static_cast<brpc::Controller*>(controller);
+  proto::P2PLinkRequest parsed_request;
+  if (!parse_control_http_request(ctrl, &parsed_request)) {
+    return;
+  }
+  const Status status = control_service_impl_->link_p2p(parsed_request);
+  write_control_http_status(ctrl, status);
 }
 
 void APIService::UnlinkP2P(::google::protobuf::RpcController* controller,
                            const proto::P2PLinkRequest* request,
                            proto::Status* response,
                            ::google::protobuf::Closure* done) {
-  control_service_impl_->unlink_p2p(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  const Status status = control_service_impl_->unlink_p2p(*request);
+  response->set_ok(status.ok());
 }
 
 void APIService::UnlinkP2PHttp(::google::protobuf::RpcController* controller,
                                const proto::HttpRequest* request,
                                proto::HttpResponse* response,
                                ::google::protobuf::Closure* done) {
-  control_service_impl_->unlink_p2p_http(controller, request, response, done);
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+  auto* ctrl = static_cast<brpc::Controller*>(controller);
+  proto::P2PLinkRequest parsed_request;
+  if (!parse_control_http_request(ctrl, &parsed_request)) {
+    return;
+  }
+  const Status status = control_service_impl_->unlink_p2p(parsed_request);
+  write_control_http_status(ctrl, status);
 }
 
 }  // namespace xllm

@@ -15,31 +15,19 @@ limitations under the License.
 
 #pragma once
 
-#include <memory>
-
 #include "core/common/types.h"
 #include "xllm_service.pb.h"
 
 namespace xllm {
 
-class MasterManager;
+class Options;
 
-// Processes typed control requests using the shared master manager.
-// MasterManager owns lifecycle transitions and request admission state.
-class ControlServiceImpl final {
- public:
-  explicit ControlServiceImpl(std::shared_ptr<MasterManager> master_manager);
+namespace api_service {
 
-  Status fork_master(const proto::MasterInfos& request);
-  Status sleep(const proto::MasterInfos& request);
-  Status wakeup(const proto::MasterInfos& request);
-  Status start_profile();
-  Status stop_profile();
-  Status link_p2p(const proto::P2PLinkRequest& request);
-  Status unlink_p2p(const proto::P2PLinkRequest& request);
+Status parse_fork_master_request(const proto::MasterInfos& request,
+                                 Options& options);
 
- private:
-  std::shared_ptr<MasterManager> master_manager_;
-};
+WakeupOptions parse_wakeup_options(const proto::MasterInfos& request);
 
+}  // namespace api_service
 }  // namespace xllm
