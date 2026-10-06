@@ -29,3 +29,22 @@ add_subdirectory(request)
 add_subdirectory(eplb)
 add_subdirectory(dit_cache)
 add_subdirectory(speculative)
+
+# Factory orchestration may query WorkerClient and XTensor, while :block and
+# :kv_cache_estimation remain independent of the runtime implementation.
+cc_library(
+  NAME
+    kv_cache_manager_factory
+  HDRS
+    block/kv_cache_manager_factory.h
+  SRCS
+    block/kv_cache_manager_factory.cpp
+  DEPS
+    :block
+    :kv_cache
+    :xtensor
+    :common
+    :runtime
+    Folly::folly
+    :models
+)

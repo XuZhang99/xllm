@@ -29,7 +29,6 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
-#include "common/device_monitor.h"
 #include "common/metrics.h"
 #include "core/common/global_flags.h"
 #include "core/distributed_runtime/master.h"
@@ -39,7 +38,6 @@ limitations under the License.
 #include "core/framework/config/service_config.h"
 #include "core/framework/model_loader/model_loader.h"
 #include "framework/block/kv_cache_manager_factory.h"
-#include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/model/model_args.h"
@@ -196,93 +194,12 @@ bool VLMEngine::init_model(MasterStatus master_status) {
 }
 
 KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
-  const int64_t max_cache_size = options_.max_cache_size();
-  const double max_memory_utilization = options_.max_memory_utilization();
-  const int64_t encoder_cache_reserved_bytes =
-      options_.max_encoder_cache_size() * 1024 * 1024;
-
-  std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
-  futures.reserve(worker_clients_num_);
-  for (auto& worker : worker_clients_) {
-    futures.push_back(worker->estimate_kv_cache_capacity_async());
-  }
-
-  int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
-  auto results = folly::collectAll(futures).get();
-  for (size_t i = 0; i < results.size(); ++i) {
-    if (!results[i].hasValue()) {
-      LOG(ERROR) << "Failed to estimate kv cache capacity for worker: " << i;
-      continue;
-    }
-
-    auto [available_memory, total_memory] = results[i].value();
-    LOG(INFO) << "worker #" << i
-              << ": available memory: " << readable_size(available_memory)
-              << ", total memory: " << readable_size(total_memory)
-              << ". Using max_memory_utilization: " << max_memory_utilization
-              << ", max_cache_size: " << readable_size(max_cache_size)
-              << ", encoder_cache_reserved: "
-              << readable_size(encoder_cache_reserved_bytes);
-    GAUGE_SET(weight_size_in_kilobytes,
-              (total_memory - available_memory) / 1024);
-    GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
-    // apply memory cap from config if it is set
-    if (max_memory_utilization < 1.0) {
-      const int64_t buffer_memory =
-          total_memory * (1.0 - max_memory_utilization);
-      available_memory -= buffer_memory;
-    }
-    if (max_cache_size > 0) {
-      available_memory = std::min(available_memory, max_cache_size);
-    }
-
-    available_memory -= encoder_cache_reserved_bytes;
-
-    cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
-  }
-
-  KVCacheEstimateOptions estimate_options;
-  estimate_options.dtype = dtype_;
-  estimate_options.kv_cache_dtype = options_.kv_cache_dtype();
-  estimate_options.indexer_cache_dtype =
-      ::xllm::KVCacheConfig::get_instance().indexer_cache_dtype();
-  estimate_options.cache_size_in_bytes = cache_size_in_bytes;
-  estimate_options.block_size = options_.block_size();
-  estimate_options.world_size = dp_local_tp_size_;
-  estimate_options.max_seqs_per_batch =
-      static_cast<int64_t>(options_.max_seqs_per_batch());
-  estimate_options.max_concurrent_requests = static_cast<int64_t>(
-      ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
-  estimate_options.max_tokens_per_batch =
-      static_cast<int64_t>(options_.max_tokens_per_batch());
-  estimate_options.max_tokens_per_chunk_for_prefill =
-      static_cast<int64_t>(options_.max_tokens_per_chunk_for_prefill());
-  estimate_options.max_linear_state_cache_slots =
-      options_.max_linear_state_cache_slots();
-  estimate_options.linear_state_cache_block_limit =
-      get_npu_linear_state_cache_block_limit(args_.model_type());
-  estimate_options.is_draft_engine = options_.is_draft_engine();
-  estimate_options.enable_chunked_prefill = options_.enable_chunked_prefill();
-  estimate_options.enable_schedule_overlap = options_.enable_schedule_overlap();
-  const KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
-  estimate_options.enable_prefix_cache =
-      kv_cache_config.enable_prefix_cache() &&
-      !kv_cache_config.enable_xtensor();
-  estimate_options.enable_disagg_pd = options_.enable_disagg_pd();
-  estimate_options.instance_role = options_.instance_role();
-
-  KVCacheCapacity kv_cache_cap =
-      KVCacheEstimator(args_).estimate(std::move(estimate_options));
-  GAUGE_SET(total_kv_cache_size_in_kilobytes,
-            kv_cache_cap.cache_size_in_bytes() / 1024);
-
-  for (auto& device : options_.devices()) {
-    DeviceMonitor::get_instance().set_total_kv_cache_memory(
-        device.index(), kv_cache_cap.cache_size_in_bytes());
-    DeviceMonitor::get_instance().set_total_activation_memory(device.index());
-  }
-
-  return kv_cache_cap;
+  return KVCacheManagerFactory::estimate_capacity(args_,
+                                                  options_,
+                                                  dtype_,
+                                                  dp_local_tp_size_,
+                                                  worker_clients_,
+                                                  /*is_multimodal=*/true);
 }
 
 bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {

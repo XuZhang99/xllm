@@ -692,7 +692,8 @@ KVCacheCapacity KVCacheEstimator::estimate(
   const int64_t n_kv_heads = model_args_.n_kv_heads().value_or(n_heads);
   options.n_local_kv_heads =
       std::max<int64_t>(1, n_kv_heads / options.world_size);
-  if (model_args_.linear_num_value_heads() > 0) {
+  if (has_linear_attention_layers(model_args_) &&
+      model_args_.linear_num_value_heads() > 0) {
     options.n_local_linear_k_heads = std::max<int64_t>(
         1, model_args_.linear_num_key_heads() / options.world_size);
     options.n_local_linear_v_heads = std::max<int64_t>(

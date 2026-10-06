@@ -49,7 +49,6 @@ limitations under the License.
 #include "core/util/model_config_utils.h"
 #include "framework/block/block_utils.h"
 #include "framework/block/kv_cache_manager_factory.h"
-#include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/model/model_args.h"
@@ -435,133 +434,8 @@ int64_t LLMEngine::get_effective_xtensor_weight_size(
 }
 
 KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
-  const int64_t max_cache_size = options_.max_cache_size();
-  const double max_memory_utilization = options_.max_memory_utilization();
-
-  int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
-
-  if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
-    // For xtensor mode, use PhyPagePool's total pages * page_size
-    auto& phy_pool = PhyPagePool::get_instance();
-    CHECK(phy_pool.is_initialized()) << "PhyPagePool not initialized";
-    cache_size_in_bytes =
-        static_cast<int64_t>(phy_pool.num_total()) *
-        ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size();
-    LOG(INFO)
-        << "XTensor mode: available memory from PhyPagePool: "
-        << readable_size(cache_size_in_bytes)
-        << " (pages: " << phy_pool.num_total() << ", page_size: "
-        << ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size()
-        << ")";
-  } else {
-    // Original logic: query each worker for available memory
-    std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
-    futures.reserve(worker_clients_num_);
-    for (auto& worker : worker_clients_) {
-      futures.push_back(worker->estimate_kv_cache_capacity_async());
-    }
-
-    auto results = folly::collectAll(futures).get();
-    for (size_t i = 0; i < results.size(); ++i) {
-      if (!results[i].hasValue()) {
-        LOG(ERROR) << "Failed to estimate kv cache capacity for worker: " << i;
-        continue;
-      }
-
-      auto [available_memory, total_memory] = results[i].value();
-      LOG(INFO) << "worker #" << i
-                << ": available memory: " << readable_size(available_memory)
-                << ", total memory: " << readable_size(total_memory)
-                << ". Using max_memory_utilization: " << max_memory_utilization
-                << ", max_cache_size: " << readable_size(max_cache_size);
-      GAUGE_SET(weight_size_in_kilobytes,
-                (total_memory - available_memory) / 1024);
-      GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
-      // apply memory cap from config if it is set
-      if (max_memory_utilization < 1.0) {
-        const int64_t buffer_memory =
-            total_memory * (1.0 - max_memory_utilization);
-        available_memory -= buffer_memory;
-      }
-      if (max_cache_size > 0) {
-        available_memory = std::min(available_memory, max_cache_size);
-      }
-      cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
-    }
-  }
-
-  KVCacheEstimateOptions estimate_options;
-  estimate_options.dtype = dtype_;
-  estimate_options.kv_cache_dtype = options_.kv_cache_dtype();
-  estimate_options.indexer_cache_dtype =
-      ::xllm::KVCacheConfig::get_instance().indexer_cache_dtype();
-  estimate_options.cache_size_in_bytes = cache_size_in_bytes;
-  estimate_options.block_size = options_.block_size();
-  estimate_options.world_size = dp_local_tp_size_;
-  estimate_options.max_seqs_per_batch =
-      static_cast<int64_t>(options_.max_seqs_per_batch());
-  estimate_options.max_concurrent_requests = static_cast<int64_t>(
-      ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
-  estimate_options.num_speculative_tokens =
-      static_cast<int64_t>(options_.num_speculative_tokens());
-  estimate_options.max_tokens_per_batch =
-      static_cast<int64_t>(options_.max_tokens_per_batch());
-  estimate_options.max_tokens_per_chunk_for_prefill =
-      static_cast<int64_t>(options_.max_tokens_per_chunk_for_prefill());
-  estimate_options.max_linear_state_cache_slots =
-      options_.max_linear_state_cache_slots();
-  estimate_options.linear_state_cache_block_limit =
-      get_npu_linear_state_cache_block_limit(args_.model_type());
-  estimate_options.is_draft_engine = options_.is_draft_engine();
-  estimate_options.enable_chunked_prefill = options_.enable_chunked_prefill();
-  estimate_options.enable_schedule_overlap = options_.enable_schedule_overlap();
-  const KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
-  estimate_options.enable_prefix_cache =
-      kv_cache_config.enable_prefix_cache() &&
-      !kv_cache_config.enable_xtensor();
-  estimate_options.enable_disagg_pd = options_.enable_disagg_pd();
-  estimate_options.instance_role = options_.instance_role();
-  estimate_options.dp_size = options_.dp_size();
-  estimate_options.enable_dp_fair_token_budget =
-      ::xllm::SchedulerConfig::get_instance().enable_dp_fair_token_budget();
-  if (options_.enable_mtp_draft_body_tp1() && options_.is_draft_engine()) {
-    estimate_options.world_size = 1;
-  }
-  estimate_options.layerwise_split_size =
-      options_.is_draft_engine()
-          ? 1
-          : ParallelConfig::get_instance().layerwise_split_size();
-
-  if (options_.enable_task_pipeline() &&
-      options_.num_speculative_tokens() > 0 && !options_.is_draft_engine()) {
-    // Every speculative context retains the current token, position and KV
-    // length. Block drafts publish auxiliary hidden states directly to draft
-    // KV; only MTP also needs the previous token, two hidden rows and repair.
-    estimate_options.embedding_context_bytes_per_block =
-        sizeof(int64_t) + 2 * sizeof(int32_t);
-    if (!SpeculativeConfig::is_block_diffusion_algorithm(
-            options_.speculative_algorithm())) {
-      CHECK_GT(args_.hidden_size(), 0);
-      const int64_t element_bytes =
-          static_cast<int64_t>(torch::scalarTypeToTypeMeta(dtype_).itemsize());
-      estimate_options.embedding_context_bytes_per_block +=
-          sizeof(int64_t) + 2 * args_.hidden_size() * element_bytes +
-          sizeof(bool);
-    }
-  }
-
-  KVCacheCapacity kv_cache_cap =
-      KVCacheEstimator(args_).estimate(std::move(estimate_options));
-  GAUGE_SET(total_kv_cache_size_in_kilobytes,
-            kv_cache_cap.cache_size_in_bytes() / 1024);
-
-  for (auto& device : options_.devices()) {
-    DeviceMonitor::get_instance().set_total_kv_cache_memory(
-        device.index(), kv_cache_cap.cache_size_in_bytes());
-    DeviceMonitor::get_instance().set_total_activation_memory(device.index());
-  }
-
-  return kv_cache_cap;
+  return KVCacheManagerFactory::estimate_capacity(
+      args_, options_, dtype_, dp_local_tp_size_, worker_clients_);
 }
 
 bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {

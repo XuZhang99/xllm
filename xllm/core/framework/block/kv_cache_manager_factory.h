@@ -15,9 +15,12 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/types.h>
+
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "core/framework/block/block_manager_pool.h"
 #include "core/framework/kv_cache/kv_cache_shape.h"
@@ -26,6 +29,11 @@ limitations under the License.
 namespace xllm {
 
 class Engine;
+class ModelArgs;
+class WorkerClient;
+namespace runtime {
+struct Options;
+}
 
 struct KVCacheManagerFactoryResult final {
   std::unique_ptr<KVCacheManager> manager;
@@ -34,6 +42,14 @@ struct KVCacheManagerFactoryResult final {
 
 class KVCacheManagerFactory final {
  public:
+  static KVCacheCapacity estimate_capacity(
+      const ModelArgs& model_args,
+      const runtime::Options& options,
+      torch::ScalarType dtype,
+      int64_t world_size,
+      const std::vector<std::shared_ptr<WorkerClient>>& worker_clients,
+      bool is_multimodal = false);
+
   static KVCacheManagerFactoryResult create(
       const KVCacheCapacity& kv_cache_capacity,
       const ModelArgs& model_args,

@@ -23,13 +23,14 @@ limitations under the License.
 
 #include "framework/kv_cache/deepseek_v4_cache_policy.h"
 #include "framework/model/model_args.h"
+#include "runtime/options.h"
 
 namespace xllm {
 namespace {
 
 ModelArgs make_standard_args() {
   ModelArgs model_args;
-  model_args.n_layers(4).head_dim(16);
+  model_args.n_layers(4).head_dim(16).n_heads(4).n_kv_heads(4);
   return model_args;
 }
 
@@ -46,6 +47,171 @@ KVCacheEstimateOptions make_estimate_options() {
 }
 
 }  // namespace
+
+TEST(KVCacheEstimationTest, RuntimeBudgetUsesMinimumAcrossWorkers) {
+  ModelArgs model_args = make_standard_args();
+  runtime::Options runtime_options;
+  runtime_options.max_memory_utilization(0.8).block_size(16);
+
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.world_size = 1;
+  context.worker_memory = {{8 * 1024 * 1024, 10 * 1024 * 1024},
+                           {16 * 1024 * 1024, 20 * 1024 * 1024}};
+
+  const KVCacheCapacity capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  // The workers have effective budgets of 6 MiB and 12 MiB respectively.
+  EXPECT_EQ(capacity.cache_size_in_bytes(), 6 * 1024 * 1024);
+}
+
+TEST(KVCacheEstimationTest, RuntimeBudgetCapsBeforeVlmEncoderReservation) {
+  ModelArgs model_args = make_standard_args();
+  runtime::Options runtime_options;
+  runtime_options.max_memory_utilization(0.8)
+      .max_cache_size(5 * 1024 * 1024)
+      .max_encoder_cache_size(1)
+      .block_size(16);
+
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.worker_memory = {
+      {8 * 1024 * 1024, 10 * 1024 * 1024},
+  };
+  context.is_multimodal = true;
+
+  const KVCacheCapacity capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  // min(8 MiB - 20%, 5 MiB) - 1 MiB = 4 MiB.
+  EXPECT_EQ(capacity.cache_size_in_bytes(), 4 * 1024 * 1024);
+}
+
+TEST(KVCacheEstimationTest, XTensorBudgetBypassesWorkerAndRuntimeCaps) {
+  ModelArgs model_args = make_standard_args();
+  runtime::Options runtime_options;
+  runtime_options.max_memory_utilization(0.1).max_cache_size(1024).block_size(
+      16);
+
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.xtensor_cache_size = 7 * 1024 * 1024;
+
+  const KVCacheCapacity capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  EXPECT_EQ(capacity.cache_size_in_bytes(), 7 * 1024 * 1024);
+}
+
+TEST(KVCacheEstimationTest, RuntimeEstimatorDerivesTensorParallelHeads) {
+  ModelArgs model_args = make_standard_args();
+  model_args.n_heads(8).n_kv_heads(4);
+  runtime::Options runtime_options;
+  runtime_options.block_size(16);
+
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.world_size = 2;
+  context.xtensor_cache_size = 1024 * 1024;
+
+  const KVCacheCapacity capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  // 2 local KV heads: 2 (K/V) * 2-byte dtype * 16 head dim * 2 heads.
+  EXPECT_EQ(capacity.slot_size(), 128);
+}
+
+TEST(KVCacheEstimationTest, DraftTp1OverridesTensorParallelHeadDerivation) {
+  ModelArgs model_args = make_standard_args();
+  model_args.n_heads(8).n_kv_heads(4);
+  runtime::Options runtime_options;
+  runtime_options.block_size(16)
+      .enable_mtp_draft_body_tp1(true)
+      .is_draft_engine(true);
+
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.world_size = 2;
+  context.xtensor_cache_size = 1024 * 1024;
+
+  const KVCacheCapacity capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  // TP1 draft uses all four KV heads instead of the target's local two.
+  EXPECT_EQ(capacity.slot_size(), 256);
+}
+
+TEST(KVCacheEstimationTest, SpeculativeEmbeddingCostDependsOnAlgorithm) {
+  ModelArgs model_args = make_standard_args();
+  model_args.hidden_size(8);
+  runtime::Options runtime_options;
+  runtime_options.block_size(16)
+      .enable_task_pipeline(true)
+      .num_speculative_tokens(2);
+
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.xtensor_cache_size = 1024 * 1024;
+
+  runtime_options.speculative_algorithm("DFlash");
+  const KVCacheCapacity block_diffusion_capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  runtime_options.speculative_algorithm("MTP");
+  const KVCacheCapacity mtp_capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  // DFlash stores only token/position metadata; MTP also stores two hidden
+  // rows and therefore fits fewer blocks in the same budget.
+  EXPECT_GT(block_diffusion_capacity.n_blocks(), mtp_capacity.n_blocks());
+}
+
+TEST(KVCacheEstimationTest, RuntimeEstimatorRejectsMissingWorkerBudget) {
+  ModelArgs model_args = make_standard_args();
+  runtime::Options runtime_options;
+  KVCacheEstimateContext context;
+
+  EXPECT_DEATH(
+      (void)KVCacheEstimator(model_args).estimate(runtime_options, context),
+      "requires worker memory snapshots");
+}
+
+TEST(KVCacheEstimationTest, RuntimeEstimatorRejectsNonPositiveWorkerBudget) {
+  ModelArgs model_args = make_standard_args();
+  runtime::Options runtime_options;
+  KVCacheEstimateContext context;
+  context.worker_memory = {{0, 0}};
+
+  EXPECT_DEATH(
+      (void)KVCacheEstimator(model_args).estimate(runtime_options, context),
+      "Available kv cache size must be greater than 0");
+}
+
+TEST(KVCacheEstimationTest, RuntimeEstimatorDerivesLinearHeadCounts) {
+  ModelArgs model_args = make_standard_args();
+  model_args.full_attention_interval(2)
+      .linear_num_key_heads(2)
+      .linear_num_value_heads(2)
+      .linear_key_head_dim(4)
+      .linear_value_head_dim(8)
+      .linear_conv_kernel_dim(3);
+  runtime::Options runtime_options;
+  runtime_options.block_size(16);
+
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.world_size = 2;
+  context.xtensor_cache_size = 2 * 1024 * 1024;
+
+  const KVCacheCapacity capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  // One local key/value head per linear-attention layer after TP sharding.
+  EXPECT_EQ(capacity.linear_slot_size(), 128);
+  EXPECT_EQ(capacity.num_linear_attention_layers(), 2);
+  EXPECT_GT(capacity.num_linear_state_blocks(), 0);
+}
 
 TEST(KVCacheEstimationTest, EstimatesStandardAttentionBlocks) {
   ModelArgs model_args = make_standard_args();

@@ -55,6 +55,7 @@ cc_library(
     :models
     :parallel_config_validation
     :runtime
+    :kv_cache_manager_factory
     :util
     glog::glog
     proto::xllm_proto

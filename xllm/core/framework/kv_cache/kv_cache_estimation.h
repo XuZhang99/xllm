@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/types.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,24 @@ limitations under the License.
 namespace xllm {
 
 class ModelArgs;
+namespace runtime {
+struct Options;
+}
+
+struct KVCacheMemorySnapshot {
+  int64_t available_memory = 0;
+  int64_t total_memory = 0;
+};
+
+// Runtime facts collected by the factory; budgeting stays in the estimator.
+struct KVCacheEstimateContext {
+  torch::ScalarType dtype = torch::kBFloat16;
+  int64_t world_size = 1;
+  int64_t linear_state_cache_block_limit = 0;
+  std::vector<KVCacheMemorySnapshot> worker_memory;
+  std::optional<int64_t> xtensor_cache_size;
+  bool is_multimodal = false;
+};
 
 struct KVCacheEstimateOptions {
   torch::ScalarType dtype = torch::kBFloat16;
@@ -75,7 +94,13 @@ class KVCacheEstimator final {
 
   KVCacheCapacity estimate(KVCacheEstimateOptions options) const;
 
+  KVCacheCapacity estimate(const runtime::Options& options,
+                           const KVCacheEstimateContext& context) const;
+
  private:
+  int64_t estimate_memory_budget(const runtime::Options& options,
+                                 const KVCacheEstimateContext& context) const;
+
   const ModelArgs& model_args_;
 };
 
