@@ -11,6 +11,7 @@ cc_library(
     openai_batch.h
     api_service.h
     api_service_impl.h
+    control_service_impl.h
     call.h
     request_id.h
     chat_json_parser.h
@@ -46,6 +47,7 @@ cc_library(
     openai_request.cpp
     openai_json.cpp
     api_service.cpp
+    control_service_impl.cpp
     chat_json_parser.cpp
     chat_request_decoder.cpp
     chat_struct_spans.cpp

@@ -21,6 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "anthropic_service_impl.h"
+#include "api_service/control_service_impl.h"
 #include "audio_generation_service_impl.h"
 #include "chat_service_impl.h"
 #include "completion_service_impl.h"
@@ -234,19 +235,8 @@ class APIService : public proto::XllmAPIService {
 
   void register_chat_completions_handler();
 
-  bool ParseForkMasterRequest(const proto::MasterInfos* request,
-                              Options& options);
-
-  // Core action helpers shared between brpc-typed and Http variants.
-  // Each returns true on success. On failure, the human readable reason is
-  // written to `error_message` so the caller can either set the HTTP response
-  // body or call `brpc::Controller::SetFailed`.
-  bool do_fork_master(const proto::MasterInfos& request,
-                      std::string* error_message);
-  bool do_sleep(const proto::MasterInfos& request, std::string* error_message);
-  bool do_wakeup(const proto::MasterInfos& request, std::string* error_message);
-
   std::shared_ptr<MasterManager> master_manager_;
+  std::unique_ptr<ControlServiceImpl> control_service_impl_;
   std::string default_model_;
   std::string system_fingerprint_;
   ChatHttpHandler chat_completions_handler_;

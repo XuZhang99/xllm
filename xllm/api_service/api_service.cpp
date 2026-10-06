@@ -22,7 +22,6 @@ limitations under the License.
 #include <json2pb/pb_to_json.h>
 
 #include <charconv>
-#include <filesystem>
 #include <limits>
 #include <sstream>
 #include <utility>
@@ -44,12 +43,10 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/common/types.h"
 #include "core/framework/config/distributed_config.h"
-#include "core/framework/config/profile_config.h"
 #include "core/util/closure_guard.h"
 #include "embedding.pb.h"
 #include "image_generation.pb.h"
 #include "models.pb.h"
-#include "service_impl_factory.h"
 #include "text_generation.pb.h"
 #include "video_generation.pb.h"
 namespace xllm {
@@ -117,7 +114,9 @@ APIService::APIService(Master* master,
                        const std::vector<std::string>& model_names,
                        const std::vector<std::string>& model_repository_names,
                        const std::vector<std::string>& model_versions)
-    : master_manager_(std::make_shared<MasterManager>()) {
+    : master_manager_(std::make_shared<MasterManager>()),
+      control_service_impl_(
+          std::make_unique<ControlServiceImpl>(master_manager_)) {
   CHECK(master != nullptr);
   CHECK(!model_names.empty());
   default_model_ = model_names.front();
@@ -1173,451 +1172,89 @@ void APIService::AnthropicCountTokensHttp(
                             /*count_tokens=*/true);
 }
 
-bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
-                                        Options& options) {
-  if (!std::filesystem::exists(request->model_path())) {
-    LOG(ERROR) << "Model path " << request->model_path() << " does not exist.";
-    return false;
-  }
-
-  std::filesystem::path model_path =
-      std::filesystem::path(request->model_path()).lexically_normal();
-  std::string model_id;
-  if (model_path.has_filename()) {
-    model_id = std::filesystem::path(request->model_path()).filename();
-  } else {
-    model_id =
-        std::filesystem::path(request->model_path()).parent_path().filename();
-  }
-  options.model_id() = model_id;
-  options.master_node_addr() = request->master_node_addr();
-  options.model_path() = request->model_path();
-  options.master_status() = MasterStatus(request->master_status());
-
-  // Parse nnodes and dp_size (tp_size = nnodes / dp_size, computed by engine)
-  if (request->nnodes() > 0) {
-    options.nnodes() = request->nnodes();
-  }
-  if (request->dp_size() > 0) {
-    options.dp_size() = request->dp_size();
-  }
-
-  return true;
-}
-
-bool APIService::do_fork_master(const proto::MasterInfos& request,
-                                std::string* error_message) {
-  Options master_options;
-  if (!ParseForkMasterRequest(&request, master_options)) {
-    *error_message = "Failed to parse fork master request";
-    return false;
-  }
-  return master_manager_->fork_master(master_options, error_message);
-}
-
 void APIService::ForkMaster(::google::protobuf::RpcController* controller,
                             const proto::MasterInfos* request,
                             proto::Status* response,
                             ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string error_message;
-  bool ok = do_fork_master(*request, &error_message);
-  response->set_ok(ok);
-  if (!ok) {
-    LOG(ERROR) << "fork_master failed: " << error_message;
-    ctrl->SetFailed(error_message);
-  }
+  control_service_impl_->fork_master(controller, request, response, done);
 }
 
 void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
                                 const proto::HttpRequest* request,
                                 proto::HttpResponse* response,
                                 ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto arena = response->GetArena();
-  auto req_pb =
-      google::protobuf::Arena::CreateMessage<proto::MasterInfos>(arena);
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-
-  std::string error;
-  json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
-  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
-    LOG(ERROR) << "parse json to proto failed: " << error;
-    return;
-  }
-
-  std::string error_message;
-  if (!do_fork_master(*req_pb, &error_message)) {
-    LOG(ERROR) << "fork_master failed: " << error_message;
-    ctrl->SetFailed(error_message);
-  }
-}
-
-bool APIService::do_sleep(const proto::MasterInfos& request,
-                          std::string* error_message) {
-  const auto req_master_status = MasterStatus(request.master_status());
-  return master_manager_->sleep(
-      request.model_id(), req_master_status, error_message);
+  control_service_impl_->fork_master_http(controller, request, response, done);
 }
 
 void APIService::Sleep(::google::protobuf::RpcController* controller,
                        const proto::MasterInfos* request,
                        proto::Status* response,
                        ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string error_message;
-  bool ok = do_sleep(*request, &error_message);
-  response->set_ok(ok);
-  if (!ok) {
-    ctrl->SetFailed(error_message);
-  }
+  control_service_impl_->sleep(controller, request, response, done);
 }
 
 void APIService::SleepHttp(::google::protobuf::RpcController* controller,
                            const proto::HttpRequest* request,
                            proto::HttpResponse* response,
                            ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto arena = response->GetArena();
-  auto req_pb =
-      google::protobuf::Arena::CreateMessage<proto::MasterInfos>(arena);
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-
-  std::string error;
-  json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
-  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
-    LOG(ERROR) << "parse json to proto failed: " << error;
-    return;
-  }
-
-  std::string error_message;
-  if (!do_sleep(*req_pb, &error_message)) {
-    ctrl->SetFailed(error_message);
-  }
-  // Success: return HTTP 200 with empty body
-}
-
-bool APIService::do_wakeup(const proto::MasterInfos& request,
-                           std::string* error_message) {
-  // Parse remote weight transfer parameters before handing over lifecycle
-  // control to the manager.
-  WakeupOptions wakeup_options;
-  if (request.remote_addrs_size() > 0) {
-    wakeup_options.remote_addrs.assign(request.remote_addrs().begin(),
-                                       request.remote_addrs().end());
-    if (request.src_weight_segments_size() > 0) {
-      for (const auto& seg_list : request.src_weight_segments()) {
-        std::vector<WeightSegment> segments;
-        segments.reserve(seg_list.segments_size());
-        for (const auto& proto_seg : seg_list.segments()) {
-          segments.emplace_back(proto_seg.offset(), proto_seg.size());
-        }
-        wakeup_options.src_weight_segments.push_back(std::move(segments));
-      }
-    }
-  }
-  return master_manager_->wakeup(
-      request.model_id(), wakeup_options, error_message);
+  control_service_impl_->sleep_http(controller, request, response, done);
 }
 
 void APIService::Wakeup(::google::protobuf::RpcController* controller,
                         const proto::MasterInfos* request,
                         proto::Status* response,
                         ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string error_message;
-  bool ok = do_wakeup(*request, &error_message);
-  response->set_ok(ok);
-  if (!ok) {
-    ctrl->SetFailed(error_message);
-  }
+  control_service_impl_->wakeup(controller, request, response, done);
 }
 
 void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
                             const proto::HttpRequest* request,
                             proto::HttpResponse* response,
                             ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto arena = response->GetArena();
-  auto req_pb =
-      google::protobuf::Arena::CreateMessage<proto::MasterInfos>(arena);
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-
-  std::string error;
-  json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
-  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
-    LOG(ERROR) << "parse json to proto failed: " << error;
-    return;
-  }
-
-  std::string error_message;
-  if (!do_wakeup(*req_pb, &error_message)) {
-    ctrl->SetFailed(error_message);
-  }
-  // Success: return HTTP 200 with empty body
+  control_service_impl_->wakeup_http(controller, request, response, done);
 }
 
 void APIService::StartProfileHttp(::google::protobuf::RpcController* controller,
                                   const proto::HttpRequest* request,
                                   proto::HttpResponse* response,
                                   ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-
-  if (!ProfileConfig::get_instance().enable_online_profile()) {
-    LOG(ERROR) << "Profiling is disabled. Start the server with "
-                  "--enable_online_profile=true to use /start_profile.";
-    ctrl->SetFailed(
-        "Profiling is disabled. Start the server with "
-        "--enable_online_profile=true.");
-    return;
-  }
-  LOG(INFO) << "Starting profiler.";
-  std::string error_message;
-  if (!master_manager_->start_profile(&error_message)) {
-    LOG(ERROR) << error_message;
-    ctrl->SetFailed(error_message);
-    return;
-  }
-  LOG(INFO) << "Profiler started.";
-  // Success: return HTTP 200 with empty body
+  control_service_impl_->start_profile_http(
+      controller, request, response, done);
 }
 
 void APIService::StopProfileHttp(::google::protobuf::RpcController* controller,
                                  const proto::HttpRequest* request,
                                  proto::HttpResponse* response,
                                  ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-
-  if (!ProfileConfig::get_instance().enable_online_profile()) {
-    LOG(ERROR) << "Profiling is disabled. Start the server with "
-                  "--enable_online_profile=true to use /stop_profile.";
-    ctrl->SetFailed(
-        "Profiling is disabled. Start the server with "
-        "--enable_online_profile=true.");
-    return;
-  }
-  LOG(INFO) << "Stopping profiler.";
-  std::string error_message;
-  if (!master_manager_->stop_profile(&error_message)) {
-    LOG(ERROR) << error_message;
-    ctrl->SetFailed(error_message);
-    return;
-  }
-  LOG(INFO) << "Profiler stopped.";
-  // Success: return HTTP 200 with empty body
+  control_service_impl_->stop_profile_http(controller, request, response, done);
 }
 
 void APIService::LinkP2P(::google::protobuf::RpcController* controller,
                          const proto::P2PLinkRequest* request,
                          proto::Status* response,
                          ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  std::string error_message;
-  const bool status = master_manager_->link_p2p(
-      request->model_id(),
-      {request->remote_addrs().begin(), request->remote_addrs().end()},
-      &error_message);
-  if (!status) {
-    LOG(ERROR) << error_message;
-  }
-  response->set_ok(status);
+  control_service_impl_->link_p2p(controller, request, response, done);
 }
 
 void APIService::LinkP2PHttp(::google::protobuf::RpcController* controller,
                              const proto::HttpRequest* request,
                              proto::HttpResponse* response,
                              ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto arena = response->GetArena();
-  auto req_pb =
-      google::protobuf::Arena::CreateMessage<proto::P2PLinkRequest>(arena);
-  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-
-  std::string error;
-  json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
-  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
-    LOG(ERROR) << "parse json to proto failed: " << error;
-    return;
-  }
-
-  if (!master_manager_->has_master(req_pb->model_id())) {
-    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
-    ctrl->SetFailed("Master for model not found");
-    return;
-  }
-
-  std::string error_message;
-  const bool status = master_manager_->link_p2p(
-      req_pb->model_id(),
-      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()},
-      &error_message);
-  if (!status) {
-    LOG(ERROR) << error_message;
-  }
-  resp_pb->set_ok(status);
-
-  json2pb::Pb2JsonOptions json_options;
-  json_options.bytes_to_base64 = false;
-  std::string err_msg;
-  butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
-  if (!json2pb::ProtoMessageToJson(
-          *resp_pb, &json_output, json_options, &err_msg)) {
-    LOG(ERROR) << "proto to json failed: " << err_msg;
-    return;
-  }
+  control_service_impl_->link_p2p_http(controller, request, response, done);
 }
 
 void APIService::UnlinkP2P(::google::protobuf::RpcController* controller,
                            const proto::P2PLinkRequest* request,
                            proto::Status* response,
                            ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  std::string error_message;
-  const bool status = master_manager_->unlink_p2p(
-      request->model_id(),
-      {request->remote_addrs().begin(), request->remote_addrs().end()},
-      &error_message);
-  if (!status) {
-    LOG(ERROR) << error_message;
-  }
-  response->set_ok(status);
+  control_service_impl_->unlink_p2p(controller, request, response, done);
 }
 
 void APIService::UnlinkP2PHttp(::google::protobuf::RpcController* controller,
                                const proto::HttpRequest* request,
                                proto::HttpResponse* response,
                                ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | response | controller is null";
-    return;
-  }
-
-  auto arena = response->GetArena();
-  auto req_pb =
-      google::protobuf::Arena::CreateMessage<proto::P2PLinkRequest>(arena);
-  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
-
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-
-  std::string error;
-  json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
-  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
-    LOG(ERROR) << "parse json to proto failed: " << error;
-    return;
-  }
-
-  if (!master_manager_->has_master(req_pb->model_id())) {
-    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
-    ctrl->SetFailed("Master for model not found");
-    return;
-  }
-
-  std::string error_message;
-  const bool status = master_manager_->unlink_p2p(
-      req_pb->model_id(),
-      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()},
-      &error_message);
-  if (!status) {
-    LOG(ERROR) << error_message;
-  }
-  resp_pb->set_ok(status);
-
-  json2pb::Pb2JsonOptions json_options;
-  json_options.bytes_to_base64 = false;
-  std::string err_msg;
-  butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
-  if (!json2pb::ProtoMessageToJson(
-          *resp_pb, &json_output, json_options, &err_msg)) {
-    LOG(ERROR) << "proto to json failed: " << err_msg;
-    return;
-  }
+  control_service_impl_->unlink_p2p_http(controller, request, response, done);
 }
 
 }  // namespace xllm
