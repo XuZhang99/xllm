@@ -2011,8 +2011,8 @@ bool WorkerImpl::wakeup_from_remote_weights(const WakeupOptions& options) {
 
   auto& allocator = XTensorAllocator::get_instance();
   auto* tensors = allocator.get_model_tensors(options_.model_id());
-  if (!tensors || tensors->weight_base_ptr == nullptr ||
-      tensors->weight_num_pages == 0) {
+  if (!tensors || tensors->weight.base_ptr() == nullptr ||
+      tensors->weight.num_pages() == 0) {
     LOG(ERROR) << "Weight region not initialized for model "
                << options_.model_id();
     return false;
@@ -2030,7 +2030,7 @@ bool WorkerImpl::wakeup_from_remote_weights(const WakeupOptions& options) {
 
   // Destination is always contiguous (local allocation).
   uint64_t dst_base_offset =
-      reinterpret_cast<uintptr_t>(tensors->weight_base_ptr) -
+      reinterpret_cast<uintptr_t>(tensors->weight.base_ptr()) -
       reinterpret_cast<uintptr_t>(global_xtensor.base_vaddr());
   for (size_t i = 0; i < options.remote_addrs.size(); ++i) {
     const auto& segments = options.src_weight_segments[i];

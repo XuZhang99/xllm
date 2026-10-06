@@ -10,16 +10,24 @@ cc_library(
     phy_page_pool.h
     virt_page.h
     page_allocator.h
+    page_coordinator.h
     global_xtensor.h
+    model_memory_store.h
     xtensor.h
     xtensor_allocator.h
+    xtensor_cluster.h
+    weight_allocation.h
     weight_transfer_segments.h
     ../../distributed_runtime/xtensor_dist_client.h
     ../../distributed_runtime/xtensor_dist_service.h
     ../../distributed_runtime/xtensor_dist_server.h
   SRCS
     page_allocator.cpp
+    page_coordinator.cpp
+    model_memory_store.cpp
     xtensor_allocator.cpp
+    xtensor_cluster.cpp
+    weight_allocation.cpp
     ../../distributed_runtime/xtensor_dist_client.cpp
     ../../distributed_runtime/xtensor_dist_service.cpp
     ../../distributed_runtime/xtensor_dist_server.cpp

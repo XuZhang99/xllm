@@ -27,47 +27,13 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/distributed_runtime/xtensor_dist_client.h"
 #include "core/distributed_runtime/xtensor_dist_server.h"
+#include "core/framework/xtensor/model_memory_store.h"
 #include "core/framework/xtensor/options.h"
-#include "core/framework/xtensor/phy_page.h"
+#include "core/framework/xtensor/page_coordinator.h"
+#include "core/framework/xtensor/xtensor_cluster.h"
 #include "core/framework/xtensor/xtensor.h"
 
 namespace xllm {
-
-/**
- * Per-model tensor storage
- */
-struct ModelTensors {
-  // K tensors: one tensor per layer (indexed by layer id)
-  std::vector<std::unique_ptr<XTensor>> k_tensors;
-  // V tensors: one tensor per layer (indexed by layer id)
-  std::vector<std::unique_ptr<XTensor>> v_tensors;
-  int64_t num_layers = 0;
-  size_t kv_tensor_size_per_layer = 0;
-
-  // ============== Weight Allocation (from GlobalXTensor) ==============
-  page_id_t weight_start_page_id =
-      -1;                            // Starting page ID of pre-allocated region
-  size_t weight_num_pages = 0;       // Number of pages pre-allocated
-  void* weight_base_ptr = nullptr;   // Base virtual address
-  size_t weight_current_offset = 0;  // Current allocation offset in bytes
-
-  // ============== Fallback Weight Allocation (XTensor with preallocated pages)
-  // Used when contiguous allocation fails due to fragmentation
-  std::unique_ptr<XTensor> weight_xtensor;
-  bool using_weight_xtensor = false;  // True if using XTensor fallback
-
-  // ============== Model-specific Parallel Strategy (for fork master)
-  // ============== Each model may have different dp_size/tp_size, used in
-  // broadcast operations to select correct workers. 0 means use global values.
-  int32_t dp_size = 0;
-  int32_t tp_size = 0;
-
-  // ============== Weight Segments (for P2P transfer) ==============
-  // Segments in logical weight order, independent of physical page ID order.
-  // For contiguous allocation: single segment.
-  // For fallback (XTensor): multiple segments from non-contiguous pages.
-  std::vector<WeightSegment> weight_segments;
-};
 
 /**
  * XTensorAllocator manages XTensor objects for KV cache and model weights.
@@ -175,7 +141,7 @@ class XTensorAllocator {
   // Get XTensor dist clients (for distributed operations)
   const std::vector<std::shared_ptr<XTensorDistClient>>&
   get_xtensor_dist_clients() const {
-    return xtensor_dist_clients_;
+    return cluster_.clients();
   }
 
   // Get device
@@ -270,20 +236,9 @@ class XTensorAllocator {
 
   mutable std::mutex mtx_;
 
-  // Per-model tensors storage (key: model_id)
-  std::unordered_map<std::string, ModelTensors> model_tensors_;
-
-  // Multi-node XTensor dist members
-  int32_t world_size_ = 0;  // total workers = dp_size * tp_size
-  int32_t dp_size_ = 1;
-  int32_t tp_size_ = 1;
-  // DP group to worker clients mapping: dp_group_clients_[dp_rank][tp_rank]
-  std::vector<std::vector<std::shared_ptr<XTensorDistClient>>>
-      dp_group_clients_;
-  // Flat list for backward compatibility and weight tensor broadcast
-  std::vector<std::shared_ptr<XTensorDistClient>> xtensor_dist_clients_;
-  std::vector<std::unique_ptr<XTensorDistServer>> xtensor_dist_servers_;
-  std::string collective_server_name_{"XTensorAllocatorCollectiveServer"};
+  ModelMemoryStore model_store_;
+  XTensorCluster cluster_;
+  XTensorPageCoordinator page_coordinator_;
 };
 
 }  // namespace xllm
