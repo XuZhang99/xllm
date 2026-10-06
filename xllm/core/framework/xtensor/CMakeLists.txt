@@ -13,23 +13,16 @@ cc_library(
     global_xtensor.h
     xtensor.h
     xtensor_allocator.h
-    xtensor_block_manager_impl.h
-    xtensor_dist_client.h
-    xtensor_dist_service.h
-    xtensor_dist_server.h
     weight_transfer_segments.h
+    ../../distributed_runtime/xtensor_dist_client.h
+    ../../distributed_runtime/xtensor_dist_service.h
+    ../../distributed_runtime/xtensor_dist_server.h
   SRCS
-    phy_page.cpp
-    phy_page_pool.cpp
-    virt_page.cpp
     page_allocator.cpp
-    global_xtensor.cpp
-    xtensor.cpp
     xtensor_allocator.cpp
-    xtensor_block_manager_impl.cpp
-    xtensor_dist_client.cpp
-    xtensor_dist_service.cpp
-    xtensor_dist_server.cpp
+    ../../distributed_runtime/xtensor_dist_client.cpp
+    ../../distributed_runtime/xtensor_dist_service.cpp
+    ../../distributed_runtime/xtensor_dist_server.cpp
   DEPS
     torch
     :minja
@@ -41,4 +34,28 @@ cc_library(
     :collective_service
     :platform
     :xllm_server
+    :xtensor_local
+)
+
+cc_library(
+  NAME
+    xtensor_local
+  HDRS
+    phy_page.h
+    phy_page_pool.h
+    virt_page.h
+    global_xtensor.h
+    xtensor.h
+  SRCS
+    phy_page.cpp
+    phy_page_pool.cpp
+    virt_page.cpp
+    global_xtensor.cpp
+    xtensor.cpp
+  DEPS
+    torch
+    :common
+    :config
+    :platform
+    glog::glog
 )

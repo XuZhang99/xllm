@@ -15,11 +15,12 @@ limitations under the License.
 
 #pragma once
 
+#include <google/protobuf/service.h>
+
 #include "api_service/api_service.h"
 #include "core/distributed_runtime/collective_service.h"
 #include "core/distributed_runtime/disagg_pd_service.h"
 #include "core/distributed_runtime/worker_service.h"
-#include "core/framework/xtensor/xtensor_dist_service.h"
 
 namespace xllm {
 
@@ -34,8 +35,9 @@ class XllmServer final {
              const std::string& addr,
              const std::string& server_name);
   bool start(std::shared_ptr<WorkerService> service, const std::string& addr);
-  bool start(std::shared_ptr<XTensorDistService> service,
-             const std::string& addr);
+  bool start(std::shared_ptr<google::protobuf::Service> service,
+             const std::string& addr,
+             const std::string& server_name);
 
   void run();
   void stop();

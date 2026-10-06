@@ -229,12 +229,13 @@ bool XllmServer::start(std::shared_ptr<WorkerService> service,
                        "DistributeWorker");
 }
 
-bool XllmServer::start(std::shared_ptr<XTensorDistService> service,
-                       const std::string& addr) {
+bool XllmServer::start(std::shared_ptr<google::protobuf::Service> service,
+                       const std::string& addr,
+                       const std::string& server_name) {
   return create_server(static_cast<google::protobuf::Service*>(service.get()),
                        addr,
                        -1,
-                       "XTensorDist");
+                       server_name);
 }
 
 bool XllmServer::create_server(google::protobuf::Service* service,

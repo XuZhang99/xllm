@@ -25,11 +25,11 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/types.h"
+#include "core/distributed_runtime/xtensor_dist_client.h"
+#include "core/distributed_runtime/xtensor_dist_server.h"
 #include "core/framework/xtensor/options.h"
 #include "core/framework/xtensor/phy_page.h"
 #include "core/framework/xtensor/xtensor.h"
-#include "core/framework/xtensor/xtensor_dist_client.h"
-#include "core/framework/xtensor/xtensor_dist_server.h"
 
 namespace xllm {
 

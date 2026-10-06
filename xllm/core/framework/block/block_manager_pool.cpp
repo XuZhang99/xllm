@@ -23,10 +23,10 @@ limitations under the License.
 #include "composite_block_manager.h"
 #include "concurrent_block_manager_impl.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "framework/block/xtensor_block_manager_impl.h"
 #include "framework/model/model_input_params.h"
 #include "framework/xtensor/page_allocator.h"
 #include "framework/xtensor/phy_page_pool.h"
-#include "framework/xtensor/xtensor_block_manager_impl.h"
 #include "linear_state_block_manager.h"
 
 namespace xllm {

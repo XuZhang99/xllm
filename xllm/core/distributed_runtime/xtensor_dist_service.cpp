@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/framework/xtensor/xtensor_dist_service.h"
+#include "core/distributed_runtime/xtensor_dist_service.h"
 
 #include <brpc/closure_guard.h>
 #include <brpc/controller.h>

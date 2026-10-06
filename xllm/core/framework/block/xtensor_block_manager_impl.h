@@ -24,8 +24,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "framework/block/block_manager.h"
-// #include "page_allocator.h"
-#include "virt_page.h"
+#include "framework/xtensor/virt_page.h"
 
 namespace xllm {
 

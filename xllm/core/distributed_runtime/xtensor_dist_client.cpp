@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xtensor_dist_client.h"
+#include "core/distributed_runtime/xtensor_dist_client.h"
 
 #include <brpc/controller.h>
 #include <glog/logging.h>

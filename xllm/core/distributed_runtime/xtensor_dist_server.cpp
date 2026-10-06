@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/framework/xtensor/xtensor_dist_server.h"
+#include "core/distributed_runtime/xtensor_dist_server.h"
 
 #include <brpc/channel.h>
 #include <glog/logging.h>
@@ -21,9 +21,9 @@ limitations under the License.
 #include <chrono>
 #include <thread>
 
+#include "core/distributed_runtime/xtensor_dist_service.h"
 #include "core/framework/config/distributed_config.h"
 #include "core/framework/config/service_config.h"
-#include "core/framework/xtensor/xtensor_dist_service.h"
 #include "core/platform/device.h"
 #include "core/util/net.h"
 #include "server/xllm_server_registry.h"
@@ -43,7 +43,7 @@ void XTensorDistServer::create_server(const std::string& master_node_addr,
   std::string addr = net::get_local_ip_addr();
   XllmServer* server =
       ServerRegistry::get_instance().register_server(server_name_);
-  if (!server->start(service, addr + ":0")) {
+  if (!server->start(service, addr + ":0", server_name_)) {
     LOG(ERROR) << "Failed to start XTensorDistServer on address: " << addr;
     readiness_.set_value(false);
     return;

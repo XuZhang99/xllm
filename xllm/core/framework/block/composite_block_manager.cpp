@@ -25,7 +25,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "embedding_block_manager.h"
-#include "framework/xtensor/xtensor_block_manager_impl.h"
+#include "framework/block/xtensor_block_manager_impl.h"
 #include "linear_state_block_manager.h"
 #include "sliding_window_block_manager.h"
 

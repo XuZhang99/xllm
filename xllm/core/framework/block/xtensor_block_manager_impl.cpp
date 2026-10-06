@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xtensor_block_manager_impl.h"
+#include "core/framework/block/xtensor_block_manager_impl.h"
 
 #include <glog/logging.h>
 
@@ -21,9 +21,9 @@ limitations under the License.
 #include <chrono>
 
 #include "common/global_flags.h"
-#include "page_allocator.h"
-#include "phy_page_pool.h"
-#include "xtensor_allocator.h"
+#include "framework/xtensor/page_allocator.h"
+#include "framework/xtensor/phy_page_pool.h"
+#include "framework/xtensor/xtensor_allocator.h"
 
 namespace xllm {
 
