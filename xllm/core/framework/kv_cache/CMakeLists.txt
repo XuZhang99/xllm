@@ -19,6 +19,7 @@ cc_library(
     kv_cache_estimation.cpp
   DEPS
     :common
+    :config
     :deepseek_v4_cache_policy
     :block_utils
     :platform

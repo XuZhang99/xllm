@@ -24,7 +24,6 @@ cc_test(
     kv_cache_estimation_test.cpp
   DEPS
     :kv_cache_estimation
-    :kv_cache_manager_factory
     GTest::gtest_main
 )
 target_link_libraries(kv_cache_estimation_test

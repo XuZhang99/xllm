@@ -18,10 +18,18 @@ limitations under the License.
 #include <algorithm>
 #include <cstddef>
 #include <limits>
+#include <utility>
 #include <vector>
 
+#include "core/common/metrics.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
+#include "core/framework/config/service_config.h"
+#include "core/framework/config/speculative_config.h"
 #include "core/layers/common/dsa_topk_share_plan.h"
 #include "core/platform/platform.h"
+#include "core/runtime/options.h"
 #include "framework/block/block_utils.h"
 #include "framework/kv_cache/deepseek_v4_cache_policy.h"
 #include "framework/kv_cache/kv_cache_shape.h"
@@ -683,6 +691,118 @@ int64_t estimate_layerwise_split_block_count(
                                      kv_cache_cap,
                                      available_bytes,
                                      additional_block_bytes);
+}
+
+int64_t KVCacheEstimator::estimate_memory_budget(
+    const runtime::Options& options,
+    const KVCacheEstimateContext& context) const {
+  if (context.xtensor_cache_size.has_value()) {
+    CHECK_GT(*context.xtensor_cache_size, 0)
+        << "XTensor KV cache budget must be positive";
+    LOG(INFO) << "XTensor mode: available memory from PhyPagePool: "
+              << readable_size(*context.xtensor_cache_size);
+    return *context.xtensor_cache_size;
+  }
+
+  CHECK(!context.worker_memory.empty())
+      << "KV cache estimation requires worker memory snapshots";
+  const int64_t encoder_cache_reserved_bytes =
+      context.is_multimodal ? options.max_encoder_cache_size() * 1024 * 1024
+                            : 0;
+  int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
+  for (size_t i = 0; i < context.worker_memory.size(); ++i) {
+    const KVCacheMemorySnapshot& memory = context.worker_memory[i];
+    int64_t available_memory = memory.available_memory;
+    const int64_t total_memory = memory.total_memory;
+    LOG(INFO) << "worker #" << i
+              << ": available memory: " << readable_size(available_memory)
+              << ", total memory: " << readable_size(total_memory)
+              << ". Using max_memory_utilization: "
+              << options.max_memory_utilization()
+              << ", max_cache_size: " << readable_size(options.max_cache_size())
+              << ", encoder_cache_reserved: "
+              << readable_size(encoder_cache_reserved_bytes);
+    GAUGE_SET(weight_size_in_kilobytes,
+              (total_memory - available_memory) / 1024);
+    GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
+    if (options.max_memory_utilization() < 1.0) {
+      const int64_t buffer_memory = static_cast<int64_t>(
+          total_memory * (1.0 - options.max_memory_utilization()));
+      available_memory -= buffer_memory;
+    }
+    if (options.max_cache_size() > 0) {
+      available_memory = std::min(available_memory, options.max_cache_size());
+    }
+    available_memory -= encoder_cache_reserved_bytes;
+    cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
+  }
+  return cache_size_in_bytes;
+}
+
+KVCacheCapacity KVCacheEstimator::estimate(
+    const runtime::Options& options,
+    const KVCacheEstimateContext& context) const {
+  KVCacheEstimateOptions estimate_options;
+  estimate_options.dtype = context.dtype;
+  estimate_options.kv_cache_dtype = options.kv_cache_dtype();
+  estimate_options.indexer_cache_dtype =
+      ::xllm::KVCacheConfig::get_instance().indexer_cache_dtype();
+  estimate_options.cache_size_in_bytes =
+      estimate_memory_budget(options, context);
+  estimate_options.block_size = options.block_size();
+  estimate_options.world_size = context.world_size;
+  estimate_options.max_seqs_per_batch =
+      static_cast<int64_t>(options.max_seqs_per_batch());
+  estimate_options.max_concurrent_requests = static_cast<int64_t>(
+      ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
+  estimate_options.max_tokens_per_batch =
+      static_cast<int64_t>(options.max_tokens_per_batch());
+  estimate_options.max_tokens_per_chunk_for_prefill =
+      static_cast<int64_t>(options.max_tokens_per_chunk_for_prefill());
+  estimate_options.max_linear_state_cache_slots =
+      options.max_linear_state_cache_slots();
+  estimate_options.linear_state_cache_block_limit =
+      context.linear_state_cache_block_limit;
+  estimate_options.is_draft_engine = options.is_draft_engine();
+  estimate_options.enable_chunked_prefill = options.enable_chunked_prefill();
+  estimate_options.enable_schedule_overlap = options.enable_schedule_overlap();
+  const KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
+  estimate_options.enable_prefix_cache =
+      kv_cache_config.enable_prefix_cache() &&
+      !kv_cache_config.enable_xtensor();
+  estimate_options.enable_disagg_pd = options.enable_disagg_pd();
+  estimate_options.instance_role = options.instance_role();
+  if (!context.is_multimodal) {
+    estimate_options.num_speculative_tokens =
+        static_cast<int64_t>(options.num_speculative_tokens());
+    estimate_options.dp_size = options.dp_size();
+    estimate_options.enable_dp_fair_token_budget =
+        ::xllm::SchedulerConfig::get_instance().enable_dp_fair_token_budget();
+    if (options.enable_mtp_draft_body_tp1() && options.is_draft_engine()) {
+      estimate_options.world_size = 1;
+    }
+    estimate_options.layerwise_split_size =
+        options.is_draft_engine()
+            ? 1
+            : ParallelConfig::get_instance().layerwise_split_size();
+
+    if (options.enable_task_pipeline() &&
+        options.num_speculative_tokens() > 0 && !options.is_draft_engine()) {
+      estimate_options.embedding_context_bytes_per_block =
+          sizeof(int64_t) + 2 * sizeof(int32_t);
+      if (!SpeculativeConfig::is_block_diffusion_algorithm(
+              options.speculative_algorithm())) {
+        CHECK_GT(model_args_.hidden_size(), 0);
+        const int64_t element_bytes = static_cast<int64_t>(
+            torch::scalarTypeToTypeMeta(context.dtype).itemsize());
+        estimate_options.embedding_context_bytes_per_block +=
+            sizeof(int64_t) + 2 * model_args_.hidden_size() * element_bytes +
+            sizeof(bool);
+      }
+    }
+  }
+
+  return estimate(std::move(estimate_options));
 }
 
 KVCacheCapacity KVCacheEstimator::estimate(
