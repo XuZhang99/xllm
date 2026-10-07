@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "core/framework/config/parallel_config.h"
+#include "core/framework/eplb/eplb_controller.h"
 #include "core/framework/kv_cache/kv_cache_estimation.h"
 #include "framework/speculative/mtp_utils.h"
 #include "llm_engine.h"
@@ -135,7 +136,10 @@ bool SpeculativeEngineBase<TargetEngine>::init_model(
   }
 
   if constexpr (std::is_same_v<TargetEngine, LLMEngine>) {
-    engine_->init_eplb_manager();
+    engine_->eplb_controller_ = EplbController::create(
+        engine_->model_args(),
+        static_cast<int32_t>(engine_->worker_clients_num_),
+        engine_->options_.ep_size());
   }
   dtype_ = util::parse_dtype(model_args_.dtype(), options_.devices()[0]);
   return true;

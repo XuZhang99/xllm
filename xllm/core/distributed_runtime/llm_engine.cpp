@@ -35,7 +35,6 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/options.h"
 #include "core/common/global_flags.h"
-#include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
@@ -43,7 +42,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/service_config.h"
 #include "core/framework/config/speculative_config.h"
-#include "core/framework/eplb/eplb_utils.h"
+#include "core/framework/eplb/eplb_controller.h"
 #include "core/framework/model_loader/model_loader.h"
 #include "core/platform/platform.h"
 #include "core/util/model_config_utils.h"
@@ -146,6 +145,8 @@ LLMEngine::LLMEngine(
       /*pool_name=*/"LLMEngine.forward_input");
 }
 
+LLMEngine::~LLMEngine() = default;
+
 runtime::DecodeGraphExecutionShape LLMEngine::decode_graph_execution_shape()
     const {
   runtime::DecodeGraphExecutionShape execution_shape;
@@ -186,7 +187,8 @@ bool LLMEngine::init(MasterStatus master_status) {
     return false;
   }
 
-  init_eplb_manager();
+  eplb_controller_ = EplbController::create(
+      args_, static_cast<int32_t>(worker_clients_num_), options_.ep_size());
 
   auto kv_cache_cap = estimate_kv_cache_capacity();
 
@@ -214,21 +216,6 @@ bool LLMEngine::init(MasterStatus master_status) {
   }
 
   return true;
-}
-
-void LLMEngine::init_eplb_manager() {
-  if (!::xllm::EPLBConfig::get_instance().enable_eplb()) {
-    return;
-  }
-
-  CHECK(eplb_manager_ == nullptr) << "EPLB manager is already initialized.";
-  const int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
-  const int32_t num_experts = args_.n_routed_experts();
-  const int32_t worker_num = static_cast<int32_t>(worker_clients_num_);
-  const int32_t eplb_device_num =
-      eplb::effective_device_num(worker_num, options_.ep_size());
-  eplb_manager_ =
-      std::make_unique<EplbManager>(num_layers, eplb_device_num, num_experts);
 }
 
 bool LLMEngine::init_model(MasterStatus master_status) {
@@ -992,19 +979,8 @@ ForwardOutput LLMEngine::step(BatchGroup& batch) {
 
   auto forward_inputs = prepare_inputs(batch);
   const bool is_graph_warmup = contains_graph_warmup(forward_inputs);
-  int64_t dispatched_activation_token = -1;
-  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
-    CHECK(!forward_inputs.empty());
-    dispatched_activation_token =
-        forward_inputs.front().input_params.expert.eplb_info.activation_token;
-    for (const LlmForwardInput& input : forward_inputs) {
-      CHECK_EQ(input.input_params.expert.eplb_info.activation_token,
-               dispatched_activation_token)
-          << "EPLB activation token must be identical across DP inputs.";
-    }
-    if (options_.enable_schedule_overlap()) {
-      pending_eplb_activation_tokens_.push_back(dispatched_activation_token);
-    }
+  if (eplb_controller_ != nullptr) {
+    eplb_controller_->on_step_dispatched(forward_inputs, is_graph_warmup);
   }
   DCHECK(dp_size_ == forward_inputs.size())
       << "The processed forward inputs size " << forward_inputs.size()
@@ -1034,9 +1010,9 @@ ForwardOutput LLMEngine::step(BatchGroup& batch) {
     }
   }
 
-  if (::xllm::EPLBConfig::get_instance().enable_eplb() &&
-      !options_.enable_schedule_overlap() && !is_graph_warmup) {
-    process_eplb_data(results, dispatched_activation_token);
+  if (eplb_controller_ != nullptr && !options_.enable_schedule_overlap() &&
+      !is_graph_warmup) {
+    eplb_controller_->on_step_completed(results, is_graph_warmup);
   }
 
   size_t dp_rank = 0;
@@ -1065,13 +1041,6 @@ ForwardOutput LLMEngine::step(BatchGroup& batch) {
 
 void LLMEngine::update_last_step_result(BatchGroup& last_batch) {
   const bool is_graph_warmup = contains_graph_warmup(last_batch);
-  int64_t completed_activation_token = -1;
-  if (::xllm::EPLBConfig::get_instance().enable_eplb() && !is_graph_warmup) {
-    CHECK(!pending_eplb_activation_tokens_.empty())
-        << "Missing EPLB activation metadata for completed overlap step.";
-    completed_activation_token = pending_eplb_activation_tokens_.front();
-    pending_eplb_activation_tokens_.pop_front();
-  }
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
   std::vector<RawForwardOutput> raw_forward_outputs;
@@ -1089,11 +1058,12 @@ void LLMEngine::update_last_step_result(BatchGroup& last_batch) {
   uint32_t stride = dp_local_size_;
   // If EPLB is enabled, we need to get results from all workers,
   // because the experts on each worker are different,
-  // and the tokens load of all experts needs to be returned to engine.
+  // and the controller needs the token load of every expert shard.
   // so we can not skip any worker.
   // Each pipeline worker retains its completed Slot until the result is taken,
   // including non-drivers. Retire every worker's Slot before the next submit.
-  if (::xllm::EPLBConfig::get_instance().enable_eplb() ||
+  if ((eplb_controller_ != nullptr &&
+       eplb_controller_->requires_all_worker_results()) ||
       options_.enable_task_pipeline()) {
     stride = 1;
   }
@@ -1110,8 +1080,8 @@ void LLMEngine::update_last_step_result(BatchGroup& last_batch) {
         << "Failed to get last step results, result has no value";
   }
 
-  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
-    process_eplb_data(last_step_results, completed_activation_token);
+  if (eplb_controller_ != nullptr) {
+    eplb_controller_->on_step_completed(last_step_results, is_graph_warmup);
   }
 
   for (auto worker_rank = 0; worker_rank < worker_clients_num_;
@@ -1152,51 +1122,6 @@ void LLMEngine::setup_workers(const runtime::Options& options) {
         std::make_shared<DistributedWorkerManager>(options);
   }
   worker_clients_ = distributed_worker_manager_->get_worker_clients();
-}
-
-void LLMEngine::process_eplb_data(
-    const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results,
-    int64_t completed_activation_token) {
-  CHECK(eplb_manager_ != nullptr)
-      << "EPLB manager must be initialized before processing expert loads.";
-  CHECK_EQ(results.size(), static_cast<size_t>(worker_clients_num_))
-      << "EPLB requires forward results from all workers.";
-  const int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
-  const int32_t worker_num = static_cast<int32_t>(worker_clients_num_);
-  const int32_t eplb_device_num =
-      eplb::effective_device_num(worker_num, options_.ep_size());
-  const int32_t num_device_experts = eplb::local_physical_experts_num(
-      args_.n_routed_experts(),
-      eplb_device_num,
-      ::xllm::EPLBConfig::get_instance().redundant_experts_num());
-  std::vector<torch::Tensor> tensors;
-  std::vector<int64_t> prepare_tokens(results.size(), -1);
-  tensors.reserve(eplb_device_num);
-  for (size_t worker_rank = 0; worker_rank < results.size(); ++worker_rank) {
-    const int32_t eplb_rank = eplb::eplb_rank_from_worker_rank(
-        static_cast<int32_t>(worker_rank), worker_num, eplb_device_num);
-    CHECK_EQ(eplb_rank, static_cast<int32_t>(worker_rank))
-        << "EPLB currently expects one worker per EP rank.";
-    auto result = results[worker_rank].value();
-    if (result.has_value()) {
-      const size_t expected_size = static_cast<size_t>(num_layers) *
-                                   static_cast<size_t>(num_device_experts);
-      CHECK_EQ(result.value().expert_load_data.size(), expected_size)
-          << "EPLB expert_load_data size mismatch from worker " << worker_rank;
-      tensors.emplace_back(
-          torch::from_blob(result.value().expert_load_data.data(),
-                           {num_layers, num_device_experts},
-                           torch::TensorOptions().dtype(torch::kInt64))
-              .clone());
-      prepare_tokens[worker_rank] = result.value().prepared_token;
-    } else {
-      LOG(ERROR) << "Failed to process EPLB data";
-    }
-  }
-  CHECK_EQ(tensors.size(), static_cast<size_t>(eplb_device_num))
-      << "EPLB expert load tensor count mismatch.";
-  eplb_manager_->set_prepared_tokens(prepare_tokens);
-  eplb_manager_->update_expert_load(tensors, completed_activation_token);
 }
 
 std::vector<LlmForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
@@ -1272,34 +1197,13 @@ std::vector<LlmForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
     }
   }
 
-  // eplb related
-  EplbInfo eplb_info;
-  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
-    CHECK(eplb_manager_ != nullptr)
-        << "EPLB manager must be initialized before preparing inputs.";
-    eplb_info = eplb_manager_->get_eplb_info(
+  if (eplb_controller_ != nullptr) {
+    eplb_controller_->annotate_inputs(
+        batched_inputs,
+        dp_global_token_nums,
         /*allow_eplb_command=*/has_non_empty_batch &&
-        all_non_empty_batches_are_decode &&
-        !contains_graph_warmup(batched_inputs));
-    std::vector<torch::Tensor> decode_masks;
-    decode_masks.reserve(batched_inputs.size());
-    for (const LlmForwardInput& input : batched_inputs) {
-      const torch::Tensor& local_mask =
-          input.input_params.expert.eplb_decode_token_mask;
-      if (!local_mask.defined()) {
-        CHECK_EQ(input.host_token_ids().numel(), 0)
-            << "EPLB requires a per-token decode mask.";
-        decode_masks.emplace_back(torch::empty({0}, torch::kBool));
-      } else {
-        decode_masks.emplace_back(local_mask);
-      }
-    }
-    const torch::Tensor global_decode_mask =
-        eplb::build_global_decode_token_mask(decode_masks,
-                                             dp_global_token_nums);
-    for (LlmForwardInput& input : batched_inputs) {
-      input.input_params.expert.eplb_decode_token_mask = global_decode_mask;
-    }
+            all_non_empty_batches_are_decode &&
+            !contains_graph_warmup(batched_inputs));
   }
 
   // Empty DP ranks inherit decode below and use fake inputs in WorkerImpl.
@@ -1330,9 +1234,6 @@ std::vector<LlmForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
     batched_inputs[dp_rank].input_params.parallel.dp_global_kv_max_seq_lens =
         dp_global_kv_max_seq_lens;
     batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
-    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
-      batched_inputs[dp_rank].input_params.expert.eplb_info = eplb_info;
-    }
     if (batched_inputs[dp_rank]
             .input_params.meta.batch_forward_type.is_empty()) {
       batched_inputs[dp_rank].input_params.meta.batch_forward_type =

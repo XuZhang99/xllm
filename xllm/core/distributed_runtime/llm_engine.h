@@ -21,7 +21,6 @@ limitations under the License.
 #include <unistd.h>
 
 #include <cstdint>
-#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -33,8 +32,6 @@ limitations under the License.
 #include "engine.h"
 #include "framework/batch/batch_group.h"
 #include "framework/block/block_manager_pool.h"
-#include "framework/eplb/eplb_manager.h"
-#include "framework/eplb/eplb_policy.h"
 #include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/quantization/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
@@ -46,6 +43,7 @@ limitations under the License.
 namespace xllm {
 
 class ModelLoader;
+class EplbController;
 
 class LLMEngine : public Engine {
  public:
@@ -54,7 +52,7 @@ class LLMEngine : public Engine {
             std::shared_ptr<DistributedWorkerManager>
                 distributed_worker_manager = nullptr);
 
-  virtual ~LLMEngine() = default;
+  ~LLMEngine() override;
 
   ForwardOutput step(BatchGroup& batch);
 
@@ -156,7 +154,6 @@ class LLMEngine : public Engine {
   // setup workers internal
   void setup_workers(const runtime::Options& options);
   bool init_model(MasterStatus master_status = MasterStatus::WAKEUP);
-  void init_eplb_manager();
   int64_t get_effective_xtensor_weight_size(
       const ModelLoader& model_loader) const;
   KVCacheCapacity estimate_kv_cache_capacity();
@@ -200,12 +197,7 @@ class LLMEngine : public Engine {
   std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_ =
       nullptr;
 
-  torch::Tensor expert_load_data_;
-  std::unique_ptr<EplbManager> eplb_manager_ = nullptr;
-  std::deque<int64_t> pending_eplb_activation_tokens_;
-  void process_eplb_data(
-      const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results,
-      int64_t completed_activation_token);
+  std::unique_ptr<EplbController> eplb_controller_;
 
   // threadpool for handle forward_input in parallel.
   // Since the batch is created in every step,

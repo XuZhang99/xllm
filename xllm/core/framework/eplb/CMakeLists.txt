@@ -11,6 +11,7 @@ cc_library(
     eplb
   HDRS
     eplb_aggregator.h
+    eplb_controller.h
     eplb_executor.h
     eplb_info.h
     eplb_manager.h
@@ -21,6 +22,7 @@ cc_library(
     expert_buffer_manager.h
   SRCS 
     eplb_aggregator.cpp
+    eplb_controller.cpp
     eplb_executor.cpp
     eplb_manager.cpp
     eplb_options.cpp
@@ -30,6 +32,9 @@ cc_library(
   DEPS
     :request
     :common
+    :config
+    :model
+    Folly::folly
     glog::glog
     torch
     :platform

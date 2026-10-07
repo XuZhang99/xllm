@@ -2,6 +2,20 @@ include(cc_test)
 
 cc_test(
   NAME
+    eplb_controller_test
+  SRCS
+    eplb_controller_test.cpp
+  DEPS
+    :eplb
+    :model
+    GTest::gtest_main
+    torch
+)
+target_link_libraries(eplb_controller_test
+                      PRIVATE $<$<BOOL:${USE_NPU}>:c_sec>)
+
+cc_test(
+  NAME
     eplb_options_test
   SRCS
     eplb_options_test.cpp
