@@ -42,10 +42,6 @@ Executor::Executor(CausalLM* model,
       model, args, device, options, backend);
 }
 
-LlmForwardInput Executor::prepare_inputs(Batch& batch) {
-  return impl_->prepare_inputs(batch);
-}
-
 bool Executor::supports_prepared_attention_metadata() const {
   return impl_->supports_prepared_attention_metadata();
 }

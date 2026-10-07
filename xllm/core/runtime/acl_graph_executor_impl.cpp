@@ -1092,12 +1092,6 @@ size_t AclGraphExecutorImpl::get_graph_capture_stream_count() const {
   return stream_ids.size();
 }
 
-LlmForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
-  // Prepare inputs for workers
-  return batch.prepare_forward_input(
-      options_.num_decoding_tokens(), 0, args_, options_.cp_size());
-}
-
 // Main execution method with graph optimization for decode phase
 // tokens: [num_decode_tokens]
 // positions: [num_decode_tokens] token pos in the sequence

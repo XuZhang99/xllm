@@ -79,9 +79,6 @@ class RemoteWorker : public WorkerClient {
                       const std::string& src_addr,
                       const std::vector<KVTransferMapping>& mappings) override;
 
-  // prepare input request
-  LlmForwardInput prepare_inputs(Batch& batch) override;
-
   std::optional<ForwardOutput> step(const LlmForwardInput& inputs) override;
 
   folly::SemiFuture<bool> init_model_async(

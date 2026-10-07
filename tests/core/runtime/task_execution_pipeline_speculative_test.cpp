@@ -100,7 +100,6 @@ class CountingModel final : public CausalLM {
 class PreparedTestExecutor final : public ExecutorImpl {
  public:
   explicit PreparedTestExecutor(CausalLM* model) : model_(model) {}
-  LlmForwardInput prepare_inputs(Batch& /*batch*/) override { return {}; }
   bool supports_prepared_attention_metadata() const override { return true; }
   void prepare_attention_metadata(std::vector<KVCache>& /*kv_caches*/,
                                   ModelInputParams& /*params*/) override {}

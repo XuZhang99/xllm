@@ -104,9 +104,6 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   };
 
   // prepare input for execution
-  LlmForwardInput prepare_inputs(Batch& batch) override {
-    return impl_->prepare_inputs(batch);
-  }
   VlmForwardInput prepare_vlm_inputs(Batch& batch) override {
     return impl_->prepare_vlm_inputs(batch);
   }

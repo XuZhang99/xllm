@@ -238,10 +238,6 @@ std::tuple<int64_t, int64_t> Worker::estimate_kv_cache_capacity() {
   return impl_->estimate_kv_cache_capacity();
 }
 
-LlmForwardInput Worker::prepare_inputs(Batch& batch) {
-  return impl_->prepare_inputs(batch);
-}
-
 VlmForwardInput Worker::prepare_vlm_inputs(Batch& batch) {
   return impl_->prepare_vlm_inputs(batch);
 }

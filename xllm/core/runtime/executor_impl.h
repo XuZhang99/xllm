@@ -22,7 +22,6 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
-#include "framework/batch/batch.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
@@ -45,8 +44,6 @@ struct SpecVerifyGraphTaskSignal {
 class ExecutorImpl {
  public:
   virtual ~ExecutorImpl() = default;
-
-  virtual LlmForwardInput prepare_inputs(Batch& batch) = 0;
 
   virtual bool supports_prepared_attention_metadata() const { return false; }
   virtual void prepare_attention_metadata(std::vector<KVCache>& /*kv_caches*/,

@@ -84,6 +84,7 @@ limitations under the License.
 #include "core/framework/speculative/mtp_utils.h"
 #include "core/runtime/decode_graph_bucket.h"
 #include "core/runtime/worker_rendezvous.h"
+#include "framework/batch/batch.h"
 #include "framework/eplb/eplb_utils.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/kv_cache/layerwise_split_layout.h"
@@ -709,10 +710,6 @@ void WorkerImpl::process_group_test() {
   parallel_state::reduce(tensor, parallel_args_.process_group_);
   // call allgather
   parallel_state::gather(tensor, parallel_args_.process_group_);
-}
-
-LlmForwardInput WorkerImpl::prepare_inputs(Batch& batch) {
-  return model_executor_->prepare_inputs(batch);
 }
 
 RecForwardInput WorkerImpl::prepare_inputs(RecBatch& batch) {

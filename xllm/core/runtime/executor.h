@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <torch/types.h>
 
-#include "framework/batch/batch.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
@@ -35,8 +34,6 @@ class Executor final {
            const runtime::Options& options);
 
   virtual ~Executor() = default;
-
-  LlmForwardInput prepare_inputs(Batch& batch);
 
   bool supports_prepared_attention_metadata() const;
   // Called on Prepare after binding Slot-owned tensor and native metadata.

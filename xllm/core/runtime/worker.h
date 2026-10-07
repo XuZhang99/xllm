@@ -90,7 +90,6 @@ class Worker {
   const bool is_driver();
 
   // prepare input for execution
-  LlmForwardInput prepare_inputs(Batch& batch);
   RecForwardInput prepare_inputs(RecBatch& batch);
   std::optional<ForwardOutput> step(const RecForwardInput& inputs);
   VlmForwardInput prepare_vlm_inputs(Batch& batch);

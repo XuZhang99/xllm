@@ -136,11 +136,6 @@ bool RemoteWorker::pull_kv_blocks(
   return channel_->pull_kv_blocks(src_cluster_id, src_addr, mappings);
 }
 
-LlmForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
-  NOT_IMPLEMENTED();
-  return {};
-}
-
 std::optional<ForwardOutput> RemoteWorker::step(const LlmForwardInput& inputs) {
   NOT_IMPLEMENTED();
   return std::nullopt;

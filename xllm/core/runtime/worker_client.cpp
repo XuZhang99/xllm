@@ -87,10 +87,6 @@ bool WorkerClient::pull_kv_blocks(
   return std::move(future).get();
 }
 
-LlmForwardInput WorkerClient::prepare_inputs(Batch& batch) {
-  return worker_->prepare_inputs(batch);
-}
-
 std::optional<ForwardOutput> WorkerClient::step(const LlmForwardInput& inputs) {
   return worker_->step(inputs);
 }

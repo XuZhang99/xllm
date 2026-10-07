@@ -43,8 +43,6 @@ class __attribute__((visibility("hidden"))) PyExecutorImpl final
 
   ~PyExecutorImpl() override;
 
-  LlmForwardInput prepare_inputs(Batch& batch) override;
-
   bool supports_prepared_attention_metadata() const override {
     return supports_prepared_metadata_;
   }

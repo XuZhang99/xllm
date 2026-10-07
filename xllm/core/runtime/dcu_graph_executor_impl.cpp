@@ -839,11 +839,6 @@ DcuGraphExecutorImpl::~DcuGraphExecutorImpl() {
   graphs_.clear();
 }
 
-LlmForwardInput DcuGraphExecutorImpl::prepare_inputs(Batch& batch) {
-  return batch.prepare_forward_input(
-      options_.num_decoding_tokens(), 0, args_, options_.cp_size());
-}
-
 uint32_t DcuGraphExecutorImpl::get_bucket_num_tokens(
     uint32_t num_tokens) const {
   if (::xllm::ExecutionConfig::get_instance()

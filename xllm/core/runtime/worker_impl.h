@@ -54,6 +54,7 @@ limitations under the License.
 
 namespace xllm {
 
+class Batch;
 class RecBatch;
 class WorkerRendezvous;
 class TaskExecutionPipeline;
@@ -125,7 +126,6 @@ class WorkerImpl {
   virtual bool unlink_p2p(const std::string& remote_addr);
 
   // prepare input for execution
-  virtual LlmForwardInput prepare_inputs(Batch& batch);
   virtual VlmForwardInput prepare_vlm_inputs(Batch& batch);
   virtual RecForwardInput prepare_inputs(RecBatch& batch);
 

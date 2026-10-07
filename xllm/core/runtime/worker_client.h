@@ -84,9 +84,6 @@ class WorkerClient {
                               const std::string& src_addr,
                               const std::vector<KVTransferMapping>& mappings);
 
-  // prepare input for execution
-  virtual LlmForwardInput prepare_inputs(Batch& batch);
-
   virtual std::optional<ForwardOutput> step(const LlmForwardInput& inputs);
 
   // initialize model, cache manager. async call
