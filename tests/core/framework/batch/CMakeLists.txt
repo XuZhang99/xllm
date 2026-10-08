@@ -58,3 +58,23 @@ target_link_libraries(batch_packed_input_test
                       $<$<BOOL:${USE_NPU}>:hccl>
                       $<$<BOOL:${USE_NPU}>:c_sec>
                       $<$<BOOL:${USE_NPU}>:nnopbase>)
+
+cc_test(
+  NAME
+    forward_input_factory_test
+  SRCS
+    forward_input_factory_test.cpp
+  DEPS
+    :config
+    :batch
+    GTest::gtest_main
+    $<$<BOOL:${USE_MLU}>:torch_mlu>
+    $<$<BOOL:${USE_NPU}>:torch_npu>
+)
+target_link_libraries(forward_input_factory_test
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>
+                      $<$<BOOL:${USE_NPU}>:nnopbase>)

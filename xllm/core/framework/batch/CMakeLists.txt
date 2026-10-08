@@ -23,6 +23,7 @@ cc_library(
     batch_factory.h
     rec_batch_factory.h
     forward_input_builder.h
+    forward_input_factory.h
     sampling_input_builder.h
     rec_forward_input_builder.h
     onerec_forward_input_builder.h
@@ -46,6 +47,7 @@ cc_library(
     batch_factory.cpp
     rec_batch_factory.cpp
     forward_input_builder.cpp
+    forward_input_factory.cpp
     sampling_input_builder.cpp
     rec_forward_input_builder.cpp
     onerec_forward_input_builder.cpp
@@ -57,6 +59,7 @@ cc_library(
     :request
     :runtime
     :common
+    :util
     :mposition
     glog::glog
     xxHash
