@@ -19,7 +19,6 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 
-#include "runtime/xservice_client.h"
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/disagg_pd_scheduler.h"
 #include "scheduler/dit_scheduler.h"

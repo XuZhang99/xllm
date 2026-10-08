@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xservice_client.h"
+#include "core/distributed_runtime/xservice_client.h"
 
 #include <absl/strings/str_split.h>
 #include <absl/time/clock.h>
@@ -21,8 +21,9 @@ limitations under the License.
 #include <glog/logging.h>
 #include <unistd.h>
 
-#include <algorithm>
+#include <chrono>
 #include <unordered_map>
+#include <utility>
 
 #include "core/framework/config/distributed_config.h"
 #include "core/framework/config/service_config.h"
@@ -74,7 +75,6 @@ bool check_instance_name(const std::string& name) {
 
 bool XServiceClient::init(const std::string& etcd_addr,
                           const std::string& instance_name,
-                          const BlockManagerPool* block_manager_pool,
                           const std::string& etcd_namespace) {
   if (initialize_done_) {
     LOG(INFO) << "XServiceClient is already initialized, skipping.";
@@ -164,17 +164,19 @@ bool XServiceClient::init(const std::string& etcd_addr,
   };
   etcd_client_->add_watch(ETCD_XSERVICES_KEY_PREFIX, xservices_func);
 
-  block_manager_pool_ = block_manager_pool;
-
   initialize_done_ = true;
   return true;
 }
 
-void XServiceClient::set_scheduler(Scheduler* scheduler) {
-  scheduler_ = scheduler;
+XServiceClient::HeartbeatCallbackRegistration
+XServiceClient::set_heartbeat_callback(HeartbeatCallback callback) {
+  return heartbeat_callback_registry_.set_callback(std::move(callback));
 }
 
-void XServiceClient::set_engine(Engine* engine) { engine_ = engine; }
+void XServiceClient::clear_heartbeat_callback(
+    HeartbeatCallbackRegistration registration) {
+  heartbeat_callback_registry_.clear_callback(registration);
+}
 
 XServiceClient::~XServiceClient() {
   exited_.store(true);
@@ -346,55 +348,12 @@ void XServiceClient::heartbeat() {
         1000)));
     if (!register_done_.load()) continue;
 
-    if (block_manager_pool_ == nullptr || scheduler_ == nullptr) continue;
-
     brpc::Controller cntl;
     xllm_service::proto::HeartbeatRequest req;
     req.set_name(instance_name_);
     req.set_incarnation_id(incarnation_id_);
 
-    req.mutable_load_metrics()->set_gpu_cache_usage_perc(
-        block_manager_pool_->get_gpu_cache_usage_perc());
-
-    req.mutable_load_metrics()->set_waiting_requests_num(
-        scheduler_->get_waiting_requests_num());
-
-    std::vector<int64_t> ttft;
-    std::vector<int64_t> tbt;
-    scheduler_->get_latency_metrics(ttft, tbt);
-    if (!ttft.empty()) {
-      auto max_ttft = std::max_element(ttft.begin(), ttft.end());
-      req.mutable_latency_metrics()->set_recent_max_ttft(*max_ttft);
-    }
-
-    if (!tbt.empty()) {
-      auto max_tbt = std::max_element(tbt.begin(), tbt.end());
-      req.mutable_latency_metrics()->set_recent_max_tbt(*max_tbt);
-    }
-
-    // Collect XTensor info (worker free pages, model weight segments)
-    if (engine_ != nullptr) {
-      std::vector<size_t> worker_free_phy_pages;
-      std::unordered_map<std::string, std::vector<WeightSegment>>
-          model_weight_segments;
-      engine_->get_xtensor_info(worker_free_phy_pages, model_weight_segments);
-
-      auto* xtensor_info = req.mutable_xtensor_info();
-      for (size_t free_pages : worker_free_phy_pages) {
-        xtensor_info->add_worker_free_phy_pages(free_pages);
-      }
-
-      // Report weight segments (for non-contiguous allocation support)
-      for (const auto& [model_id, segments] : model_weight_segments) {
-        auto& seg_list =
-            (*xtensor_info->mutable_model_weight_segments())[model_id];
-        for (const auto& seg : segments) {
-          auto* proto_seg = seg_list.add_segments();
-          proto_seg->set_offset(seg.offset);
-          proto_seg->set_size(seg.size);
-        }
-      }
-    }
+    heartbeat_callback_registry_.invoke(req);
 
     xllm_service::proto::Status resp;
     std::string master_addr;

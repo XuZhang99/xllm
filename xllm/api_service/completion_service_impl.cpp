@@ -32,8 +32,8 @@ limitations under the License.
 #include "completion.pb.h"
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/master_manager.h"
+#include "core/distributed_runtime/xservice_client.h"
 #include "core/framework/request/request_output.h"
-#include "core/runtime/xservice_client.h"
 #include "core/util/utils.h"
 
 #ifdef likely

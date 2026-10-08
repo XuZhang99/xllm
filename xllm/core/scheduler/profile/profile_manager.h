@@ -29,7 +29,6 @@ limitations under the License.
 #include "core/framework/block/block_manager_pool.h"
 #include "core/framework/request/request.h"
 #include "core/framework/request/sequence.h"
-#include "core/runtime/xservice_client.h"
 #include "core/scheduler/profile/decode_graph_warmup_plan.h"
 #include "core/scheduler/profile/time_predictor.h"
 

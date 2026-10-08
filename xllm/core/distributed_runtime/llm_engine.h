@@ -38,7 +38,6 @@ limitations under the License.
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/worker.h"
 #include "runtime/worker_client.h"
-#include "runtime/xservice_client.h"
 #include "util/threadpool.h"
 namespace xllm {
 

@@ -13,6 +13,15 @@ cc_test(
 )
 
 cc_test(
+  NAME
+    heartbeat_callback_registry_test
+  SRCS
+    heartbeat_callback_registry_test.cpp
+  DEPS
+    GTest::gtest_main
+)
+
+cc_test(
   NO_NPU_RUNTIME
   NAME
     collective_service_test

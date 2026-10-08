@@ -30,9 +30,9 @@ limitations under the License.
 #include <vector>
 
 #include "disagg_pd.pb.h"
+#include "distributed_runtime/xservice_client.h"
 #include "framework/request/request.h"
 #include "framework/tokenizer/tokenizer.h"
-#include "runtime/xservice_client.h"
 #include "scheduler/continuous_scheduler.h"
 #include "server/xllm_server_registry.h"
 #include "util/blockingconcurrentqueue.h"

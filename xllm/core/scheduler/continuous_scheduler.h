@@ -32,13 +32,13 @@ limitations under the License.
 #include "core/common/macros.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/engine.h"
+#include "core/distributed_runtime/xservice_client.h"
 #include "core/framework/batch/batch_factory.h"
 #include "core/framework/batch/batch_group.h"
 #include "core/framework/block/kv_cache_manager.h"
 #include "core/framework/request/priority_comparator.h"
 #include "core/framework/request/request.h"
 #include "core/framework/request/sequence.h"
-#include "core/runtime/xservice_client.h"
 #include "core/scheduler/async_response_processor.h"
 #include "core/scheduler/profile/profile_manager.h"
 #include "core/scheduler/request_priority_queue.h"
@@ -131,6 +131,9 @@ class ContinuousSchedulerBase : public Scheduler {
 
   void clear_mtp_bootstrap(Request* request);
   void drain_prefetch_pipeline();
+  void populate_heartbeat_request(
+      xllm_service::proto::HeartbeatRequest& request,
+      bool include_xtensor_info) const;
   virtual void enqueue_ready_request(std::shared_ptr<Request> request);
   virtual void release_failed_request(const std::shared_ptr<Request>& request) {
   }
@@ -236,6 +239,8 @@ class ContinuousSchedulerBase : public Scheduler {
   std::unique_ptr<Tokenizer> tokenizer_;
 
   XServiceClient* xservice_client_ = nullptr;
+  XServiceClient::HeartbeatCallbackRegistration
+      heartbeat_callback_registration_ = 0;
 
   // params for enable_schedule_overlap case
   BatchGroup last_batch_;

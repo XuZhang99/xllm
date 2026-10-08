@@ -34,8 +34,8 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "models/model_registry.h"
 #endif
+#include "distributed_runtime/xservice_client.h"
 #include "runtime/options.h"
-#include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
 #include "util/model_config_utils.h"
@@ -252,7 +252,6 @@ LLMMaster::LLMMaster(const Options& options)
       xservice_client_ = XServiceClient::get_instance();
       CHECK(xservice_client_->init(options_.etcd_addr().value_or(""),
                                    options_.instance_name().value_or(""),
-                                   engine->block_manager_pool(),
                                    options_.etcd_namespace().value_or("")))
           << "XServiceClient init fail!";
     }

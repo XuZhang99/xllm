@@ -18,7 +18,10 @@ limitations under the License.
 #include <brpc/channel.h>
 
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -27,16 +30,19 @@ limitations under the License.
 #include <vector>
 
 #include "common/etcd_client.h"
-#include "distributed_runtime/engine.h"
-#include "forward_params.h"
-#include "framework/block/block_manager_pool.h"
+#include "common/types.h"
+#include "distributed_runtime/heartbeat_callback_registry.h"
 #include "framework/request/request_output.h"
-#include "scheduler/scheduler.h"
 #include "xservice.pb.h"
 namespace xllm {
 
 class XServiceClient {
  public:
+  using HeartbeatCallback = detail::HeartbeatCallbackRegistry<
+      xllm_service::proto::HeartbeatRequest>::Callback;
+  using HeartbeatCallbackRegistration = detail::HeartbeatCallbackRegistry<
+      xllm_service::proto::HeartbeatRequest>::RegistrationId;
+
   static XServiceClient* get_instance() {
     static XServiceClient xservice_client;
     return &xservice_client;
@@ -45,10 +51,10 @@ class XServiceClient {
   ~XServiceClient();
   bool init(const std::string& etcd_addr,
             const std::string& instance_name = "",
-            const BlockManagerPool* block_manager_pool = nullptr,
             const std::string& etcd_namespace = "");
-  void set_scheduler(Scheduler* scheduler);
-  void set_engine(Engine* engine);
+  HeartbeatCallbackRegistration set_heartbeat_callback(
+      HeartbeatCallback callback);
+  void clear_heartbeat_callback(HeartbeatCallbackRegistration registration);
   bool initialize_done() { return initialize_done_; }
 
   std::string get_instance_name();
@@ -113,9 +119,8 @@ class XServiceClient {
   std::mutex registration_mutex_;
   brpc::ChannelOptions chan_options_;
   std::unique_ptr<EtcdClient> etcd_client_;
-  const BlockManagerPool* block_manager_pool_ = nullptr;  // not own
-  Scheduler* scheduler_ = nullptr;                        // not own
-  Engine* engine_ = nullptr;  // not own, for xtensor info
+  detail::HeartbeatCallbackRegistry<xllm_service::proto::HeartbeatRequest>
+      heartbeat_callback_registry_;
 };
 
 }  // namespace xllm

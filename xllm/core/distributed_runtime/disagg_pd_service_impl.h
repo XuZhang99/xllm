@@ -20,8 +20,8 @@ limitations under the License.
 #include <string>
 
 #include "disagg_pd.pb.h"
+#include "distributed_runtime/xservice_client.h"
 #include "framework/sampling/json_object_grammar.h"
-#include "runtime/xservice_client.h"
 
 namespace xllm {
 

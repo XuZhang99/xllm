@@ -32,9 +32,9 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "models/model_registry.h"
 #endif
+#include "distributed_runtime/xservice_client.h"
 #include "rec_engine.h"
 #include "runtime/options.h"
-#include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
 #include "util/model_config_utils.h"
 #include "util/rec_model_utils.h"
@@ -144,7 +144,6 @@ RecMaster::RecMaster(const Options& options) : Master(options) {
     XServiceClient* xservice_client = XServiceClient::get_instance();
     if (!xservice_client->init(options_.etcd_addr().value_or(""),
                                options_.instance_name().value_or(""),
-                               rec_engine_->block_manager_pool(),
                                options_.etcd_namespace().value_or(""))) {
       LOG(FATAL) << "XServiceClient init fail!";
       return;

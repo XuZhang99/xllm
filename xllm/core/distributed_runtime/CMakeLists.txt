@@ -30,6 +30,8 @@ cc_library(
     worker_service.h
     comm_channel.h
     shm_channel.h
+    heartbeat_callback_registry.h
+    xservice_client.h
   SRCS
     master.cpp
     master_factory.cpp
@@ -50,6 +52,7 @@ cc_library(
     worker_service.cpp
     comm_channel.cpp
     shm_channel.cpp
+    xservice_client.cpp
   DEPS
     :api_service
     :models
@@ -66,6 +69,8 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:unified_dlog>
     :collective_service
     :xtensor
+    absl::strings
+    absl::time
 )
 
 cc_library(

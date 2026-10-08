@@ -124,10 +124,12 @@ ContinuousSchedulerBase::ContinuousSchedulerBase(Engine* engine,
       LOG(FATAL) << "XServiceClient not init.";
       return;
     }
-    xservice_client_->set_scheduler(this);
+    heartbeat_callback_registration_ = xservice_client_->set_heartbeat_callback(
+        [this](xllm_service::proto::HeartbeatRequest& request) {
+          populate_heartbeat_request(request, !options_.enable_disagg_pd());
+        });
     if (::xllm::KVCacheConfig::get_instance().enable_xtensor() &&
         !options_.enable_disagg_pd()) {
-      xservice_client_->set_engine(resource_engine_);
       resource_engine_->get_cache_info(instance_info_.cluster_ids,
                                        instance_info_.addrs,
                                        instance_info_.ports);
@@ -147,7 +149,56 @@ ContinuousSchedulerBase::ContinuousSchedulerBase(Engine* engine,
   }
 }
 
+void ContinuousSchedulerBase::populate_heartbeat_request(
+    xllm_service::proto::HeartbeatRequest& request,
+    bool include_xtensor_info) const {
+  request.mutable_load_metrics()->set_gpu_cache_usage_perc(
+      resource_engine_->block_manager_pool()->get_gpu_cache_usage_perc());
+  request.mutable_load_metrics()->set_waiting_requests_num(
+      get_waiting_requests_num());
+
+  std::vector<int64_t> ttft;
+  std::vector<int64_t> tbt;
+  get_latency_metrics(ttft, tbt);
+  if (!ttft.empty()) {
+    request.mutable_latency_metrics()->set_recent_max_ttft(
+        *std::max_element(ttft.begin(), ttft.end()));
+  }
+  if (!tbt.empty()) {
+    request.mutable_latency_metrics()->set_recent_max_tbt(
+        *std::max_element(tbt.begin(), tbt.end()));
+  }
+
+  if (include_xtensor_info &&
+      ::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
+    std::vector<size_t> worker_free_phy_pages;
+    std::unordered_map<std::string, std::vector<WeightSegment>>
+        model_weight_segments;
+    resource_engine_->get_xtensor_info(worker_free_phy_pages,
+                                       model_weight_segments);
+
+    auto* xtensor_info = request.mutable_xtensor_info();
+    for (size_t free_pages : worker_free_phy_pages) {
+      xtensor_info->add_worker_free_phy_pages(free_pages);
+    }
+    for (const auto& [model_id, segments] : model_weight_segments) {
+      auto& segment_list =
+          (*xtensor_info->mutable_model_weight_segments())[model_id];
+      for (const auto& segment : segments) {
+        auto* proto_segment = segment_list.add_segments();
+        proto_segment->set_offset(segment.offset);
+        proto_segment->set_size(segment.size);
+      }
+    }
+  }
+}
+
 ContinuousSchedulerBase::~ContinuousSchedulerBase() {
+  if (xservice_client_ != nullptr) {
+    xservice_client_->clear_heartbeat_callback(
+        heartbeat_callback_registration_);
+  }
+
   // Requests never submitted to the engine own no asynchronous callback and
   // can be cancelled directly, including an offline scheduler never started.
   {

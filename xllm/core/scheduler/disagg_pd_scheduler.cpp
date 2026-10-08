@@ -37,13 +37,13 @@ limitations under the License.
 #include "disagg_pd.pb.h"
 #include "disagg_pd_scheduler.h"
 #include "distributed_runtime/engine.h"
+#include "distributed_runtime/xservice_client.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/kv_cache_transfer/pd_topology_guard.h"
 #include "framework/request/request.h"
 #include "framework/request/request_state.h"
 #include "framework/request/sequence.h"
 #include "framework/xtensor/page_allocator.h"
-#include "runtime/xservice_client.h"
 #include "scheduler/continuous_scheduler.h"
 #include "util/env_var.h"
 #include "util/timer.h"
@@ -173,6 +173,11 @@ bool has_rank_preserving_kv_groups(const proto::DisaggResponse& response) {
 }
 
 DisaggPDScheduler::~DisaggPDScheduler() {
+  if (xservice_client_ != nullptr) {
+    xservice_client_->clear_heartbeat_callback(
+        heartbeat_callback_registration_);
+  }
+
   if (rpc_server_thread_ && rpc_server_thread_->joinable()) {
     rpc_server_thread_->join();
   }
@@ -202,10 +207,13 @@ void DisaggPDScheduler::initialize_rpc_server(const std::string& server_name) {
     LOG(FATAL) << "XServiceClient not init.";
     return;
   }
-  xservice_client_->set_scheduler(this);
-  if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
-    xservice_client_->set_engine(engine_);
-  }
+  const XServiceClient::HeartbeatCallbackRegistration previous_registration =
+      heartbeat_callback_registration_;
+  heartbeat_callback_registration_ = xservice_client_->set_heartbeat_callback(
+      [this](xllm_service::proto::HeartbeatRequest& request) {
+        populate_heartbeat_request(request, true);
+      });
+  xservice_client_->clear_heartbeat_callback(previous_registration);
 }
 
 void DisaggPDScheduler::register_instance_info(const std::string& server_name,
