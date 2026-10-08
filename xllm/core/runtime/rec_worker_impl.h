@@ -54,8 +54,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   void load_model(std::unique_ptr<ModelLoader> loader) override;
 
-  RecForwardInput prepare_inputs(RecBatch& batch) override;
-
   void prepare_work_before_execute(const RecForwardInput& inputs,
                                    RecForwardInput& processed_inputs) override;
 
@@ -99,8 +97,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
         : runtime_(std::move(runtime)) {}
     virtual ~RecWorkPipeline() = default;
 
-    virtual RecForwardInput prepare_inputs(RecBatch& batch);
-
     virtual void prepare_work_before_execute(const RecForwardInput& inputs,
                                              RecForwardInput& processed_inputs);
 
@@ -128,8 +124,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
         RecPipelineRuntime& runtime,
         RecPipelineType pipeline_type = RecPipelineType::kOneRecDefault);
 
-    RecForwardInput prepare_inputs(RecBatch& batch) override;
-
     void prepare_work_before_execute(
         const RecForwardInput& inputs,
         RecForwardInput& processed_inputs) override;
@@ -148,8 +142,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
   class OneRecXAttentionWorkPipeline final : public RecWorkPipeline {
    public:
     explicit OneRecXAttentionWorkPipeline(RecPipelineRuntime& runtime);
-
-    RecForwardInput prepare_inputs(RecBatch& batch) override;
 
     void prepare_work_before_execute(
         const RecForwardInput& inputs,
@@ -214,8 +206,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
   class LlmRecMultiRoundPipeline final : public RecWorkPipeline {
    public:
     explicit LlmRecMultiRoundPipeline(RecPipelineRuntime& runtime);
-
-    RecForwardInput prepare_inputs(RecBatch& batch) override;
 
     void prepare_work_before_execute(
         const RecForwardInput& inputs,

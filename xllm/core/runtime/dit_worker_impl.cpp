@@ -228,10 +228,6 @@ folly::SemiFuture<folly::Unit> DiTWorkerImpl::process_group_test_async() {
 }
 
 // prepare input for execution
-DiTForwardInput DiTWorkerImpl::prepare_inputs(DiTBatch& batch) {
-  return dit_model_executor_->prepare_inputs(batch);
-}
-
 int64_t DiTWorkerImpl::get_active_activation_memory() {
   return DeviceMonitor::get_instance()
       .get_device_stats(device_.index())

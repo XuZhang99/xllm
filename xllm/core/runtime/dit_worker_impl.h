@@ -62,9 +62,6 @@ class DiTWorkerImpl : public WorkerImpl {
 
   folly::SemiFuture<folly::Unit> process_group_test_async() override;
 
-  // prepare input for execution
-  DiTForwardInput prepare_inputs(DiTBatch& batch);
-
   int64_t get_active_activation_memory();
 
  private:

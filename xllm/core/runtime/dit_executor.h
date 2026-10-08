@@ -37,8 +37,6 @@ class DiTExecutor {
 
   ~DiTExecutor() = default;
 
-  DiTForwardInput prepare_inputs(DiTBatch& batch);
-
   DiTForwardOutput forward(const DiTForwardInput& input);
 
  private:

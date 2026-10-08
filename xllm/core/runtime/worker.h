@@ -90,8 +90,6 @@ class Worker {
   const bool is_driver();
   bool task_pipeline_uses_worker_prepare() const;
 
-  // prepare input for execution
-  RecForwardInput prepare_inputs(RecBatch& batch);
   std::optional<ForwardOutput> step(const RecForwardInput& inputs);
   VlmForwardInput prepare_vlm_inputs(Batch& batch);
   std::optional<ForwardOutput> step(const VlmForwardInput& inputs);

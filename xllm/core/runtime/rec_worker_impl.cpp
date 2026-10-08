@@ -437,15 +437,6 @@ void RecWorkerImpl::RecWorkPipeline::prepare_work_before_execute(
 #endif
 }
 
-RecForwardInput RecWorkerImpl::RecWorkPipeline::prepare_inputs(
-    RecBatch& batch) {
-  return batch.prepare_forward_input(
-      runtime_.worker.options_.num_decoding_tokens(),
-      /*min_decoding_batch_size=*/0,
-      runtime_.context->get_model_args(),
-      runtime_.worker.options_.cp_size());
-}
-
 std::optional<ForwardOutput> RecWorkerImpl::RecWorkPipeline::step(
     const RecForwardInput& input) {
   Timer timer;
@@ -627,20 +618,6 @@ RecWorkerImpl::OneRecWorkPipeline::OneRecWorkPipeline(
   CHECK(constrained_decoding_->build_mask_cache())
       << "Failed to build OneRec constrained decoding cache, vocab_size="
       << vocab_size;
-}
-
-RecForwardInput RecWorkerImpl::OneRecWorkPipeline::prepare_inputs(
-    RecBatch& batch) {
-  MPMCThreadPool* thread_pool =
-      runtime_.worker.input_builder_thread_pool_
-          ? runtime_.worker.input_builder_thread_pool_.get()
-          : nullptr;
-
-  return batch.prepare_rec_forward_input(
-      runtime_.worker.options_.num_decoding_tokens(),
-      /*min_decoding_batch_size=*/0,
-      runtime_.context->get_model_args(),
-      thread_pool);
 }
 
 void RecWorkerImpl::OneRecWorkPipeline::prepare_work_before_execute(
@@ -1125,20 +1102,6 @@ void RecWorkerImpl::OneRecXAttentionWorkPipeline::execute_cache_select(
   UNUSED_PARAMETER(beam_width);
   UNUSED_PARAMETER(num_layers);
 #endif
-}
-
-RecForwardInput RecWorkerImpl::OneRecXAttentionWorkPipeline::prepare_inputs(
-    RecBatch& batch) {
-  MPMCThreadPool* thread_pool =
-      runtime_.worker.input_builder_thread_pool_
-          ? runtime_.worker.input_builder_thread_pool_.get()
-          : nullptr;
-
-  return batch.prepare_rec_forward_input(
-      runtime_.worker.options_.num_decoding_tokens(),
-      /*min_decoding_batch_size=*/0,
-      runtime_.context->get_model_args(),
-      thread_pool);
 }
 
 void RecWorkerImpl::OneRecXAttentionWorkPipeline::prepare_work_before_execute(
@@ -1932,20 +1895,6 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::LlmRecMultiRoundPipeline(
 
   full_kv_cache_offsets_ = std::make_unique<FullKvCacheOffsets>(this);
   allocate_kv_caches_related();
-}
-
-RecForwardInput RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_inputs(
-    RecBatch& batch) {
-  MPMCThreadPool* thread_pool =
-      runtime_.worker.input_builder_thread_pool_
-          ? runtime_.worker.input_builder_thread_pool_.get()
-          : nullptr;
-
-  return batch.prepare_rec_forward_input(
-      runtime_.worker.options_.num_decoding_tokens(),
-      /*min_decoding_batch_size=*/0,
-      runtime_.context->get_model_args(),
-      thread_pool);
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_work_before_execute(
@@ -3038,11 +2987,6 @@ void RecWorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
   }
 
   LOG(INFO) << "Loaded weights for all " << work_pipelines_.size() << " models";
-}
-
-RecForwardInput RecWorkerImpl::prepare_inputs(RecBatch& batch) {
-  CHECK(!work_pipelines_.empty()) << "RecWorkerImpl is not initialized.";
-  return work_pipelines_[0]->prepare_inputs(batch);
 }
 
 void RecWorkerImpl::prepare_work_before_execute(

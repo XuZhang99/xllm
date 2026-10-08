@@ -158,12 +158,9 @@ bool RecEngine::init_model() {
   pipeline_->setup_workers();
   pipeline_->process_group_test();
 
-  if (!threadpool_) {
-    threadpool_ = std::make_unique<ThreadPool>(
-        /*num_threads=*/16,
-        /*cpu_binding=*/true,
-        /*pool_name=*/"rec_engine_pool");
-  }
+  forward_input_factory_ = std::make_unique<ForwardInputFactory>(
+      ForwardInputFactoryOptions{.dp_size = static_cast<uint32_t>(dp_size_),
+                                 .cp_size = 1});
   // Compute KV cache config (shared logic)
   const int32_t world_size = static_cast<int32_t>(options_.devices().size());
   const int64_t n_heads = args_.n_heads();
@@ -395,59 +392,6 @@ size_t RecEngine::LlmRecEnginePipeline::num_workers() const {
   return engine_.worker_clients_.size();
 }
 
-std::vector<RecForwardInput> RecEngine::LlmRecEnginePipeline::prepare_inputs(
-    RecBatchGroup& batch) {
-  std::vector<RecForwardInput> batched_inputs;
-  batched_inputs.reserve(engine_.dp_size_);
-
-  // some dp related variables
-  std::vector<int32_t> dp_global_token_nums(engine_.dp_size_);
-  std::vector<int32_t> dp_global_sequence_nums(engine_.dp_size_);
-  std::vector<int32_t> dp_is_decode(engine_.dp_size_, 0);
-  // when enable dp, we need to check the forward type of each batch
-  // and set the empty forward type of each batch to the same value as the first
-  // batch
-  BatchForwardType batch_forward_type;
-
-  for (int32_t dp_rank = 0; dp_rank < engine_.dp_size_; ++dp_rank) {
-    // kLlmRec needs refresh_forward_type for correct dp_is_decode
-    batch[dp_rank].refresh_forward_type();
-
-    batched_inputs.emplace_back(std::move(batch[dp_rank].prepare_forward_input(
-        engine_.args_, engine_.threadpool_.get(), /*cp_size=*/1)));
-    dp_global_token_nums[dp_rank] =
-        static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
-    dp_global_sequence_nums[dp_rank] =
-        batched_inputs[dp_rank].input_params.meta.num_sequences;
-    if (batch_forward_type.is_empty() &&
-        !batched_inputs[dp_rank]
-             .input_params.meta.batch_forward_type.is_empty()) {
-      batch_forward_type =
-          batched_inputs[dp_rank].input_params.meta.batch_forward_type;
-    }
-    dp_is_decode[dp_rank] =
-        batch_forward_type.is_decode() &&
-        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
-  }
-
-  for (int32_t dp_rank = 0; dp_rank < engine_.dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
-        dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_global_sequence_nums =
-        dp_global_sequence_nums;
-    batched_inputs[dp_rank].input_params.parallel.raw_dp_global_token_nums =
-        dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
-    if (batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
-          batch_forward_type;
-    }
-  }
-
-  return batched_inputs;
-}
-
 ForwardOutput RecEngine::LlmRecEnginePipeline::step(RecBatchGroup& batches) {
   if (engine_.worker_clients_.empty()) {
     return {};
@@ -459,7 +403,9 @@ ForwardOutput RecEngine::LlmRecEnginePipeline::step(RecBatchGroup& batches) {
 
   auto run_one_step = [this, &batches](int step_idx) -> bool {
     Timer timer;
-    auto forward_inputs = prepare_inputs(batches);
+    std::vector<RecForwardInput> forward_inputs;
+    engine_.forward_input_factory_->create_inputs(batches, engine_.args_,
+                                                  forward_inputs);
     HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                       static_cast<int64_t>(timer.elapsed_microseconds()));
 
@@ -748,7 +694,10 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
   Timer timer;
   Timer timer_total;
   // OneRec does not need refresh_forward_type
-  auto forward_inputs = engine_.workers_[0]->prepare_inputs(batches[0]);
+  RecForwardInput forward_inputs;
+  engine_.forward_input_factory_->create_input(
+      batches[0], engine_.args_, forward_inputs,
+      engine_.options_.num_decoding_tokens(), /*min_decoding_batch_size=*/0);
   HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                     timer.elapsed_microseconds());
 
@@ -772,7 +721,10 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
   for (size_t i = 0; i < kRecDecodeSteps; ++i) {
     timer.reset();
     // OneRec does not need refresh_forward_type
-    forward_inputs = engine_.workers_[0]->prepare_inputs(batches[0]);
+    engine_.forward_input_factory_->create_input(
+        batches[0], engine_.args_, forward_inputs,
+        engine_.options_.num_decoding_tokens(),
+        /*min_decoding_batch_size=*/0);
     HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                       timer.elapsed_microseconds());
 
@@ -894,7 +846,10 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
   }
 
   Timer timer;
-  auto forward_inputs = engine_.workers_[0]->prepare_inputs(batches[0]);
+  RecForwardInput forward_inputs;
+  engine_.forward_input_factory_->create_input(
+      batches[0], engine_.args_, forward_inputs,
+      engine_.options_.num_decoding_tokens(), /*min_decoding_batch_size=*/0);
   HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                     timer.elapsed_microseconds());
 
@@ -1188,8 +1143,10 @@ ForwardOutput RecEngine::RecMultiRoundEnginePipeline::step(
   }
 
   Timer timer;
-  // Call worker's prepare_inputs (multi-round logic is inside worker)
-  auto forward_inputs = engine_.workers_[0]->prepare_inputs(batches[0]);
+  RecForwardInput forward_inputs;
+  engine_.forward_input_factory_->create_input(
+      batches[0], engine_.args_, forward_inputs,
+      engine_.options_.num_decoding_tokens(), /*min_decoding_batch_size=*/0);
   HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                     timer.elapsed_microseconds());
 

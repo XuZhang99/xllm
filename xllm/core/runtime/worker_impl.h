@@ -126,9 +126,7 @@ class WorkerImpl {
   virtual bool link_p2p(const std::string& remote_addr);
   virtual bool unlink_p2p(const std::string& remote_addr);
 
-  // prepare input for execution
   virtual VlmForwardInput prepare_vlm_inputs(Batch& batch);
-  virtual RecForwardInput prepare_inputs(RecBatch& batch);
 
   // prepare work before model execution
   virtual void prepare_work_before_execute(const LlmForwardInput& inputs,

@@ -31,7 +31,7 @@ limitations under the License.
 #include "runtime/vlm_forward_params.h"
 #include "runtime/worker.h"
 #include "runtime/worker_client.h"
-#include "util/threadpool.h"
+#include "core/framework/batch/forward_input_factory.h"
 
 namespace xllm {
 
@@ -61,7 +61,6 @@ class VLMEngine : public Engine {
   bool init_model(MasterStatus master_status);
   KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);
-  std::vector<VlmForwardInput> prepare_inputs(BatchGroup& batch);
   void setup_workers(const runtime::Options& options);
   void process_group_test();
 
@@ -89,7 +88,7 @@ class VLMEngine : public Engine {
   std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_ =
       nullptr;
 
-  std::unique_ptr<ThreadPool> threadpool_ = nullptr;
+  std::unique_ptr<ForwardInputFactory> forward_input_factory_;
 };
 
 }  // namespace xllm

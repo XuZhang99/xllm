@@ -275,10 +275,6 @@ VlmForwardInput Worker::prepare_vlm_inputs(Batch& batch) {
   return impl_->prepare_vlm_inputs(batch);
 }
 
-RecForwardInput Worker::prepare_inputs(RecBatch& batch) {
-  return impl_->prepare_inputs(batch);
-}
-
 std::optional<ForwardOutput> Worker::step(const RecForwardInput& inputs) {
   CHECK(!enable_task_pipeline_) << "Rec does not support the LLM task pipeline";
   return impl_->step(inputs);

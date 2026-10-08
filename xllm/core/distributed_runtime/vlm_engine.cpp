@@ -85,11 +85,8 @@ VLMEngine::VLMEngine(
 
   process_group_test();
 
-  // init thread pool
-  threadpool_ = std::make_unique<ThreadPool>(
-      /*num_threads=*/16,
-      /*cpu_binding=*/false,
-      /*pool_name=*/"VLMEngine.forward_input");
+  forward_input_factory_ = std::make_unique<ForwardInputFactory>(
+      ForwardInputFactoryOptions{.dp_size = dp_size_, .cp_size = 1});
 }
 
 void VLMEngine::process_group_test() {
@@ -300,7 +297,11 @@ ForwardOutput VLMEngine::step(BatchGroup& batch) {
       << "Split DP batch failed with dp_size as " << dp_size_
       << " and actual batch size as " << batch.size() << ".";
 
-  auto forward_inputs = prepare_inputs(batch);
+  std::vector<VlmForwardInput> forward_inputs;
+  forward_input_factory_->create_inputs(
+      batch, args_, forward_inputs,
+      dp_size_ > 1 && !options_.is_draft_engine() &&
+          options_.num_speculative_tokens() > 0);
 
   DCHECK(dp_size_ == forward_inputs.size())
       << "The processed forward inputs size " << forward_inputs.size()
@@ -418,94 +419,6 @@ std::vector<int64_t> VLMEngine::get_active_activation_memory() const {
     active_activation_memories.push_back(result.value());
   }
   return active_activation_memories;
-}
-
-std::vector<VlmForwardInput> VLMEngine::prepare_inputs(BatchGroup& batch) {
-  std::vector<VlmForwardInput> batched_inputs;
-  batched_inputs.reserve(dp_size_);
-  // some dp related variables
-  std::vector<int32_t> dp_global_token_nums(dp_size_);
-  std::vector<int32_t> dp_global_sequence_nums(dp_size_);
-  std::vector<int32_t> dp_global_kv_max_seq_lens(dp_size_);
-  std::vector<int32_t> dp_global_json_object_active(
-      dp_size_ > 1 && !options_.is_draft_engine() &&
-              options_.num_speculative_tokens() > 0
-          ? dp_size_
-          : 0);
-  std::vector<int32_t> dp_is_decode(dp_size_, 0);
-  // when enable dp, we need to check the forward type of each batch
-  // and set the empty forward type of each batch to the same value as the first
-  // batch
-  BatchForwardType batch_forward_type;
-
-  for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    if (batch[dp_rank].empty()) {
-      // Use value-initialization to zero primitive fields for empty shard.
-      VlmForwardInput empty_input;
-      empty_input.input_params.meta.batch_forward_type = BatchForwardType();
-      empty_input.input_params.meta.batch_id = UNINITIALIZED_BATCH_ID;
-      batched_inputs.emplace_back(std::move(empty_input));
-    } else {
-      batched_inputs.emplace_back(std::move(
-          batch[dp_rank].prepare_vlm_forward_input(args_, threadpool_.get())));
-    }
-    dp_global_token_nums[dp_rank] =
-        static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
-    dp_global_sequence_nums[dp_rank] =
-        batched_inputs[dp_rank].input_params.meta.num_sequences;
-    dp_global_kv_max_seq_lens[dp_rank] =
-        batched_inputs[dp_rank].input_params.meta.kv_max_seq_len;
-    if (!dp_global_json_object_active.empty()) {
-      const auto& shard = batched_inputs[dp_rank];
-      dp_global_json_object_active[dp_rank] =
-          !shard.json_object_states.empty() ||
-          !shard.json_object_state_snapshots.empty();
-    }
-    if (batch_forward_type.is_empty() &&
-        !batched_inputs[dp_rank]
-             .input_params.meta.batch_forward_type.is_empty()) {
-      batch_forward_type =
-          batched_inputs[dp_rank].input_params.meta.batch_forward_type;
-    }
-    dp_is_decode[dp_rank] =
-        batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_decode() &&
-        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
-  }
-
-  // Empty DP ranks inherit decode below and use fake inputs in WorkerImpl.
-  if (::xllm::ExecutionConfig::get_instance().enable_graph() &&
-      batch_forward_type.is_decode()) {
-    for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-      if (batched_inputs[dp_rank]
-              .input_params.meta.batch_forward_type.is_empty() &&
-          dp_global_token_nums[dp_rank] == 0) {
-        dp_is_decode[dp_rank] = 1;
-      }
-    }
-  }
-
-  // update dp_global_token_nums and batch_forward_type
-  for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
-        dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_global_sequence_nums =
-        dp_global_sequence_nums;
-    batched_inputs[dp_rank].input_params.parallel.raw_dp_global_token_nums =
-        dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_global_kv_max_seq_lens =
-        dp_global_kv_max_seq_lens;
-    batched_inputs[dp_rank].input_params.parallel.dp_global_json_object_active =
-        dp_global_json_object_active;
-    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
-    if (batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
-          batch_forward_type;
-    }
-  }
-
-  return batched_inputs;
 }
 
 }  // namespace xllm

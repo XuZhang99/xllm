@@ -64,11 +64,8 @@ DiTEngine::DiTEngine(
   setup_workers(options);
   worker_clients_num_ = worker_clients_.size();
 
-  // init thread pool
-  threadpool_ = std::make_unique<ThreadPool>(
-      /*num_threads=*/16,
-      /*cpu_binding=*/false,
-      /*pool_name=*/"DiTEngine.forward_input");
+  forward_input_factory_ = std::make_unique<ForwardInputFactory>(
+      ForwardInputFactoryOptions{});
 }
 
 void DiTEngine::setup_workers(const runtime::Options& options) {
@@ -122,7 +119,8 @@ DiTForwardOutput DiTEngine::step(std::vector<DiTBatch>& batches) {
   }
 
   Timer timer;
-  DiTForwardInput forward_input = batches[0].prepare_forward_input();
+  DiTForwardInput forward_input;
+  forward_input_factory_->create_input(batches[0], forward_input);
   COUNTER_ADD(prepare_input_latency_seconds, timer.elapsed_seconds());
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;

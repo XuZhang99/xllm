@@ -23,6 +23,7 @@ limitations under the License.
 #include "core/distributed_runtime/distributed_worker_manager.h"
 #include "engine.h"
 #include "framework/batch/rec_batch_group.h"
+#include "framework/batch/forward_input_factory.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/quantization/quant_args.h"
@@ -30,7 +31,6 @@ limitations under the License.
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/worker.h"
 #include "util/rec_model_utils.h"
-#include "util/threadpool.h"
 
 namespace xllm {
 
@@ -104,8 +104,6 @@ class RecEngine : public Engine {
     size_t num_workers() const override;
 
    private:
-    std::vector<RecForwardInput> prepare_inputs(RecBatchGroup& batch);
-
     // Get max tokens from batch for dynamic step control
     size_t get_max_steps_from_batch(RecBatchGroup& batches) const;
   };
@@ -210,7 +208,7 @@ class RecEngine : public Engine {
 
   // Shared by both pipelines
   std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_;
-  std::unique_ptr<ThreadPool> threadpool_;
+  std::unique_ptr<ForwardInputFactory> forward_input_factory_;
 
   // LlmRec specific (managed by LlmRecEnginePipeline)
   std::vector<std::shared_ptr<WorkerClient>> worker_clients_;

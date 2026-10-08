@@ -25,9 +25,12 @@ limitations under the License.
 namespace xllm {
 
 class BatchGroup;
+class DiTBatch;
 class EplbController;
 class ThreadPool;
 struct ModelArgs;
+class RecBatch;
+class RecBatchGroup;
 
 struct ForwardInputFactoryOptions {
   uint32_t dp_size = 1;
@@ -52,6 +55,19 @@ class ForwardInputFactory final {
                      const ModelArgs& model_args,
                      std::vector<LlmForwardInput>& inputs,
                      bool& is_graph_warmup);
+  void create_inputs(BatchGroup& batches,
+                     const ModelArgs& model_args,
+                     std::vector<VlmForwardInput>& inputs,
+                     bool enable_dp_global_json_object_active);
+  void create_input(DiTBatch& batch, DiTForwardInput& input);
+  void create_inputs(RecBatchGroup& batches,
+                     const ModelArgs& model_args,
+                     std::vector<RecForwardInput>& inputs);
+  void create_input(RecBatch& batch,
+                    const ModelArgs& model_args,
+                    RecForwardInput& input,
+                    int32_t num_decoding_tokens,
+                    int32_t min_decoding_batch_size);
 
   // The controller remains owned by LLMEngine and must outlive this factory.
   void set_eplb_controller(EplbController* controller);
@@ -75,6 +91,22 @@ class ForwardInputFactory final {
                            PreparationState& state);
   void finalize_inputs(PreparationState& state);
   void annotate_eplb_inputs(PreparationState& state);
+
+  struct VlmPreparationState {
+    std::vector<VlmForwardInput> inputs;
+    std::vector<int32_t> dp_token_counts;
+    std::vector<int32_t> dp_sequence_counts;
+    std::vector<int32_t> dp_kv_max_seq_lens;
+    std::vector<int32_t> dp_global_json_object_active;
+    std::vector<int32_t> dp_is_decode;
+    BatchForwardType batch_forward_type;
+  };
+
+  void prepare_vlm_rank_inputs(BatchGroup& batches,
+                               const ModelArgs& model_args,
+                               bool enable_dp_global_json_object_active,
+                               VlmPreparationState& state);
+  void finalize_vlm_inputs(VlmPreparationState& state);
 
   ForwardInputFactoryOptions options_;
   std::vector<std::vector<int32_t>> dp_batch_embedding_ids_;

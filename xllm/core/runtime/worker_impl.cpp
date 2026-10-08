@@ -712,11 +712,6 @@ void WorkerImpl::process_group_test() {
   parallel_state::gather(tensor, parallel_args_.process_group_);
 }
 
-RecForwardInput WorkerImpl::prepare_inputs(RecBatch& batch) {
-  LOG(FATAL) << "Rec batch input requires a Rec worker";
-  return {};
-}
-
 std::optional<ForwardOutput> WorkerImpl::step(
     const RecForwardInput& /*inputs*/) {
   LOG(FATAL) << "Rec input requires a Rec worker";
