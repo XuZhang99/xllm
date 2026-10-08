@@ -85,11 +85,11 @@ Batch make_batch(Sequence* sequence) {
   return batch;
 }
 
-ForwardInputFactory make_factory(uint32_t dp_size,
-                                 uint32_t cp_size = 1,
-                                 int64_t max_tokens_per_batch = 0,
-                                 bool enable_dp_global_json_object_active =
-                                     false) {
+ForwardInputFactory make_factory(
+    uint32_t dp_size,
+    uint32_t cp_size = 1,
+    int64_t max_tokens_per_batch = 0,
+    bool enable_dp_global_json_object_active = false) {
   ForwardInputFactoryOptions options;
   options.dp_size = dp_size;
   options.cp_size = cp_size;

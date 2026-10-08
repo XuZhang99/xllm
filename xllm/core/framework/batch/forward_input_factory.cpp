@@ -153,8 +153,7 @@ void ForwardInputFactory::finalize_inputs(PreparationState& state) {
     parallel.raw_dp_global_token_nums = state.dp_token_counts;
     parallel.dp_global_batch_generations = dp_batch_generations_;
     parallel.dp_global_kv_max_seq_lens = state.dp_kv_max_seq_lens;
-    parallel.dp_global_json_object_active =
-        state.dp_global_json_object_active;
+    parallel.dp_global_json_object_active = state.dp_global_json_object_active;
     parallel.dp_is_decode = state.dp_is_decode;
     if (input.input_params.meta.batch_forward_type.is_empty()) {
       input.input_params.meta.batch_forward_type = state.batch_forward_type;

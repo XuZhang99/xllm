@@ -140,6 +140,8 @@ bool SpeculativeEngineBase<TargetEngine>::init_model(
         engine_->model_args(),
         static_cast<int32_t>(engine_->worker_clients_num_),
         engine_->options_.ep_size());
+    engine_->forward_input_factory_->set_eplb_controller(
+        engine_->eplb_controller_.get());
   }
   dtype_ = util::parse_dtype(model_args_.dtype(), options_.devices()[0]);
   return true;
