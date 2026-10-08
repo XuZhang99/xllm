@@ -56,6 +56,7 @@ cc_library(
     beam_search.h
   DEPS
     :config
+    :eplb
     :request
     :runtime
     :common

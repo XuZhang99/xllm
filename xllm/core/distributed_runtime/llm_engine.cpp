@@ -69,13 +69,6 @@ limitations under the License.
 namespace xllm {
 namespace {
 
-bool contains_graph_warmup(const std::vector<LlmForwardInput>& inputs) {
-  return std::any_of(
-      inputs.begin(), inputs.end(), [](const LlmForwardInput& input) {
-        return input.input_params.meta.is_graph_warmup;
-      });
-}
-
 bool contains_graph_warmup(const BatchGroup& batches) {
   for (const Batch& batch : batches) {
     const std::vector<Sequence*> sequences = batch.get_sequences();
@@ -122,9 +115,16 @@ LLMEngine::LLMEngine(
 
   dp_size_ = options_.dp_size();
   cp_size_ = options_.cp_size();
-  dp_batch_embedding_ids_.resize(dp_size_);
-  dp_batch_request_ids_.resize(dp_size_);
-  dp_batch_generations_.resize(dp_size_, 0);
+  forward_input_factory_ =
+      std::make_unique<ForwardInputFactory>(ForwardInputFactoryOptions{
+          .dp_size = dp_size_,
+          .cp_size = cp_size_,
+          .max_tokens_per_batch =
+              static_cast<int64_t>(options_.max_tokens_per_batch()),
+          .enable_dp_global_json_object_active =
+              dp_size_ > 1 && !options_.is_draft_engine() &&
+              options_.num_speculative_tokens() > 0,
+      });
   worker_clients_num_ = worker_clients_.size();
   dp_local_size_ = worker_clients_num_ / dp_size_;
   // MLU and NPU model-side CP both use orthogonal CP x attention-TP, so the
@@ -138,12 +138,6 @@ LLMEngine::LLMEngine(
       /*pool_name=*/"LLMEngine.link");
 
   process_group_test();
-
-  // init thread pool
-  threadpool_ = std::make_unique<ThreadPool>(
-      /*num_threads=*/16,
-      /*cpu_binding=*/false,
-      /*pool_name=*/"LLMEngine.forward_input");
 }
 
 LLMEngine::~LLMEngine() = default;
@@ -194,6 +188,7 @@ bool LLMEngine::init(MasterStatus master_status) {
 
   eplb_controller_ = EplbController::create(
       args_, static_cast<int32_t>(worker_clients_num_), options_.ep_size());
+  forward_input_factory_->set_eplb_controller(eplb_controller_.get());
 
   auto kv_cache_cap = estimate_kv_cache_capacity();
 
@@ -985,8 +980,10 @@ ForwardOutput LLMEngine::step(BatchGroup& batch) {
       << "Split DP batch failed with dp_size as " << dp_size_
       << " and actual batch size as " << batch.size() << ".";
 
-  auto forward_inputs = prepare_inputs(batch);
-  const bool is_graph_warmup = contains_graph_warmup(forward_inputs);
+  std::vector<LlmForwardInput> forward_inputs;
+  bool is_graph_warmup = false;
+  forward_input_factory_->create_inputs(
+      batch, args_, forward_inputs, is_graph_warmup);
   if (eplb_controller_ != nullptr) {
     eplb_controller_->on_step_dispatched(forward_inputs, is_graph_warmup);
   }
@@ -1130,139 +1127,6 @@ void LLMEngine::setup_workers(const runtime::Options& options) {
         std::make_shared<DistributedWorkerManager>(options);
   }
   worker_clients_ = distributed_worker_manager_->get_worker_clients();
-}
-
-std::vector<LlmForwardInput> LLMEngine::prepare_inputs(BatchGroup& batch) {
-  std::vector<LlmForwardInput> batched_inputs;
-  batched_inputs.reserve(dp_size_ * cp_size_);
-  // some dp related variables
-  std::vector<int32_t> dp_global_token_nums(dp_size_);
-  std::vector<int32_t> dp_global_sequence_nums(dp_size_);
-  std::vector<int32_t> dp_global_kv_max_seq_lens(dp_size_);
-  std::vector<int32_t> dp_global_json_object_active(
-      dp_size_ > 1 && !options_.is_draft_engine() &&
-              options_.num_speculative_tokens() > 0
-          ? dp_size_
-          : 0);
-  std::vector<int32_t> dp_is_decode(dp_size_, 0);
-  // when enable dp, we need to check the forward type of each batch
-  // and set the empty forward type of each batch to the same value as the first
-  // batch
-  BatchForwardType batch_forward_type;
-  bool has_non_empty_batch = false;
-  bool all_non_empty_batches_are_decode = true;
-
-  // build model input for every single micro batch
-  for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    // Linear-state saves deferred from the previous step are executed by the
-    // LINEAR leaf inside allocate_for_sequence (scheduler-side), so the builder
-    // below already sees the rotated live slot -- no apply step is needed here.
-    batched_inputs.emplace_back(std::move(batch[dp_rank].prepare_forward_input(
-        args_, threadpool_.get(), cp_size_)));
-    const BatchForwardType& current_batch_forward_type =
-        batched_inputs[dp_rank].input_params.meta.batch_forward_type;
-    dp_global_token_nums[dp_rank] =
-        static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
-    dp_global_sequence_nums[dp_rank] =
-        batched_inputs[dp_rank].input_params.meta.num_sequences;
-    dp_global_kv_max_seq_lens[dp_rank] =
-        batched_inputs[dp_rank].input_params.meta.kv_max_seq_len;
-    if (!dp_global_json_object_active.empty()) {
-      const auto& shard = batched_inputs[dp_rank];
-      dp_global_json_object_active[dp_rank] =
-          !shard.json_object_states.empty() ||
-          !shard.json_object_state_snapshots.empty();
-    }
-    if (util::is_deepseek_v4_model_type(args_.model_type())) {
-      const int64_t actual_scheduled_tokens = static_cast<int64_t>(
-          batched_inputs[dp_rank].host_token_ids().numel());
-      const int64_t max_tokens_per_batch =
-          static_cast<int64_t>(options_.max_tokens_per_batch());
-      CHECK_LE(actual_scheduled_tokens, max_tokens_per_batch)
-          << "DSV4 actual scheduled tokens exceed max_tokens_per_batch used "
-             "for SWA cache allocation. This can make the shared SWA burst "
-             "pool smaller than the block/table consumer needs and may cause "
-             "SWA KV rows to be overwritten or read from the wrong position. "
-             "Please increase --max_tokens_per_batch, reduce scheduler token "
-             "load, or check chunked-prefill padding. Details: dp_rank="
-          << dp_rank << ", actual_scheduled_tokens=" << actual_scheduled_tokens
-          << ", max_tokens_per_batch=" << max_tokens_per_batch
-          << ", q_max_seq_len="
-          << batched_inputs[dp_rank].input_params.meta.q_max_seq_len
-          << ", kv_max_seq_len="
-          << batched_inputs[dp_rank].input_params.meta.kv_max_seq_len
-          << ", batch_forward_type=" << current_batch_forward_type.to_string();
-    }
-    if (batch_forward_type.is_empty() &&
-        !current_batch_forward_type.is_empty()) {
-      batch_forward_type = current_batch_forward_type;
-    }
-    if (!current_batch_forward_type.is_empty()) {
-      has_non_empty_batch = true;
-      all_non_empty_batches_are_decode = all_non_empty_batches_are_decode &&
-                                         current_batch_forward_type.is_decode();
-    }
-    dp_is_decode[dp_rank] =
-        current_batch_forward_type.is_decode() &&
-        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
-
-    const LlmEmbeddingInput& embedding =
-        batched_inputs[dp_rank].input_params.embedding;
-    if (dp_batch_embedding_ids_[dp_rank] != embedding.embedding_ids ||
-        dp_batch_request_ids_[dp_rank] != embedding.request_ids) {
-      dp_batch_embedding_ids_[dp_rank] = embedding.embedding_ids;
-      dp_batch_request_ids_[dp_rank] = embedding.request_ids;
-      ++dp_batch_generations_[dp_rank];
-    }
-  }
-
-  if (eplb_controller_ != nullptr) {
-    eplb_controller_->annotate_inputs(
-        batched_inputs,
-        dp_global_token_nums,
-        /*allow_eplb_command=*/has_non_empty_batch &&
-            all_non_empty_batches_are_decode &&
-            !contains_graph_warmup(batched_inputs));
-  }
-
-  // Empty DP ranks inherit decode below and use fake inputs in WorkerImpl.
-  if (::xllm::ExecutionConfig::get_instance().enable_graph() &&
-      batch_forward_type.is_decode()) {
-    for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-      if (batched_inputs[dp_rank]
-              .input_params.meta.batch_forward_type.is_empty() &&
-          dp_global_token_nums[dp_rank] == 0) {
-        dp_is_decode[dp_rank] = 1;
-      }
-    }
-  }
-
-  // Empty ranks must participate in the same warmup capture as active ranks.
-  const bool is_graph_warmup = contains_graph_warmup(batched_inputs);
-  // update dp_global_token_nums and batch_forward_type
-  for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].input_params.meta.is_graph_warmup = is_graph_warmup;
-    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
-        dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_global_sequence_nums =
-        dp_global_sequence_nums;
-    batched_inputs[dp_rank].input_params.parallel.raw_dp_global_token_nums =
-        dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_global_batch_generations =
-        dp_batch_generations_;
-    batched_inputs[dp_rank].input_params.parallel.dp_global_kv_max_seq_lens =
-        dp_global_kv_max_seq_lens;
-    batched_inputs[dp_rank].input_params.parallel.dp_global_json_object_active =
-        dp_global_json_object_active;
-    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
-    if (batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
-          batch_forward_type;
-    }
-  }
-
-  return batched_inputs;
 }
 
 bool LLMEngine::sleep(MasterStatus master_status) {

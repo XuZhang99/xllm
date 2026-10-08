@@ -146,14 +146,19 @@ class FakeEngine : public Engine {
 class PipelinePhaseEngine final : public FakeEngine {
  public:
   PipelinePhaseEngine() : FakeEngine(/*num_blocks=*/128, /*block_size=*/4) {}
-  ForwardOutput step(BatchGroup& /*batch*/) {
+  ForwardOutput step(BatchGroup& /*batch*/) override {
     calls.emplace_back("step");
+    step_observed_consumed = consumed;
     return {};
   }
-  void update_last_step_result(BatchGroup& /*batch*/) {
+  void update_last_step_result(BatchGroup& /*batch*/) override {
     calls.emplace_back("consume");
+    consumed = true;
   }
+
   std::vector<std::string> calls;
+  bool consumed = false;
+  bool step_observed_consumed = false;
 };
 
 class TestableContinuousScheduler final : public ContinuousScheduler<> {
@@ -508,6 +513,7 @@ TEST(ContinuousSchedulerTest,
               ? std::vector<std::string>{"consume", "step"}
               : std::vector<std::string>{"step", "consume"};
       EXPECT_EQ(engine.calls, expected);
+      EXPECT_EQ(engine.step_observed_consumed, stateful_pipeline && !decode);
     }
   }
 }

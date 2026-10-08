@@ -20,9 +20,11 @@ limitations under the License.
 #include <limits>
 
 #include "core/framework/batch/batch_group.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/eplb/eplb_controller.h"
 #include "core/framework/model/model_args.h"
-#include "core/util/utils.h"
 #include "core/util/threadpool.h"
+#include "core/util/utils.h"
 
 namespace xllm {
 
@@ -42,35 +44,55 @@ ForwardInputFactory::ForwardInputFactory(ForwardInputFactoryOptions options)
 
 ForwardInputFactory::~ForwardInputFactory() = default;
 
-PreparedLlmInputGroup ForwardInputFactory::create_inputs(
-    BatchGroup& batches,
-    const ModelArgs& model_args,
-    bool enable_graph) {
+void ForwardInputFactory::create_inputs(BatchGroup& batches,
+                                        const ModelArgs& model_args,
+                                        std::vector<LlmForwardInput>& inputs,
+                                        bool& is_graph_warmup) {
   CHECK_EQ(batches.size(), options_.dp_size)
       << "Split DP batch failed with dp_size as " << options_.dp_size
       << " and actual batch size as " << batches.size() << ".";
 
-  PreparedLlmInputGroup prepared;
-  auto& inputs = prepared.inputs;
-  inputs.reserve(options_.dp_size);
-  prepared.dp_token_counts.resize(options_.dp_size);
-  std::vector<int32_t> dp_sequence_counts(options_.dp_size);
-  std::vector<int32_t> dp_kv_max_seq_lens(options_.dp_size);
-  std::vector<int32_t> dp_is_decode(options_.dp_size, 0);
-  BatchForwardType batch_forward_type;
+  PreparationState state;
+  state.inputs.reserve(options_.dp_size);
+  state.dp_token_counts.resize(options_.dp_size);
+  state.dp_sequence_counts.resize(options_.dp_size);
+  state.dp_kv_max_seq_lens.resize(options_.dp_size);
+  if (options_.enable_dp_global_json_object_active) {
+    state.dp_global_json_object_active.resize(options_.dp_size);
+  }
+  state.dp_is_decode.resize(options_.dp_size, 0);
+  prepare_rank_inputs(batches, model_args, state);
+  finalize_inputs(state);
 
+  inputs = std::move(state.inputs);
+  is_graph_warmup = state.is_graph_warmup;
+}
+
+void ForwardInputFactory::set_eplb_controller(EplbController* controller) {
+  eplb_controller_ = controller;
+}
+
+void ForwardInputFactory::prepare_rank_inputs(BatchGroup& batches,
+                                              const ModelArgs& model_args,
+                                              PreparationState& state) {
   for (uint32_t dp_rank = 0; dp_rank < options_.dp_size; ++dp_rank) {
-    inputs.emplace_back(batches[dp_rank].prepare_forward_input(
+    state.inputs.emplace_back(batches[dp_rank].prepare_forward_input(
         model_args, threadpool_.get(), static_cast<int32_t>(options_.cp_size)));
-    const auto& meta = inputs[dp_rank].input_params.meta;
+    const auto& input = state.inputs[dp_rank];
+    const auto& meta = input.input_params.meta;
     const BatchForwardType& current_forward_type = meta.batch_forward_type;
-    prepared.dp_token_counts[dp_rank] =
-        static_cast<int32_t>(inputs[dp_rank].host_token_ids().numel());
-    dp_sequence_counts[dp_rank] = meta.num_sequences;
-    dp_kv_max_seq_lens[dp_rank] = meta.kv_max_seq_len;
+    state.dp_token_counts[dp_rank] =
+        static_cast<int32_t>(input.host_token_ids().numel());
+    state.dp_sequence_counts[dp_rank] = meta.num_sequences;
+    state.dp_kv_max_seq_lens[dp_rank] = meta.kv_max_seq_len;
+    if (options_.enable_dp_global_json_object_active) {
+      state.dp_global_json_object_active[dp_rank] =
+          !input.json_object_states.empty() ||
+          !input.json_object_state_snapshots.empty();
+    }
     if (util::is_deepseek_v4_model_type(model_args.model_type())) {
       const int64_t actual_scheduled_tokens =
-          inputs[dp_rank].host_token_ids().numel();
+          static_cast<int64_t>(input.host_token_ids().numel());
       CHECK_LE(actual_scheduled_tokens, options_.max_tokens_per_batch)
           << "DSV4 actual scheduled tokens exceed max_tokens_per_batch used "
              "for SWA cache allocation. This can make the shared SWA burst "
@@ -84,20 +106,21 @@ PreparedLlmInputGroup ForwardInputFactory::create_inputs(
           << ", kv_max_seq_len=" << meta.kv_max_seq_len
           << ", batch_forward_type=" << current_forward_type.to_string();
     }
-    if (batch_forward_type.is_empty() && !current_forward_type.is_empty()) {
-      batch_forward_type = current_forward_type;
+    if (state.batch_forward_type.is_empty() &&
+        !current_forward_type.is_empty()) {
+      state.batch_forward_type = current_forward_type;
     }
     if (!current_forward_type.is_empty()) {
-      prepared.has_non_empty_batch = true;
-      prepared.all_non_empty_batches_are_decode =
-          prepared.all_non_empty_batches_are_decode &&
+      state.has_non_empty_batch = true;
+      state.all_non_empty_batches_are_decode =
+          state.all_non_empty_batches_are_decode &&
           current_forward_type.is_decode();
     }
-    prepared.is_graph_warmup = prepared.is_graph_warmup || meta.is_graph_warmup;
-    dp_is_decode[dp_rank] =
+    state.is_graph_warmup = state.is_graph_warmup || meta.is_graph_warmup;
+    state.dp_is_decode[dp_rank] =
         current_forward_type.is_decode() && meta.q_max_seq_len == 1;
 
-    const auto& embedding = inputs[dp_rank].input_params.embedding;
+    const auto& embedding = input.input_params.embedding;
     if (dp_batch_embedding_ids_[dp_rank] != embedding.embedding_ids ||
         dp_batch_request_ids_[dp_rank] != embedding.request_ids) {
       dp_batch_embedding_ids_[dp_rank] = embedding.embedding_ids;
@@ -105,31 +128,49 @@ PreparedLlmInputGroup ForwardInputFactory::create_inputs(
       ++dp_batch_generations_[dp_rank];
     }
   }
+}
 
+void ForwardInputFactory::finalize_inputs(PreparationState& state) {
   // Graph decode requires empty ranks to participate using Worker fake inputs.
-  if (enable_graph && batch_forward_type.is_decode()) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph() &&
+      state.batch_forward_type.is_decode()) {
     for (uint32_t dp_rank = 0; dp_rank < options_.dp_size; ++dp_rank) {
-      if (inputs[dp_rank].input_params.meta.batch_forward_type.is_empty() &&
-          prepared.dp_token_counts[dp_rank] == 0) {
-        dp_is_decode[dp_rank] = 1;
+      if (state.inputs[dp_rank]
+              .input_params.meta.batch_forward_type.is_empty() &&
+          state.dp_token_counts[dp_rank] == 0) {
+        state.dp_is_decode[dp_rank] = 1;
       }
     }
   }
 
-  for (auto& input : inputs) {
-    input.input_params.meta.is_graph_warmup = prepared.is_graph_warmup;
+  annotate_eplb_inputs(state);
+
+  for (auto& input : state.inputs) {
+    input.input_params.meta.is_graph_warmup = state.is_graph_warmup;
     auto& parallel = input.input_params.parallel;
-    parallel.dp_global_token_nums = prepared.dp_token_counts;
-    parallel.dp_global_sequence_nums = dp_sequence_counts;
-    parallel.raw_dp_global_token_nums = prepared.dp_token_counts;
+    parallel.dp_global_token_nums = state.dp_token_counts;
+    parallel.dp_global_sequence_nums = state.dp_sequence_counts;
+    parallel.raw_dp_global_token_nums = state.dp_token_counts;
     parallel.dp_global_batch_generations = dp_batch_generations_;
-    parallel.dp_global_kv_max_seq_lens = dp_kv_max_seq_lens;
-    parallel.dp_is_decode = dp_is_decode;
+    parallel.dp_global_kv_max_seq_lens = state.dp_kv_max_seq_lens;
+    parallel.dp_global_json_object_active =
+        state.dp_global_json_object_active;
+    parallel.dp_is_decode = state.dp_is_decode;
     if (input.input_params.meta.batch_forward_type.is_empty()) {
-      input.input_params.meta.batch_forward_type = batch_forward_type;
+      input.input_params.meta.batch_forward_type = state.batch_forward_type;
     }
   }
-  return prepared;
+}
+
+void ForwardInputFactory::annotate_eplb_inputs(PreparationState& state) {
+  if (eplb_controller_ == nullptr) {
+    return;
+  }
+  eplb_controller_->annotate_inputs(
+      state.inputs,
+      state.dp_token_counts,
+      /*allow_eplb_command=*/state.has_non_empty_batch &&
+          state.all_non_empty_batches_are_decode && !state.is_graph_warmup);
 }
 
 }  // namespace xllm

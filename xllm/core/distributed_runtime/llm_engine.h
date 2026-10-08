@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/distributed_runtime/master.h"
 #include "engine.h"
 #include "framework/batch/batch_group.h"
+#include "framework/batch/forward_input_factory.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/quantization/quant_args.h"
@@ -157,7 +158,6 @@ class LLMEngine : public Engine {
       const ModelLoader& model_loader) const;
   KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);
-  std::vector<LlmForwardInput> prepare_inputs(BatchGroup& batch);
   void process_group_test();
 
  protected:
@@ -183,9 +183,7 @@ class LLMEngine : public Engine {
   // Effective TP width (MLU=dp_local; NPU=dp_local/cp).
   uint32_t dp_local_tp_size_;
   uint32_t dp_local_size_;
-  std::vector<std::vector<int32_t>> dp_batch_embedding_ids_;
-  std::vector<std::vector<std::string>> dp_batch_request_ids_;
-  std::vector<uint64_t> dp_batch_generations_;
+  std::unique_ptr<ForwardInputFactory> forward_input_factory_;
 
   // For multi-node serving
   // engine brpc server, all workers connect to engine_server_,
@@ -197,13 +195,6 @@ class LLMEngine : public Engine {
       nullptr;
 
   std::unique_ptr<EplbController> eplb_controller_;
-
-  // threadpool for handle forward_input in parallel.
-  // Since the batch is created in every step,
-  // the thread_pool is placed inside the engine so as to
-  // avoid creating a new thread pool for each batch.
-  // NOTE: Perhaps it can be optimized to create a global thread pool.
-  std::unique_ptr<ThreadPool> threadpool_ = nullptr;
 
   // threadpool for link cluster
   std::unique_ptr<ThreadPool> link_threadpool_;

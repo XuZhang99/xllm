@@ -25,6 +25,7 @@ limitations under the License.
 namespace xllm {
 
 class BatchGroup;
+class EplbController;
 class ThreadPool;
 struct ModelArgs;
 
@@ -32,22 +33,7 @@ struct ForwardInputFactoryOptions {
   uint32_t dp_size = 1;
   uint32_t cp_size = 1;
   int64_t max_tokens_per_batch = 0;
-};
-
-class PreparedLlmInputGroup final {
- public:
-  PreparedLlmInputGroup() = default;
-  PreparedLlmInputGroup(const PreparedLlmInputGroup&) = delete;
-  PreparedLlmInputGroup& operator=(const PreparedLlmInputGroup&) = delete;
-  PreparedLlmInputGroup(PreparedLlmInputGroup&&) noexcept = default;
-  PreparedLlmInputGroup& operator=(PreparedLlmInputGroup&&) noexcept = default;
-
-  std::vector<LlmForwardInput> inputs;
-  std::vector<int32_t> dp_token_counts;
-  // Facts from rank-local inputs before empty-rank forward type inheritance.
-  bool has_non_empty_batch = false;
-  bool all_non_empty_batches_are_decode = true;
-  bool is_graph_warmup = false;
+  bool enable_dp_global_json_object_active = false;
 };
 
 // One engine-owned instance retains rank identities and reuses preparation
@@ -62,16 +48,40 @@ class ForwardInputFactory final {
   ForwardInputFactory& operator=(ForwardInputFactory&&) noexcept = default;
 
   // Advances Batch/Sequence preparation state; prepare each group only once.
-  PreparedLlmInputGroup create_inputs(BatchGroup& batches,
-                                      const ModelArgs& model_args,
-                                      bool enable_graph);
+  void create_inputs(BatchGroup& batches,
+                     const ModelArgs& model_args,
+                     std::vector<LlmForwardInput>& inputs,
+                     bool& is_graph_warmup);
+
+  // The controller remains owned by LLMEngine and must outlive this factory.
+  void set_eplb_controller(EplbController* controller);
 
  private:
+  struct PreparationState {
+    std::vector<LlmForwardInput> inputs;
+    std::vector<int32_t> dp_token_counts;
+    std::vector<int32_t> dp_sequence_counts;
+    std::vector<int32_t> dp_kv_max_seq_lens;
+    std::vector<int32_t> dp_global_json_object_active;
+    std::vector<int32_t> dp_is_decode;
+    BatchForwardType batch_forward_type;
+    bool has_non_empty_batch = false;
+    bool all_non_empty_batches_are_decode = true;
+    bool is_graph_warmup = false;
+  };
+
+  void prepare_rank_inputs(BatchGroup& batches,
+                           const ModelArgs& model_args,
+                           PreparationState& state);
+  void finalize_inputs(PreparationState& state);
+  void annotate_eplb_inputs(PreparationState& state);
+
   ForwardInputFactoryOptions options_;
   std::vector<std::vector<int32_t>> dp_batch_embedding_ids_;
   std::vector<std::vector<std::string>> dp_batch_request_ids_;
   std::vector<uint64_t> dp_batch_generations_;
   std::unique_ptr<ThreadPool> threadpool_;
+  EplbController* eplb_controller_ = nullptr;  // Owned by LLMEngine.
 };
 
 }  // namespace xllm

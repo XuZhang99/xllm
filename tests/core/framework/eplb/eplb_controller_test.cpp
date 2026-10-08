@@ -99,5 +99,38 @@ TEST(EplbControllerTest, AnnotatesInputsAndSubmitsWorkerResults) {
   controller->on_step_completed(results, /*is_graph_warmup=*/false);
 }
 
+TEST(EplbControllerTest, AnnotatesGlobalMaskAcrossEmptyDpRank) {
+  ScopedEplbEnabled eplb_enabled(/*enabled=*/true);
+  std::unique_ptr<EplbController> controller =
+      EplbController::create(make_model_args(),
+                             /*worker_num=*/2,
+                             /*ep_size=*/2);
+  ASSERT_NE(controller, nullptr);
+
+  std::vector<LlmForwardInput> inputs(2);
+  inputs[0].token_ids_host = torch::tensor({1, 2}, torch::kInt64);
+  inputs[0].input_params.expert.eplb_decode_token_mask =
+      torch::tensor({false, true}, torch::kBool);
+  // An empty DP rank has no local mask. The controller must materialize an
+  // empty one before concatenating the global mask used by every rank.
+  inputs[1].token_ids_host = torch::empty({0}, torch::kInt64);
+
+  controller->annotate_inputs(inputs,
+                              /*dp_token_counts=*/{2, 0},
+                              /*allow_eplb_command=*/false);
+
+  const torch::Tensor expected_mask =
+      torch::tensor({false, true}, torch::kBool);
+  for (const LlmForwardInput& input : inputs) {
+    EXPECT_TRUE(torch::equal(input.input_params.expert.eplb_decode_token_mask,
+                             expected_mask));
+    // The false eligibility bit must prevent a command from being handed out,
+    // even while the input mask is still annotated.
+    EXPECT_EQ(input.input_params.expert.eplb_info.activation_token, -1);
+    EXPECT_EQ(input.input_params.expert.eplb_info.prepare_token, -1);
+    EXPECT_EQ(input.input_params.expert.eplb_info.update_layer_id, -1);
+  }
+}
+
 }  // namespace
 }  // namespace xllm
