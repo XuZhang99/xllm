@@ -46,6 +46,16 @@ def initialize_runtime() -> None:
     if current_platform.is_cuda():
         backend_name = "xllm.python.kernels_cuda"
     elif current_platform.is_npu():
+        import xllm_kernel
+
+        from scripts.logger import logger
+
+        prepared = xllm_kernel.initialize(device="npu")
+        logger.info(
+            "Python RMSNorm kernel: %s (generation=%s)",
+            prepared.spec.name,
+            prepared.generation,
+        )
         backend_name = "xllm.python.kernels_npu"
     else:
         device_type = current_platform.device_type()
