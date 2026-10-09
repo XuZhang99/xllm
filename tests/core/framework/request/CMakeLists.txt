@@ -78,6 +78,7 @@ cc_test(
 cc_test(
   NAME
     request_params_test
+  NO_NPU_RUNTIME
   SRCS
     request_params_test.cpp
   DEPS
@@ -152,6 +153,7 @@ cc_test(
 cc_test(
   NAME
     stopping_checker_test
+  NO_NPU_RUNTIME
   SRCS
     stopping_checker_test.cpp
   DEPS

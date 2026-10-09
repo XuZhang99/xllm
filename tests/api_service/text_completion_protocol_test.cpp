@@ -75,13 +75,12 @@ TEST(TextCompletionRequestTest, GreedySamplingRequiresOneChoice) {
   }
 }
 
-TEST(TextCompletionRequestTest, Vllm023AcceptsTemperaturesAboveTwo) {
+TEST(TextCompletionRequestTest, RejectsTemperaturesAboveTwo) {
   const auto [status, body] = normalize_openai_request(
       R"({"prompt":"hi","messages":[{"role":"user","content":"hi"}],"temperature":3})",
       OpenAIEndpoint::COMPLETION,
       "model");
-  ASSERT_TRUE(status.ok()) << status.message();
-  EXPECT_EQ(nlohmann::json::parse(body)["temperature"], 3);
+  EXPECT_FALSE(status.ok());
 }
 
 TEST(TextCompletionRequestTest, SchemaAndSamplingErrorsHaveDistinctTypes) {
@@ -115,7 +114,7 @@ TEST(TextCompletionRequestTest, CompletionDefaultsAndExtendedStops) {
 
 TEST(TextCompletionRequestTest, UnsupportedSamplingControlsFailExplicitly) {
   for (const char* field :
-       {"seed", "min_p", "min_tokens", "logit_bias", "structured_outputs"}) {
+       {"prompt_logprobs", "structured_outputs", "logprob_token_ids"}) {
     auto request = nlohmann::json({{"prompt", "hi"}, {field, 1}});
     const auto [status, body] = normalize_openai_request(
         request.dump(), OpenAIEndpoint::COMPLETION, "model");
