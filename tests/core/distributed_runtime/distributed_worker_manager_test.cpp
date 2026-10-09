@@ -108,11 +108,13 @@ TEST_F(DistributedWorkerManagerTest, LinksAndUnlinksAllWorkers) {
   auto first = std::make_shared<RecordingWorkerClient>();
   auto second = std::make_shared<RecordingWorkerClient>();
   auto manager = make_manager({first, second});
+  EXPECT_FALSE(manager->link_threadpool_);
 
   EXPECT_TRUE(manager->link_cluster(cluster_ids(),
                                     addrs(),
                                     ports(),
                                     /*src_dp_size=*/1));
+  EXPECT_TRUE(manager->link_threadpool_);
   EXPECT_TRUE(manager->unlink_cluster(cluster_ids(),
                                       addrs(),
                                       ports(),
@@ -165,6 +167,7 @@ TEST_F(DistributedWorkerManagerTest, ReportsWorkerFailures) {
 TEST_F(DistributedWorkerManagerTest, RejectsInvalidTopologyWithoutDispatch) {
   auto client = std::make_shared<RecordingWorkerClient>();
   auto manager = make_manager({client});
+  EXPECT_FALSE(manager->link_threadpool_);
 
   const auto expect_rejected = [&manager](
                                    const std::vector<uint64_t>& ids,
@@ -210,6 +213,7 @@ TEST_F(DistributedWorkerManagerTest, RejectsInvalidTopologyWithoutDispatch) {
                   /*kv_split_size=*/1);
   EXPECT_FALSE(manager->link_p2p({}));
   EXPECT_FALSE(manager->unlink_p2p({"one", "two"}));
+  EXPECT_FALSE(manager->link_threadpool_);
   EXPECT_EQ(client->link_cluster_calls_, 0);
   EXPECT_EQ(client->unlink_cluster_calls_, 0);
   EXPECT_EQ(client->link_p2p_calls_, 0);

@@ -71,6 +71,7 @@ class DistributedWorkerManager final {
                             const std::string& master_node_addr);
   void connect_worker_clients(const runtime::Options& options,
                               const std::string& master_node_addr);
+  void ensure_link_threadpool();
   void wait_for_worker_servers() const;
   void start_health_checks();
 

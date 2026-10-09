@@ -66,12 +66,6 @@ DistributedWorkerManager::DistributedWorkerManager(
   start_worker_servers(options, master_node_addr);
   if (options.node_rank() == 0) {
     connect_worker_clients(options, master_node_addr);
-    if (!worker_clients_.empty()) {
-      link_threadpool_ = std::make_unique<ThreadPool>(
-          /*num_threads=*/worker_clients_.size(),
-          /*cpu_binding=*/false,
-          /*pool_name=*/"DistributedWorkerManager.link");
-    }
     start_health_checks();
   }
   wait_for_worker_servers();
@@ -80,14 +74,7 @@ DistributedWorkerManager::DistributedWorkerManager(
 
 DistributedWorkerManager::DistributedWorkerManager(
     std::vector<std::shared_ptr<WorkerClient>> worker_clients)
-    : worker_clients_(std::move(worker_clients)) {
-  if (!worker_clients_.empty()) {
-    link_threadpool_ = std::make_unique<ThreadPool>(
-        /*num_threads=*/worker_clients_.size(),
-        /*cpu_binding=*/false,
-        /*pool_name=*/"DistributedWorkerManager.test");
-  }
-}
+    : worker_clients_(std::move(worker_clients)) {}
 
 DistributedWorkerManager::~DistributedWorkerManager() {
   std::lock_guard<std::mutex> lock(link_mutex_);
@@ -110,6 +97,16 @@ DistributedWorkerManager::~DistributedWorkerManager() {
   }
 }
 
+void DistributedWorkerManager::ensure_link_threadpool() {
+  if (link_threadpool_ != nullptr) {
+    return;
+  }
+  link_threadpool_ = std::make_unique<ThreadPool>(
+      /*num_threads=*/worker_clients_.size(),
+      /*cpu_binding=*/false,
+      /*pool_name=*/"DistributedWorkerManager.link");
+}
+
 bool DistributedWorkerManager::link_cluster(
     const std::vector<uint64_t>& cluster_ids,
     const std::vector<std::string>& addrs,
@@ -130,6 +127,7 @@ bool DistributedWorkerManager::link_cluster(
     LOG(ERROR) << "Invalid source topology for cache layout negotiation.";
     return false;
   }
+  ensure_link_threadpool();
 
   // Every D worker negotiates with all P workers. Logical shard intersection
   // determines which edges carry bytes; modulo TP routing cannot represent
@@ -182,6 +180,7 @@ bool DistributedWorkerManager::unlink_cluster(
     LOG(ERROR) << "Invalid source topology for cache unlink.";
     return false;
   }
+  ensure_link_threadpool();
 
   // Symmetric to link_cluster: close every negotiated source edge.
   std::vector<folly::SemiFuture<bool>> futures;
@@ -224,6 +223,7 @@ bool DistributedWorkerManager::link_p2p(
                << " != worker_clients_num " << worker_clients_.size();
     return false;
   }
+  ensure_link_threadpool();
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_.size());
@@ -263,6 +263,7 @@ bool DistributedWorkerManager::unlink_p2p(
                << " != worker_clients_num " << worker_clients_.size();
     return false;
   }
+  ensure_link_threadpool();
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_.size());
