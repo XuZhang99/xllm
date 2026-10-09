@@ -40,12 +40,12 @@ void RecForwardInputFactory::create_inputs(
     const ModelArgs& model_args,
     std::vector<RecForwardInput>& inputs) {
   CHECK_EQ(batches.size(), options_.dp_size);
-  if (threadpool_ == nullptr) {
+  std::call_once(threadpool_once_, [this] {
     threadpool_ = std::make_unique<ThreadPool>(
         /*num_threads=*/16,
         /*cpu_binding=*/true,
         /*pool_name=*/"RecForwardInputFactory.forward_input");
-  }
+  });
   PreparationState state;
   state.inputs.reserve(options_.dp_size);
   state.dp_token_counts.resize(options_.dp_size);
@@ -59,12 +59,12 @@ void RecForwardInputFactory::create_inputs(
 RecForwardInput RecForwardInputFactory::create_input(
     RecBatch& batch,
     const ModelArgs& model_args) {
-  if (input_builder_threadpool_ == nullptr) {
+  std::call_once(input_builder_threadpool_once_, [this] {
     const int64_t num_threads = std::max<int64_t>(
         1, util::get_int_env("XLLM_REC_INPUT_BUILDER_THREADS", 16));
     input_builder_threadpool_ =
         std::make_unique<MPMCThreadPool>(static_cast<size_t>(num_threads));
-  }
+  });
   return batch.prepare_rec_forward_input(options_.num_decoding_tokens,
                                          options_.min_decoding_batch_size,
                                          model_args,

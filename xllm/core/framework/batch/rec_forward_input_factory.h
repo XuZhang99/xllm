@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "core/runtime/rec_forward_params.h"
@@ -61,7 +62,9 @@ class RecForwardInputFactory final {
   void finalize_inputs(PreparationState& state);
 
   RecForwardInputFactoryOptions options_;
+  std::once_flag threadpool_once_;
   std::unique_ptr<ThreadPool> threadpool_;
+  std::once_flag input_builder_threadpool_once_;
   std::unique_ptr<MPMCThreadPool> input_builder_threadpool_;
 };
 
