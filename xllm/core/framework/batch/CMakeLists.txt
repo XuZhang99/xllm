@@ -8,6 +8,7 @@ cc_library(
     dit_batch.h
     dit_batch_factory.h
     dit_forward_input_builder.h
+    dit_forward_input_factory.h
     batch_input_data.h
     batch.h
     batch_group.h
@@ -24,6 +25,8 @@ cc_library(
     rec_batch_factory.h
     forward_input_builder.h
     forward_input_factory.h
+    vlm_forward_input_factory.h
+    rec_forward_input_factory.h
     sampling_input_builder.h
     rec_forward_input_builder.h
     onerec_forward_input_builder.h
@@ -33,6 +36,7 @@ cc_library(
     dit_batch.cpp
     dit_batch_factory.cpp
     dit_forward_input_builder.cpp
+    dit_forward_input_factory.cpp
     batch.cpp
     batch_group.cpp
     batch_state.cpp
@@ -48,6 +52,8 @@ cc_library(
     rec_batch_factory.cpp
     forward_input_builder.cpp
     forward_input_factory.cpp
+    vlm_forward_input_factory.cpp
+    rec_forward_input_factory.cpp
     sampling_input_builder.cpp
     rec_forward_input_builder.cpp
     onerec_forward_input_builder.cpp

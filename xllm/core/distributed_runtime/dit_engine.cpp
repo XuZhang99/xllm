@@ -64,8 +64,7 @@ DiTEngine::DiTEngine(
   setup_workers(options);
   worker_clients_num_ = worker_clients_.size();
 
-  forward_input_factory_ = std::make_unique<ForwardInputFactory>(
-      ForwardInputFactoryOptions{});
+  forward_input_factory_ = std::make_unique<DiTForwardInputFactory>();
 }
 
 void DiTEngine::setup_workers(const runtime::Options& options) {

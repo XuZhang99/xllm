@@ -158,9 +158,12 @@ bool RecEngine::init_model() {
   pipeline_->setup_workers();
   pipeline_->process_group_test();
 
-  forward_input_factory_ = std::make_unique<ForwardInputFactory>(
-      ForwardInputFactoryOptions{.dp_size = static_cast<uint32_t>(dp_size_),
-                                 .cp_size = 1});
+  forward_input_factory_ =
+      std::make_unique<RecForwardInputFactory>(RecForwardInputFactoryOptions{
+          .dp_size = static_cast<uint32_t>(dp_size_),
+          .num_decoding_tokens =
+              static_cast<uint32_t>(options_.num_decoding_tokens()),
+          .min_decoding_batch_size = 0});
   // Compute KV cache config (shared logic)
   const int32_t world_size = static_cast<int32_t>(options_.devices().size());
   const int64_t n_heads = args_.n_heads();
@@ -404,8 +407,8 @@ ForwardOutput RecEngine::LlmRecEnginePipeline::step(RecBatchGroup& batches) {
   auto run_one_step = [this, &batches](int step_idx) -> bool {
     Timer timer;
     std::vector<RecForwardInput> forward_inputs;
-    engine_.forward_input_factory_->create_inputs(batches, engine_.args_,
-                                                  forward_inputs);
+    engine_.forward_input_factory_->create_inputs(
+        batches, engine_.args_, forward_inputs);
     HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                       static_cast<int64_t>(timer.elapsed_microseconds()));
 
@@ -696,8 +699,7 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
   // OneRec does not need refresh_forward_type
   RecForwardInput forward_inputs;
   engine_.forward_input_factory_->create_input(
-      batches[0], engine_.args_, forward_inputs,
-      engine_.options_.num_decoding_tokens(), /*min_decoding_batch_size=*/0);
+      batches[0], engine_.args_, forward_inputs);
   HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                     timer.elapsed_microseconds());
 
@@ -722,9 +724,7 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
     timer.reset();
     // OneRec does not need refresh_forward_type
     engine_.forward_input_factory_->create_input(
-        batches[0], engine_.args_, forward_inputs,
-        engine_.options_.num_decoding_tokens(),
-        /*min_decoding_batch_size=*/0);
+        batches[0], engine_.args_, forward_inputs);
     HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                       timer.elapsed_microseconds());
 
@@ -848,8 +848,7 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
   Timer timer;
   RecForwardInput forward_inputs;
   engine_.forward_input_factory_->create_input(
-      batches[0], engine_.args_, forward_inputs,
-      engine_.options_.num_decoding_tokens(), /*min_decoding_batch_size=*/0);
+      batches[0], engine_.args_, forward_inputs);
   HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                     timer.elapsed_microseconds());
 
@@ -1145,8 +1144,7 @@ ForwardOutput RecEngine::RecMultiRoundEnginePipeline::step(
   Timer timer;
   RecForwardInput forward_inputs;
   engine_.forward_input_factory_->create_input(
-      batches[0], engine_.args_, forward_inputs,
-      engine_.options_.num_decoding_tokens(), /*min_decoding_batch_size=*/0);
+      batches[0], engine_.args_, forward_inputs);
   HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                     timer.elapsed_microseconds());
 

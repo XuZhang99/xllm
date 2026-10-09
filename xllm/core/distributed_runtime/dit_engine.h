@@ -22,9 +22,9 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "core/distributed_runtime/distributed_worker_manager.h"
+#include "core/framework/batch/dit_forward_input_factory.h"
 #include "engine.h"
 #include "framework/batch/dit_batch.h"
-#include "core/framework/batch/forward_input_factory.h"
 #include "framework/parallel_state/process_group.h"
 #include "framework/quantization/quant_args.h"
 #include "runtime/dit_worker_impl.h"
@@ -69,7 +69,7 @@ class DiTEngine : public Engine {
   std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_ =
       nullptr;
 
-  std::unique_ptr<ForwardInputFactory> forward_input_factory_;
+  std::unique_ptr<DiTForwardInputFactory> forward_input_factory_;
 
  private:
   // setup workers internal

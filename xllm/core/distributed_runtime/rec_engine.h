@@ -23,7 +23,7 @@ limitations under the License.
 #include "core/distributed_runtime/distributed_worker_manager.h"
 #include "engine.h"
 #include "framework/batch/rec_batch_group.h"
-#include "framework/batch/forward_input_factory.h"
+#include "framework/batch/rec_forward_input_factory.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/quantization/quant_args.h"
@@ -208,7 +208,7 @@ class RecEngine : public Engine {
 
   // Shared by both pipelines
   std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_;
-  std::unique_ptr<ForwardInputFactory> forward_input_factory_;
+  std::unique_ptr<RecForwardInputFactory> forward_input_factory_;
 
   // LlmRec specific (managed by LlmRecEnginePipeline)
   std::vector<std::shared_ptr<WorkerClient>> worker_clients_;

@@ -78,3 +78,25 @@ target_link_libraries(forward_input_factory_test
                       $<$<BOOL:${USE_NPU}>:hccl>
                       $<$<BOOL:${USE_NPU}>:c_sec>
                       $<$<BOOL:${USE_NPU}>:nnopbase>)
+
+foreach(factory IN ITEMS vlm rec dit)
+  cc_test(
+    NAME
+      ${factory}_forward_input_factory_test
+    SRCS
+      ${factory}_forward_input_factory_test.cpp
+    DEPS
+      :config
+      :batch
+      GTest::gtest_main
+      $<$<BOOL:${USE_MLU}>:torch_mlu>
+      $<$<BOOL:${USE_NPU}>:torch_npu>
+  )
+  target_link_libraries(${factory}_forward_input_factory_test
+                        PUBLIC
+                        Python::Python
+                        $<$<BOOL:${USE_NPU}>:ascendcl>
+                        $<$<BOOL:${USE_NPU}>:hccl>
+                        $<$<BOOL:${USE_NPU}>:c_sec>
+                        $<$<BOOL:${USE_NPU}>:nnopbase>)
+endforeach()

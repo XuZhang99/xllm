@@ -85,8 +85,12 @@ VLMEngine::VLMEngine(
 
   process_group_test();
 
-  forward_input_factory_ = std::make_unique<ForwardInputFactory>(
-      ForwardInputFactoryOptions{.dp_size = dp_size_, .cp_size = 1});
+  forward_input_factory_ =
+      std::make_unique<VlmForwardInputFactory>(VlmForwardInputFactoryOptions{
+          .dp_size = dp_size_,
+          .enable_dp_global_json_object_active =
+              dp_size_ > 1 && !options_.is_draft_engine() &&
+              options_.num_speculative_tokens() > 0});
 }
 
 void VLMEngine::process_group_test() {
@@ -298,10 +302,7 @@ ForwardOutput VLMEngine::step(BatchGroup& batch) {
       << " and actual batch size as " << batch.size() << ".";
 
   std::vector<VlmForwardInput> forward_inputs;
-  forward_input_factory_->create_inputs(
-      batch, args_, forward_inputs,
-      dp_size_ > 1 && !options_.is_draft_engine() &&
-          options_.num_speculative_tokens() > 0);
+  forward_input_factory_->create_inputs(batch, args_, forward_inputs);
 
   DCHECK(dp_size_ == forward_inputs.size())
       << "The processed forward inputs size " << forward_inputs.size()
