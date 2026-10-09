@@ -15,17 +15,24 @@ limitations under the License.
 
 #include "core/framework/request/stopping_checker.h"
 
-#include <absl/strings/match.h>
-#include <gflags/gflags_declare.h>
+#include <glog/logging.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <unordered_set>
 #include <vector>
 
-#include "core/util/utils.h"
-
 namespace xllm {
+namespace {
+
+bool matches_suffix(const Slice<int32_t>& token_ids,
+                    const std::vector<int32_t>& suffix) {
+  return token_ids.size() >= suffix.size() &&
+         std::equal(
+             suffix.begin(), suffix.end(), token_ids.end() - suffix.size());
+}
+
+}  // namespace
 
 StoppingChecker::StoppingChecker(
     size_t max_generated_tokens,
@@ -107,8 +114,7 @@ FinishReason StoppingChecker::check(const Slice<int32_t>& token_ids,
   // check stop sequences
   for (size_t index = 0; index < stop_sequences_.size(); ++index) {
     const auto& seq = stop_sequences_[index];
-    if (seq.back() == last_token_id &&
-        util::match_suffix(valid_token_ids, seq)) {
+    if (seq.back() == last_token_id && matches_suffix(valid_token_ids, seq)) {
       if (stop_reason != nullptr && index < stop_strings_.size() &&
           !stop_strings_[index].empty()) {
         *stop_reason = stop_strings_[index];
@@ -126,8 +132,7 @@ FinishReason StoppingChecker::check(const Slice<int32_t>& token_ids,
   if (total_tokens > num_prompt_tokens) {
     for (size_t index = 0; index < generated_stop_sequences_.size(); ++index) {
       const auto& seq = generated_stop_sequences_[index];
-      if (seq.back() == last_token_id &&
-          util::match_suffix(valid_token_ids, seq)) {
+      if (seq.back() == last_token_id && matches_suffix(valid_token_ids, seq)) {
         if (stop_reason != nullptr && index < generated_stop_strings_.size()) {
           *stop_reason = generated_stop_strings_[index];
         }

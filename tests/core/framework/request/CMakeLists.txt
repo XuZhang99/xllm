@@ -156,8 +156,9 @@ cc_test(
   NO_NPU_RUNTIME
   SRCS
     stopping_checker_test.cpp
+    ${PROJECT_SOURCE_DIR}/xllm/core/framework/request/stopping_checker.cpp
   DEPS
-    :request
+    glog::glog
     GTest::gtest_main
 )
 
