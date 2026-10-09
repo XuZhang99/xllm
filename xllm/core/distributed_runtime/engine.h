@@ -125,35 +125,6 @@ class Engine {
     NOT_IMPLEMENTED();
   };
 
-  virtual bool link_cluster(const std::vector<uint64_t>& cluster_ids,
-                            const std::vector<std::string>& addrs,
-                            const std::vector<uint16_t>& ports,
-                            const int32_t src_dp_size,
-                            const int32_t src_kv_split_size = 1) {
-    NOT_IMPLEMENTED();
-    return false;
-  };
-
-  virtual bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
-                              const std::vector<std::string>& addrs,
-                              const std::vector<uint16_t>& ports,
-                              const int32_t src_dp_size,
-                              const int32_t src_kv_split_size = 1) {
-    NOT_IMPLEMENTED();
-    return false;
-  };
-
-  // P2P link for weight transfer - each worker links to one remote addr.
-  virtual bool link_p2p(const std::vector<std::string>& remote_addrs) {
-    NOT_IMPLEMENTED();
-    return false;
-  };
-
-  virtual bool unlink_p2p(const std::vector<std::string>& remote_addrs) {
-    NOT_IMPLEMENTED();
-    return false;
-  };
-
   virtual bool sleep(MasterStatus master_status) {
     LOG(FATAL) << " sleep is not implemented!";
     return false;

@@ -327,28 +327,6 @@ void SpeculativeEngineBase<TargetEngine>::get_cache_info(
   engine_->get_cache_info(cluster_ids, addrs, ports);
 };
 
-template <typename TargetEngine>
-bool SpeculativeEngineBase<TargetEngine>::link_cluster(
-    const std::vector<uint64_t>& cluster_ids,
-    const std::vector<std::string>& addrs,
-    const std::vector<uint16_t>& ports,
-    const int32_t src_dp_size,
-    const int32_t src_kv_split_size) {
-  return engine_->link_cluster(
-      cluster_ids, addrs, ports, src_dp_size, src_kv_split_size);
-};
-
-template <typename TargetEngine>
-bool SpeculativeEngineBase<TargetEngine>::unlink_cluster(
-    const std::vector<uint64_t>& cluster_ids,
-    const std::vector<std::string>& addrs,
-    const std::vector<uint16_t>& ports,
-    const int32_t src_dp_size,
-    const int32_t src_kv_split_size) {
-  return engine_->unlink_cluster(
-      cluster_ids, addrs, ports, src_dp_size, src_kv_split_size);
-};
-
 template class SpeculativeEngineBase<LLMEngine>;
 template class SpeculativeEngineBase<VLMEngine>;
 

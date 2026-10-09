@@ -82,18 +82,6 @@ class SpeculativeEngineBase : public Engine {
                       std::vector<std::string>& addrs,
                       std::vector<uint16_t>& ports) override;
 
-  bool link_cluster(const std::vector<uint64_t>& cluster_ids,
-                    const std::vector<std::string>& addrs,
-                    const std::vector<uint16_t>& ports,
-                    const int32_t src_dp_size,
-                    const int32_t src_kv_split_size = 1) override;
-
-  bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
-                      const std::vector<std::string>& addrs,
-                      const std::vector<uint16_t>& ports,
-                      const int32_t src_dp_size,
-                      const int32_t src_kv_split_size = 1) override;
-
  protected:
   SpeculativeEngineBase(const runtime::Options& options, bool use_draft_engine);
 

@@ -38,7 +38,6 @@ limitations under the License.
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/worker.h"
 #include "runtime/worker_client.h"
-#include "util/threadpool.h"
 namespace xllm {
 
 class ModelLoader;
@@ -102,23 +101,6 @@ class LLMEngine : public Engine {
       std::vector<size_t>& worker_free_phy_pages,
       std::unordered_map<std::string, std::vector<WeightSegment>>&
           model_weight_segments) override;
-
-  bool link_cluster(const std::vector<uint64_t>& cluster_ids,
-                    const std::vector<std::string>& addrs,
-                    const std::vector<uint16_t>& ports,
-                    const int32_t src_dp_size,
-                    const int32_t src_kv_split_size = 1) override;
-
-  bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
-                      const std::vector<std::string>& addrs,
-                      const std::vector<uint16_t>& ports,
-                      const int32_t src_dp_size,
-                      const int32_t src_kv_split_size = 1) override;
-
-  // P2P link for weight transfer - each worker links to one remote addr
-  bool link_p2p(const std::vector<std::string>& remote_addrs) override;
-
-  bool unlink_p2p(const std::vector<std::string>& remote_addrs) override;
 
   std::shared_ptr<DistributedWorkerManager> get_distributed_worker_manager()
       const {
@@ -190,9 +172,6 @@ class LLMEngine : public Engine {
       nullptr;
 
   std::unique_ptr<EplbController> eplb_controller_;
-
-  // threadpool for link cluster
-  std::unique_ptr<ThreadPool> link_threadpool_;
 };
 
 }  // namespace xllm
