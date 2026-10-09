@@ -271,10 +271,6 @@ std::tuple<int64_t, int64_t> Worker::estimate_kv_cache_capacity() {
   return impl_->estimate_kv_cache_capacity();
 }
 
-VlmForwardInput Worker::prepare_vlm_inputs(Batch& batch) {
-  return impl_->prepare_vlm_inputs(batch);
-}
-
 std::optional<ForwardOutput> Worker::step(const RecForwardInput& inputs) {
   CHECK(!enable_task_pipeline_) << "Rec does not support the LLM task pipeline";
   return impl_->step(inputs);

@@ -34,7 +34,6 @@ limitations under the License.
 #include "framework/batch/forward_input_factory.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_utils.h"
-#include "framework/quantization/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/worker.h"
@@ -167,9 +166,6 @@ class LLMEngine : public Engine {
   // dtype
   torch::ScalarType dtype_;
 
-  // quantization args
-  QuantArgs quant_args_;
-
   // worker client which is used for call worker
   // The reason for adding a worker client is to unify the
   // access code for both local and remote workers, thereby
@@ -178,7 +174,6 @@ class LLMEngine : public Engine {
 
   // common frequently used args
   uint32_t dp_size_ = 1;
-  uint32_t cp_size_ = 1;
   uint32_t worker_clients_num_;
   // Effective TP width (MLU=dp_local; NPU=dp_local/cp).
   uint32_t dp_local_tp_size_;

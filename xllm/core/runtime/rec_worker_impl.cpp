@@ -2865,10 +2865,6 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
 
   LOG(INFO) << "RecWorkerImpl constructor: "
             << options_.rec_worker_max_concurrency();
-  const int64_t num_threads = std::max<int64_t>(
-      1, util::get_int_env("XLLM_REC_INPUT_BUILDER_THREADS", 16));
-  input_builder_thread_pool_ =
-      std::make_shared<MPMCThreadPool>(static_cast<size_t>(num_threads));
 }
 
 RecWorkerImpl::~RecWorkerImpl() {
@@ -2906,12 +2902,12 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
 
   // Determine rec model kind and pipeline type
   const auto& model_type = context.get_model_args().model_type();
-  rec_model_kind_ = get_rec_model_kind(model_type);
-  CHECK(rec_model_kind_ != RecModelKind::kNone)
+  const RecModelKind rec_model_kind = get_rec_model_kind(model_type);
+  CHECK(rec_model_kind != RecModelKind::kNone)
       << "Unsupported rec model_type: " << model_type;
 
   // Create concurrent pipeline (not base class pipeline)
-  auto pipeline_type = get_rec_pipeline_type(rec_model_kind_);
+  auto pipeline_type = get_rec_pipeline_type(rec_model_kind);
 
   // Reserve space for model instances
   work_pipelines_.reserve(options_.rec_worker_max_concurrency());
@@ -2927,7 +2923,7 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
                                        context.get_quant_args(),
                                        context.get_tensor_options());
 
-    if (rec_model_kind_ == RecModelKind::kOneRec) {
+    if (rec_model_kind == RecModelKind::kOneRec) {
       runtime.model = create_rec_model(*runtime.context.get());
     } else {
       runtime.model = create_llm_model(*runtime.context.get());

@@ -46,8 +46,7 @@ TEST(DiTForwardInputFactoryTest, PreservesRequestOrderAndNamedInputs) {
   batch.add(first);
   batch.add(second);
   DiTForwardInputFactory factory;
-  DiTForwardInput input;
-  factory.create_input(batch, input);
+  auto input = factory.create_input(batch);
 
   EXPECT_EQ(input.batch_size, 2);
   EXPECT_EQ(input.prompts, (std::vector<std::string>{"first", "second"}));
@@ -76,8 +75,7 @@ TEST(DiTForwardInputFactoryTest, ReusesSingleRequestTensorStorage) {
   DiTBatch batch;
   batch.add(request);
   DiTForwardInputFactory factory;
-  DiTForwardInput input;
-  factory.create_input(batch, input);
+  auto input = factory.create_input(batch);
 
   const torch::Tensor& image = input.image_sources.at(0).tensor;
   EXPECT_EQ(image.sizes(), torch::IntArrayRef({1, 3, 2, 2}));
@@ -101,9 +99,7 @@ TEST(DiTForwardInputFactoryDeathTest, RejectsMixedGenerationParameters) {
   batch.add(first);
   batch.add(second);
   DiTForwardInputFactory factory;
-  DiTForwardInput input;
-
-  EXPECT_DEATH(factory.create_input(batch, input), "generation params");
+  EXPECT_DEATH(factory.create_input(batch), "generation params");
 }
 
 }  // namespace

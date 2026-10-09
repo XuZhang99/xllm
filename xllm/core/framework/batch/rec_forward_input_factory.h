@@ -44,9 +44,7 @@ class RecForwardInputFactory final {
   void create_inputs(RecBatchGroup& batches,
                      const ModelArgs& model_args,
                      std::vector<RecForwardInput>& inputs);
-  void create_input(RecBatch& batch,
-                    const ModelArgs& model_args,
-                    RecForwardInput& input);
+  RecForwardInput create_input(RecBatch& batch, const ModelArgs& model_args);
 
  private:
   struct PreparationState {

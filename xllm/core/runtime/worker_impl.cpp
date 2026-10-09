@@ -84,7 +84,6 @@ limitations under the License.
 #include "core/framework/speculative/mtp_utils.h"
 #include "core/runtime/decode_graph_bucket.h"
 #include "core/runtime/worker_rendezvous.h"
-#include "framework/batch/batch.h"
 #include "framework/eplb/eplb_utils.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/kv_cache/layerwise_split_layout.h"
@@ -2962,13 +2961,6 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
     const VlmForwardInput& input) {
   return step_async_impl(input);
-}
-
-VlmForwardInput WorkerImpl::prepare_vlm_inputs(Batch& batch) {
-  return batch.prepare_vlm_forward_input(options_.num_decoding_tokens(),
-                                         /*min_decoding_batch_size=*/0,
-                                         context_.get_model_args(),
-                                         options_.cp_size());
 }
 
 void WorkerImpl::prepare_work_before_execute(const VlmForwardInput& input,

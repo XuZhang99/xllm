@@ -143,7 +143,6 @@ bool VLMEngine::init_model(MasterStatus master_status) {
   CHECK(tokenizer_ != nullptr);
 
   args_ = model_loader->model_args();
-  quant_args_ = model_loader->quant_args();
   tokenizer_args_ = model_loader->tokenizer_args();
 
   dtype_ = util::parse_dtype(args_.dtype(), options_.devices()[0]);
@@ -170,7 +169,8 @@ bool VLMEngine::init_model(MasterStatus master_status) {
   }
 
   LOG(INFO) << "Initializing model with " << args_;
-  LOG(INFO) << "Initializing model with quant args: " << quant_args_;
+  LOG(INFO) << "Initializing model with quant args: "
+            << model_loader->quant_args();
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
   LOG(INFO) << "Initializing model with random seed: "
             << ::xllm::ExecutionConfig::get_instance().random_seed();

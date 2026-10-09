@@ -118,8 +118,7 @@ DiTForwardOutput DiTEngine::step(std::vector<DiTBatch>& batches) {
   }
 
   Timer timer;
-  DiTForwardInput forward_input;
-  forward_input_factory_->create_input(batches[0], forward_input);
+  auto forward_input = forward_input_factory_->create_input(batches[0]);
   COUNTER_ADD(prepare_input_latency_seconds, timer.elapsed_seconds());
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;

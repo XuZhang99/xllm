@@ -23,7 +23,6 @@ limitations under the License.
 #include <optional>
 #include <vector>
 
-#include "framework/batch/rec_batch.h"
 #include "runtime/llm_worker_impl.h"
 #include "runtime/rec_forward_params.h"
 #include "util/blockingconcurrentqueue.h"
@@ -66,9 +65,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const LlmForwardInput& input) override;
-
- protected:
-  std::shared_ptr<MPMCThreadPool> input_builder_thread_pool_;
 
  private:
   struct RecPipelineRuntime {
@@ -369,8 +365,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
   void initialize_xattention_workspace();
 
   std::vector<std::unique_ptr<RecWorkPipeline>> work_pipelines_;
-
-  RecModelKind rec_model_kind_ = RecModelKind::kNone;
 
   std::unique_ptr<ThreadPool> step_threadpool_;
 

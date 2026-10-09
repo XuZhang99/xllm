@@ -22,8 +22,8 @@ limitations under the License.
 
 #include "core/framework/batch/rec_batch.h"
 #include "core/framework/batch/rec_batch_group.h"
+#include "core/util/env_var.h"
 #include "core/util/threadpool.h"
-#include "core/util/utils.h"
 
 namespace xllm {
 
@@ -56,19 +56,19 @@ void RecForwardInputFactory::create_inputs(
   inputs = std::move(state.inputs);
 }
 
-void RecForwardInputFactory::create_input(RecBatch& batch,
-                                          const ModelArgs& model_args,
-                                          RecForwardInput& input) {
+RecForwardInput RecForwardInputFactory::create_input(
+    RecBatch& batch,
+    const ModelArgs& model_args) {
   if (input_builder_threadpool_ == nullptr) {
     const int64_t num_threads = std::max<int64_t>(
         1, util::get_int_env("XLLM_REC_INPUT_BUILDER_THREADS", 16));
     input_builder_threadpool_ =
         std::make_unique<MPMCThreadPool>(static_cast<size_t>(num_threads));
   }
-  input = batch.prepare_rec_forward_input(options_.num_decoding_tokens,
-                                          options_.min_decoding_batch_size,
-                                          model_args,
-                                          input_builder_threadpool_.get());
+  return batch.prepare_rec_forward_input(options_.num_decoding_tokens,
+                                         options_.min_decoding_batch_size,
+                                         model_args,
+                                         input_builder_threadpool_.get());
 }
 
 void RecForwardInputFactory::prepare_rank_inputs(RecBatchGroup& batches,

@@ -25,9 +25,6 @@ limitations under the License.
 #include "core/framework/batch/dit_forward_input_factory.h"
 #include "engine.h"
 #include "framework/batch/dit_batch.h"
-#include "framework/parallel_state/process_group.h"
-#include "framework/quantization/quant_args.h"
-#include "runtime/dit_worker_impl.h"
 
 namespace xllm {
 
@@ -80,8 +77,6 @@ class DiTEngine : public Engine {
   runtime::Options options_;
   // num of worker_clients
   int64_t worker_clients_num_;
-  // a list of process groups, with each process group handling a single device
-  std::vector<std::unique_ptr<ProcessGroup>> process_groups_;
 };
 
 }  // namespace xllm

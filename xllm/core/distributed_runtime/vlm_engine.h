@@ -26,12 +26,9 @@ limitations under the License.
 #include "engine.h"
 #include "framework/batch/batch_group.h"
 #include "framework/block/block_manager_pool.h"
-#include "framework/quantization/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/vlm_forward_params.h"
-#include "runtime/worker.h"
-#include "runtime/worker_client.h"
 
 namespace xllm {
 
@@ -70,12 +67,6 @@ class VLMEngine : public Engine {
 
   // dtype
   torch::ScalarType dtype_;
-
-  // quantization args
-  QuantArgs quant_args_;
-
-  // a list of process groups, with each process group handling a single device
-  std::vector<std::unique_ptr<ProcessGroup>> process_groups_;
 
   // a list of workers, with each worker handling a partial of model
   std::vector<std::shared_ptr<WorkerClient>> worker_clients_;

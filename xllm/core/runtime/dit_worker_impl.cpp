@@ -134,8 +134,7 @@ bool DiTWorkerImpl::init_model(const std::string& model_weights_path,
   CHECK(dit_model_ != nullptr) << "Failed to create model.";
   dit_model_->load_model(std::move(loader));
 
-  dit_model_executor_ =
-      std::make_unique<DiTExecutor>(dit_model_.get(), options_);
+  dit_model_executor_ = std::make_unique<DiTExecutor>(dit_model_.get());
 
   DiTCache::get_instance().init(cache_config, parallel_args_);
 

@@ -103,11 +103,6 @@ class SpeculativeWorkerImpl : public WorkerImpl {
     impl_->get_cache_info(cluster_id, addr, port);
   };
 
-  // prepare input for execution
-  VlmForwardInput prepare_vlm_inputs(Batch& batch) override {
-    return impl_->prepare_vlm_inputs(batch);
-  }
-
   // prepare work before model execution
   void prepare_work_before_execute(const TargetInput& input,
                                    TargetInput& new_input) override;

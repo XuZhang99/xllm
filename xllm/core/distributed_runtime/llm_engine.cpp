@@ -114,11 +114,11 @@ LLMEngine::LLMEngine(
   setup_workers(options);
 
   dp_size_ = options_.dp_size();
-  cp_size_ = options_.cp_size();
+  const uint32_t cp_size = options_.cp_size();
   forward_input_factory_ =
       std::make_unique<ForwardInputFactory>(ForwardInputFactoryOptions{
           .dp_size = dp_size_,
-          .cp_size = cp_size_,
+          .cp_size = cp_size,
           .max_tokens_per_batch =
               static_cast<int64_t>(options_.max_tokens_per_batch()),
           .enable_dp_global_json_object_active =
@@ -129,7 +129,7 @@ LLMEngine::LLMEngine(
   dp_local_size_ = worker_clients_num_ / dp_size_;
   // MLU and NPU model-side CP both use orthogonal CP x attention-TP, so the
   // DP-local TP width is divided by CP.
-  dp_local_tp_size_ = dp_local_size_ / cp_size_;
+  dp_local_tp_size_ = dp_local_size_ / cp_size;
 
   // create ThreadPool for link cluster
   link_threadpool_ = std::make_unique<ThreadPool>(
@@ -228,7 +228,6 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   configure_glm5_next_mtp_args(
       args_, options_.speculative_algorithm(), options_.is_draft_engine());
 #endif
-  quant_args_ = model_loader->quant_args();
   if (!options_.is_draft_engine() &&
       SpeculativeConfig::is_block_diffusion_algorithm(
           options_.speculative_algorithm())) {
@@ -273,7 +272,8 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   }
 
   LOG(INFO) << "Initializing model with " << args_;
-  LOG(INFO) << "Initializing model with quant args: " << quant_args_;
+  LOG(INFO) << "Initializing model with quant args: "
+            << model_loader->quant_args();
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
   LOG(INFO) << "Initializing model with random seed: "
             << ::xllm::ExecutionConfig::get_instance().random_seed();

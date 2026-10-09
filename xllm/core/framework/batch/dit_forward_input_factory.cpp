@@ -19,9 +19,8 @@ limitations under the License.
 
 namespace xllm {
 
-void DiTForwardInputFactory::create_input(DiTBatch& batch,
-                                          DiTForwardInput& input) {
-  input = batch.prepare_forward_input();
+DiTForwardInput DiTForwardInputFactory::create_input(DiTBatch& batch) {
+  return batch.prepare_forward_input();
 }
 
 }  // namespace xllm

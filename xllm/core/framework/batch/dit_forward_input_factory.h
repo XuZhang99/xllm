@@ -23,7 +23,7 @@ class DiTBatch;
 
 class DiTForwardInputFactory final {
  public:
-  void create_input(DiTBatch& batch, DiTForwardInput& input);
+  DiTForwardInput create_input(DiTBatch& batch);
 };
 
 }  // namespace xllm

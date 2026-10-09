@@ -91,7 +91,6 @@ class Worker {
   bool task_pipeline_uses_worker_prepare() const;
 
   std::optional<ForwardOutput> step(const RecForwardInput& inputs);
-  VlmForwardInput prepare_vlm_inputs(Batch& batch);
   std::optional<ForwardOutput> step(const VlmForwardInput& inputs);
 
   std::optional<ForwardOutput> step(const DiTForwardInput& inputs);

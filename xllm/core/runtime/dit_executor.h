@@ -23,17 +23,15 @@ limitations under the License.
 #include "common/macros.h"
 #include "core/framework/model_loader/dit_model_loader.h"
 #include "forward_params.h"
-#include "framework/batch/dit_batch.h"
 #include "framework/model/dit_model.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/dit_request_state.h"
-#include "runtime/options.h"
 
 namespace xllm {
 
 class DiTExecutor {
  public:
-  DiTExecutor(DiTModel* model, const runtime::Options& options);
+  explicit DiTExecutor(DiTModel* model);
 
   ~DiTExecutor() = default;
 
@@ -42,7 +40,6 @@ class DiTExecutor {
  private:
   // not own
   DiTModel* model_;
-  runtime::Options options_;
 };
 
 }  // namespace xllm

@@ -21,8 +21,7 @@ limitations under the License.
 
 namespace xllm {
 
-DiTExecutor::DiTExecutor(DiTModel* model, const runtime::Options& options)
-    : model_(model), options_(options) {}
+DiTExecutor::DiTExecutor(DiTModel* model) : model_(model) {}
 
 DiTForwardOutput DiTExecutor::forward(const DiTForwardInput& input) {
   return model_->forward(input);

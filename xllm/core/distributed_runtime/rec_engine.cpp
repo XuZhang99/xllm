@@ -131,19 +131,18 @@ bool RecEngine::init_model() {
   CHECK(tokenizer_ != nullptr);
 
   args_ = model_loader->model_args();
-  quant_args_ = model_loader->quant_args();
   tokenizer_args_ = model_loader->tokenizer_args();
   // Determine rec model kind and create pipeline via factory
-  rec_model_kind_ = get_rec_model_kind(args_.model_type());
-  CHECK(rec_model_kind_ != RecModelKind::kNone)
+  const RecModelKind rec_model_kind = get_rec_model_kind(args_.model_type());
+  CHECK(rec_model_kind != RecModelKind::kNone)
       << "Unsupported rec model_type: " << args_.model_type();
   // Reject unsupported multi-node REC configurations before selecting a
   // pipeline, so the leader fails fast too (not only secondary ranks).
   validate_multi_node_support();
-  auto pipeline_type = get_rec_pipeline_type(rec_model_kind_);
+  auto pipeline_type = get_rec_pipeline_type(rec_model_kind);
   pipeline_ = create_pipeline(pipeline_type, *this);
   // LlmRec-specific initialization
-  if (rec_model_kind_ == RecModelKind::kLlmRec) {
+  if (rec_model_kind == RecModelKind::kLlmRec) {
 #if defined(USE_NPU)
     FLAGS_enable_atb_comm_multiprocess =
         options_.enable_offline_inference() || (options_.nnodes() > 1);
@@ -177,7 +176,8 @@ bool RecEngine::init_model() {
             << ", head_dim: " << head_dim_ << ", n_layers: " << args_.n_layers()
             << ", dtype: " << dtype_;
   LOG(INFO) << "Initializing model with " << args_;
-  LOG(INFO) << "Initializing model with quant args: " << quant_args_;
+  LOG(INFO) << "Initializing model with quant args: "
+            << model_loader->quant_args();
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
 
   // Pipeline-specific model initialization
@@ -697,9 +697,8 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
   Timer timer;
   Timer timer_total;
   // OneRec does not need refresh_forward_type
-  RecForwardInput forward_inputs;
-  engine_.forward_input_factory_->create_input(
-      batches[0], engine_.args_, forward_inputs);
+  auto forward_inputs =
+      engine_.forward_input_factory_->create_input(batches[0], engine_.args_);
   HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                     timer.elapsed_microseconds());
 
@@ -723,8 +722,8 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
   for (size_t i = 0; i < kRecDecodeSteps; ++i) {
     timer.reset();
     // OneRec does not need refresh_forward_type
-    engine_.forward_input_factory_->create_input(
-        batches[0], engine_.args_, forward_inputs);
+    forward_inputs =
+        engine_.forward_input_factory_->create_input(batches[0], engine_.args_);
     HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                       timer.elapsed_microseconds());
 
@@ -846,9 +845,8 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
   }
 
   Timer timer;
-  RecForwardInput forward_inputs;
-  engine_.forward_input_factory_->create_input(
-      batches[0], engine_.args_, forward_inputs);
+  auto forward_inputs =
+      engine_.forward_input_factory_->create_input(batches[0], engine_.args_);
   HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                     timer.elapsed_microseconds());
 
@@ -1142,9 +1140,8 @@ ForwardOutput RecEngine::RecMultiRoundEnginePipeline::step(
   }
 
   Timer timer;
-  RecForwardInput forward_inputs;
-  engine_.forward_input_factory_->create_input(
-      batches[0], engine_.args_, forward_inputs);
+  auto forward_inputs =
+      engine_.forward_input_factory_->create_input(batches[0], engine_.args_);
   HISTOGRAM_OBSERVE(prepare_input_latency_microseconds,
                     timer.elapsed_microseconds());
 

@@ -165,8 +165,7 @@ TEST(RecForwardInputFactoryTest, MultiRoundInputKeepsScheduledTokenBudgets) {
       {first->sequences()[0].get(), second->sequences()[0].get()},
       {1, 2});
   RecForwardInputFactory factory(RecForwardInputFactoryOptions{});
-  RecForwardInput input;
-  factory.create_input(batches[0], ModelArgs(), input);
+  auto input = factory.create_input(batches[0], ModelArgs());
 
   EXPECT_TRUE(torch::equal(input.host_token_ids(),
                            torch::tensor({1, 4, 5}, torch::kInt32)));
@@ -185,13 +184,10 @@ TEST(RecForwardInputFactoryTest, MultiRoundInputKeepsScheduledTokenBudgets) {
                            torch::tensor({0, 1, 2, 3}, torch::kInt32)));
 }
 
-TEST(RecForwardInputFactoryTest, EmptySingleBatchClearsPreviousInput) {
+TEST(RecForwardInputFactoryTest, EmptySingleBatchReturnsEmptyInput) {
   RecForwardInputFactory factory(RecForwardInputFactoryOptions{});
   RecBatch batch(BatchInputType::REC_MULTI_ROUND);
-  RecForwardInput input;
-  input.token_ids = torch::tensor({42}, torch::kInt32);
-  input.step_decode = StepDecodeMeta{};
-  factory.create_input(batch, ModelArgs(), input);
+  auto input = factory.create_input(batch, ModelArgs());
 
   EXPECT_FALSE(input.token_ids.defined());
   EXPECT_FALSE(input.has_step_meta());

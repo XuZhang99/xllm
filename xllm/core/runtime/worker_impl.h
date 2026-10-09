@@ -54,8 +54,6 @@ limitations under the License.
 
 namespace xllm {
 
-class Batch;
-class RecBatch;
 class WorkerRendezvous;
 class TaskExecutionPipeline;
 struct LlmTaskCapacity;
@@ -125,8 +123,6 @@ class WorkerImpl {
   // P2P link for weight transfer
   virtual bool link_p2p(const std::string& remote_addr);
   virtual bool unlink_p2p(const std::string& remote_addr);
-
-  virtual VlmForwardInput prepare_vlm_inputs(Batch& batch);
 
   // prepare work before model execution
   virtual void prepare_work_before_execute(const LlmForwardInput& inputs,
