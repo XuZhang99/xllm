@@ -15,12 +15,14 @@ limitations under the License.
 
 #include "core/distributed_runtime/distributed_worker_manager.h"
 
+#include <folly/futures/Future.h>
 #include <glog/logging.h>
 
 #include <chrono>
 #include <cstdint>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 
 #include "core/common/health_check_manager.h"
 #include "core/distributed_runtime/collective_service.h"
@@ -34,6 +36,7 @@ limitations under the License.
 #include "core/platform/numa_utils.h"
 #endif
 #include "core/util/net.h"
+#include "core/util/threadpool.h"
 #include "server/xllm_server_registry.h"
 
 namespace xllm {
@@ -63,12 +66,21 @@ DistributedWorkerManager::DistributedWorkerManager(
   start_worker_servers(options, master_node_addr);
   if (options.node_rank() == 0) {
     connect_worker_clients(options, master_node_addr);
+    if (!worker_clients_.empty()) {
+      link_threadpool_ = std::make_unique<ThreadPool>(
+          /*num_threads=*/worker_clients_.size(),
+          /*cpu_binding=*/false,
+          /*pool_name=*/"DistributedWorkerManager.link");
+    }
     start_health_checks();
   }
   wait_for_worker_servers();
 }
 
 DistributedWorkerManager::~DistributedWorkerManager() {
+  std::lock_guard<std::mutex> lock(link_mutex_);
+  // Drain connection work while the worker clients and servers are still alive.
+  link_threadpool_.reset();
   HealthCheckManager::instance().stop_health_check_thread();
 
   XllmServer* collective_server =
@@ -81,6 +93,186 @@ DistributedWorkerManager::~DistributedWorkerManager() {
   for (const auto& server : worker_servers_) {
     server->stop();
   }
+}
+
+bool DistributedWorkerManager::link_cluster(
+    const std::vector<uint64_t>& cluster_ids,
+    const std::vector<std::string>& addrs,
+    const std::vector<uint16_t>& ports,
+    int32_t src_dp_size,
+    int32_t src_kv_split_size) {
+  std::lock_guard<std::mutex> lock(link_mutex_);
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "Only the leader node can link clusters.";
+    return false;
+  }
+  const int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
+  if (src_dp_size <= 0 || src_kv_split_size <= 0 || src_world_size <= 0 ||
+      src_world_size % src_dp_size != 0 ||
+      (src_world_size / src_dp_size) % src_kv_split_size != 0 ||
+      addrs.size() != cluster_ids.size() ||
+      ports.size() != cluster_ids.size()) {
+    LOG(ERROR) << "Invalid source topology for cache layout negotiation.";
+    return false;
+  }
+
+  // Every D worker negotiates with all P workers. Logical shard intersection
+  // determines which edges carry bytes; modulo TP routing cannot represent
+  // non-integer TP changes or KV-head replication.
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_.size());
+  for (size_t worker_rank = 0; worker_rank < worker_clients_.size();
+       ++worker_rank) {
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                &cluster_ids,
+                                &addrs,
+                                &ports]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->link_cluster(
+          cluster_ids, addrs, ports));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Link cluster failed.";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool DistributedWorkerManager::unlink_cluster(
+    const std::vector<uint64_t>& cluster_ids,
+    const std::vector<std::string>& addrs,
+    const std::vector<uint16_t>& ports,
+    int32_t src_dp_size,
+    int32_t src_kv_split_size) {
+  std::lock_guard<std::mutex> lock(link_mutex_);
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "Only the leader node can unlink clusters.";
+    return false;
+  }
+  const int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
+  if (src_dp_size <= 0 || src_kv_split_size <= 0 || src_world_size <= 0 ||
+      src_world_size % src_dp_size != 0 ||
+      (src_world_size / src_dp_size) % src_kv_split_size != 0 ||
+      addrs.size() != cluster_ids.size() ||
+      ports.size() != cluster_ids.size()) {
+    LOG(ERROR) << "Invalid source topology for cache unlink.";
+    return false;
+  }
+
+  // Symmetric to link_cluster: close every negotiated source edge.
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_.size());
+  for (size_t worker_rank = 0; worker_rank < worker_clients_.size();
+       ++worker_rank) {
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                &cluster_ids,
+                                &addrs,
+                                &ports]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->unlink_cluster(
+          cluster_ids, addrs, ports));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Unlink cluster failed.";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool DistributedWorkerManager::link_p2p(
+    const std::vector<std::string>& remote_addrs) {
+  std::lock_guard<std::mutex> lock(link_mutex_);
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "Only the leader node can link P2P addresses.";
+    return false;
+  }
+  if (remote_addrs.size() != worker_clients_.size()) {
+    LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
+               << " != worker_clients_num " << worker_clients_.size();
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_.size());
+  for (size_t worker_rank = 0; worker_rank < worker_clients_.size();
+       ++worker_rank) {
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                &remote_addrs]() mutable {
+      promise.setValue(
+          worker_clients_[worker_rank]->link_p2p(remote_addrs[worker_rank]));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Link P2P failed.";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool DistributedWorkerManager::unlink_p2p(
+    const std::vector<std::string>& remote_addrs) {
+  std::lock_guard<std::mutex> lock(link_mutex_);
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "Only the leader node can unlink P2P addresses.";
+    return false;
+  }
+  if (remote_addrs.size() != worker_clients_.size()) {
+    LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
+               << " != worker_clients_num " << worker_clients_.size();
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_.size());
+  for (size_t worker_rank = 0; worker_rank < worker_clients_.size();
+       ++worker_rank) {
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                &remote_addrs]() mutable {
+      promise.setValue(
+          worker_clients_[worker_rank]->unlink_p2p(remote_addrs[worker_rank]));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Unlink P2P failed.";
+      return false;
+    }
+  }
+  return true;
 }
 
 namespace {

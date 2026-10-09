@@ -16,7 +16,9 @@ limitations under the License.
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -27,6 +29,7 @@ limitations under the License.
 namespace xllm {
 
 class WorkerServer;
+class ThreadPool;
 
 // Owns worker servers, cluster rendezvous, and worker clients. Multiple engines
 // can share the manager to use the same distributed workers.
@@ -40,6 +43,21 @@ class DistributedWorkerManager final {
     return worker_clients_;
   }
 
+  bool link_cluster(const std::vector<uint64_t>& cluster_ids,
+                    const std::vector<std::string>& addrs,
+                    const std::vector<uint16_t>& ports,
+                    int32_t src_dp_size,
+                    int32_t src_kv_split_size = 1);
+  bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
+                      const std::vector<std::string>& addrs,
+                      const std::vector<uint16_t>& ports,
+                      int32_t src_dp_size,
+                      int32_t src_kv_split_size = 1);
+
+  // Each worker links to the remote weight-transfer address at its global rank.
+  bool link_p2p(const std::vector<std::string>& remote_addrs);
+  bool unlink_p2p(const std::vector<std::string>& remote_addrs);
+
  private:
   DISALLOW_COPY_AND_ASSIGN(DistributedWorkerManager);
 
@@ -52,6 +70,9 @@ class DistributedWorkerManager final {
 
   std::string collective_server_name_;
   std::vector<std::shared_ptr<WorkerClient>> worker_clients_;
+  // Shared engines must not interleave cluster and weight-transfer operations.
+  std::mutex link_mutex_;
+  std::unique_ptr<ThreadPool> link_threadpool_;
   // Worker threads borrow these flags; keep them alive until servers stop.
   std::vector<std::atomic<bool>> worker_ready_;
   std::vector<std::unique_ptr<WorkerServer>> worker_servers_;
