@@ -127,6 +127,9 @@ class LLMMaster : public Master {
   MasterStatus master_status_;
   XServiceClient* xservice_client_ = nullptr;
 
+  // Shared workers outlive the scheduler and every engine using them.
+  std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_;
+
   // Exactly one of these owners is populated, depending on the configured
   // LLM execution mode.
   std::unique_ptr<LLMEngine> llm_engine_;

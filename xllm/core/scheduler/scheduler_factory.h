@@ -18,6 +18,7 @@ limitations under the License.
 #include <concepts>
 #include <cstdint>
 #include <memory>
+#include <utility>
 
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/disagg_pd_scheduler.h"
@@ -45,10 +46,13 @@ template <typename TargetEngine>
   }
 std::unique_ptr<Scheduler> create_continuous_scheduler(
     TargetEngine* engine,
-    SchedulerOptions options) {
+    SchedulerOptions options,
+    std::shared_ptr<DistributedWorkerManager> distributed_worker_manager =
+        nullptr) {
   switch (select_scheduler_kind(options)) {
     case SchedulerKind::DISAGG_PD:
-      return std::make_unique<DisaggPDScheduler>(engine, options);
+      return std::make_unique<DisaggPDScheduler>(
+          engine, options, std::move(distributed_worker_manager));
     case SchedulerKind::ZERO_EVICTION:
       return std::make_unique<ZeroEvictionScheduler>(engine, options);
     case SchedulerKind::CONTINUOUS:

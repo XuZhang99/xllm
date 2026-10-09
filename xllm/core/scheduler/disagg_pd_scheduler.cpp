@@ -1362,7 +1362,12 @@ bool DisaggPDScheduler::link_instance(const std::string& instance_name,
                                       const int32_t dp_size,
                                       const int32_t src_kv_split_size) {
   std::lock_guard<std::mutex> lock(linked_instances_mutex_);
-  if (!engine_->link_cluster(
+  if (distributed_worker_manager_ == nullptr) {
+    LOG(ERROR)
+        << "Cannot link an instance without a distributed worker manager.";
+    return false;
+  }
+  if (!distributed_worker_manager_->link_cluster(
           cluster_ids, addrs, ports, dp_size, src_kv_split_size)) {
     LOG(ERROR) << "Link instance failed, instance_name: " << instance_name;
     return false;
@@ -1394,7 +1399,12 @@ bool DisaggPDScheduler::unlink_instance(
   }
 
   std::lock_guard<std::mutex> lock(linked_instances_mutex_);
-  if (!engine_->unlink_cluster(
+  if (distributed_worker_manager_ == nullptr) {
+    LOG(ERROR)
+        << "Cannot unlink an instance without a distributed worker manager.";
+    return false;
+  }
+  if (!distributed_worker_manager_->unlink_cluster(
           cluster_ids, addrs, ports, dp_size, src_kv_split_size)) {
     LOG(ERROR) << "Unlink instance failed, instance_name: " << instance_name;
     return false;

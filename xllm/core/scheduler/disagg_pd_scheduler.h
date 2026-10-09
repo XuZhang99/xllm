@@ -22,6 +22,7 @@ limitations under the License.
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -29,6 +30,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "core/distributed_runtime/distributed_worker_manager.h"
 #include "disagg_pd.pb.h"
 #include "distributed_runtime/xservice_client.h"
 #include "framework/request/request.h"
@@ -65,8 +67,16 @@ class DisaggPDScheduler : public ContinuousScheduler<> {
       { engine->step(batch) } -> std::same_as<ForwardOutput>;
       { engine->update_last_step_result(batch) } -> std::same_as<void>;
     }
-  DisaggPDScheduler(TargetEngine* engine, const Options& options)
-      : DisaggPDScheduler(engine, options, SkipRuntimeStart{}) {
+  DisaggPDScheduler(
+      TargetEngine* engine,
+      const Options& options,
+      std::shared_ptr<DistributedWorkerManager> distributed_worker_manager)
+      : DisaggPDScheduler(engine,
+                          options,
+                          SkipRuntimeStart{},
+                          std::move(distributed_worker_manager)) {
+    CHECK(distributed_worker_manager_ != nullptr)
+        << "Disaggregated PD requires a distributed worker manager.";
     dispatch_thread_ = std::make_unique<std::thread>(
         &DisaggPDScheduler::dispatch_requests, this);
     server_name_.append(std::to_string(options_.server_idx()));
@@ -158,8 +168,12 @@ class DisaggPDScheduler : public ContinuousScheduler<> {
     }
   DisaggPDScheduler(TargetEngine* engine,
                     const Options& options,
-                    SkipRuntimeStart)
-      : ContinuousScheduler<>(engine, options), server_name_("DisaggPDServer") {
+                    SkipRuntimeStart,
+                    std::shared_ptr<DistributedWorkerManager>
+                        distributed_worker_manager = nullptr)
+      : ContinuousScheduler<>(engine, options),
+        distributed_worker_manager_(std::move(distributed_worker_manager)),
+        server_name_("DisaggPDServer") {
     if (!options_.instance_role().has_value()) {
       LOG(FATAL) << "Instance type is not set in disagg pd mode.";
     }
@@ -207,6 +221,8 @@ class DisaggPDScheduler : public ContinuousScheduler<> {
   // Register instance information including name, RPC address, type, and cache
   // info
   void register_instance_info(const std::string& server_name, Engine* engine);
+
+  std::shared_ptr<DistributedWorkerManager> distributed_worker_manager_;
 
   // remote instance name(ID) -> instance info
   std::unordered_map<std::string, InstanceInfo> remote_instances_info_;

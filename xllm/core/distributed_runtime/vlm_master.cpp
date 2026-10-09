@@ -320,11 +320,15 @@ VLMMaster::VLMMaster(const Options& options) : Master(options) {
       .enable_schedule_overlap(options_.enable_schedule_overlap())
       .server_idx(options_.server_idx());
   if (use_speculative_engine) {
-    scheduler_ = create_continuous_scheduler(speculative_engine_.get(),
-                                             scheduler_options);
+    scheduler_ = create_continuous_scheduler(
+        speculative_engine_.get(),
+        scheduler_options,
+        speculative_engine_->get_distributed_worker_manager());
   } else {
-    scheduler_ =
-        create_continuous_scheduler(vlm_engine_.get(), scheduler_options);
+    scheduler_ = create_continuous_scheduler(
+        vlm_engine_.get(),
+        scheduler_options,
+        vlm_engine_->get_distributed_worker_manager());
   }
 
   if (options_.enable_service_routing()) {

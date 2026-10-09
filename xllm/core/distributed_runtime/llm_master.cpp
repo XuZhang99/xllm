@@ -206,6 +206,7 @@ LLMMaster::LLMMaster(const Options& options)
 
   if (!use_ssm_engine) {
     llm_engine_ = std::make_unique<LLMEngine>(engine_options);
+    distributed_worker_manager_ = llm_engine_->get_distributed_worker_manager();
   } else {
     const std::string draft_model_path =
         options_.draft_model_path().value_or("");
@@ -236,9 +237,13 @@ LLMMaster::LLMMaster(const Options& options)
     if (use_suffix_spec) {
       suffix_engine_ =
           std::make_unique<SuffixSpeculativeEngine>(engine_options);
+      distributed_worker_manager_ =
+          suffix_engine_->get_distributed_worker_manager();
     } else {
       speculative_engine_ =
           std::make_unique<SpeculativeEngineBase<LLMEngine>>(engine_options);
+      distributed_worker_manager_ =
+          speculative_engine_->get_distributed_worker_manager();
     }
   }
   if (!is_leader()) {
@@ -296,14 +301,15 @@ LLMMaster::LLMMaster(const Options& options)
       .server_idx(options_.server_idx())
       .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
   if (!use_ssm_engine) {
-    scheduler_ =
-        create_continuous_scheduler(llm_engine_.get(), scheduler_options);
+    scheduler_ = create_continuous_scheduler(
+        llm_engine_.get(), scheduler_options, distributed_worker_manager_);
   } else if (options_.speculative_algorithm() == "Suffix") {
-    scheduler_ =
-        create_continuous_scheduler(suffix_engine_.get(), scheduler_options);
+    scheduler_ = create_continuous_scheduler(
+        suffix_engine_.get(), scheduler_options, distributed_worker_manager_);
   } else {
     scheduler_ = create_continuous_scheduler(speculative_engine_.get(),
-                                             scheduler_options);
+                                             scheduler_options,
+                                             distributed_worker_manager_);
   }
 
   if (options_.enable_service_routing()) {
@@ -606,20 +612,11 @@ bool LLMMaster::wakeup(const WakeupOptions& options) {
 }
 
 bool LLMMaster::link_p2p(const std::vector<std::string>& remote_addrs) {
-  return dispatch_engine(
-      llm_engine_.get(),
-      suffix_engine_.get(),
-      speculative_engine_.get(),
-      [&remote_addrs](auto& engine) { return engine.link_p2p(remote_addrs); });
+  return distributed_worker_manager_->link_p2p(remote_addrs);
 }
 
 bool LLMMaster::unlink_p2p(const std::vector<std::string>& remote_addrs) {
-  return dispatch_engine(llm_engine_.get(),
-                         suffix_engine_.get(),
-                         speculative_engine_.get(),
-                         [&remote_addrs](auto& engine) {
-                           return engine.unlink_p2p(remote_addrs);
-                         });
+  return distributed_worker_manager_->unlink_p2p(remote_addrs);
 }
 
 bool LLMMaster::start_profile() {

@@ -56,6 +56,11 @@ class SpeculativeEngineBase : public Engine {
   runtime::DecodeGraphExecutionShape decode_graph_execution_shape()
       const override;
 
+  std::shared_ptr<DistributedWorkerManager> get_distributed_worker_manager()
+      const {
+    return distributed_worker_manager_;
+  }
+
   const TokenizerArgs& tokenizer_args() const override {
     return engine_->tokenizer_args();
   }
