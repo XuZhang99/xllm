@@ -75,12 +75,27 @@ DistributedWorkerManager::DistributedWorkerManager(
     start_health_checks();
   }
   wait_for_worker_servers();
+  runtime_resources_started_ = true;
+}
+
+DistributedWorkerManager::DistributedWorkerManager(
+    std::vector<std::shared_ptr<WorkerClient>> worker_clients)
+    : worker_clients_(std::move(worker_clients)) {
+  if (!worker_clients_.empty()) {
+    link_threadpool_ = std::make_unique<ThreadPool>(
+        /*num_threads=*/worker_clients_.size(),
+        /*cpu_binding=*/false,
+        /*pool_name=*/"DistributedWorkerManager.test");
+  }
 }
 
 DistributedWorkerManager::~DistributedWorkerManager() {
   std::lock_guard<std::mutex> lock(link_mutex_);
   // Drain connection work while the worker clients and servers are still alive.
   link_threadpool_.reset();
+  if (!runtime_resources_started_) {
+    return;
+  }
   HealthCheckManager::instance().stop_health_check_thread();
 
   XllmServer* collective_server =

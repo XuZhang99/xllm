@@ -30,6 +30,7 @@ namespace xllm {
 
 class WorkerServer;
 class ThreadPool;
+class DistributedWorkerManagerTest;
 
 // Owns worker servers, cluster rendezvous, and worker clients. Multiple engines
 // can share the manager to use the same distributed workers.
@@ -59,7 +60,12 @@ class DistributedWorkerManager final {
   bool unlink_p2p(const std::vector<std::string>& remote_addrs);
 
  private:
+  friend class DistributedWorkerManagerTest;
+
   DISALLOW_COPY_AND_ASSIGN(DistributedWorkerManager);
+
+  explicit DistributedWorkerManager(
+      std::vector<std::shared_ptr<WorkerClient>> worker_clients);
 
   void start_worker_servers(const runtime::Options& options,
                             const std::string& master_node_addr);
@@ -73,6 +79,7 @@ class DistributedWorkerManager final {
   // Shared engines must not interleave cluster and weight-transfer operations.
   std::mutex link_mutex_;
   std::unique_ptr<ThreadPool> link_threadpool_;
+  bool runtime_resources_started_ = false;
   // Worker threads borrow these flags; keep them alive until servers stop.
   std::vector<std::atomic<bool>> worker_ready_;
   std::vector<std::unique_ptr<WorkerServer>> worker_servers_;
