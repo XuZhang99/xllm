@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -26,42 +24,16 @@ from xllm.python.layers import DFlash2GroupedConv
 from xllm.python.model_loader import ParallelLoadContext, ScopedWeightLoader
 from xllm.python.models.qwen3 import Qwen3DecoderLayer
 from xllm.python.models.qwen3_dflash import (
-    DFlashQwen3Config,
+    DFlashQwen3Context,
     DFlashQwen3ForCausalLM,
     DFlashQwen3Model,
 )
 
 
-@dataclass
-class DFlash2Qwen3Config(DFlashQwen3Config):
-    block_size: int = 0
-    conv_group_size: int = 0
-    conv_kernel_size: int = 0
-    selector_rank: int = 0
-    selector_top_k: int = 0
+class DFlash2Qwen3Context(DFlashQwen3Context):
+    """Execution view over the Transformers architecture config."""
 
-    @classmethod
-    def from_dict(cls, d: dict) -> DFlash2Qwen3Config:
-        base = DFlashQwen3Config.from_dict(d)
-        nested = d.get("dflash_config")
-        dflash_config = nested if isinstance(nested, dict) else {}
-
-        def pick(reflected_name: str, nested_name: str) -> int:
-            value = d.get(reflected_name)
-            if value is None:
-                value = d.get(nested_name)
-            if value is None:
-                value = dflash_config.get(nested_name, 0)
-            return int(value)
-
-        return cls(
-            **base.__dict__,
-            block_size=pick("dflash2_block_size", "block_size"),
-            conv_group_size=pick("dflash2_conv_group_size", "conv_group_size"),
-            conv_kernel_size=pick("dflash2_conv_kernel_size", "conv_kernel_size"),
-            selector_rank=pick("dflash2_selector_rank", "selector_rank"),
-            selector_top_k=pick("dflash2_selector_top_k", "selector_top_k"),
-        )
+    draft_kind = "dflash2"
 
     def validate(self) -> None:
         super().validate()
@@ -141,7 +113,7 @@ class DFlash2CandidateSelector(nn.Module):
 class DFlash2Qwen3DecoderLayer(Qwen3DecoderLayer):
     def __init__(
         self,
-        cfg: DFlash2Qwen3Config,
+        cfg: DFlash2Qwen3Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -204,7 +176,7 @@ class DFlash2Qwen3DecoderLayer(Qwen3DecoderLayer):
 
 
 class DFlash2Qwen3Model(DFlashQwen3Model):
-    def __init__(self, cfg: DFlash2Qwen3Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: DFlash2Qwen3Context, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__(
             cfg,
             dtype,
@@ -233,7 +205,7 @@ class DFlash2Qwen3Model(DFlashQwen3Model):
 
 class DFlash2Qwen3ForCausalLM(DFlashQwen3ForCausalLM):
     model: DFlash2Qwen3Model
-    config_cls = DFlash2Qwen3Config
+    config_cls = DFlash2Qwen3Context
     model_cls = DFlash2Qwen3Model
 
     def dflash2_candidates(

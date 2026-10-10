@@ -70,7 +70,7 @@ def _three_token_plan(rank: int) -> CpContext:
 
 
 def _indexer() -> glm5_2.Glm52Indexer:
-    cfg = glm5_2.Glm52Config(
+    cfg = glm5_2.Glm52Context(
         hidden_size=2,
         q_lora_rank=2,
         index_n_heads=1,
@@ -348,7 +348,7 @@ def test_cp_indexer_preserves_query_segments_and_cache_order(packed: bool, rank:
 
 
 def test_indexer_fuses_k_and_weight_projections_after_loading() -> None:
-    cfg = glm5_2.Glm52Config(
+    cfg = glm5_2.Glm52Context(
         hidden_size=3,
         q_lora_rank=2,
         index_n_heads=2,
@@ -380,7 +380,7 @@ def test_indexer_fuses_k_and_weight_projections_after_loading() -> None:
 
 
 def test_indexer_keeps_separate_projections_for_distinct_cache_rows() -> None:
-    cfg = glm5_2.Glm52Config(
+    cfg = glm5_2.Glm52Context(
         hidden_size=3,
         q_lora_rank=2,
         index_n_heads=2,
@@ -403,7 +403,7 @@ def test_indexer_keeps_separate_projections_for_distinct_cache_rows() -> None:
 
 
 def test_indexer_invalidates_fused_projection_after_state_dict_load() -> None:
-    cfg = glm5_2.Glm52Config(
+    cfg = glm5_2.Glm52Context(
         hidden_size=3,
         q_lora_rank=2,
         index_n_heads=2,
@@ -436,7 +436,7 @@ def test_indexer_invalidates_fused_projection_after_state_dict_load() -> None:
 
 
 def test_interleaved_indexer_rope_uses_inplace_partial_kernel() -> None:
-    cfg = glm5_2.Glm52Config(
+    cfg = glm5_2.Glm52Context(
         hidden_size=4,
         q_lora_rank=4,
         index_n_heads=1,
@@ -484,7 +484,7 @@ def test_interleaved_indexer_rope_uses_inplace_partial_kernel() -> None:
 
 @pytest.mark.parametrize("multi_stream", [False, True])
 def test_indexer_consumes_explicit_distinct_query_and_key_cos_sin(multi_stream: bool) -> None:
-    cfg = glm5_2.Glm52Config(
+    cfg = glm5_2.Glm52Context(
         hidden_size=2,
         q_lora_rank=2,
         index_n_heads=1,

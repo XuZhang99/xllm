@@ -159,7 +159,7 @@ def test_mtp_builds_fallback_indexer_for_pattern_shared_layers() -> None:
 
 
 def test_glm53_reads_rope_theta_from_rope_parameters() -> None:
-    cfg = glm5_2_mtp.Glm52Config.from_dict(
+    cfg = glm5_2_mtp.Glm52Context.from_dict(
         _config(
             rope_parameters={"rope_theta": 8_000_000, "rope_type": "default"},
         )
@@ -169,7 +169,7 @@ def test_glm53_reads_rope_theta_from_rope_parameters() -> None:
 
 
 def test_mtp_ignores_target_layer_metadata_with_mismatched_depth() -> None:
-    cfg = glm5_2_mtp.Glm52Config.from_dict(
+    cfg = glm5_2_mtp.Glm52Context.from_dict(
         _config(
             first_k_dense_replace=0,
             indexer_types=["full", "shared"],

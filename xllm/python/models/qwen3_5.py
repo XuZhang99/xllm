@@ -17,8 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Any, cast
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -34,115 +33,14 @@ from xllm.python.model_loader import (
     load_causal_lm_weights,
 )
 from xllm.python.models.base import PyModelBase
+from xllm.python.models.model_config import ModelContext
 
 
-@dataclass
-class Qwen3_5Config:
-    hidden_size: int
-    n_layers: int
-    n_heads: int
-    n_kv_heads: int
-    head_dim: int
-    intermediate_size: int
-    rms_norm_eps: float
-    rope_theta: float
-    partial_rotary_factor: float
-    max_position_embeddings: int
-    vocab_size: int
-    layer_types: list[str]
-    linear_conv_kernel_dim: int
-    linear_key_head_dim: int
-    linear_value_head_dim: int
-    linear_num_key_heads: int
-    linear_num_value_heads: int
-    attention_bias: bool
-    attn_output_gate: bool
-    tie_word_embeddings: bool
-    num_experts: int
-    num_experts_per_tok: int
-    decoder_sparse_step: int
-    mlp_only_layers: list[int]
-    norm_topk_prob: bool
-    moe_intermediate_size: int
-    shared_expert_intermediate_size: int
-    tp_size: int
-    tp_rank: int
-    dp_size: int
-    dp_rank: int
-    world_size: int
-    moe_tp_size: int
-    moe_tp_rank: int
-    ep_size: int
-    ep_rank: int
-    enable_mega_moe: bool
-    mega_moe_context: torch.Tensor | None
-    mega_moe_ccl_buffer_size: int
-    mega_moe_num_max_tokens_per_rank: int
+class Qwen35Context(ModelContext):
+    """Execution view over the Transformers architecture config."""
 
-    @classmethod
-    def from_dict(cls, d: dict) -> Qwen3_5Config:
-        def pick(*keys: str, default: Any = None) -> Any:
-            for key in keys:
-                if key in d and d[key] is not None:
-                    return d[key]
-            return default
-
-        n_layers = int(pick("n_layers", "num_hidden_layers", default=0))
-        interval = int(pick("full_attention_interval", default=4))
-        layer_types = list(pick("layer_types", default=[]))
-        if not layer_types:
-            layer_types = ["full_attention" if (i + 1) % interval == 0 else "linear_attention" for i in range(n_layers)]
-        if len(layer_types) != n_layers:
-            raise ValueError("layer_types must contain one entry per hidden layer")
-
-        hidden_size = int(pick("hidden_size", default=0))
-        n_heads = int(pick("n_heads", "num_attention_heads", default=0))
-        tp_size = int(pick("tp_size", default=1))
-        dp_size = int(pick("dp_size", default=1))
-        world_size = int(pick("world_size", default=tp_size * dp_size))
-        ep_size = int(pick("ep_size", default=1))
-        return cls(
-            hidden_size=hidden_size,
-            n_layers=n_layers,
-            n_heads=n_heads,
-            n_kv_heads=int(pick("n_kv_heads", "num_key_value_heads", default=0)),
-            head_dim=int(pick("head_dim", default=hidden_size // n_heads)),
-            intermediate_size=int(pick("intermediate_size", default=0)),
-            rms_norm_eps=float(pick("rms_norm_eps", default=1e-6)),
-            rope_theta=float(pick("rope_theta", default=1e7)),
-            partial_rotary_factor=float(pick("partial_rotary_factor", default=0.25)),
-            max_position_embeddings=int(pick("max_position_embeddings", default=262144)),
-            vocab_size=int(pick("vocab_size", default=248320)),
-            layer_types=layer_types,
-            linear_conv_kernel_dim=int(pick("linear_conv_kernel_dim", default=4)),
-            linear_key_head_dim=int(pick("linear_key_head_dim", default=128)),
-            linear_value_head_dim=int(pick("linear_value_head_dim", default=128)),
-            linear_num_key_heads=int(pick("linear_num_key_heads", default=16)),
-            linear_num_value_heads=int(pick("linear_num_value_heads", default=32)),
-            attention_bias=bool(pick("attention_bias", default=False)),
-            attn_output_gate=bool(pick("attn_output_gate", default=True)),
-            tie_word_embeddings=bool(pick("tie_word_embeddings", default=False)),
-            num_experts=int(pick("num_experts", "n_routed_experts", default=0)),
-            num_experts_per_tok=int(pick("num_experts_per_tok", default=0)),
-            decoder_sparse_step=int(pick("decoder_sparse_step", default=1)),
-            mlp_only_layers=[int(layer_id) for layer_id in pick("mlp_only_layers", default=[])],
-            norm_topk_prob=bool(pick("norm_topk_prob", default=True)),
-            moe_intermediate_size=int(pick("moe_intermediate_size", default=0)),
-            shared_expert_intermediate_size=int(pick("shared_expert_intermediate_size", default=0)),
-            tp_size=tp_size,
-            tp_rank=int(pick("tp_rank", default=0)),
-            dp_size=dp_size,
-            dp_rank=int(pick("dp_rank", default=0)),
-            world_size=world_size,
-            moe_tp_size=int(pick("moe_tp_size", default=world_size // max(ep_size, 1))),
-            moe_tp_rank=int(pick("moe_tp_rank", default=0)),
-            ep_size=ep_size,
-            ep_rank=int(pick("ep_rank", default=0)),
-            enable_mega_moe=bool(pick("enable_mega_moe", default=False)),
-            mega_moe_context=pick("mega_moe_context", default=None),
-            mega_moe_ccl_buffer_size=int(pick("mega_moe_ccl_buffer_size", default=0)),
-            mega_moe_num_max_tokens_per_rank=int(pick("mega_moe_num_max_tokens_per_rank", default=0)),
-        )
+    config_module = "qwen3_5"
+    config_name = "Qwen3_5TextConfig"
 
     def validate(self) -> None:
         if self.hidden_size <= 0 or self.n_heads <= 0 or self.n_kv_heads <= 0 or self.n_layers <= 0:
@@ -213,7 +111,7 @@ class Qwen3_5Config:
 
 
 class Qwen3_5Model(nn.Module):
-    def __init__(self, cfg: Qwen3_5Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Qwen35Context, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         if device.type in ("npu", "privateuseone"):
             builders: list[ExecutionMetadataBuilder] = []
@@ -270,7 +168,7 @@ class Qwen3_5ForCausalLM(PyModelBase):
 
     def __init__(self, config: dict) -> None:
         super().__init__()
-        self.cfg = Qwen3_5Config.from_dict(config)
+        self.cfg = Qwen35Context.from_dict(config)
         self.cfg.validate()
         dtype = self.resolve_dtype(config.get("dtype") or config.get("torch_dtype"))
         device = torch.device(config.get("device", "cuda"))

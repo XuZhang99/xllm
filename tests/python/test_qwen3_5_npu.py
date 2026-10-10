@@ -76,7 +76,7 @@ from xllm.python.model_executor.forward_context import (
 )
 from xllm.python.model_executor.runners.eager import EagerRunner
 from xllm.python.model_loader import ParallelLoadContext, ScopedWeightLoader
-from xllm.python.models.qwen3_5 import Qwen3_5Config
+from xllm.python.models.qwen3_5 import Qwen35Context
 
 kernels.gemma_rms_norm = _gemma_rms_norm
 kernels.moe_fused_topk = MagicMock()
@@ -91,7 +91,7 @@ distributed.moe_tp_all_reduce = MagicMock()
 distributed.moe_ep_all_reduce = MagicMock()
 
 
-def _mega_moe_config(*, tp_rank: int = 0, dp_rank: int = 0, max_tokens_per_rank: int = 4096) -> Qwen3_5Config:
+def _mega_moe_config(*, tp_rank: int = 0, dp_rank: int = 0, max_tokens_per_rank: int = 4096) -> Qwen35Context:
     return _config(
         tp_size=2,
         tp_rank=tp_rank,
@@ -110,7 +110,7 @@ def _mega_moe_config(*, tp_rank: int = 0, dp_rank: int = 0, max_tokens_per_rank:
 
 
 def _mega_moe_eager_metadata(
-    cfg: Qwen3_5Config,
+    cfg: Qwen35Context,
     local_token_count: int,
     execution_token_counts: tuple[int, ...],
 ) -> MegaMoeMetadata:
@@ -124,7 +124,7 @@ def _mega_moe_eager_metadata(
 
 
 def _mega_moe_graph_metadata(
-    cfg: Qwen3_5Config,
+    cfg: Qwen35Context,
     token_capacity: int,
     local_token_count: int,
 ) -> MegaMoeMetadata:

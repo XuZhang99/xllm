@@ -31,7 +31,6 @@ GLM-5.2 structural deltas live here:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -76,6 +75,7 @@ from xllm.python.models.deepseek_v32 import (
 from xllm.python.models.deepseek_v32 import (
     DeepseekYarnRotaryEmbedding as Glm52YarnRotaryEmbedding,
 )
+from xllm.python.models.model_config import ModelContext
 
 _MLAPO_V2_Q_LORA_RANK = 1536
 _MLAPO_V2_KV_LORA_RANK = 512
@@ -84,7 +84,7 @@ _MLAPO_V2_QK_ROPE_HEAD_DIM = 64
 _MLAPO_V2_V_HEAD_DIM = 128
 
 
-def _can_use_mlapo_v2(cfg: Glm52Config, device: torch.device) -> bool:
+def _can_use_mlapo_v2(cfg: Glm52Context, device: torch.device) -> bool:
     if not cfg.enable_mlapo or device.type not in ("npu", "privateuseone"):
         return False
     if (
@@ -123,190 +123,11 @@ def _load_w8a8_attention_projection(
     )
 
 
-@dataclass
-class Glm52Config:
-    """GLM-5.2 (glm_moe_dsa) architecture parameters."""
+class Glm52Context(ModelContext):
+    """Execution view over the Transformers architecture config."""
 
-    model_type: str = "glm_moe_dsa"
-    hidden_size: int = 6144
-    n_layers: int = 78
-    n_heads: int = 64
-    head_dim: int = 0
-    intermediate_size: int = 12288
-    vocab_size: int = 154880
-    rms_norm_eps: float = 1e-5
-    rope_theta: float = 1.0e6
-    max_position_embeddings: int = 202752
-    original_max_position_embeddings: int = 202752
-    rope_scaling_factor: float = 1.0
-    rope_beta_fast: int = 32
-    rope_beta_slow: int = 1
-    rope_mscale: float = 1.0
-    rope_mscale_all_dim: float = 1.0
-    tie_word_embeddings: bool = False
-    q_lora_rank: int = 2048
-    kv_lora_rank: int = 512
-    qk_nope_head_dim: int = 192
-    qk_rope_head_dim: int = 64
-    qk_head_dim: int = 256
-    v_head_dim: int = 256
-    index_n_heads: int = 32
-    index_head_dim: int = 128
-    index_topk: int = 2048
-    first_k_dense_replace: int = 3
-    moe_layer_freq: int = 1
-    n_routed_experts: int = 256
-    n_shared_experts: int = 1
-    num_experts_per_tok: int = 8
-    n_group: int = 1
-    topk_group: int = 1
-    routed_scaling_factor: float = 2.5
-    topk_method: str = "noaux_tc"
-    norm_topk_prob: bool = True
-    moe_intermediate_size: int = 2048
-    tp_size: int = 1
-    tp_rank: int = 0
-    ep_size: int = 1
-    ep_rank: int = 0
-    dp_size: int = 1
-    dp_rank: int = 0
-    cp_size: int = 1
-    cp_rank: int = 0
-    layerwise_split_size: int = 1
-    layerwise_split_rank: int = 0
-    moe_tp_size: int = 1
-    moe_tp_rank: int = 0
-    world_size: int = 1
-    indexer_types: list | None = None
-    mlp_layer_types: list | None = None
-    index_skip_topk_offset: int = 2
-    index_topk_freq: int = 1
-    index_topk_pattern: list | None = None
-    indexer_rope_interleave: bool = True
-    enable_dsa_multi_stream: bool = False
-    num_nextn_predict_layers: int = 0
-    index_share_for_mtp_iteration: bool = False
-    enable_mlapo: bool = True
-    enable_attn_dp_weight_sharding: bool = False
-    layers_to_capture: tuple[int, ...] = ()
-    enable_mega_moe: bool = False
-    mega_moe_context: torch.Tensor | None = None
-    mega_moe_ccl_buffer_size: int = 0
-    mega_moe_num_max_tokens_per_rank: int = 0
-
-    @classmethod
-    def from_dict(cls, d: dict) -> Glm52Config:
-        def pick(*keys: str, default: Any = None) -> Any:
-            for k in keys:
-                if k in d and d[k] is not None:
-                    return d[k]
-            return default
-
-        rs_raw = d.get("rope_scaling")
-        rs = rs_raw if isinstance(rs_raw, dict) else {}
-        if not rs:
-            rp = d.get("rope_parameters")
-            if isinstance(rp, dict):
-                rs = rp
-
-        def rpick(*keys: str, default: Any = None) -> Any:
-            for k in keys:
-                if isinstance(rs, dict) and k in rs and rs[k] is not None:
-                    return rs[k]
-                fk = f"rope_scaling_{k}"
-                if fk in d and d[fk] is not None:
-                    return d[fk]
-                if k in d and d[k] is not None:
-                    return d[k]
-            return default
-
-        def rpick_nz(*keys: str, default: Any) -> Any:
-            v = rpick(*keys, default=None)
-            if v is None or v == 0 or v == -1 or v == "":
-                return default
-            return v
-
-        hidden = int(pick("hidden_size", default=6144))
-        n_heads = int(pick("n_heads", "num_attention_heads", default=64))
-        max_pe = int(pick("max_position_embeddings", default=202752))
-        tp_size = int(pick("tp_size", default=1))
-        dp_size = int(pick("dp_size", default=1))
-        cp_size = int(pick("cp_size", default=1))
-        world_size = int(pick("world_size", default=tp_size * dp_size * cp_size))
-        rope_scaling_factor = float(rpick_nz("factor", "rope_scaling_factor", default=1.0))
-        original_max = int(rpick_nz("original_max_position_embeddings", default=max_pe))
-
-        cfg = cls(
-            model_type=str(pick("model_type", default="glm_moe_dsa")),
-            hidden_size=hidden,
-            n_layers=int(pick("n_layers", "num_hidden_layers", default=78)),
-            n_heads=n_heads,
-            head_dim=int(pick("head_dim", default=hidden // n_heads if n_heads else 0)),
-            intermediate_size=int(pick("intermediate_size", default=12288)),
-            vocab_size=int(pick("vocab_size", default=154880)),
-            rms_norm_eps=float(pick("rms_norm_eps", default=1e-5)),
-            rope_theta=float(rpick("rope_theta", default=1.0e6)),
-            max_position_embeddings=max_pe,
-            original_max_position_embeddings=original_max,
-            rope_scaling_factor=rope_scaling_factor,
-            rope_beta_fast=int(rpick_nz("beta_fast", default=32)),
-            rope_beta_slow=int(rpick_nz("beta_slow", default=1)),
-            rope_mscale=float(rpick_nz("mscale", default=1.0)),
-            rope_mscale_all_dim=float(rpick_nz("mscale_all_dim", default=1.0)),
-            tie_word_embeddings=bool(pick("tie_word_embeddings", default=False)),
-            q_lora_rank=int(pick("q_lora_rank", default=2048)),
-            kv_lora_rank=int(pick("kv_lora_rank", default=512)),
-            index_n_heads=int(pick("index_n_heads", default=32)),
-            index_head_dim=int(pick("index_head_dim", default=128)),
-            index_topk=int(pick("index_topk", default=2048)),
-            qk_nope_head_dim=int(pick("qk_nope_head_dim", default=192)),
-            qk_rope_head_dim=int(pick("qk_rope_head_dim", default=64)),
-            qk_head_dim=int(pick("qk_head_dim", default=256)),
-            v_head_dim=int(pick("v_head_dim", default=256)),
-            first_k_dense_replace=int(pick("first_k_dense_replace", default=3)),
-            moe_layer_freq=int(pick("moe_layer_freq", default=1)),
-            n_routed_experts=int(pick("n_routed_experts", "num_local_experts", "num_experts", default=256)),
-            n_shared_experts=int(pick("n_shared_experts", default=1)),
-            num_experts_per_tok=int(pick("num_experts_per_tok", default=8)),
-            n_group=int(pick("n_group", default=1)),
-            topk_group=int(pick("topk_group", default=1)),
-            routed_scaling_factor=float(pick("routed_scaling_factor", default=2.5)),
-            topk_method=str(pick("topk_method", default="noaux_tc")),
-            norm_topk_prob=bool(pick("norm_topk_prob", default=True)),
-            moe_intermediate_size=int(pick("moe_intermediate_size", default=2048)),
-            tp_size=tp_size,
-            tp_rank=int(pick("tp_rank", default=0)),
-            ep_size=int(pick("ep_size", default=1)),
-            ep_rank=int(pick("ep_rank", default=0)),
-            dp_size=dp_size,
-            dp_rank=int(pick("dp_rank", default=0)),
-            cp_size=cp_size,
-            cp_rank=int(pick("cp_rank", default=0)),
-            layerwise_split_size=int(pick("layerwise_split_size", default=1)),
-            layerwise_split_rank=int(pick("layerwise_split_rank", default=0)),
-            moe_tp_size=int(pick("moe_tp_size", default=1)),
-            moe_tp_rank=int(pick("moe_tp_rank", default=0)),
-            world_size=world_size,
-            indexer_types=pick("indexer_types", default=None) or None,
-            mlp_layer_types=pick("mlp_layer_types", default=None) or None,
-            index_skip_topk_offset=int(pick("index_skip_topk_offset", default=2)),
-            index_topk_freq=int(pick("index_topk_freq", default=1)),
-            index_topk_pattern=pick("index_topk_pattern", default=None),
-            indexer_rope_interleave=bool(pick("indexer_rope_interleave", default=True)),
-            enable_dsa_multi_stream=bool(pick("enable_dsa_multi_stream", default=False)),
-            num_nextn_predict_layers=int(pick("num_nextn_predict_layers", default=0)),
-            index_share_for_mtp_iteration=bool(pick("index_share_for_mtp_iteration", default=False)),
-            enable_mlapo=bool(pick("enable_mlapo", default=True)),
-            enable_attn_dp_weight_sharding=bool(pick("enable_attn_dp_weight_sharding", default=False)),
-            layers_to_capture=tuple(int(layer_id) for layer_id in pick("layers_to_capture", default=[])),
-            enable_mega_moe=bool(pick("enable_mega_moe", default=False)),
-            mega_moe_context=pick("mega_moe_context", default=None),
-            mega_moe_ccl_buffer_size=int(pick("mega_moe_ccl_buffer_size", default=0)),
-            mega_moe_num_max_tokens_per_rank=int(pick("mega_moe_num_max_tokens_per_rank", default=0)),
-        )
-        cfg._resolve_indexer_types()
-        cfg._resolve_mlp_layer_types()
-        return cfg
+    config_module = "glm_moe_dsa"
+    config_name = "GlmMoeDsaConfig"
 
     def validate(self) -> None:
         """Validate the orthogonal attention/DP and MoE EP topology."""
@@ -355,47 +176,19 @@ class Glm52Config:
             return self.tp_size * self.dp_size, self.tp_rank * self.dp_size + self.dp_rank
         return self.tp_size, self.tp_rank
 
-    def _resolve_indexer_types(self) -> None:
-        """Derive per-layer indexer mode (full/shared)."""
-        if self.indexer_types is not None:
-            if len(self.indexer_types) == self.n_layers:
-                return
-            self.indexer_types = None
-        pattern = self.index_topk_pattern
-        if pattern:
-            if isinstance(pattern, str):
-                self.indexer_types = [{"F": "full", "S": "shared"}[c] for c in pattern]
-            else:
-                self.indexer_types = list(pattern)
-            return
-        freq = max(self.index_topk_freq, 1)
-        offset = self.index_skip_topk_offset
-        self.indexer_types = [
-            "full" if (max(i - offset + 1, 0) % freq) == 0 else "shared" for i in range(self.n_layers)
-        ]
-
-    def _resolve_mlp_layer_types(self) -> None:
-        """Derive per-layer MLP mode (dense/sparse)."""
-        if self.mlp_layer_types is not None:
-            if len(self.mlp_layer_types) == self.n_layers:
-                return
-            self.mlp_layer_types = None
-        n_dense = min(self.first_k_dense_replace, self.n_layers)
-        self.mlp_layer_types = ["dense"] * n_dense + ["sparse"] * (self.n_layers - n_dense)
-
     def head_split(self) -> tuple[int, int]:
         """Per-rank (num_heads_local, num_kv_heads_local=1) — MLA has one latent KV head per rank."""
         return mla_head_split(self.n_heads, self.tp_size)
 
 
-def _attn_dp_execution_counts(cfg: Glm52Config) -> tuple[int, ...]:
+def _attn_dp_execution_counts(cfg: Glm52Context) -> tuple[int, ...]:
     counts = tuple(get_forward_context().metadata.dp_execution_token_counts)
     if len(counts) != cfg.dp_size or any(count <= 0 for count in counts):
         raise ValueError("attention DP requires positive execution token counts for every DP rank")
     return counts
 
 
-def _attn_dp_owner_rows(value: torch.Tensor, cfg: Glm52Config) -> torch.Tensor:
+def _attn_dp_owner_rows(value: torch.Tensor, cfg: Glm52Context) -> torch.Tensor:
     counts = _attn_dp_execution_counts(cfg)
     padded_tokens = max(counts)
     if value.shape[0] != cfg.dp_size * padded_tokens:
@@ -404,7 +197,7 @@ def _attn_dp_owner_rows(value: torch.Tensor, cfg: Glm52Config) -> torch.Tensor:
 
 
 def _attn_dp_gather_inputs(
-    hidden: torch.Tensor, positions: torch.Tensor, cfg: Glm52Config
+    hidden: torch.Tensor, positions: torch.Tensor, cfg: Glm52Context
 ) -> tuple[torch.Tensor, torch.Tensor]:
     counts = _attn_dp_execution_counts(cfg)
     local_tokens = counts[cfg.dp_rank]
@@ -423,7 +216,7 @@ class Glm52MLAAttention(DeepseekV3MLAAttention):
 
     _linear_type = W8A8AttentionLinear
 
-    def __init__(self, cfg: Glm52Config, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm52Context, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__(cfg, layer_id, dtype, device)
         self._attn_dp_layout: AttnDpLayout | None = None
         self.register_buffer("W_UV_owner", torch.empty(0, dtype=dtype, device=device), persistent=False)
@@ -498,16 +291,16 @@ class Glm52MLAAttention(DeepseekV3MLAAttention):
         self.kv_b_proj.weight.data = self.kv_b_proj.weight.new_empty(0)
         self._prepare_indexer_weights()
 
-    def _mlapo_enabled(self, cfg: Glm52Config, device: torch.device) -> bool:
+    def _mlapo_enabled(self, cfg: Glm52Context, device: torch.device) -> bool:
         return _can_use_mlapo_v2(cfg, device)
 
-    def _init_a_projections(self, cfg: Glm52Config, device: torch.device) -> None:
+    def _init_a_projections(self, cfg: Glm52Context, device: torch.device) -> None:
         self._combined_qkv: W8A8AttentionLinear | None = None
         self.q_a_proj = W8A8AttentionLinear(cfg.hidden_size, cfg.q_lora_rank, device)
         self.kv_a_proj_with_mqa = W8A8AttentionLinear(cfg.hidden_size, cfg.kv_lora_rank + cfg.qk_rope_head_dim, device)
 
     def _make_indexer(
-        self, cfg: Glm52Config, layer_id: int, dtype: torch.dtype, device: torch.device
+        self, cfg: Glm52Context, layer_id: int, dtype: torch.dtype, device: torch.device
     ) -> Glm52Indexer | None:
         # A draft shared layer still needs K/cache updates, and full selection
         # on the first step. Target shared layers have no indexer at all.
@@ -817,17 +610,17 @@ class Glm52MLAAttention(DeepseekV3MLAAttention):
 class Glm52Indexer(DeepseekV3Indexer):
     """GLM checkpoint projections and optional DSA projection streams."""
 
-    def _uses_interleaved_rope(self, cfg: Glm52Config) -> bool:
+    def _uses_interleaved_rope(self, cfg: Glm52Context) -> bool:
         return cfg.indexer_rope_interleave
 
-    def _init_streams(self, cfg: Glm52Config, device: torch.device) -> None:
+    def _init_streams(self, cfg: Glm52Context, device: torch.device) -> None:
         super()._init_streams(cfg, device)
         if cfg.enable_dsa_multi_stream:
             self._weights_stream = get_device_stream(device, "dsa_indexer_weights")
             if not self.indexer_rope_interleave:
                 self._q_stream = get_device_stream(device, "dsa_indexer_q")
 
-    def _init_projections(self, cfg: Glm52Config, dtype: torch.dtype, device: torch.device) -> None:
+    def _init_projections(self, cfg: Glm52Context, dtype: torch.dtype, device: torch.device) -> None:
         self.wq_b = W8A8AttentionLinear(cfg.q_lora_rank, self.n_head * self.head_dim, device)
         self.wk = nn.Linear(cfg.hidden_size, self.head_dim, bias=False, dtype=dtype, device=device)
         self.weights_proj = nn.Linear(cfg.hidden_size, self.n_head, bias=False, dtype=dtype, device=device)
@@ -899,7 +692,7 @@ class Glm52MoE(DeepseekV3MoE):
 
     def __init__(
         self,
-        cfg: Glm52Config,
+        cfg: Glm52Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -974,12 +767,12 @@ class Glm52MoE(DeepseekV3MoE):
 
 class Glm52DecoderLayer(DeepseekV3DecoderLayer):
     def _make_attention(
-        self, cfg: Glm52Config, layer_id: int, dtype: torch.dtype, device: torch.device
+        self, cfg: Glm52Context, layer_id: int, dtype: torch.dtype, device: torch.device
     ) -> Glm52MLAAttention:
         return Glm52MLAAttention(cfg, layer_id, dtype, device)
 
     def _make_mlp(
-        self, cfg: Glm52Config, layer_id: int, dtype: torch.dtype, device: torch.device
+        self, cfg: Glm52Context, layer_id: int, dtype: torch.dtype, device: torch.device
     ) -> DeepseekV3MLP | DeepseekV3MoE:
         mlp_type = (
             cfg.mlp_layer_types[layer_id]
@@ -1019,12 +812,12 @@ class Glm52DecoderLayer(DeepseekV3DecoderLayer):
 
 
 class Glm52Model(DeepseekV3Model):
-    def __init__(self, cfg: Glm52Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm52Context, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__(cfg, dtype, device)
         self.aux_hidden_capture = AuxHiddenCapture(cfg.layers_to_capture)
 
     def _make_decoder(
-        self, cfg: Glm52Config, layer_id: int, dtype: torch.dtype, device: torch.device
+        self, cfg: Glm52Context, layer_id: int, dtype: torch.dtype, device: torch.device
     ) -> Glm52DecoderLayer:
         return Glm52DecoderLayer(cfg, layer_id, dtype, device)
 
@@ -1074,7 +867,7 @@ class Glm52ForCausalLM(PyModelBase):
 
     def __init__(self, config: dict, build_model: bool = True) -> None:
         super().__init__()
-        self.cfg = Glm52Config.from_dict(config)
+        self.cfg = Glm52Context.from_dict(config)
         self.cfg.tp_size = int(config.get("tp_size", 1))
         self.cfg.tp_rank = int(config.get("tp_rank", _tp_rank_from_device(config.get("device", "npu:0"))))
         self.cfg.ep_size = int(config.get("ep_size", 1))

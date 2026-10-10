@@ -75,7 +75,7 @@ def _run_attention(global_rank: int, rendezvous: str, tp_size: int, dp_size: int
         owner_head_count = 4 // tp_size
         collectives._groups[("dp", "cpu")] = groups[tp_rank]
         collectives._groups[("attn_dp", "cpu")] = dist.group.WORLD
-        cfg = glm5_2.Glm52Config.from_dict(
+        cfg = glm5_2.Glm52Context.from_dict(
             dict(
                 hidden_size=4,
                 n_heads=4,

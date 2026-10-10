@@ -11,6 +11,49 @@ models  ->  layers  ->  kernels
         distributed owns parallel collectives
 ```
 
+## Model configuration
+
+Python model architectures use the upstream Transformers config classes through
+their public `from_dict()` API. Install or upgrade the dependency with
+`pip install --upgrade '.[python-models]'` in the Python executor environment.
+The extra requires `transformers>=5.19.0,<5.20` as the shared baseline for all
+supported Python models; it does not pin a Git checkout.
+The pure C++ executor does not need this extra.
+
+Transformers 5.19.0 includes `Glm5NextTextConfig` and `Glm5NextVisionConfig`
+alongside the Qwen3, Qwen3.5, Qwen3-VL, DeepSeek-V3.2/V4 and GLM-MoE-DSA
+configs. Upgrade environments still using 5.14.1 before running this Python
+executor: that version lacks the GLM-5-Next classes and does not meet the shared
+dependency requirement. Missing config classes raise an error naming the
+required class and installed version when that model is constructed.
+
+Each model's `cfg` is an execution context: `cfg.hf_config` is the actual upstream
+configuration, and `cfg.runtime` holds ranks, parallel sizes, capture settings,
+and communication tensors. Only serialize `cfg.hf_config.to_dict()` as the
+architecture configuration. `with_runtime(...)` creates a separate runtime view
+while sharing the same architecture.
+
+`models/model_config.py` adapts the native flat `ModelArgs` transport (`n_layers`,
+`n_heads`, `mm_*`, flattened RoPE fields) and nested `text_config` / `vision_config`
+inputs. Effective native values take precedence over nested text values; absent
+architecture values use Transformers defaults. In particular, handcrafted partial
+dictionaries should explicitly supply the dimensions, RoPE settings and layer
+schedules they require instead of relying on the removed xLLM dataclass defaults.
+Invalid upstream layer schedules now fail during configuration construction.
+
+Unlike vLLM's checkpoint-path loader (`AutoConfig.from_pretrained()`), this
+boundary receives the native executor's effective dictionary, including MTP
+depth overrides. It therefore calls the selected upstream class's `from_dict()`
+without rereading the target checkpoint and losing those overrides.
+
+Qwen3.5 dense and MoE use `Qwen3_5TextConfig` and `Qwen3_5MoeTextConfig`;
+Qwen3-VL uses its own text and vision configs. DeepSeek-V3.2 uses
+`DeepseekV32Config`, GLM-5.2 uses `GlmMoeDsaConfig`, and GLM-5-Next uses its text
+and vision configs. DFlash, DFlash2 and DSpark use the upstream Qwen3 backbone
+plus a separate `DraftConfig` for their checkpoint-specific fields. Small
+execution compatibility options remain in the context when Transformers has no
+equivalent field; they do not duplicate upstream configuration defaults.
+
 ## Package responsibilities
 
 ### `models/`

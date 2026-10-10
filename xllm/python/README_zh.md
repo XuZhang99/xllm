@@ -26,6 +26,39 @@ models  ->  layers  ->  kernels
         distributed 负责并行通信
 ```
 
+## 模型配置
+
+Python 模型架构通过公开的 `from_dict()` 接口使用 Transformers 上游配置类。
+在 Python 执行器环境中执行 `pip install --upgrade '.[python-models]'` 安装或升级依赖。
+所有支持的 Python 模型统一要求 `transformers>=5.19.0,<5.20`，不绑定 Git 提交。
+纯 C++ 执行器不需要此依赖。
+
+Transformers 5.19.0 已包含 `Glm5NextTextConfig`、`Glm5NextVisionConfig`，以及
+Qwen3、Qwen3.5、Qwen3-VL、DeepSeek-V3.2/V4 和 GLM-MoE-DSA 配置。
+仍使用 5.14.1 的环境应在运行此 Python 执行器前升级；该版本缺少 GLM-5-Next
+配置类，不满足统一依赖要求。构造模型时若缺少所需配置类，错误会明确指出类名和当前版本。
+
+各模型的 `cfg` 是执行上下文：`cfg.hf_config` 为真实的上游配置对象，
+`cfg.runtime` 保存 rank、并行大小、隐藏状态捕获设置及通信张量。模型架构
+序列化使用 `cfg.hf_config.to_dict()`。`with_runtime(...)` 会创建独立的运行时
+视图，同时共享同一个架构配置。
+
+`models/model_config.py` 适配原生扁平 `ModelArgs` 传输格式（`n_layers`、
+`n_heads`、`mm_*`、扁平 RoPE 字段）及嵌套的 `text_config` / `vision_config`。
+原生有效参数优先于嵌套文本参数，缺失的架构参数采用 Transformers 默认值。
+因此，手工构造的部分配置字典应显式填写所需维度、RoPE 参数和层计划，不再
+依赖已移除的 xLLM dataclass 默认值。无效的上游层计划会在构造配置时直接报错。
+
+vLLM 从检查点路径调用 `AutoConfig.from_pretrained()`；这里接收的是原生执行器
+已处理过的有效字典，其中包含 MTP 层数等覆盖参数。因此，此处调用选定的上游配置类
+的 `from_dict()`，避免重新读取目标模型检查点而丢失这些覆盖参数。
+
+Qwen3.5 Dense / MoE 分别使用 `Qwen3_5TextConfig` / `Qwen3_5MoeTextConfig`；
+Qwen3-VL 使用自己的文本和视觉配置。DeepSeek-V3.2 使用 `DeepseekV32Config`，
+GLM-5.2 使用 `GlmMoeDsaConfig`，GLM-5-Next 使用其文本和视觉配置。DFlash、
+DFlash2、DSpark 复用上游 Qwen3 主干配置，专有检查点字段单独存入 `DraftConfig`。
+Transformers 没有对应字段的少量执行兼容选项仍保存在上下文中，不复制上游配置默认值。
+
 ## 包职责
 
 ### `models/`

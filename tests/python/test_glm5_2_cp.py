@@ -110,7 +110,7 @@ def _make_model(events: list[str]) -> tuple[glm5_2.Glm52Model, list[_DecoderLaye
     model = glm5_2.Glm52Model.__new__(glm5_2.Glm52Model)
     nn.Module.__init__(model)
     layers = [_DecoderLayer(layer_id, events) for layer_id in range(2)]
-    model.cfg = glm5_2.Glm52Config()
+    model.cfg = glm5_2.Glm52Context()
     model.embed_tokens = _Embedding(events)
     model.layers = nn.ModuleList(layers)
     model.norm = _Norm(events)

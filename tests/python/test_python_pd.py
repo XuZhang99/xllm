@@ -34,7 +34,7 @@ from xllm.python.model_executor.forward_context import (
     in_acl_graph,
 )
 from xllm.python.models.deepseek_v32 import DeepseekV3Model
-from xllm.python.models.glm5_next import Glm5NextConfig, Glm5NextIndexer, Glm5NextModel
+from xllm.python.models.glm5_next import Glm5NextContext, Glm5NextIndexer, Glm5NextModel
 from xllm.python.models.glm5_next_kpool import alloc_pool_cache, compress_completed_pools
 from xllm.python.models.glm5_next_mtp import Glm5NextMtpModel
 
@@ -87,7 +87,7 @@ class _IndexHistory:
 @pytest.mark.parametrize("stale_pool", [False, True])
 @pytest.mark.parametrize("graph_mode", [False, True])
 def test_pd_kpool_decode_uses_transferred_history(prompt_length: int, stale_pool: bool, graph_mode: bool) -> None:
-    cfg = Glm5NextConfig(
+    cfg = Glm5NextContext(
         hidden_size=8,
         q_lora_rank=4,
         index_n_heads=2,

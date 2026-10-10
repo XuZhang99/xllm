@@ -21,7 +21,7 @@ xllm/core/layers/npu_torch/deepseek_sparse_attention.cpp). Reuses the W8A8
 linear / MLP / MoE / YaRN-RoPE / weight-loader primitives from
 ``deepseek_v32`` and adds the DeepSeek-V4-specific pieces:
 
-  * ``DeepseekV4Config`` -- reads the DSV4 fields (compress_ratios, window_size,
+  * ``DeepseekV4Context`` -- reads the DSV4 fields (compress_ratios, window_size,
     o_lora_rank, o_groups, hc_*, index_*).
   * HyperConnection residual path (hc_pre / hc_post).
   * ``DeepseekV4Attention`` -- q_a/kv projections + RoPE, hands q/kv to the
@@ -34,7 +34,6 @@ linear / MLP / MoE / YaRN-RoPE / weight-loader primitives from
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field, replace
 from typing import Any
 
 import torch
@@ -65,8 +64,8 @@ from xllm.python.models.deepseek_v32 import (
     DeepseekV3MLP,
     DeepseekYarnRotaryEmbedding,
     W8A8DynamicLinear,
-    _tp_rank_from_device,
 )
+from xllm.python.models.model_config import ModelContext
 
 try:
     from xllm.python import distributed
@@ -77,13 +76,6 @@ try:
     from xllm.python import kernels
 except Exception:  # pragma: no cover - kernels need the compiled lib
     kernels = None  # type: ignore[assignment]
-
-
-def _pick(d: dict, *keys: str, default: Any = None) -> Any:
-    for k in keys:
-        if k in d and d[k] is not None:
-            return d[k]
-    return default
 
 
 def _compress_kv(
@@ -167,175 +159,18 @@ def _compress_kv(
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class DeepseekV4Config:
-    """DeepSeek-V4 model config (DSV3.2 MLA fields + DSV4-specific fields)."""
+class DeepseekV4Context(ModelContext):
+    """Execution view over the Transformers architecture config."""
 
-    model_type: str = "deepseek_v4"
-    hidden_size: int = 4096
-    n_layers: int = 43
-    n_heads: int = 64
-    head_dim: int = 512
-    vocab_size: int = 129280
-    rms_norm_eps: float = 1e-6
-    rope_theta: float = 10000.0
-    max_position_embeddings: int = 1048576
-    original_max_position_embeddings: int = 65536
-    rope_scaling_factor: float = 16.0
-    rope_beta_fast: int = 32
-    rope_beta_slow: int = 1
-    rope_mscale: float = 1.0
-    rope_mscale_all_dim: float = 1.0
-    q_lora_rank: int = 1024
-    kv_lora_rank: int = 0
-    qk_nope_head_dim: int = 0
-    qk_rope_head_dim: int = 64
-    v_head_dim: int = 0
-    # DSV4-specific
-    rope_head_dim: int = 64
-    o_lora_rank: int = 1024
-    o_groups: int = 8
-    compress_ratios: list[int] = field(default_factory=list)
-    compress_rope_theta: float = 160000.0
-    window_size: int = 128
-    n_activated_experts: int = 6
-    n_hash_layers: int = 3
-    hc_mult: int = 4
-    hc_sinkhorn_iters: int = 20
-    hc_eps: float = 1e-6
-    scoring_func: str = "sqrtsoftplus"
-    scale_fmt: str = "ue8m0"
-    index_head_dim: int = 128
-    index_n_heads: int = 64
-    index_topk: int = 512
-    n_routed_experts: int = 256
-    n_shared_experts: int = 1
-    moe_intermediate_size: int = 2048
-    swiglu_limit: float = 10.0
-    first_k_dense_replace: int = 0
-    moe_layer_freq: int = 1
-    norm_topk_prob: bool = True
-    routed_scaling_factor: float = 1.5
-    topk_method: str = "noaux_tc"
-    n_group: int = 0
-    topk_group: int = 0
-    tie_word_embeddings: bool = False
-    tp_size: int = 1
-    tp_rank: int = 0
-    moe_tp_size: int = 1
-    moe_tp_rank: int = 0
-    ep_size: int = 1
-    ep_rank: int = 0
-    cp_size: int = 1
-    cp_rank: int = 0
-    dp_size: int = 1
-    dp_rank: int = 0
-
-    @classmethod
-    def from_dict(cls, d: dict) -> DeepseekV4Config:
-        rs_raw = d.get("rope_scaling")
-        rs = rs_raw if isinstance(rs_raw, dict) else {}
-
-        def rope_value(
-            model_arg: str,
-            nested_key: str,
-            default: float | int,
-            *legacy_keys: str,
-        ) -> float | int:
-            # PyCausalLM reflects ModelArgs into this dict. DSV4 uses factor,
-            # beta_fast/beta_slow and rope_scaling_attn_factor directly; older
-            # generic aliases may also be present with their zero defaults.
-            for key in (model_arg, *legacy_keys):
-                value = d.get(key)
-                if value not in (None, 0, 0.0):
-                    return value
-            value = rs.get(nested_key)
-            return default if value in (None, 0, 0.0) else value
-
-        n_layers = int(_pick(d, "num_hidden_layers", "n_layers", default=43))
-        compress_ratios = [1 if int(ratio) <= 1 else int(ratio) for ratio in d.get("compress_ratios", [])]
-        if len(compress_ratios) < n_layers:
-            compress_ratios.extend([1] * (n_layers - len(compress_ratios)))
-
-        return cls(
-            model_type=_pick(d, "model_type", default="deepseek_v4"),
-            hidden_size=int(_pick(d, "hidden_size", default=4096)),
-            n_layers=n_layers,
-            n_heads=int(_pick(d, "n_heads", "num_attention_heads", default=64)),
-            head_dim=int(_pick(d, "head_dim", default=512)),
-            vocab_size=int(_pick(d, "vocab_size", default=129280)),
-            rms_norm_eps=float(_pick(d, "rms_norm_eps", default=1e-6)),
-            rope_theta=float(_pick(d, "rope_theta", default=10000.0)),
-            max_position_embeddings=int(_pick(d, "max_position_embeddings", default=1048576)),
-            original_max_position_embeddings=int(
-                rope_value(
-                    "rope_scaling_original_max_position_embeddings",
-                    "original_max_position_embeddings",
-                    65536,
-                )
-            ),
-            rope_scaling_factor=float(rope_value("factor", "factor", 16.0, "rope_scaling_factor")),
-            rope_beta_fast=int(rope_value("beta_fast", "beta_fast", 32, "rope_scaling_beta_fast")),
-            rope_beta_slow=int(rope_value("beta_slow", "beta_slow", 1, "rope_scaling_beta_slow")),
-            rope_mscale=float(rope_value("rope_scaling_attn_factor", "attn_factor", 1.0)),
-            rope_mscale_all_dim=1.0,
-            q_lora_rank=int(_pick(d, "q_lora_rank", default=1024)),
-            qk_rope_head_dim=int(_pick(d, "qk_rope_head_dim", default=64)),
-            rope_head_dim=int(_pick(d, "qk_rope_head_dim", default=64)),
-            o_lora_rank=int(_pick(d, "o_lora_rank", default=1024)),
-            o_groups=int(_pick(d, "o_groups", default=8)),
-            compress_ratios=compress_ratios,
-            compress_rope_theta=float(_pick(d, "compress_rope_theta", default=160000.0)),
-            window_size=(
-                int(v) if (v := _pick(d, "window_size", "sliding_window", default=128)) not in (None, -1, 0) else 128
-            ),
-            n_activated_experts=int(_pick(d, "n_activated_experts", "num_experts_per_tok", default=6)),
-            # PyCausalLM reflects the native ModelArgs field as n_hash_layers;
-            # direct Hugging Face config dictionaries use num_hash_layers.
-            n_hash_layers=int(_pick(d, "n_hash_layers", "num_hash_layers", default=3)),
-            hc_mult=int(_pick(d, "hc_mult", default=4)),
-            hc_sinkhorn_iters=int(_pick(d, "hc_sinkhorn_iters", default=20)),
-            hc_eps=float(_pick(d, "hc_eps", default=1e-6)),
-            scoring_func=_pick(d, "scoring_func", default="sqrtsoftplus"),
-            scale_fmt=_pick(d, "scale_fmt", default="ue8m0"),
-            index_head_dim=int(_pick(d, "index_head_dim", default=128)),
-            index_n_heads=int(_pick(d, "index_n_heads", default=64)),
-            index_topk=int(_pick(d, "index_topk", default=512)),
-            n_routed_experts=int(_pick(d, "n_routed_experts", default=256)),
-            n_shared_experts=int(_pick(d, "n_shared_experts", default=1)),
-            moe_intermediate_size=int(_pick(d, "moe_intermediate_size", default=2048)),
-            swiglu_limit=float(_pick(d, "swiglu_limit", default=10.0)),
-            first_k_dense_replace=int(_pick(d, "first_k_dense_replace", default=0)),
-            moe_layer_freq=int(_pick(d, "moe_layer_freq", default=1)),
-            norm_topk_prob=bool(_pick(d, "norm_topk_prob", default=True)),
-            routed_scaling_factor=float(_pick(d, "routed_scaling_factor", default=1.5)),
-            topk_method=_pick(d, "topk_method", default="noaux_tc"),
-            n_group=int(_pick(d, "n_group", default=0)),
-            topk_group=int(_pick(d, "topk_group", default=0)),
-            tie_word_embeddings=bool(_pick(d, "tie_word_embeddings", default=False)),
-            tp_size=int(d.get("tp_size", 1)),
-            tp_rank=int(d.get("tp_rank", _tp_rank_from_device(d.get("device", "npu:0")))),
-            moe_tp_size=int(d.get("moe_tp_size", 1)),
-            moe_tp_rank=int(d.get("moe_tp_rank", 0)),
-            ep_size=int(d.get("ep_size", d.get("tp_size", 1))),
-            ep_rank=int(d.get("ep_rank", d.get("tp_rank", 0))),
-            cp_size=int(d.get("cp_size", 1)),
-            cp_rank=int(d.get("cp_rank", 0)),
-            dp_size=int(d.get("dp_size", 1)),
-            dp_rank=int(d.get("dp_rank", 0)),
-        )
+    config_module = "deepseek_v4"
+    config_name = "DeepseekV4Config"
 
     def head_split(self) -> tuple[int, int]:
         return self.n_heads // self.tp_size, 1
 
-    # -- aliases so DSV3.2-reused modules (MoE/MLP) read DSV4 config unchanged --
-    @property
-    def num_experts_per_tok(self) -> int:
-        return self.n_activated_experts
-
-    @property
-    def intermediate_size(self) -> int:
-        return self.moe_intermediate_size
+    def compression_ratio(self, layer_id: int) -> int:
+        layer_type = self.hf_config.layer_types[layer_id]
+        return self.hf_config.compress_rates.get(layer_type, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +281,7 @@ class DeepseekV4HyperConnection(nn.Module):
     ``hc_dim = hc_mult*hidden``; ``hc_base = [mix_hc]``; ``hc_scale = [3]``.
     """
 
-    def __init__(self, cfg: DeepseekV4Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: DeepseekV4Context, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.hc_mult = cfg.hc_mult
         self.hc_eps = cfg.hc_eps
@@ -535,7 +370,7 @@ class DeepseekV4Attention(Attention):
 
     def __init__(
         self,
-        cfg: DeepseekV4Config,
+        cfg: DeepseekV4Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -623,7 +458,7 @@ class DeepseekV4Attention(Attention):
             device=device,
             use_checkpoint_layout=True,
         )
-        compress_ratio = cfg.compress_ratios[layer_id]
+        compress_ratio = cfg.compression_ratio(layer_id)
         self.indexer: DeepseekV4Indexer | None = (
             DeepseekV4Indexer(cfg, dtype, device) if compress_ratio == 4 and cfg.index_topk > 0 else None
         )
@@ -714,7 +549,7 @@ class DeepseekV4Attention(Attention):
         kv = self.kv_a_layernorm(kv)
         kv_tensor = kv.view(kv_hidden.shape[0], 1, self.head_dim)
         if cp_ctx is not None and cp_ctx.enabled():
-            kv_cos, kv_sin = cp_ctx.global_rope(self.cfg.compress_ratios[self.layer_id])
+            kv_cos, kv_sin = cp_ctx.global_rope(self.cfg.compression_ratio(self.layer_id))
             if kv_cos is None or kv_sin is None:
                 raise RuntimeError("DeepSeek-V4 prefill CP requires global KV RoPE tables")
         else:
@@ -844,7 +679,7 @@ class DeepseekV4Indexer(nn.Module):
     indexer to pick top-k compressed blocks.
     """
 
-    def __init__(self, cfg: DeepseekV4Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: DeepseekV4Context, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.cfg = cfg
         self.n_head = cfg.index_n_heads
@@ -1101,7 +936,7 @@ class DeepseekV4MoE(nn.Module):
     FusedMoEImpl::forward_with_selected_experts.
     """
 
-    def __init__(self, cfg: DeepseekV4Config, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: DeepseekV4Context, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.cfg = cfg
         self.layer_id = layer_id
@@ -1109,7 +944,7 @@ class DeepseekV4MoE(nn.Module):
         self.num_total_experts = cfg.n_routed_experts
         self.routed_scaling = cfg.routed_scaling_factor
         self.n_hash_layers = cfg.n_hash_layers
-        self.hash_layer = 0 <= layer_id < cfg.n_hash_layers
+        self.hash_layer = cfg.hf_config.mlp_layer_types[layer_id] == "hash_moe"
         self.scoring_func = cfg.scoring_func
         # EP: each rank holds num_experts_per_rank experts (not all).
         # Mirrors C++ FusedMoEImpl (fused_moe.cpp:420-421).
@@ -1172,7 +1007,7 @@ class DeepseekV4MoE(nn.Module):
 
         # Shared expert uses the orthogonal MoE TP group, matching C++
         # FusedMoEImpl. skip_tp_reduce keeps collective ordering in this class.
-        shared_cfg = replace(cfg, tp_size=self.moe_tp_size, tp_rank=self.moe_tp_rank)
+        shared_cfg = cfg.with_runtime(tp_size=self.moe_tp_size, tp_rank=self.moe_tp_rank)
         self.shared_experts = DeepseekV3MLP(
             shared_cfg,
             cfg.moe_intermediate_size * cfg.n_shared_experts,
@@ -1306,7 +1141,7 @@ class DeepseekV4MoE(nn.Module):
             )
             topk_weights = topk_weights * local_mask.to(topk_weights.dtype)
 
-        # 3) Expert computation with pre-selected routing (EP-sharded).
+        # 3) Expert computation with preselected routing (EP-sharded).
         if self.w4a8_dynamic:
             # W4A8_DYNAMIC uses the same two grouped GEMMs as C++
             # forward_expert: W4 GMM1 -> SwiGLU -> dynamic int8 -> W4 GMM2.
@@ -1440,7 +1275,7 @@ class DeepseekV4DecoderLayer(nn.Module):
 
     def __init__(
         self,
-        cfg: DeepseekV4Config,
+        cfg: DeepseekV4Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -1512,7 +1347,7 @@ class DeepseekV4DecoderLayer(nn.Module):
 class DeepseekV4Model(nn.Module):
     """DeepSeek-V4 transformer body."""
 
-    def __init__(self, cfg: DeepseekV4Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: DeepseekV4Context, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.cfg = cfg
         tp = cfg.tp_size
@@ -1657,7 +1492,7 @@ class DeepseekV4Model(nn.Module):
         if self.layers and select_layer_rope is None:
             raise RuntimeError("DeepSeek-V4 requires select_dsa_layer_rope")
         for layer_id, layer in enumerate(self.layers):
-            compress_ratio = self.cfg.compress_ratios[layer_id] if layer_id < len(self.cfg.compress_ratios) else 1
+            compress_ratio = self.cfg.compression_ratio(layer_id)
             if compress_ratio == 4:
                 layer_cos_sin_cache = self.compress_rotary_c4.cos_sin_cache
             elif compress_ratio == 128:
@@ -1689,7 +1524,7 @@ class DeepseekV4ForCausalLM(PyModelBase):
 
     def __init__(self, config: dict) -> None:
         super().__init__()
-        self.cfg = DeepseekV4Config.from_dict(config)
+        self.cfg = DeepseekV4Context.from_dict(config)
         dtype = self.resolve_dtype(config.get("dtype") or config.get("torch_dtype"))
         device = torch.device(config.get("device", "npu:0"))
         self.model = DeepseekV4Model(self.cfg, dtype, device)

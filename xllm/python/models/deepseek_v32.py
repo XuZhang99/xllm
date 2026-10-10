@@ -23,7 +23,6 @@ from __future__ import annotations
 import math
 import os
 from contextlib import nullcontext
-from dataclasses import dataclass
 from typing import Optional
 
 import torch
@@ -63,6 +62,7 @@ from xllm.python.model_loader import (
 )
 from xllm.python.models.aux_hidden_capture import AuxHiddenCapture
 from xllm.python.models.base import PyModelBase
+from xllm.python.models.model_config import ModelContext
 
 _SHARED_EXPERT_STREAMS: dict[tuple[str, int | None], torch.npu.Stream] = {}
 
@@ -303,125 +303,11 @@ class DeepseekYarnRotaryEmbedding(RotaryEmbedding):
         return inv_freq_interpolation * (1 - inv_freq_mask) + inv_freq_extrapolation * inv_freq_mask
 
 
-@dataclass
-class DeepseekV3Config:
-    """DeepSeek-V3.2 architecture parameters."""
+class DeepseekV32Context(ModelContext):
+    """Execution view over the Transformers architecture config."""
 
-    hidden_size: int = 2048
-    n_layers: int = 61
-    n_heads: int = 128
-    head_dim: int = 0
-    intermediate_size: int = 10240
-    vocab_size: int = 129280
-    rms_norm_eps: float = 1e-6
-    rope_theta: float = 1.0e6
-    max_position_embeddings: int = 4096
-    original_max_position_embeddings: int = 4096
-    rope_scaling_factor: float = 40.0
-    rope_beta_fast: int = 32
-    rope_beta_slow: int = 1
-    rope_mscale: float = 1.0
-    rope_mscale_all_dim: float = 1.0
-    tie_word_embeddings: bool = False
-    q_lora_rank: int = 1536
-    kv_lora_rank: int = 512
-    qk_nope_head_dim: int = 128
-    qk_rope_head_dim: int = 64
-    v_head_dim: int = 128
-    index_n_heads: int = 64
-    index_head_dim: int = 128
-    index_topk: int = 2048
-    first_k_dense_replace: int = 3
-    moe_layer_freq: int = 1
-    n_routed_experts: int = 256
-    n_shared_experts: int = 1
-    num_experts_per_tok: int = 8
-    n_group: int = 8
-    topk_group: int = 4
-    routed_scaling_factor: float = 2.5
-    topk_method: str = "noaux_tc"
-    norm_topk_prob: bool = True
-    moe_intermediate_size: int = 2048
-    tp_size: int = 1  # TP for dense layers (attn, embed, shared expert, lm_head)
-    tp_rank: int = 0
-    ep_size: int = 1
-    ep_rank: int = 0
-    dp_size: int = 1
-    dp_rank: int = 0
-    moe_tp_size: int = 1  # TP for routed MoE experts (equals tp_size when ep_size == 1)
-    moe_tp_rank: int = 0
-    world_size: int = 1
-
-    @classmethod
-    def from_dict(cls, d: dict) -> DeepseekV3Config:
-        def pick(*keys, default=None):
-            for k in keys:
-                if k in d and d[k] is not None:
-                    return d[k]
-            return default
-
-        rs_raw = d.get("rope_scaling")
-        rs = rs_raw if isinstance(rs_raw, dict) else {}
-
-        def rpick(*keys, default=None):
-            for k in keys:
-                if isinstance(rs, dict) and k in rs and rs[k] is not None:
-                    return rs[k]
-                fk = f"rope_scaling_{k}"
-                if fk in d and d[fk] is not None:
-                    return d[fk]
-                if k in d and d[k] is not None:
-                    return d[k]
-            return default
-
-        hidden = int(pick("hidden_size", default=2048))
-        n_heads = int(pick("n_heads", "num_attention_heads", default=128))
-        return cls(
-            hidden_size=hidden,
-            n_layers=int(pick("n_layers", "num_hidden_layers", default=61)),
-            n_heads=n_heads,
-            head_dim=int(pick("head_dim", default=hidden // n_heads)),
-            intermediate_size=int(pick("intermediate_size", default=10240)),
-            vocab_size=int(pick("vocab_size", default=129280)),
-            rms_norm_eps=float(pick("rms_norm_eps", default=1e-6)),
-            rope_theta=float(pick("rope_theta", default=1.0e6)),
-            max_position_embeddings=int(pick("max_position_embeddings", default=4096)),
-            original_max_position_embeddings=int(rpick("original_max_position_embeddings", default=4096)),
-            rope_scaling_factor=float(rpick("factor", "rope_scaling_factor", default=40.0)),
-            rope_beta_fast=int(rpick("beta_fast", default=32)),
-            rope_beta_slow=int(rpick("beta_slow", default=1)),
-            rope_mscale=float(rpick("mscale", default=1.0)),
-            rope_mscale_all_dim=float(rpick("mscale_all_dim", default=1.0)),
-            tie_word_embeddings=bool(pick("tie_word_embeddings", default=False)),
-            q_lora_rank=int(pick("q_lora_rank", default=1536)),
-            kv_lora_rank=int(pick("kv_lora_rank", default=512)),
-            index_n_heads=int(pick("index_n_heads", default=64)),
-            index_head_dim=int(pick("index_head_dim", default=128)),
-            index_topk=int(pick("index_topk", default=2048)),
-            qk_nope_head_dim=int(pick("qk_nope_head_dim", default=128)),
-            qk_rope_head_dim=int(pick("qk_rope_head_dim", default=64)),
-            v_head_dim=int(pick("v_head_dim", default=128)),
-            first_k_dense_replace=int(pick("first_k_dense_replace", default=3)),
-            moe_layer_freq=int(pick("moe_layer_freq", default=1)),
-            n_routed_experts=int(pick("n_routed_experts", default=256)),
-            n_shared_experts=int(pick("n_shared_experts", default=1)),
-            num_experts_per_tok=int(pick("num_experts_per_tok", default=8)),
-            n_group=int(pick("n_group", default=8)),
-            topk_group=int(pick("topk_group", default=4)),
-            routed_scaling_factor=float(pick("routed_scaling_factor", default=2.5)),
-            topk_method=str(pick("topk_method", default="noaux_tc")),
-            norm_topk_prob=bool(pick("norm_topk_prob", default=True)),
-            moe_intermediate_size=int(pick("moe_intermediate_size", default=2048)),
-            tp_size=int(pick("tp_size", default=1)),
-            tp_rank=int(pick("tp_rank", default=0)),
-            ep_size=int(pick("ep_size", default=1)),
-            ep_rank=int(pick("ep_rank", default=0)),
-            dp_size=int(pick("dp_size", default=1)),
-            dp_rank=int(pick("dp_rank", default=0)),
-            moe_tp_size=int(pick("moe_tp_size", default=1)),
-            moe_tp_rank=int(pick("moe_tp_rank", default=0)),
-            world_size=int(pick("world_size", default=1)),
-        )
+    config_module = "deepseek_v32"
+    config_name = "DeepseekV32Config"
 
     def head_split(self) -> tuple[int, int]:
         """Per-rank (num_heads_local, num_kv_heads_local=1) — MLA has one latent KV head per rank."""
@@ -713,7 +599,7 @@ class DeepseekV3MLP(nn.Module):
 
     def __init__(
         self,
-        cfg: DeepseekV3Config,
+        cfg: DeepseekV32Context,
         intermediate_size: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -821,7 +707,7 @@ class DeepseekV3MLAAttention(Attention):
 
     def __init__(
         self,
-        cfg: DeepseekV3Config,
+        cfg: DeepseekV32Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -907,20 +793,20 @@ class DeepseekV3MLAAttention(Attention):
             )
         self.indexer = self._make_indexer(cfg, layer_id, dtype, device)
 
-    def _mlapo_enabled(self, cfg: DeepseekV3Config, device: torch.device) -> bool:
+    def _mlapo_enabled(self, cfg: DeepseekV32Context, device: torch.device) -> bool:
         return (
             self._use_fused_mla_decode
             and os.environ.get("XLLM_ENABLE_MLAPO_V2") == "1"
             and kernels.has_mla_preprocess_v2()
         )
 
-    def _init_a_projections(self, cfg: DeepseekV3Config, device: torch.device) -> None:
+    def _init_a_projections(self, cfg: DeepseekV32Context, device: torch.device) -> None:
         self.qkv_a_proj = W8A8StaticLinear(
             cfg.hidden_size, cfg.q_lora_rank + cfg.kv_lora_rank + cfg.qk_rope_head_dim, device
         )
 
     def _make_indexer(
-        self, cfg: DeepseekV3Config, layer_id: int, dtype: torch.dtype, device: torch.device
+        self, cfg: DeepseekV32Context, layer_id: int, dtype: torch.dtype, device: torch.device
     ) -> DeepseekV3Indexer | None:
         return DeepseekV3Indexer(cfg, dtype, device, layer_id) if cfg.index_topk > 0 else None
 
@@ -1317,7 +1203,7 @@ class DeepseekV3MLAAttention(Attention):
 class DeepseekV3Indexer(nn.Module):
     """DeepSeek-V3.2 LightningIndexer with optional INT8 Q/K cache."""
 
-    def __init__(self, cfg: DeepseekV3Config, dtype: torch.dtype, device: torch.device, layer_id: int = 0) -> None:
+    def __init__(self, cfg: DeepseekV32Context, dtype: torch.dtype, device: torch.device, layer_id: int = 0) -> None:
         super().__init__()
         self.layer_id = layer_id
         self.indexer_rope_interleave = self._uses_interleaved_rope(cfg)
@@ -1334,14 +1220,14 @@ class DeepseekV3Indexer(nn.Module):
             persistent=False,
         )
 
-    def _uses_interleaved_rope(self, cfg: DeepseekV3Config) -> bool:
+    def _uses_interleaved_rope(self, cfg: DeepseekV32Context) -> bool:
         return False
 
-    def _init_streams(self, cfg: DeepseekV3Config, device: torch.device) -> None:
+    def _init_streams(self, cfg: DeepseekV32Context, device: torch.device) -> None:
         self._q_stream = None
         self._weights_stream = None
 
-    def _init_projections(self, cfg: DeepseekV3Config, dtype: torch.dtype, device: torch.device) -> None:
+    def _init_projections(self, cfg: DeepseekV32Context, dtype: torch.dtype, device: torch.device) -> None:
         self.wq_b = nn.Linear(cfg.q_lora_rank, self.n_head * self.head_dim, bias=False, dtype=dtype, device=device)
         self.wk_weights_proj = nn.Linear(
             cfg.hidden_size,
@@ -1618,7 +1504,7 @@ class DeepseekV3MoE(nn.Module):
 
     def __init__(
         self,
-        cfg: DeepseekV3Config,
+        cfg: DeepseekV32Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -2153,7 +2039,7 @@ class DeepseekV3MoE(nn.Module):
 class DeepseekV3DecoderLayer(nn.Module):
     def __init__(
         self,
-        cfg: DeepseekV3Config,
+        cfg: DeepseekV32Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -2167,14 +2053,14 @@ class DeepseekV3DecoderLayer(nn.Module):
         self._fuse_dense_norm_quant = isinstance(self.mlp, DeepseekV3MLP) and device.type in ("npu", "privateuseone")
 
     def _make_attention(
-        self, cfg: DeepseekV3Config, layer_id: int, dtype: torch.dtype, device: torch.device
+        self, cfg: DeepseekV32Context, layer_id: int, dtype: torch.dtype, device: torch.device
     ) -> DeepseekV3MLAAttention:
         return DeepseekV3MLAAttention(cfg, layer_id, dtype, device)
 
     def _make_mlp(
-        self, cfg: DeepseekV3Config, layer_id: int, dtype: torch.dtype, device: torch.device
+        self, cfg: DeepseekV32Context, layer_id: int, dtype: torch.dtype, device: torch.device
     ) -> DeepseekV3MLP | DeepseekV3MoE:
-        if layer_id < cfg.first_k_dense_replace:
+        if cfg.mlp_layer_types[layer_id] == "dense":
             return DeepseekV3MLP(cfg, cfg.intermediate_size, dtype, device)
         return DeepseekV3MoE(cfg, layer_id, dtype, device)
 
@@ -2252,7 +2138,7 @@ class DeepseekV3DecoderLayer(nn.Module):
 class DeepseekV3Model(nn.Module):
     def __init__(
         self,
-        cfg: DeepseekV3Config,
+        cfg: DeepseekV32Context,
         dtype: torch.dtype,
         device: torch.device,
     ) -> None:
@@ -2285,7 +2171,7 @@ class DeepseekV3Model(nn.Module):
         self.aux_hidden_capture = AuxHiddenCapture(())
 
     def _make_decoder(
-        self, cfg: DeepseekV3Config, layer_id: int, dtype: torch.dtype, device: torch.device
+        self, cfg: DeepseekV32Context, layer_id: int, dtype: torch.dtype, device: torch.device
     ) -> DeepseekV3DecoderLayer:
         return DeepseekV3DecoderLayer(cfg, layer_id, dtype, device)
 
@@ -2339,7 +2225,7 @@ class DeepseekV3ForCausalLM(PyModelBase):
 
     def __init__(self, config: dict, build_model: bool = True) -> None:
         super().__init__()
-        self.cfg = DeepseekV3Config.from_dict(config)
+        self.cfg = DeepseekV32Context.from_dict(config)
         self.cfg.tp_size = int(config.get("tp_size", 1))
         self.cfg.tp_rank = int(config.get("tp_rank", _tp_rank_from_device(config.get("device", "npu:0"))))
         self.cfg.ep_size = int(config.get("ep_size", 1))

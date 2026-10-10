@@ -30,7 +30,7 @@ from xllm.python.layers import moe_dp
 from xllm.python.model_executor.forward_context import ForwardContext, forward_context
 from xllm.python.models import deepseek_v4, deepseek_v32
 from xllm.python.models.deepseek_v4 import (
-    DeepseekV4Config,
+    DeepseekV4Context,
     DeepseekV4DecoderLayer,
     DeepseekV4ForCausalLM,
     DeepseekV4HyperConnection,
@@ -85,7 +85,7 @@ _DSV4_CONFIG = {
 
 
 def test_config_from_dict_reads_dsv4_fields() -> None:
-    cfg = DeepseekV4Config.from_dict(_DSV4_CONFIG)
+    cfg = DeepseekV4Context.from_dict(_DSV4_CONFIG)
     assert cfg.model_type == "deepseek_v4"
     assert cfg.n_layers == 4
     assert cfg.compress_ratios == [1, 4, 128, 4]
@@ -98,7 +98,7 @@ def test_config_from_dict_reads_dsv4_fields() -> None:
 
 
 def test_config_prefers_dsv4_model_args_over_zero_legacy_rope_fields() -> None:
-    cfg = DeepseekV4Config.from_dict(
+    cfg = DeepseekV4Context.from_dict(
         {
             **_DSV4_CONFIG,
             "rope_scaling": None,
@@ -127,7 +127,7 @@ def test_config_prefers_dsv4_model_args_over_zero_legacy_rope_fields() -> None:
     ],
 )
 def test_config_accepts_native_and_legacy_hash_layer_fields(fields: dict, expected: int) -> None:
-    cfg = DeepseekV4Config.from_dict({**_DSV4_CONFIG, **fields})
+    cfg = DeepseekV4Context.from_dict({**_DSV4_CONFIG, **fields})
     assert cfg.n_hash_layers == expected
 
 
@@ -250,7 +250,7 @@ def test_registry_resolves_deepseek_v4() -> None:
 
 
 def test_hyper_connection_shapes() -> None:
-    cfg = DeepseekV4Config.from_dict(_DSV4_CONFIG)
+    cfg = DeepseekV4Context.from_dict(_DSV4_CONFIG)
     hc = DeepseekV4HyperConnection(cfg, torch.float32, torch.device("cpu"))
     assert hc.hc_mult_local == 4  # hc_mult is NOT TP-sharded
     # hc_*_fn: [mix_hc, hc_dim] = [(2+mult)*mult, mult*hidden] = [24, 16384].
@@ -263,7 +263,7 @@ def test_hyper_connection_shapes() -> None:
 
 def test_decoder_layer_builds() -> None:
     """A C4 decoder layer builds attention + HC + MoE without error."""
-    cfg = DeepseekV4Config.from_dict(_DSV4_CONFIG)
+    cfg = DeepseekV4Context.from_dict(_DSV4_CONFIG)
     layer = DeepseekV4DecoderLayer(cfg, layer_id=1, dtype=torch.float32, device=torch.device("cpu"))
     assert layer.self_attn.layer_id == 1
     assert layer.self_attn.indexer is not None
@@ -271,7 +271,7 @@ def test_decoder_layer_builds() -> None:
 
 
 def test_attention_builds_compression_modules_only_for_matching_ratios() -> None:
-    cfg = DeepseekV4Config.from_dict(_DSV4_CONFIG)
+    cfg = DeepseekV4Context.from_dict(_DSV4_CONFIG)
     c1 = DeepseekV4DecoderLayer(cfg, layer_id=0, dtype=torch.float32, device=torch.device("cpu")).self_attn
     c4 = DeepseekV4DecoderLayer(cfg, layer_id=1, dtype=torch.float32, device=torch.device("cpu")).self_attn
     c128 = DeepseekV4DecoderLayer(cfg, layer_id=2, dtype=torch.float32, device=torch.device("cpu")).self_attn
@@ -288,7 +288,7 @@ def test_attention_builds_compression_modules_only_for_matching_ratios() -> None
 
 
 def test_compressor_weights_are_cached_as_non_persistent_bf16(monkeypatch) -> None:
-    cfg = DeepseekV4Config.from_dict(_DSV4_CONFIG)
+    cfg = DeepseekV4Context.from_dict(_DSV4_CONFIG)
     attention = DeepseekV4DecoderLayer(cfg, layer_id=1, dtype=torch.float32, device=torch.device("cpu")).self_attn
     for projection in (attention.q_a_proj, attention.kv_proj, attention.q_b_proj, attention.indexer.wq_b):
         projection.weight_offset.zero_()
@@ -308,7 +308,7 @@ def test_compressor_weights_are_cached_as_non_persistent_bf16(monkeypatch) -> No
 def test_moe_gate_state_matches_cpp_parameter_ownership() -> None:
     cfg_dict = dict(_DSV4_CONFIG)
     cfg_dict["n_hash_layers"] = 3
-    cfg = DeepseekV4Config.from_dict(cfg_dict)
+    cfg = DeepseekV4Context.from_dict(cfg_dict)
 
     hash_moe = DeepseekV4MoE(cfg, layer_id=2, dtype=torch.float32, device=torch.device("cpu"))
     non_hash_moe = DeepseekV4MoE(cfg, layer_id=3, dtype=torch.float32, device=torch.device("cpu"))
@@ -368,7 +368,7 @@ def test_dynamic_linear_preserves_v3_and_v4_weight_layout_contracts(
 def test_dequant_swiglu_quant_can_write_into_caller_buffer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cfg = DeepseekV4Config.from_dict(_DSV4_CONFIG)
+    cfg = DeepseekV4Context.from_dict(_DSV4_CONFIG)
     mlp = DeepseekV3MLP(cfg, cfg.moe_intermediate_size, torch.float32, torch.device("cpu"))
     gate_up = torch.ones((1, 2 * mlp.down_proj.in_features), dtype=torch.int8)
     act_int8 = torch.ones((1, mlp.down_proj.in_features), dtype=torch.int8)
@@ -401,7 +401,7 @@ def test_dequant_swiglu_quant_can_write_into_caller_buffer(
 
 
 def test_dense_mlp_uses_native_aware_tp_reduce(monkeypatch) -> None:
-    cfg = DeepseekV4Config.from_dict({**_DSV4_CONFIG, "tp_size": 2})
+    cfg = DeepseekV4Context.from_dict({**_DSV4_CONFIG, "tp_size": 2})
     mlp = DeepseekV3MLP(cfg, cfg.moe_intermediate_size, torch.float32, torch.device("cpu"))
     mlp.gate_up_proj.forward = MagicMock(return_value=torch.ones(1, 2 * mlp.gate_up_proj.out_features))
     mlp.down_proj.forward = MagicMock(return_value=torch.ones(1, cfg.hidden_size))
@@ -419,13 +419,13 @@ def test_dense_mlp_uses_native_aware_tp_reduce(monkeypatch) -> None:
 
 
 def test_model_accepts_cp_config() -> None:
-    cfg = DeepseekV4Config.from_dict({**_DSV4_CONFIG, "cp_size": 2})
+    cfg = DeepseekV4Context.from_dict({**_DSV4_CONFIG, "cp_size": 2})
     model = DeepseekV4Model(cfg, torch.float32, torch.device("cpu"))
     assert model.cfg.cp_size == 2
 
 
 def test_causal_lm_accepts_data_parallelism_config() -> None:
-    model = DeepseekV4ForCausalLM({**_DSV4_CONFIG, "dp_size": 2})
+    model = DeepseekV4ForCausalLM({**_DSV4_CONFIG, "dp_size": 2, "device": "cpu"})
     assert model.cfg.dp_size == 2
 
 
@@ -492,7 +492,7 @@ def test_moe_uses_dedicated_group_sizes() -> None:
         cp_size=1,
         cp_rank=0,
     )
-    cfg = DeepseekV4Config.from_dict(cfg_dict)
+    cfg = DeepseekV4Context.from_dict(cfg_dict)
     moe = DeepseekV4MoE(cfg, layer_id=0, dtype=torch.float32, device=torch.device("cpu"))
 
     assert moe.moe_tp_size == 1
@@ -574,7 +574,7 @@ def test_moe_tp_only_combines_before_one_reduce(
 
 def test_v4_o_b_row_parallel_keeps_checkpoint_layout() -> None:
     """Native o_b consumes [N, K] through F.linear for BF16 parity."""
-    cfg = DeepseekV4Config.from_dict(_DSV4_CONFIG)
+    cfg = DeepseekV4Context.from_dict(_DSV4_CONFIG)
     layer = DeepseekV4DecoderLayer(cfg, layer_id=0, dtype=torch.float32, device=torch.device("cpu"))
 
     assert layer.self_attn.o_b_proj._use_checkpoint_layout is True

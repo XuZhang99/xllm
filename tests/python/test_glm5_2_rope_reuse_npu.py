@@ -105,7 +105,7 @@ def test_indexer_query_and_cache_equal_raw_cache_reference(
     rows: int,
 ) -> None:
     glm, ds = runtime
-    cfg = glm.Glm52Config(
+    cfg = glm.Glm52Context(
         hidden_size=128,
         q_lora_rank=128,
         index_n_heads=4,
@@ -170,7 +170,7 @@ def test_aclgraph_changed_positions_and_alternating_target_draft_buckets(
         positions = _positions(rows).contiguous()
         query = torch.randn(rows, 4, 128, dtype=torch.bfloat16, device="npu:0")
         key = torch.randn(rows, 128, dtype=torch.bfloat16, device="npu:0")
-        cfg = glm.Glm52Config(
+        cfg = glm.Glm52Context(
             hidden_size=128,
             q_lora_rank=128,
             index_n_heads=4,

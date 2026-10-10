@@ -47,7 +47,7 @@ from xllm.python.layers.linear import ColumnParallelLinear
 from xllm.python.model_executor.forward_context import record_layer_event
 from xllm.python.model_loader import QLinearWeightLoader
 from xllm.python.models.glm5_next import (
-    Glm5NextConfig,
+    Glm5NextContext,
     Glm5NextForCausalLM,
     Glm5NextMlaAttention,
     Glm5NextMoE,
@@ -86,11 +86,11 @@ def _get_mtp_name_aliases(
 class Glm5NextMtpDecoderLayer(nn.Module):
     """One pre-norm decoder layer without mHC (the MTP checkpoint layer shape)."""
 
-    def __init__(self, cfg: Glm5NextConfig, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.layer_id = 0
         self.input_layernorm = Glm5NextRMSNorm(cfg.hidden_size, cfg.rms_norm_eps, dtype, device)
-        # Draft schedule: layer 0 is deepseek_sparse_attention (the appended
+        # Draft schedule: layer 0 is indexed_attention (the appended
         # MTP layer carries a full indexer), MoE MLP (first_k_dense_replace=0).
         self.self_attn = Glm5NextMlaAttention(cfg, 0, dtype, device)
         self.post_attention_layernorm = Glm5NextRMSNorm(cfg.hidden_size, cfg.rms_norm_eps, dtype, device)
@@ -127,7 +127,7 @@ class Glm5NextMtpDecoderLayer(nn.Module):
 class Glm5NextMtpModel(nn.Module):
     """MTP draft body: eh_proj fusion + one decoder layer + shared-head norm."""
 
-    def __init__(self, cfg: Glm5NextConfig, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.cfg = cfg
         tp = cfg.tp_size
@@ -144,7 +144,7 @@ class Glm5NextMtpModel(nn.Module):
         # wrong weight branch in _load_mlp or crash forward on the missing
         # indexer, so fail fast on both.
         if not cfg.is_dsa(0):
-            raise ValueError("glm5_next_mtp draft layer 0 must be deepseek_sparse_attention")
+            raise ValueError("glm5_next_mtp draft layer 0 must be indexed_attention")
         if not cfg.is_moe(0):
             raise ValueError(
                 "glm5_next_mtp draft layer 0 must be MoE; set first_k_dense_replace=0 "

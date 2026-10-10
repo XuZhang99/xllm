@@ -189,7 +189,7 @@ def test_real_native_mtp_checkpoint_loads(tp_rank: int, monkeypatch: pytest.Monk
             torch.testing.assert_close(model.get_parameter(model_name), expected, rtol=0, atol=0)
 
 
-def _make_cfg(**overrides: Any) -> glm5_next_mtp.Glm5NextConfig:
+def _make_cfg(**overrides: Any) -> glm5_next_mtp.Glm5NextContext:
     """Real one-layer MTP configuration for the fail-fast prelude."""
     defaults: dict[str, Any] = {
         "hidden_size": 16,
@@ -204,10 +204,10 @@ def _make_cfg(**overrides: Any) -> glm5_next_mtp.Glm5NextConfig:
         "indexer_types": ["full"],
     }
     defaults.update(overrides)
-    return glm5_next_mtp.Glm5NextConfig(**defaults)
+    return glm5_next_mtp.Glm5NextContext(**defaults)
 
 
-def _instantiate_model(cfg: glm5_next_mtp.Glm5NextConfig) -> None:
+def _instantiate_model(cfg: glm5_next_mtp.Glm5NextContext) -> None:
     """Trigger fail-fast checks before module construction."""
     glm5_next_mtp.Glm5NextMtpModel(cfg, torch.float32, torch.device("cpu"))
 
@@ -225,7 +225,12 @@ def test_rejects_non_divisible_vocab_size() -> None:
 
 
 def test_rejects_multi_layer_config() -> None:
-    cfg = _make_cfg(n_layers=45)
+    cfg = _make_cfg(
+        n_layers=45,
+        layer_types=["indexed_attention"] * 45,
+        mlp_layer_types=["sparse"] * 45,
+        indexer_types=["full"] * 45,
+    )
     with pytest.raises(ValueError, match="1 layer"):
         _instantiate_model(cfg)
 

@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import torch
@@ -36,7 +35,7 @@ from xllm.python.model_loader import (
     shard_tensor,
 )
 from xllm.python.models.base import PyModelBase
-from xllm.python.models.qwen3 import Qwen3Config, Qwen3DecoderLayer, Qwen3Model
+from xllm.python.models.qwen3 import Qwen3Context, Qwen3DecoderLayer, Qwen3Model
 
 
 def _load_reference_quarot_rotation(
@@ -55,25 +54,10 @@ def _load_reference_quarot_rotation(
         return f.get_tensor("global_rotation")
 
 
-@dataclass
-class DFlashQwen3Config(Qwen3Config):
-    draft_vocab_size: int = 0
-    world_size: int = 1
+class DFlashQwen3Context(Qwen3Context):
+    """Execution view over the Transformers architecture config."""
 
-    @classmethod
-    def from_dict(cls, d: dict) -> DFlashQwen3Config:
-        normalized_config = dict(d)
-        rope_parameters = d.get("rope_parameters") or {}
-        if normalized_config.get("rope_theta") is None:
-            normalized_config["rope_theta"] = rope_parameters.get("rope_theta")
-
-        base = Qwen3Config.from_dict(normalized_config)
-        draft_vocab_size = int(d.get("draft_vocab_size") or base.vocab_size)
-        return cls(
-            **base.__dict__,
-            draft_vocab_size=draft_vocab_size,
-            world_size=int(d.get("world_size", base.tp_size * base.dp_size)),
-        )
+    draft_kind = "dflash"
 
     def validate(self) -> None:
         if self.hidden_size <= 0 or self.n_layers <= 0 or self.n_heads <= 0:
@@ -152,7 +136,7 @@ class DFlashContextProjection(nn.Module):
 class DFlashQwen3Model(Qwen3Model):
     def __init__(
         self,
-        cfg: DFlashQwen3Config,
+        cfg: DFlashQwen3Context,
         dtype: torch.dtype,
         device: torch.device,
         *,
@@ -298,7 +282,7 @@ class DFlashQwen3Model(Qwen3Model):
 
 class DFlashQwen3ForCausalLM(PyModelBase):
     model: DFlashQwen3Model
-    config_cls: type[DFlashQwen3Config] = DFlashQwen3Config
+    config_cls: type[DFlashQwen3Context] = DFlashQwen3Context
     model_cls: type[DFlashQwen3Model] = DFlashQwen3Model
 
     def __init__(self, config: dict) -> None:

@@ -51,10 +51,11 @@ import torch.nn.functional as F
 from xllm.python.layers import ColumnParallelLinear, RowParallelLinear
 from xllm.python.models.base import PyModelBase
 from xllm.python.models.glm5_next import (
-    Glm5NextConfig,
+    Glm5NextContext,
     Glm5NextForCausalLM,
     Glm5NextModel,
 )
+from xllm.python.models.model_config import ModelContext
 
 # ---------------------------------------------------------------------------
 # Position helpers (mirror transformers.vision_utils, pure-tensor, no dep)
@@ -117,100 +118,11 @@ def get_vision_position_ids(grid_thw: torch.Tensor, spatial_merge_size: int) -> 
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class Glm5NextVisionConfig:
-    """Configuration for the GLM-5.3-Flash-VL vision tower (GlmOcr-based).
+class Glm5NextVisionContext(ModelContext):
+    """Execution view over the Transformers architecture config."""
 
-    Field names match the HuggingFace ``GlmOcrVisionConfig`` plus the
-    GLM-5.3-Flash-specific ``projection_intermediate_size`` used by the SGLang
-    adaptation to override the merger context dimension.
-
-    ``projection_intermediate_size`` defaults to ``None``: when unset, the
-    merger context_dim falls back to ``out_hidden_size * in_channels`` (the
-    base GlmOcr behavior used by GLM-OCR). When set (GLM-5.3-Flash SGLang
-    adaptation), it overrides the merger context_dim.
-    """
-
-    depth: int = 24
-    hidden_size: int = 1024
-    hidden_act: str = "silu"
-    attention_bias: bool = True
-    attention_dropout: float = 0.0
-    num_heads: int = 16
-    in_channels: int = 3
-    image_size: int = 336
-    patch_size: int = 14
-    rms_norm_eps: float = 1e-5
-    spatial_merge_size: int = 2
-    temporal_patch_size: int = 2
-    out_hidden_size: int = 1536
-    intermediate_size: int = 4096
-    initializer_range: float = 0.02
-    # GLM-5.3-Flash override: merger context dim. None = fall back to
-    # out_hidden_size * in_channels (base GlmOcr / GLM-OCR behavior).
-    projection_intermediate_size: Optional[int] = None
-    # GLM-5.3-Flash SwiGLU clamp limit. HF's Glm5NextConfig injects this into the
-    # vision config from text_config.swiglu_limit (always 10.0 for this
-    # checkpoint). Applied to gate/up projections in VisionMLP + VisionPatchMerger.
-    swiglu_limit: float = 10.0
-    tp_size: int = 1
-    tp_rank: int = 0
-
-    @classmethod
-    def from_dict(cls, d: dict) -> Glm5NextVisionConfig:
-        def pick(*keys, default=None):
-            for k in keys:
-                if k in d and d[k] is not None and d[k] != -1 and d[k] != "":
-                    return d[k]
-            return default
-
-        # The C++ ModelArgs default (``PROPERTY(float, swiglu_limit) = 0.0f``,
-        # model_args.h) leaks into the flat config dict because the C++ side
-        # does not carry the nested ``vision_config.swiglu_limit``. A picked
-        # 0/0.0 is therefore the unset default, not a real limit — and a limit
-        # of 0 would zero the SwiGLU gate/up (clamp(max=0) kills all positive
-        # values), collapsing the whole ViT output to zeros. Fall back to the
-        # HF default 10.0 (config.json vision_config.swiglu_limit).
-        swiglu_limit = pick("swiglu_limit", "mm_swiglu_limit", default=10.0)
-        if not swiglu_limit:
-            swiglu_limit = 10.0
-
-        return cls(
-            depth=int(pick("mm_num_hidden_layers", "depth", default=24)),
-            hidden_size=int(pick("mm_hidden_size", "hidden_size", default=1024)),
-            hidden_act=str(pick("mm_hidden_act", "hidden_act", default="silu")),
-            # NOTE: only the ``mm_``-prefixed key is honored. The C++ flat
-            # config dict carries the TEXT model's ``attention_bias = false``
-            # (ModelArgs default), which would silently disable every vision
-            # bias (qkv/proj/mlp) even though the checkpoint ships them —
-            # shape checks can't catch a missing bias.
-            attention_bias=bool(pick("mm_attention_bias", default=True)),
-            attention_dropout=float(pick("mm_dropout", "attention_dropout", default=0.0)),
-            num_heads=int(pick("mm_num_attention_heads", "num_heads", default=16)),
-            in_channels=int(pick("mm_num_channels", "in_channels", "in_chans", default=3)),
-            image_size=int(pick("mm_image_size", "image_size", default=336)),
-            patch_size=int(pick("mm_patch_size", "patch_size", default=14)),
-            rms_norm_eps=float(pick("mm_layer_norm_eps", "rms_norm_eps", default=1e-5)),
-            spatial_merge_size=int(pick("mm_spatial_merge_size", "spatial_merge_size", default=2)),
-            temporal_patch_size=int(pick("mm_temporal_patch_size", "temporal_patch_size", default=2)),
-            out_hidden_size=int(pick("mm_projection_dim", "out_hidden_size", default=1536)),
-            intermediate_size=int(pick("mm_intermediate_size", "intermediate_size", default=4096)),
-            initializer_range=float(pick("mm_initializer_range", "initializer_range", default=0.02)),
-            projection_intermediate_size=pick(
-                "projection_intermediate_size",
-                "context_size",
-                "mm_projection_intermediate_size",
-                # GLM-5.3-Flash vision projector (config.json
-                # vision_config.projection_intermediate_size = 10240). The C++
-                # ModelArgs loader should expose it as mm_projection_intermediate_size;
-                # 10240 is the fallback so the merger matches the checkpoint when the
-                # C++ side hasn't been extended yet.
-                default=10240,
-            ),
-            swiglu_limit=swiglu_limit,
-            tp_size=int(pick("tp_size", default=1)),
-            tp_rank=int(pick("tp_rank", default=0)),
-        )
+    config_module = "glm5_next"
+    config_name = "Glm5NextVisionConfig"
 
     def merger_context_dim(self) -> int:
         """Resolve the merger context_dim.
@@ -247,7 +159,7 @@ class VisionRMSNorm(nn.Module):
 class VisionPatchEmbed(nn.Module):
     """3D-conv patch embedding (temporal, height, width), no bias."""
 
-    def __init__(self, cfg: Glm5NextVisionConfig) -> None:
+    def __init__(self, cfg: Glm5NextVisionContext) -> None:
         super().__init__()
         self.patch_size = cfg.patch_size
         self.temporal_patch_size = cfg.temporal_patch_size
@@ -331,7 +243,7 @@ class VisionAttention(nn.Module):
     skip their collectives, so the path is byte-identical to plain ``nn.Linear``.
     """
 
-    def __init__(self, cfg: Glm5NextVisionConfig) -> None:
+    def __init__(self, cfg: Glm5NextVisionContext) -> None:
         super().__init__()
         self.dim = cfg.hidden_size
         self.num_heads = cfg.num_heads
@@ -425,7 +337,7 @@ class VisionMLP(nn.Module):
     and skip their collectives, so the path is byte-identical to ``nn.Linear``.
     """
 
-    def __init__(self, cfg: Glm5NextVisionConfig, bias: bool = True) -> None:
+    def __init__(self, cfg: Glm5NextVisionContext, bias: bool = True) -> None:
         super().__init__()
         assert cfg.intermediate_size % cfg.tp_size == 0, (
             f"vision intermediate_size {cfg.intermediate_size} not divisible by tp_size {cfg.tp_size}"
@@ -472,7 +384,7 @@ class VisionMLP(nn.Module):
 class VisionBlock(nn.Module):
     """Pre-norm transformer block with RMSNorm: LN -> attn -> residual, LN -> mlp -> residual."""
 
-    def __init__(self, cfg: Glm5NextVisionConfig) -> None:
+    def __init__(self, cfg: Glm5NextVisionContext) -> None:
         super().__init__()
         self.norm1 = VisionRMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
         self.norm2 = VisionRMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
@@ -586,7 +498,7 @@ class Glm5NextVisionModel(nn.Module):
 
     def __init__(
         self,
-        cfg: Glm5NextVisionConfig,
+        cfg: Glm5NextVisionContext,
         dtype: torch.dtype,
         device: torch.device,
     ) -> None:
@@ -817,13 +729,13 @@ class Glm5NextVLModel(Glm5NextForCausalLM):
         # PyCausalLM hands us a FLAT ModelArgs dict (built by build_config_dict
         # via visit_properties): text fields are top-level (hidden_size,
         # n_layers, n_heads, tie_word_embeddings, tp_size, ...), vision fields
-        # are "mm_"-prefixed. Both Glm5NextTextConfig.from_dict and
-        # Glm5NextVisionConfig.from_dict read this flat layout directly.
+        # are "mm_"-prefixed. Both Glm5NextContext.from_dict and
+        # Glm5NextVisionContext.from_dict read this flat layout directly.
         # Fall back to nested vision_config/text_config for standalone tests.
         vision_cfg_dict = config.get("vision_config", config)
         text_cfg_dict = config.get("text_config", config)
 
-        vcfg = Glm5NextVisionConfig.from_dict(vision_cfg_dict)
+        vcfg = Glm5NextVisionContext.from_dict(vision_cfg_dict)
         vcfg.tp_size = int(config.get("tp_size", 1))
         vcfg.tp_rank = int(config.get("tp_rank", 0))
 

@@ -23,7 +23,7 @@ from xllm.python.models.glm5_next_kpool import compress_completed_pools
 
 
 def _indexer(device: torch.device) -> glm5_next.Glm5NextIndexer:
-    config = glm5_next.Glm5NextConfig(
+    config = glm5_next.Glm5NextContext(
         hidden_size=16,
         q_lora_rank=16,
         index_n_heads=2,

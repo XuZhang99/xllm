@@ -28,7 +28,7 @@ from xllm.python.device_stream import get_device_stream
 from xllm.python.model_executor.forward_context import AclGraphExecutionState, ForwardContext, forward_context
 from xllm.python.model_loader import W8A8WeightLoader
 from xllm.python.models import deepseek_v32, glm5_2
-from xllm.python.models.glm5_2 import Glm52Config, Glm52ForCausalLM, Glm52MoE
+from xllm.python.models.glm5_2 import Glm52Context, Glm52ForCausalLM, Glm52MoE
 
 
 def _config(**overrides) -> dict:
@@ -72,7 +72,7 @@ def _config(**overrides) -> dict:
 
 
 def test_full_world_ep_partitions_glm_experts() -> None:
-    cfg = Glm52Config.from_dict(_config(ep_rank=3))
+    cfg = Glm52Context.from_dict(_config(ep_rank=3))
     cfg.validate()
 
     model = Glm52ForCausalLM(_config(ep_rank=3))
@@ -93,7 +93,7 @@ def test_full_world_ep_partitions_glm_experts() -> None:
 
 def test_proper_divisor_ep_partitions_experts_and_moe_intermediate() -> None:
     values = _config(ep_size=2, ep_rank=1, moe_tp_size=2, moe_tp_rank=1)
-    cfg = Glm52Config.from_dict(values)
+    cfg = Glm52Context.from_dict(values)
 
     cfg.validate()
     model = Glm52ForCausalLM(values)
@@ -111,7 +111,7 @@ def test_proper_divisor_ep_partitions_experts_and_moe_intermediate() -> None:
 
 
 def test_glm_ep8_moe_tp2_topology_is_valid() -> None:
-    cfg = Glm52Config.from_dict(
+    cfg = Glm52Context.from_dict(
         _config(
             num_attention_heads=64,
             n_routed_experts=256,
@@ -133,7 +133,7 @@ def test_glm_parallel_world_size_defaults_to_tp_dp_product() -> None:
     values = _config()
     values.pop("world_size")
 
-    cfg = Glm52Config.from_dict(values)
+    cfg = Glm52Context.from_dict(values)
 
     assert cfg.world_size == cfg.tp_size * cfg.dp_size * cfg.cp_size == 4
 
@@ -147,7 +147,7 @@ def test_glm_mlapo_config_defaults_on_and_can_be_disabled(
     if configured is not None:
         values["enable_mlapo"] = configured
 
-    cfg = Glm52Config.from_dict(values)
+    cfg = Glm52Context.from_dict(values)
 
     assert cfg.enable_mlapo is expected
 
@@ -169,7 +169,7 @@ def test_glm_mlapo_requires_config_device_and_runtime_support(
     runtime_supported: bool,
     expected: bool,
 ) -> None:
-    cfg = Glm52Config.from_dict(
+    cfg = Glm52Context.from_dict(
         _config(
             enable_mlapo=enable_mlapo,
             q_lora_rank=1536,
@@ -209,8 +209,9 @@ def test_glm_mlapo_rejects_unsupported_projection_geometry(dimension: str) -> No
         qk_rope_head_dim=64,
         v_head_dim=128,
     )
-    values[dimension] += 1
-    cfg = Glm52Config.from_dict(values)
+    # Keep RoPE valid so this exercises the MLAPO capability check.
+    values[dimension] += 2 if dimension == "qk_rope_head_dim" else 1
+    cfg = Glm52Context.from_dict(values)
     supports = MagicMock(return_value=True)
 
     with patch.object(glm5_2.kernels, "supports_mla_preprocess_v2", supports):
@@ -221,7 +222,7 @@ def test_glm_mlapo_rejects_unsupported_projection_geometry(dimension: str) -> No
 
 
 def test_glm_parallel_world_size_includes_context_parallel() -> None:
-    cfg = Glm52Config.from_dict(_config(cp_size=2, cp_rank=1, world_size=8, ep_size=8))
+    cfg = Glm52Context.from_dict(_config(cp_size=2, cp_rank=1, world_size=8, ep_size=8))
 
     cfg.validate()
 
@@ -230,15 +231,15 @@ def test_glm_parallel_world_size_includes_context_parallel() -> None:
 
 
 def test_glm_dsa_multi_stream_config_is_opt_in() -> None:
-    assert not Glm52Config.from_dict(_config()).enable_dsa_multi_stream
-    assert Glm52Config.from_dict(_config(enable_dsa_multi_stream=True)).enable_dsa_multi_stream
+    assert not Glm52Context.from_dict(_config()).enable_dsa_multi_stream
+    assert Glm52Context.from_dict(_config(enable_dsa_multi_stream=True)).enable_dsa_multi_stream
 
 
 @pytest.mark.parametrize("interleave", [False, True])
 def test_glm_indexer_stream_selection(monkeypatch: pytest.MonkeyPatch, interleave: bool) -> None:
     streams = MagicMock(side_effect=lambda _device, name: name)
     monkeypatch.setattr(glm5_2, "get_device_stream", streams)
-    cfg = Glm52Config.from_dict(_config(enable_dsa_multi_stream=True, indexer_rope_interleave=interleave))
+    cfg = Glm52Context.from_dict(_config(enable_dsa_multi_stream=True, indexer_rope_interleave=interleave))
     indexer = glm5_2.Glm52Indexer(cfg, torch.float32, torch.device("cpu"))
     assert indexer._weights_stream == "dsa_indexer_weights"
     assert indexer._q_stream == (None if interleave else "dsa_indexer_q")
@@ -394,7 +395,7 @@ def test_glm_indexer_projection_overlap_matches_serial(
         pytest.skip("requires an available NPU")
     device = torch.device(device_type)
     torch.manual_seed(42)
-    cfg = Glm52Config.from_dict(_config(indexer_rope_interleave=interleave))
+    cfg = Glm52Context.from_dict(_config(indexer_rope_interleave=interleave))
     indexer = glm5_2.Glm52Indexer(cfg, dtype, device)
     indexer.wq_b = torch.nn.Linear(cfg.q_lora_rank, cfg.index_n_heads * cfg.index_head_dim, device=device, dtype=dtype)
     if fused_projection:
@@ -555,17 +556,17 @@ def test_glm_indexer_projection_overlap_matches_serial(
 
 
 def test_glm_layerwise_split_rank_is_validated() -> None:
-    cfg = Glm52Config.from_dict(_config(layerwise_split_size=2, layerwise_split_rank=1))
+    cfg = Glm52Context.from_dict(_config(layerwise_split_size=2, layerwise_split_rank=1))
     cfg.validate()
     assert cfg.layerwise_split_rank == 1
 
-    invalid = Glm52Config.from_dict(_config(layerwise_split_size=2, layerwise_split_rank=2))
+    invalid = Glm52Context.from_dict(_config(layerwise_split_size=2, layerwise_split_rank=2))
     with pytest.raises(ValueError, match="layerwise_split_rank"):
         invalid.validate()
 
 
 def test_glm_layerwise_split_cannot_overlap_context_parallel() -> None:
-    cfg = Glm52Config.from_dict(
+    cfg = Glm52Context.from_dict(
         _config(
             cp_size=2,
             cp_rank=0,
@@ -591,7 +592,7 @@ def test_glm_layerwise_split_cannot_overlap_context_parallel() -> None:
     ],
 )
 def test_invalid_glm_parallel_topology_is_rejected(overrides: dict, message: str) -> None:
-    cfg = Glm52Config.from_dict(_config(**overrides))
+    cfg = Glm52Context.from_dict(_config(**overrides))
 
     with pytest.raises(ValueError, match=message):
         cfg.validate()
@@ -904,7 +905,7 @@ def test_attn_dp_switch_preserves_backend_heads(enabled: bool, tp_size: int, dp_
         moe_tp_rank=13,
         moe_intermediate_size=2048,
     )
-    cfg = Glm52Config.from_dict(values)
+    cfg = Glm52Context.from_dict(values)
     cfg.validate()
     ranks = []
     for tp_rank in range(tp_size):
@@ -933,13 +934,13 @@ def test_attn_dp_switch_preserves_backend_heads(enabled: bool, tp_size: int, dp_
     ],
 )
 def test_attn_dp_rejects_unsupported_layout(overrides: dict) -> None:
-    cfg = Glm52Config.from_dict(_config(enable_attn_dp_weight_sharding=True, **overrides))
+    cfg = Glm52Context.from_dict(_config(enable_attn_dp_weight_sharding=True, **overrides))
     with pytest.raises(ValueError):
         cfg.validate()
 
 
 def test_attn_dp_switch_defaults_off() -> None:
-    cfg = Glm52Config.from_dict(_config())
+    cfg = Glm52Context.from_dict(_config())
     assert cfg.enable_attn_dp_weight_sharding is False
     assert cfg.attention_weight_shard() == (cfg.tp_size, cfg.tp_rank)
 
@@ -947,7 +948,7 @@ def test_attn_dp_switch_defaults_off() -> None:
 @pytest.mark.parametrize("dynamic", [False, True])
 @pytest.mark.parametrize("dp_rank", [0, 1])
 def test_attn_dp_absorbs_only_weight_heads_and_preserves_owner_uv(dynamic: bool, dp_rank: int) -> None:
-    cfg = Glm52Config.from_dict(_config(enable_attn_dp_weight_sharding=True, dp_rank=dp_rank))
+    cfg = Glm52Context.from_dict(_config(enable_attn_dp_weight_sharding=True, dp_rank=dp_rank))
     attention = glm5_2.Glm52MLAAttention(cfg, 0, torch.float32, torch.device("cpu"))
     owner_weight = torch.arange(2 * 8 * 4, dtype=torch.float32).reshape(16, 4)
     attention.kv_b_proj.weight.data.copy_(owner_weight.chunk(2, dim=0)[dp_rank])
@@ -1012,7 +1013,7 @@ def test_attention_weight_loader_uses_dp_tp_shards(dynamic: bool, projection: st
 
 @pytest.mark.parametrize("counts", [(1, 3), (3, 1)])
 def test_attn_dp_gathers_padded_inputs_and_slices_owner_rows(counts: tuple[int, int]) -> None:
-    cfg = Glm52Config.from_dict(_config(enable_attn_dp_weight_sharding=True, dp_rank=0))
+    cfg = Glm52Context.from_dict(_config(enable_attn_dp_weight_sharding=True, dp_rank=0))
     local_tokens = counts[0]
     hidden = torch.arange(local_tokens * 16).float().reshape(local_tokens, 16)
     positions = torch.arange(local_tokens, dtype=torch.int32)
@@ -1093,7 +1094,7 @@ def _expanded_decode_metadata(num_tokens: int) -> SimpleNamespace:
 
 
 def _make_mega_moe_layer() -> Glm52MoE:
-    cfg = Glm52Config.from_dict(_config())
+    cfg = Glm52Context.from_dict(_config())
     moe = Glm52MoE(cfg, layer_id=0, dtype=torch.float32, device=torch.device("cpu"))
     moe.gate.float()
     moe._mega_moe_enabled = True
@@ -1106,7 +1107,7 @@ def _make_mega_moe_layer() -> Glm52MoE:
 
 def test_glm_mega_moe_config_fields_are_parsed() -> None:
     context = torch.zeros(4, dtype=torch.int32)
-    cfg = Glm52Config.from_dict(
+    cfg = Glm52Context.from_dict(
         _config(
             enable_mega_moe=True,
             mega_moe_context=context,
@@ -1152,13 +1153,13 @@ def test_shared_moe_mega_moe_resolved_flag_requires_supported_topology(
     model_type: str, overrides: dict, device_type: str, expected: bool
 ) -> None:
     values = _config(model_type=model_type, **overrides)
-    cfg = Glm52Config.from_dict(values)
+    cfg = Glm52Context.from_dict(values)
     device = _npu_device() if device_type == "npu" else torch.device("cpu")
     assert Glm52MoE._can_enable_mega_moe(cfg, device) is expected
 
 
 def test_shared_moe_mega_moe_ignores_speculative_token_count() -> None:
-    cfg = Glm52Config.from_dict(_config(enable_mega_moe=True, ep_size=4))
+    cfg = Glm52Context.from_dict(_config(enable_mega_moe=True, ep_size=4))
     cfg.num_speculative_tokens = 4
     assert Glm52MoE._can_enable_mega_moe(cfg, _npu_device()) is True
 

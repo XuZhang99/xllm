@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
 from typing import Optional
 
 import torch
@@ -73,6 +72,7 @@ from xllm.python.models.glm5_next_kpool import (
 from xllm.python.models.glm5_next_kpool import (
     pooled_states as _kpool_pooled_states,
 )
+from xllm.python.models.model_config import ModelContext
 
 # xllm Attention base — present in the real engine (full xllm.python package).
 # Under the standalone stub-loader align path the package is not wired, so fall
@@ -143,177 +143,14 @@ class _RMSNormGated(nn.Module):
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-@dataclass
-class Glm5NextConfig:
-    """glm5_next architecture parameters (transformers schema)."""
+class Glm5NextContext(ModelContext):
+    """Execution view over the Transformers architecture config."""
 
-    model_type: str = "glm5_next"
-    hidden_size: int = 4096
-    n_layers: int = 45
-    n_heads: int = 64
-    n_kv_heads: int = 64
-    intermediate_size: int = 12288
-    vocab_size: int = 154880
-    rms_norm_eps: float = 1e-5
-    rope_theta: float = 10000.0
-    max_position_embeddings: int = 1104096
-    hidden_act: str = "silu"
-    attention_bias: bool = False
-    tie_word_embeddings: bool = False
-    # MLA
-    q_lora_rank: int = 1536
-    kv_lora_rank: int = 512
-    qk_nope_head_dim: int = 256
-    qk_rope_head_dim: int = 0
-    v_head_dim: int = 256
-    # KDA
-    kda_num_heads: int = 64
-    kda_head_dim: int = 128
-    short_conv_kernel_size: int = 4
-    linear_lower_bound: Optional[float] = -5.0
-    swiglu_limit: float = 10.0
-    # MoE
-    moe_intermediate_size: int = 2048
-    n_routed_experts: int = 288
-    n_shared_experts: int = 1
-    num_experts_per_tok: int = 8
-    n_group: int = 1
-    topk_group: int = 1
-    routed_scaling_factor: float = 2.5
-    norm_topk_prob: bool = True
-    first_k_dense_replace: int = 3
-    # DSA / kPool indexer
-    index_n_heads: int = 32
-    index_head_dim: int = 128
-    index_topk: int = 2048
-    index_kpool: int = 1
-    index_kpool_compress: bool = False
-    index_kpool_always_select_tail: bool = False
-    # mHC (multi-stream hyper-connection residual) — always on, per reference
-    hc_mult: int = 4
-    hc_eps: float = 1e-6
-    hc_sinkhorn_iters: int = 20
-    # derived
-    layer_types: list = field(default_factory=list)  # "linear_attention" / "deepseek_sparse_attention"
-    mlp_layer_types: list = field(default_factory=list)  # "dense" / "sparse"
-    indexer_types: list = field(default_factory=list)  # "full" / "shared"
-    tp_size: int = 1
-    tp_rank: int = 0
-
-    @classmethod
-    def from_dict(cls, d: dict) -> Glm5NextConfig:
-        # Multimodal full-weight configs nest text-model fields under
-        # "text_config"; single-model configs are flat. Merge text_config into
-        # the top level (without clobbering top-level overrides) so the flat
-        # picks below work for both layouts. Mirrors JsonReader::resolve.
-        tc = d.get("text_config")
-        if isinstance(tc, dict):
-            d = {**tc, **d}
-
-        def pick(*keys, default=None):
-            for k in keys:
-                if k in d and d[k] is not None:
-                    return d[k]
-            return default
-
-        hidden = int(pick("hidden_size", default=4096))
-        n_heads = int(pick("n_heads", "num_attention_heads", default=64))
-        n_layers = int(pick("n_layers", "num_hidden_layers", default=45))
-        first_k_dense = int(pick("first_k_dense_replace", default=3))
-
-        # KDA linear_attn_config (transformers stores it as a dict)
-        lac = pick("linear_attn_config", default=None) or {}
-        kda_heads = int(lac.get("num_heads", 64))
-        kda_dim = int(lac.get("head_dim", 128))
-        conv_k = int(lac.get("short_conv_kernel_size", 4))
-        full_attn_layers = lac.get("full_attn_layers")
-        if full_attn_layers is None:
-            full_attn_layers = [i for i in range(n_layers) if i % 4 == 3]
-
-        # Forget-gate lower-bound resolution — mirrors reference config __post_init__:
-        # the dict key is ``gate_lower_bound`` (NOT ``lower_bound``); field default
-        # is -5.0; if safe_gate (default True) and the bound is None, force -5.0.
-        lower_bound = lac.get("gate_lower_bound", -5.0)
-        if lac.get("safe_gate", True) and lower_bound is None:
-            lower_bound = -5.0
-
-        cfg = cls(
-            model_type=str(pick("model_type", default="glm5_next")),
-            hidden_size=hidden,
-            n_layers=n_layers,
-            n_heads=n_heads,
-            n_kv_heads=int(pick("n_kv_heads", "num_key_value_heads", default=n_heads)),
-            intermediate_size=int(pick("intermediate_size", default=12288)),
-            vocab_size=int(pick("vocab_size", default=154880)),
-            rms_norm_eps=float(pick("rms_norm_eps", default=1e-5)),
-            rope_theta=float(pick("rope_theta", default=10000.0)),
-            max_position_embeddings=int(pick("max_position_embeddings", default=1104096)),
-            hidden_act=str(pick("hidden_act", default="silu")),
-            attention_bias=bool(pick("attention_bias", default=False)),
-            tie_word_embeddings=bool(pick("tie_word_embeddings", default=False)),
-            q_lora_rank=int(pick("q_lora_rank", default=1536)),
-            kv_lora_rank=int(pick("kv_lora_rank", default=512)),
-            qk_nope_head_dim=int(pick("qk_nope_head_dim", default=256)),
-            qk_rope_head_dim=int(pick("qk_rope_head_dim", default=0)),
-            v_head_dim=int(pick("v_head_dim", default=256)),
-            kda_num_heads=kda_heads,
-            kda_head_dim=kda_dim,
-            short_conv_kernel_size=conv_k,
-            linear_lower_bound=lower_bound,
-            swiglu_limit=float(pick("swiglu_limit", default=10.0)) or 10.0,
-            moe_intermediate_size=int(pick("moe_intermediate_size", default=2048)),
-            n_routed_experts=int(pick("n_routed_experts", "num_local_experts", "num_experts", default=288)),
-            n_shared_experts=int(pick("n_shared_experts", default=1)),
-            num_experts_per_tok=int(pick("num_experts_per_tok", default=8)),
-            n_group=int(pick("n_group", default=1)),
-            topk_group=int(pick("topk_group", default=1)),
-            routed_scaling_factor=float(pick("routed_scaling_factor", default=2.5)),
-            norm_topk_prob=bool(pick("norm_topk_prob", default=True)),
-            first_k_dense_replace=first_k_dense,
-            index_n_heads=int(pick("index_n_heads", default=32)),
-            index_head_dim=int(pick("index_head_dim", default=128)),
-            index_topk=int(pick("index_topk", default=2048)),
-            index_kpool=int(pick("index_kpool", default=1)),
-            index_kpool_compress=bool(pick("index_kpool_compress", default=False)),
-            index_kpool_always_select_tail=bool(pick("index_kpool_always_select_tail", default=False)),
-            tp_size=int(pick("tp_size", default=1)),
-            tp_rank=int(pick("tp_rank", default=0)),
-            # mHC fields: ModelArgs may emit a 0 default (un-plumbed); treat 0
-            # /None as unset and fall back to the real 300B defaults.
-            hc_mult=(int(pick("hc_mult", default=4)) or 4),
-            hc_eps=(float(pick("hc_eps", default=1e-6)) or 1e-6),
-            hc_sinkhorn_iters=(int(pick("hc_sinkhorn_iters", default=20)) or 20),
-        )
-        cfg._resolve_schedules(full_attn_layers, d)
-        return cfg
-
-    def _resolve_schedules(self, full_attn_layers: list, d: dict) -> None:
-        n = self.n_layers
-        lt = d.get("layer_types")
-        if isinstance(lt, list) and lt:
-            self.layer_types = list(lt)
-        else:
-            self.layer_types = [
-                "deepseek_sparse_attention" if i in full_attn_layers else "linear_attention" for i in range(n)
-            ]
-        mlt = d.get("mlp_layer_types")
-        if isinstance(mlt, list) and mlt:
-            self.mlp_layer_types = list(mlt)
-        else:
-            n_dense = min(self.first_k_dense_replace, n)
-            self.mlp_layer_types = ["dense"] * n_dense + ["sparse"] * (n - n_dense)
-        it = d.get("indexer_types")
-        if isinstance(it, list) and it:
-            self.indexer_types = list(it)
-        else:
-            offset = int(d.get("index_skip_topk_offset", 1))
-            freq = int(d.get("index_topk_freq", 1))
-            self.indexer_types = [
-                "full" if (max(i - offset + 1, 0) % max(freq, 1)) == 0 else "shared" for i in range(n)
-            ]
+    config_module = "glm5_next"
+    config_name = "Glm5NextTextConfig"
 
     def is_dsa(self, layer_id: int) -> bool:
-        return layer_id < len(self.layer_types) and self.layer_types[layer_id] == "deepseek_sparse_attention"
+        return layer_id < len(self.layer_types) and self.layer_types[layer_id] == "indexed_attention"
 
     def is_moe(self, layer_id: int) -> bool:
         if layer_id < len(self.mlp_layer_types):
@@ -368,7 +205,7 @@ class Glm5NextKdaAttention(Attention):
     ``fla_npu`` operators.
     """
 
-    def __init__(self, cfg: Glm5NextConfig, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__(
             num_heads=cfg.kda_num_heads,
             num_kv_heads=cfg.kda_num_heads,
@@ -515,7 +352,7 @@ def _current_q_seq_lens(num_seqs: int, num_tokens: int) -> list[int]:
 class Glm5NextIndexer(nn.Module):
     """GlmMoeDsaRecomputeKPoolIndexer port: packed [k, gate, valid] cache."""
 
-    def __init__(self, cfg: Glm5NextConfig, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.layer_id = layer_id
         self.n_heads = cfg.index_n_heads
@@ -1087,7 +924,7 @@ class Glm5NextMlaAttention(Attention):
     # and fail on builds without them).
     is_glm_next_mla: bool = True
 
-    def __init__(self, cfg: Glm5NextConfig, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__(
             num_heads=cfg.n_heads,
             num_kv_heads=cfg.n_kv_heads,
@@ -1271,7 +1108,7 @@ class Glm5NextMlaAttention(Attention):
 class Glm5NextMLP(nn.Module):
     def __init__(
         self,
-        cfg: Glm5NextConfig,
+        cfg: Glm5NextContext,
         intermediate_size: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -1337,7 +1174,7 @@ class Glm5NextExperts(nn.Module):
     combines across ranks.
     """
 
-    def __init__(self, cfg: Glm5NextConfig, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.num_experts = cfg.n_routed_experts
         self.tp = cfg.tp_size
@@ -1447,7 +1284,7 @@ class Glm5NextExperts(nn.Module):
 
 
 class Glm5NextMoE(nn.Module):
-    def __init__(self, cfg: Glm5NextConfig, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.cfg = cfg
         tp = cfg.tp_size
@@ -1602,7 +1439,7 @@ class Glm5NextHyperConnection(nn.Module):
     ``collapsed`` is the single-sequence input to feed the sublayer.
     """
 
-    def __init__(self, cfg: Glm5NextConfig, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.hc_mult = cfg.hc_mult
         self.hc_sinkhorn_iters = cfg.hc_sinkhorn_iters
@@ -1665,7 +1502,7 @@ class Glm5NextHyperHead(nn.Module):
 # Decoder layer + model
 # ---------------------------------------------------------------------------
 class Glm5NextDecoderLayer(nn.Module):
-    def __init__(self, cfg: Glm5NextConfig, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.layer_id = layer_id
         self.input_layernorm = Glm5NextRMSNorm(cfg.hidden_size, cfg.rms_norm_eps, dtype, device)
@@ -1775,7 +1612,7 @@ class Glm5NextDecoderLayer(nn.Module):
 
 
 class Glm5NextModel(nn.Module):
-    def __init__(self, cfg: Glm5NextConfig, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5NextContext, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.cfg = cfg
         self.embed_tokens = HiddenParallelEmbedding(
@@ -1894,7 +1731,7 @@ class Glm5NextForCausalLM(PyModelBase):
 
     def __init__(self, config: dict, build_model: bool = True) -> None:
         super().__init__()
-        self.cfg = Glm5NextConfig.from_dict(config)
+        self.cfg = Glm5NextContext.from_dict(config)
         self.cfg.tp_size = int(config.get("tp_size", 1))
         self.cfg.tp_rank = int(config.get("tp_rank", 0))
         for name, val in (

@@ -44,7 +44,9 @@ class _StateDict:
 def _make_model(
     tp_size: int, tp_rank: int
 ) -> tuple[glm5_next.Glm5NextForCausalLM, dict[str, torch.Tensor], glm5_next.Glm5NextKdaAttention]:
-    config = glm5_next.Glm5NextConfig(hidden_size=32, kda_num_heads=8, kda_head_dim=8, tp_size=tp_size, tp_rank=tp_rank)
+    config = glm5_next.Glm5NextContext(
+        hidden_size=32, kda_num_heads=8, kda_head_dim=8, tp_size=tp_size, tp_rank=tp_rank
+    )
     attention = glm5_next.Glm5NextKdaAttention(config, 0, torch.float32, torch.device("cpu"))
     model = glm5_next.Glm5NextForCausalLM.__new__(glm5_next.Glm5NextForCausalLM)
     torch.nn.Module.__init__(model)
@@ -338,14 +340,14 @@ def test_merged_input_npu_projection_and_graph_replay(num_tokens: int, npu_runti
 
 
 @pytest.fixture(scope="module")
-def real_kda_weights(npu_runtime: ModuleType) -> tuple[glm5_next.Glm5NextConfig, dict[str, torch.Tensor]]:
+def real_kda_weights(npu_runtime: ModuleType) -> tuple[glm5_next.Glm5NextContext, dict[str, torch.Tensor]]:
     model_path = os.getenv("XLLM_GLM_KDA_MODEL_PATH", "")
     if not model_path:
         pytest.skip("real KDA checkpoint not configured")
     from safetensors import safe_open
 
     checkpoint = Path(model_path)
-    config = glm5_next.Glm5NextConfig.from_dict(json.loads((checkpoint / "config.json").read_text()))
+    config = glm5_next.Glm5NextContext.from_dict(json.loads((checkpoint / "config.json").read_text()))
     names = {projection + ".weight" for projection, _, _ in _KDA_IN_PROJ}
     names.update(("forget_gate.f_b_proj.weight", "g_b_proj.weight", "forget_gate.A_log", "forget_gate.dt_bias"))
     aliases = {
@@ -368,7 +370,7 @@ def real_kda_weights(npu_runtime: ModuleType) -> tuple[glm5_next.Glm5NextConfig,
 @pytest.mark.parametrize("num_tokens", [1, 4, 17, 128])
 @torch.inference_mode()
 def test_real_kda_merged_projection_graph_replay(
-    real_kda_weights: tuple[glm5_next.Glm5NextConfig, dict[str, torch.Tensor]],
+    real_kda_weights: tuple[glm5_next.Glm5NextContext, dict[str, torch.Tensor]],
     npu_runtime: ModuleType,
     tp_rank: int,
     num_tokens: int,

@@ -37,7 +37,7 @@ def test_mtp_constructor_defers_shared_target_modules() -> None:
 
     with (
         patch.object(
-            deepseek_v32_mtp.DeepseekV3Config,
+            deepseek_v32_mtp.DeepseekV32Context,
             "from_dict",
             return_value=model_config,
         ),
@@ -80,7 +80,7 @@ def test_mtp_load_rejects_missing_required_weights() -> None:
 
     with (
         patch.object(
-            deepseek_v32_mtp.DeepseekV3Config,
+            deepseek_v32_mtp.DeepseekV32Context,
             "from_dict",
             return_value=model_config,
         ),
