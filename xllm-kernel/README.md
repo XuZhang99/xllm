@@ -46,10 +46,10 @@ validates arguments. Output is independent of input/weight, and neither input
 is modified. Registry diagnostics expose the selected contract, implementation,
 execution modes, generation, and exclusion reasons. Runtime logs selection once.
 
-Validation lives in `tests/scripts/test_kernel_package.py` (import/registry/
-packaging) and `tests/python/test_kernel_rms_norm_npu.py` (native/fake/stream/
-ACLGraph and GLM dimensions). Run NPU tests only on an idle device. A package
-import or a passing fake test does not prove device or whole-model correctness.
+Package tests live in `xllm-kernel/test/`: common import, registry, packaging,
+numerical-report and CLI tests are at its root; NPU integration tests are in
+`test/npu/`. Run NPU tests only on idle devices. A package import or a passing
+fake test does not prove device or whole-model correctness.
 
 ## Optional xlite RMSNorm
 
@@ -88,6 +88,22 @@ automatic per-token switch to xlite or fallback from it.
 
 ## Independent validation tools
 
+The package follows the same ownership split as TokenSpeed:
+
+```text
+xllm-kernel/
+├── python/xllm_kernel/
+│   ├── numerics/       # cases, inputs, reference, validation and precision CLI
+│   └── benchmark/      # timing, performance reports and benchmark CLI
+└── test/
+    ├── test_*.py       # common package and tool tests
+    └── npu/            # NPU fixtures and integration tests
+```
+
+`benchmark` reuses `numerics` validation before timing. `numerics` does not
+import the benchmark timer. Test fixtures belong in `test/`, outside the
+installed Python package; there is no package-level `testing` layer.
+
 The numerical and benchmark entry points use the same versioned RMSNorm cases,
 CPU-generated inputs, FP32 CPU reference and tolerance rules. They write JSON
 and Markdown with coverage, failure reasons, alias/mutation checks and error
@@ -102,8 +118,23 @@ python -m xllm_kernel.benchmark --device npu --mode aclgraph \
   --implementation npu.xlite.rms_norm --revision "$(git rev-parse HEAD)" \
   --iterations 50 --output benchmark.json
 XLLM_KERNEL_RMS_NORM_IMPL=npu.xlite.rms_norm \
-  python -m pytest -q tests/python/test_kernel_xlite_rms_norm_npu.py
+  python -m pytest -q xllm-kernel/test/npu/test_kernel_xlite_rms_norm_npu.py
 ```
+
+After installing the package, run common tests without an NPU or host extension:
+
+```bash
+python -m pytest -q xllm-kernel/test --ignore=xllm-kernel/test/npu
+```
+
+NPU integration tests also require the matching xLLM host. Their local
+`conftest.py` loads its extension and initializes Python kernels before
+collection. Run native and xlite tests in separate processes with the
+corresponding `XLLM_KERNEL_RMS_NORM_IMPL`; selection stays fixed for a process.
+The NPU host build registers `python_kernel_tests` with CTest and `all_tests`:
+`python setup.py test --test-name python_kernel_tests` builds dependencies and
+runs each file with its implementation explicitly selected. These tests share
+the existing Python device resource lock.
 
 Require idle hardware and monitor ownership externally throughout measurement.
 The device test suite requires two visible NPUs for device-guard validation.

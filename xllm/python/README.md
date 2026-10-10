@@ -231,6 +231,12 @@ Run the NPU Python suite with `python setup.py test --test-name python_tests`;
 its per-file targets depend on `xllm_export`. CTest runs each file in a separate
 pytest process, using the same `conftest.py`.
 
+The independent kernel package owns its tests in `xllm-kernel/test/`.
+Run its separate CTest group with
+`python setup.py test --test-name python_kernel_tests`; see
+[`xllm-kernel/README.md`](../../xllm-kernel/README.md#independent-validation-tools)
+for common tests and the native/xlite NPU test commands.
+
 ### Python offline inference API
 
 This mode uses public Python APIs such as `xllm.LLM` to call the C++ engine:
