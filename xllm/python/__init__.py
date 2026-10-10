@@ -27,6 +27,7 @@ effects lets build tools import leaf DSL modules such as
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from types import ModuleType
 from typing import Any
@@ -50,7 +51,7 @@ def initialize_runtime() -> None:
 
         from scripts.logger import logger
 
-        prepared = xllm_kernel.initialize(device="npu")
+        prepared = xllm_kernel.initialize(device="npu", implementation=os.environ.get("XLLM_KERNEL_RMS_NORM_IMPL"))
         logger.info(
             "Python RMSNorm kernel: %s (generation=%s)",
             prepared.spec.name,

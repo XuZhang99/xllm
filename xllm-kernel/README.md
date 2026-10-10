@@ -51,6 +51,70 @@ packaging) and `tests/python/test_kernel_rms_norm_npu.py` (native/fake/stream/
 ACLGraph and GLM dimensions). Run NPU tests only on an idle device. A package
 import or a passing fake test does not prove device or whole-model correctness.
 
-CUDA adapters, shape-specialized selection, independent native libraries,
-fused/quantized operators, and compiler ownership migration are later phases.
-The existing CUDA-like platform paths remain unchanged.
+## Optional xlite RMSNorm
+
+The package owns `xllm_kernel::xlite_rms_norm`, its PrivateUse1 bridge, and its
+fake implementation. It calls the GVirt RMSNorm host launchers on the current
+PyTorch NPU stream through the torch_npu submission queue. It does not create
+an XRuntime/private stream or synchronize in the operator. Existing C++ model
+interfaces and `xllm_ops` schemas are unchanged.
+
+Build against the installed GVirt revision
+`4a6dc3102d5778928e4d21116bc4d4694d51e584`, matching Torch/torch_npu and CANN:
+
+```bash
+cd xllm-kernel
+XLLM_KERNEL_BUILD_XLITE=1 MAX_JOBS=4 python setup.py build_ext --inplace
+cd ..
+python setup.py build
+export XLLM_KERNEL_RMS_NORM_IMPL=npu.xlite.rms_norm
+```
+
+For a standalone compiled wheel, use
+`XLLM_KERNEL_BUILD_XLITE=1 python -m pip wheel --no-build-isolation --no-deps ./xllm-kernel`.
+The wheel contains the bridge and build manifest; GVirt launcher libraries,
+Torch, torch_npu and CANN are external deployment dependencies. Startup checks
+the recorded versions and launcher-library hashes before loading the bridge.
+Ordinary package import and pure-Python installation never load those libraries.
+
+The explicit solution accepts FP16/BF16 inputs and weights on the same NPU,
+ND layout, width divisible by 64 and at most 8192, at most `2**32 - 1` input
+elements, and finite nonnegative FP32 epsilon. Strided ND views are copied on
+the current stream; empty rows are supported. Unsupported arguments fail
+before launching the kernel. Fake tensors validate logical shape/dtype/device;
+physical NPU format is checked by the real bridge. Model warmup must cover the
+intended shapes before readiness. Default selection stays native; there is no
+automatic per-token switch to xlite or fallback from it.
+
+## Independent validation tools
+
+The numerical and benchmark entry points use the same versioned RMSNorm cases,
+CPU-generated inputs, FP32 CPU reference and tolerance rules. They write JSON
+and Markdown with coverage, failure reasons, alias/mutation checks and error
+summaries. The native solution requires an installed xLLM host extension; xlite
+can run with the standalone compiled package, without starting an xLLM server.
+
+```bash
+python -m xllm_kernel.numerics --device npu --mode eager \
+  --implementation npu.xlite.rms_norm --revision "$(git rev-parse HEAD)" \
+  --output numerics.json
+python -m xllm_kernel.benchmark --device npu --mode aclgraph \
+  --implementation npu.xlite.rms_norm --revision "$(git rev-parse HEAD)" \
+  --iterations 50 --output benchmark.json
+XLLM_KERNEL_RMS_NORM_IMPL=npu.xlite.rms_norm \
+  python -m pytest -q tests/python/test_kernel_xlite_rms_norm_npu.py
+```
+
+Require idle hardware and monitor ownership externally throughout measurement.
+The device test suite requires two visible NPUs for device-guard validation.
+Benchmarks validate first and exclude preparation, warmup and capture from
+steady-state samples. Eager reports host submission, device-event interval
+(including submission gaps) and synchronized wall time. ACLGraph captures 64
+independent operations and reports time per operation, median/p90, dispersion
+and raw samples. The cache policy is repeated hot inputs, without an explicit
+flush. Use complete native A1 / xlite B / native A2 runs with identical case,
+mode and timer settings; compare against both baselines and report drift.
+Zero applicable cases or failed validation cannot produce a passing report.
+
+CUDA adapters, shape-specialized selection, profiling/replay, compiler
+monitoring, tuning and fused/quantized operators remain later phases.

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Functional RMSNorm, preserving the host native Torch operator's contract."""
+"""Functional RMSNorm with a fixed native or explicitly selected xlite binding."""
 
 from __future__ import annotations
 
@@ -35,12 +35,13 @@ _configuration: tuple[str, str | None] | None = None
 
 
 def initialize(*, device: str, implementation: str | None = None) -> PreparedKernel:
-    """Bind the NPU host operator once, before model import or graph capture.
+    """Bind an NPU operator once, before model import or graph capture.
 
-    The host must have registered ``torch.ops.xllm_ops`` first. It remains the
-    owner of native schemas and fake implementations. No dependency discovery,
-    device probing, compilation, or execution-error fallback happens here.
-    Changing policy requires a fresh worker and fresh graphs.
+    The default adapter requires the host's ``torch.ops.xllm_ops`` registration.
+    The explicit xlite solution loads its package-owned, prebuilt extension
+    here. Dependency checks and binding happen only during preparation, with
+    no runtime compilation or execution-error fallback. Changing policy
+    requires a fresh worker and fresh graphs.
     """
     global _prepared, _configuration
     configuration = (device, implementation)
@@ -51,7 +52,10 @@ def initialize(*, device: str, implementation: str | None = None) -> PreparedKer
     if device != "npu":
         raise ValueError(f"xllm_kernel does not yet provide a {device!r} adapter")
 
-    from xllm_kernel.ops.normalization.npu import register
+    if implementation == "npu.xlite.rms_norm":
+        from xllm_kernel.ops.normalization.xlite import register
+    else:
+        from xllm_kernel.ops.normalization.npu import register
 
     registry = KernelRegistry()
     register(registry)
@@ -77,10 +81,11 @@ def prepare_rms_norm() -> PreparedKernel:
 def rms_norm(input: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
     """Normalize the last dimension without modifying or aliasing the inputs.
 
-    This thin adapter preserves ``torch.ops.xllm_ops.rms_norm`` argument
-    validation, strided views, dtype rules, allocation, and rounding. It has no
-    residual, gamma offset, quantization, or out-buffer semantics. The existing
-    host fake registration describes its abstract output; no schema is added.
+    The default binding preserves the host operator's complete tensor domain.
+    Explicit xlite selection restricts inputs to the domain in its KernelSpec;
+    its bridge validates tensors before launch and never falls back. Both have
+    no residual, gamma offset, quantization, or out-buffer semantics. Numerical
+    equivalence between implementations is tolerance-based, not bitwise.
     """
     if _prepared is None:
         raise RuntimeError("xllm_kernel runtime is not initialized")

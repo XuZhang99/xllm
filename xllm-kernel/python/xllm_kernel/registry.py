@@ -38,13 +38,14 @@ class KernelSpec:
     execution_modes: tuple[str, ...]
     input_domain: str
     priority: int = 0
+    solution: str = "native"
 
 
 @dataclass(frozen=True)
 class PreparedKernel:
     """Immutable binding; callers retain it for their graph's entire lifetime.
 
-    ``input_domain`` describes the native operator's domain. This first adapter
+    ``input_domain`` describes the selected operator's domain. These adapters
     does not specialize on shape or cache a plan prepared for a sample tensor.
     Native Torch dispatch remains responsible for tensor argument validation.
     """
