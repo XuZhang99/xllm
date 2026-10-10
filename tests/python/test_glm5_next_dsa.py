@@ -27,8 +27,9 @@ from xllm.python.models import glm5_next
 
 
 def _make_attention(tp_size: int = 1, tp_rank: int = 0, bias: bool = False) -> glm5_next.Glm5NextMlaAttention:
-    config = glm5_next.Glm5NextConfig(
+    config = glm5_next.Glm5NextContext(
         hidden_size=32,
+        n_layers=1,
         n_heads=8,
         n_kv_heads=8,
         q_lora_rank=16,
@@ -208,14 +209,14 @@ def test_qkv_a_npu_graph_replay(num_tokens: int) -> None:
 
 
 @pytest.fixture(scope="module")
-def real_dsa_weights() -> tuple[glm5_next.Glm5NextConfig, dict[str, torch.Tensor]]:
+def real_dsa_weights() -> tuple[glm5_next.Glm5NextContext, dict[str, torch.Tensor]]:
     model_path = os.getenv("XLLM_GLM_KDA_MODEL_PATH")
     if not model_path:
         pytest.skip("real GLM checkpoint not configured")
     from safetensors import safe_open
 
     checkpoint = Path(model_path)
-    config = glm5_next.Glm5NextConfig.from_dict(json.loads((checkpoint / "config.json").read_text()))
+    config = glm5_next.Glm5NextContext.from_dict(json.loads((checkpoint / "config.json").read_text()))
     layer_id = next(index for index in range(config.n_layers) if config.is_dsa(index))
     prefix = f"model.layers.{layer_id}.self_attn."
     names = ("q_a_proj.weight", "kv_a_proj_with_mqa.weight", "q_a_layernorm.weight", "kv_a_layernorm.weight")
@@ -234,7 +235,7 @@ def real_dsa_weights() -> tuple[glm5_next.Glm5NextConfig, dict[str, torch.Tensor
 @pytest.mark.parametrize("num_tokens", [1, 4, 17, 128])
 @torch.inference_mode()
 def test_real_qkv_a_projection_and_graph_replay(
-    real_dsa_weights: tuple[glm5_next.Glm5NextConfig, dict[str, torch.Tensor]],
+    real_dsa_weights: tuple[glm5_next.Glm5NextContext, dict[str, torch.Tensor]],
     device_kind: str,
     num_tokens: int,
     record_property: Callable[[str, object], None],

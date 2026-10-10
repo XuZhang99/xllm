@@ -19,11 +19,12 @@ from types import SimpleNamespace
 import pytest
 import torch
 import torch.nn.functional as F
+from transformers import GlmMoeDsaConfig
 
 from xllm.python import kernels
 from xllm.python.model_executor.forward_context import ForwardContext, forward_context
 from xllm.python.model_loader import ParallelLoadContext, ScopedWeightLoader
-from xllm.python.models.glm5_dspark import Glm5DSparkConfig, Glm5DSparkForCausalLM, _apply_rope
+from xllm.python.models.glm5_dspark import Glm5DSparkContext, Glm5DSparkForCausalLM, _apply_rope
 
 
 def _config(**overrides: object) -> dict:
@@ -77,7 +78,7 @@ class _StateDict:
 
 
 def test_speculators_config_uses_mla_dimensions_and_nested_rope() -> None:
-    config = Glm5DSparkConfig.from_dict(
+    config = Glm5DSparkContext.from_dict(
         {
             "speculators_model_type": "dspark",
             "markov_rank": 256,
@@ -99,6 +100,10 @@ def test_speculators_config_uses_mla_dimensions_and_nested_rope() -> None:
         }
     )
     config.validate()
+    assert isinstance(config.hf_config, GlmMoeDsaConfig)
+    assert config.hf_config.mlp_layer_types == ["dense"] * 5
+    assert config.hf_config.index_topk == 0
+    assert "markov_rank" not in config.hf_config.to_dict()
     assert config.head_dim == 256
     assert config.n_kv_heads == 1
     assert config.rope_theta == 8000000
@@ -182,7 +187,7 @@ def test_context_writes_compressed_latent_and_rotary_cache_only(
 
 def test_attention_tp_loads_head_shards_and_replicated_latents(model: Glm5DSparkForCausalLM) -> None:
     tensors = {key: value.detach().clone() for key, value in model.model.layers[0].self_attn.state_dict().items()}
-    cfg = Glm5DSparkConfig.from_dict(_config(tp_size=2, tp_rank=1))
+    cfg = Glm5DSparkContext.from_dict(_config(tp_size=2, tp_rank=1))
     cfg.validate()
     from xllm.python.models.glm5_dspark import Glm5DSparkAttention
 

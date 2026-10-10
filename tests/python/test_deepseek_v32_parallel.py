@@ -29,8 +29,8 @@ from xllm.python.model_executor.forward_context import (  # noqa: E402
     forward_context,
 )
 from xllm.python.models.deepseek_v32 import (  # noqa: E402
-    DeepseekV3Config,
     DeepseekV3MoE,
+    DeepseekV32Context,
     W8A8AttentionLinear,
 )
 
@@ -53,7 +53,7 @@ def _mock_parallel_ops(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _config(**overrides) -> DeepseekV3Config:
+def _config(**overrides) -> DeepseekV32Context:
     values = {
         "hidden_size": 64,
         "n_layers": 2,
@@ -91,7 +91,7 @@ def _config(**overrides) -> DeepseekV3Config:
         "world_size": 1,
     }
     values.update(overrides)
-    return DeepseekV3Config.from_dict(values)
+    return DeepseekV32Context.from_dict(values)
 
 
 # ---------------------------------------------------------------------------

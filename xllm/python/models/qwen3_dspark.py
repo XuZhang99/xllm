@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import torch
 import torch.nn as nn
 
@@ -29,26 +27,15 @@ from xllm.python.model_loader import (
 )
 from xllm.python.models.dspark import DSparkForCausalLMBase
 from xllm.python.models.qwen3_dflash import (
-    DFlashQwen3Config,
+    DFlashQwen3Context,
     DFlashQwen3Model,
 )
 
 
-@dataclass
-class Qwen3DSparkConfig(DFlashQwen3Config):
-    markov_rank: int = 0
-    enable_confidence_head: bool = False
-    confidence_head_with_markov: bool = False
+class Qwen3DSparkContext(DFlashQwen3Context):
+    """Execution view over the Transformers architecture config."""
 
-    @classmethod
-    def from_dict(cls, d: dict) -> Qwen3DSparkConfig:
-        base = DFlashQwen3Config.from_dict(d)
-        return cls(
-            **base.__dict__,
-            markov_rank=int(d.get("markov_rank", 0)),
-            enable_confidence_head=bool(d.get("enable_confidence_head", False)),
-            confidence_head_with_markov=bool(d.get("confidence_head_with_markov", False)),
-        )
+    draft_kind = "dspark"
 
     def validate(self) -> None:
         super().validate()
@@ -64,7 +51,7 @@ class Qwen3DSparkForCausalLM(DSparkForCausalLMBase):
     model: Qwen3DSparkModel
 
     def __init__(self, config: dict) -> None:
-        cfg = Qwen3DSparkConfig.from_dict(config)
+        cfg = Qwen3DSparkContext.from_dict(config)
         cfg.validate()
         dtype = self.resolve_dtype(config.get("dtype") or config.get("torch_dtype"))
         device = torch.device(config.get("device", "npu"))

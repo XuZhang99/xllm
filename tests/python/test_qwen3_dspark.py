@@ -19,14 +19,14 @@ import torch
 
 from xllm.python import kernels
 from xllm.python.models.qwen3_dspark import (
-    Qwen3DSparkConfig,
+    Qwen3DSparkContext,
     Qwen3DSparkForCausalLM,
 )
 
 
-def _config(**overrides) -> Qwen3DSparkConfig:
+def _config(**overrides) -> Qwen3DSparkContext:
     values = _config_dict(**overrides)
-    config = Qwen3DSparkConfig.from_dict(values)
+    config = Qwen3DSparkContext.from_dict(values)
     config.validate()
     return config
 

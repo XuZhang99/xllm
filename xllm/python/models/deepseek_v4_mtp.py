@@ -23,7 +23,7 @@ from xllm.python.layers.embedding import HiddenParallelEmbedding
 from xllm.python.layers.layernorm import RMSNorm
 from xllm.python.model_executor.forward_context import get_forward_context, record_layer_event
 from xllm.python.models.deepseek_v4 import (
-    DeepseekV4Config,
+    DeepseekV4Context,
     DeepseekV4DecoderLayer,
     _build_rotary_tables,
     _DeepseekV4ForwardSetup,
@@ -36,7 +36,7 @@ class DeepseekV4MtpLayer(DeepseekV4DecoderLayer):
 
     def __init__(
         self,
-        cfg: DeepseekV4Config,
+        cfg: DeepseekV4Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -109,7 +109,7 @@ class DeepseekV4MtpLayer(DeepseekV4DecoderLayer):
 class DeepseekV4MtpModel(_DeepseekV4ForwardSetup, nn.Module):
     """DeepSeek-V4 MTP body with checkpoint-owned or target-shared endpoints."""
 
-    def __init__(self, cfg: DeepseekV4Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: DeepseekV4Context, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.cfg = cfg
         tp = cfg.tp_size

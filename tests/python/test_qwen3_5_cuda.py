@@ -62,7 +62,7 @@ from xllm.python.layers.qwen3_5.decoder_layer import get_qwen3_5_decoder_layer_c
 from xllm.python.model_executor.forward_context import forward_context
 from xllm.python.model_loader import ParallelLoadContext, ScopedWeightLoader
 from xllm.python.models import qwen3_5 as qwen3_5_model
-from xllm.python.models.qwen3_5 import Qwen3_5Config, Qwen3_5ForCausalLM, Qwen3_5Model
+from xllm.python.models.qwen3_5 import Qwen3_5ForCausalLM, Qwen3_5Model, Qwen35Context
 
 kernels.supports_cutlass_moe = supports_cutlass_moe
 kernels.gemma_rms_norm = _gemma_rms_norm
@@ -87,7 +87,7 @@ def _use_cuda_decoder_for_cpu_model_tests(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
 
-def _make_moe_layer(cfg: Qwen3_5Config, device: torch.device | None = None) -> FusedMoE:
+def _make_moe_layer(cfg: Qwen35Context, device: torch.device | None = None) -> FusedMoE:
     return FusedMoE(
         hidden_size=cfg.hidden_size,
         intermediate_size=cfg.moe_intermediate_size,

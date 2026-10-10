@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import math
 import runpy
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -50,7 +49,7 @@ def test_native_npu_cases_do_not_replace_production_bindings() -> None:
     assert not (Path(__file__).parent / "test_glm5_next_moe_npu.py").exists()
 
 
-def _config(**overrides: object) -> glm5_next.Glm5NextConfig:
+def _config(**overrides: object) -> glm5_next.Glm5NextContext:
     values = dict(
         hidden_size=8,
         intermediate_size=16,
@@ -64,7 +63,7 @@ def _config(**overrides: object) -> glm5_next.Glm5NextConfig:
         first_k_dense_replace=0,
     )
     values.update(overrides)
-    return glm5_next.Glm5NextConfig.from_dict(values)
+    return glm5_next.Glm5NextContext.from_dict(values)
 
 
 @pytest.mark.parametrize(
@@ -89,7 +88,7 @@ def test_invalid_parallel_config(overrides: dict, message: str) -> None:
 
 
 def test_config_preserves_tp_defaults_and_nested_text_fields() -> None:
-    config = glm5_next.Glm5NextConfig.from_dict(
+    config = glm5_next.Glm5NextContext.from_dict(
         {"text_config": {"tp_size": 4, "tp_rank": 3}, "ep_size": 2, "moe_tp_size": 2, "moe_tp_rank": 1}
     )
     assert (config.tp_size, config.tp_rank) == (4, 3)
@@ -126,7 +125,7 @@ def test_vl_nested_entry_merges_runtime_axes_before_moe_defaults(axes: dict[str,
         **axes,
     }
     model = Glm5NextVLModel(config)
-    expected = glm5_next.Glm5NextConfig.from_dict(config)
+    expected = glm5_next.Glm5NextContext.from_dict(config)
     for name in ("tp_size", "tp_rank", "dp_size", "dp_rank", "ep_size", "ep_rank", "moe_tp_size", "moe_tp_rank"):
         assert getattr(model.text_cfg, name) == getattr(expected, name)
     model.text_cfg._validate_moe_parallelism()
@@ -153,7 +152,9 @@ def test_bf16_expert_partition_matches_unsharded(graph_friendly: bool, moe_tp_si
     output = torch.zeros_like(expected)
     for ep_rank in range(2):
         for moe_tp_rank in range(moe_tp_size):
-            shard_config = replace(config, ep_size=2, ep_rank=ep_rank, moe_tp_size=moe_tp_size, moe_tp_rank=moe_tp_rank)
+            shard_config = config.with_runtime(
+                ep_size=2, ep_rank=ep_rank, moe_tp_size=moe_tp_size, moe_tp_rank=moe_tp_rank
+            )
             shard = glm5_next.Glm5NextExperts(shard_config, torch.float32, torch.device("cpu"))
             expert_slice = slice(ep_rank * 2, (ep_rank + 1) * 2)
             inter_slice = slice(moe_tp_rank * shard.intermediate_dim, (moe_tp_rank + 1) * shard.intermediate_dim)
@@ -517,7 +518,7 @@ def test_native_numerical_fixture_is_away_from_input_quantization_ties(rows: int
 def test_quantized_expert_scales_are_loaded_in_kernel_dtypes(
     monkeypatch: pytest.MonkeyPatch, shape: tuple[int, ...]
 ) -> None:
-    config = glm5_next.Glm5NextConfig(
+    config = glm5_next.Glm5NextContext(
         hidden_size=8,
         n_routed_experts=4,
         num_experts_per_tok=2,
@@ -597,7 +598,7 @@ def test_quantized_expert_scales_are_loaded_in_kernel_dtypes(
 
 
 def test_nonquantized_experts_do_not_allocate_quantization_scales() -> None:
-    config = glm5_next.Glm5NextConfig(
+    config = glm5_next.Glm5NextContext(
         hidden_size=8,
         n_routed_experts=4,
         num_experts_per_tok=2,

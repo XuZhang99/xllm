@@ -16,10 +16,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import torch
 import torch.nn as nn
+from transformers import GlmMoeDsaConfig
 
 from xllm.python import kernels
 from xllm.python.layers import Attention, GatedMLP, RMSNorm, RotaryEmbedding, RowParallelLinear
@@ -36,36 +35,35 @@ from xllm.python.model_loader import (
 )
 from xllm.python.models.dspark import DSparkForCausalLMBase
 from xllm.python.models.qwen3_dflash import DFlashContextProjection, _load_reference_quarot_rotation
-from xllm.python.models.qwen3_dspark import Qwen3DSparkConfig
+from xllm.python.models.qwen3_dspark import Qwen3DSparkContext
 
 
-@dataclass
-class Glm5DSparkConfig(Qwen3DSparkConfig):
-    q_lora_rank: int = 2048
-    kv_lora_rank: int = 512
-    qk_nope_head_dim: int = 192
-    qk_rope_head_dim: int = 64
-    v_head_dim: int = 256
-    rope_interleave: bool = True
+class Glm5DSparkContext(Qwen3DSparkContext):
+    """Dense MLA draft using the Transformers GLM architecture config."""
+
+    config_module = "glm_moe_dsa"
+    config_name = "GlmMoeDsaConfig"
 
     @classmethod
-    def from_dict(cls, config: dict) -> Glm5DSparkConfig:
+    def from_dict(cls, config: dict) -> Glm5DSparkContext:
         values = dict(config.get("transformer_layer_config") or {})
         values.update({key: value for key, value in config.items() if value is not None})
-        values["head_dim"] = int(values.get("qk_nope_head_dim", 192)) + int(values.get("qk_rope_head_dim", 64))
-        values["n_kv_heads"] = 1
-        values["sliding_window"] = max(int(values.get("sliding_window") or 0), 0)
+        if int(values.get("sliding_window") or 0) > 0:
+            raise ValueError("MLA DSpark supports bias-free full attention only")
+        values.pop("n_kv_heads", None)
+        values["num_key_value_heads"] = 1
         values.setdefault("tie_word_embeddings", False)
-        base = Qwen3DSparkConfig.from_dict(values)
-        return cls(
-            **base.__dict__,
-            q_lora_rank=int(values.get("q_lora_rank", 2048)),
-            kv_lora_rank=int(values.get("kv_lora_rank", 512)),
-            qk_nope_head_dim=int(values.get("qk_nope_head_dim", 192)),
-            qk_rope_head_dim=int(values.get("qk_rope_head_dim", 64)),
-            v_head_dim=int(values.get("v_head_dim", 256)),
-            rope_interleave=bool(values.get("rope_interleave", True)),
+        # The draft has dense MLPs and full MLA, without the target's MoE/DSA.
+        values["first_k_dense_replace"] = int(
+            values.get("n_layers", values.get("num_hidden_layers", GlmMoeDsaConfig.num_hidden_layers))
         )
+        values["index_topk"] = 0
+        return super().from_dict(values)
+
+    @property
+    def head_dim(self) -> int:
+        # Transformers head_dim denotes the RoPE slice for this architecture.
+        return self.qk_nope_head_dim + self.qk_rope_head_dim
 
     def head_split(self) -> tuple[int, int]:
         return mla_head_split(self.n_heads, self.tp_size)
@@ -90,7 +88,7 @@ def _apply_rope(value: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, *, in
 
 
 class Glm5DSparkAttention(Attention):
-    def __init__(self, cfg: Glm5DSparkConfig, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5DSparkContext, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
         heads, _ = cfg.head_split()
         super().__init__(
             heads, 1, cfg.kv_lora_rank + cfg.qk_rope_head_dim, cfg.head_dim**-0.5, 0, layer_id, causal=False
@@ -152,7 +150,7 @@ class Glm5DSparkAttention(Attention):
 
 
 class Glm5DSparkDecoderLayer(nn.Module):
-    def __init__(self, cfg: Glm5DSparkConfig, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5DSparkContext, layer_id: int, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.layer_id = layer_id
         self.input_layernorm = RMSNorm(cfg.hidden_size, cfg.rms_norm_eps, dtype=dtype, device=device)
@@ -173,7 +171,7 @@ class Glm5DSparkDecoderLayer(nn.Module):
 
 
 class Glm5DSparkModel(nn.Module):
-    def __init__(self, cfg: Glm5DSparkConfig, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm5DSparkContext, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.cfg, self.dtype, self.device = cfg, dtype, device
         self.embed_tokens = None
@@ -238,7 +236,7 @@ class Glm5DSparkForCausalLM(DSparkForCausalLMBase):
             raise NotImplementedError(
                 "Python MLA DSpark requires unsharded KV caches; use kv_split_size=1 and cp_size=1"
             )
-        cfg = Glm5DSparkConfig.from_dict(config)
+        cfg = Glm5DSparkContext.from_dict(config)
         cfg.validate()
         dtype = self.resolve_dtype(config.get("dtype") or config.get("torch_dtype"))
         device = torch.device(config.get("device", "npu"))

@@ -23,7 +23,7 @@ import torch
 
 from xllm.python.attention.backend import LayerCache
 from xllm.python.model_executor.forward_context import ForwardContext
-from xllm.python.models.qwen3_5 import Qwen3_5Config
+from xllm.python.models.qwen3_5 import Qwen35Context
 
 
 def gemma_rms_norm(
@@ -36,7 +36,7 @@ def gemma_rms_norm(
     return normalized * (weight + 1.0)
 
 
-def make_config(**overrides: Any) -> Qwen3_5Config:
+def make_config(**overrides: Any) -> Qwen35Context:
     values = {
         "hidden_size": 64,
         "num_hidden_layers": 1,
@@ -65,7 +65,7 @@ def make_config(**overrides: Any) -> Qwen3_5Config:
         "ep_rank": 0,
     }
     values.update(overrides)
-    return Qwen3_5Config.from_dict(values)
+    return Qwen35Context.from_dict(values)
 
 
 class StateDict:
@@ -88,7 +88,7 @@ class ConstantModule(torch.nn.Module):
         return self.value
 
 
-def make_linear_config(**overrides: Any) -> Qwen3_5Config:
+def make_linear_config(**overrides: Any) -> Qwen35Context:
     values = dict(
         hidden_size=8,
         num_hidden_layers=1,
@@ -109,7 +109,7 @@ def make_linear_config(**overrides: Any) -> Qwen3_5Config:
     return make_config(**values)
 
 
-def make_moe_checkpoint(cfg: Qwen3_5Config) -> dict[str, torch.Tensor]:
+def make_moe_checkpoint(cfg: Qwen35Context) -> dict[str, torch.Tensor]:
     experts, intermediate, hidden = cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size
     gate_up = torch.arange(experts * 2 * intermediate * hidden, dtype=torch.float32)
     down = torch.arange(experts * hidden * intermediate, dtype=torch.float32)

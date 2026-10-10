@@ -21,7 +21,7 @@ from xllm.python import kernels, registry
 from xllm.python.layers import DFlash2GroupedConv
 from xllm.python.models.qwen3_dflash2 import (
     DFlash2CandidateSelector,
-    DFlash2Qwen3Config,
+    DFlash2Qwen3Context,
     DFlash2Qwen3ForCausalLM,
     DFlash2Qwen3Model,
 )
@@ -57,8 +57,8 @@ def _config_dict(**overrides) -> dict:
     return values
 
 
-def _config(**overrides) -> DFlash2Qwen3Config:
-    config = DFlash2Qwen3Config.from_dict(_config_dict(**overrides))
+def _config(**overrides) -> DFlash2Qwen3Context:
+    config = DFlash2Qwen3Context.from_dict(_config_dict(**overrides))
     config.validate()
     return config
 
@@ -90,7 +90,7 @@ def test_config_accepts_nested_and_reflected_dflash_geometry() -> None:
             "selector_top_k": 2,
         },
     )
-    nested = DFlash2Qwen3Config.from_dict(nested_values)
+    nested = DFlash2Qwen3Context.from_dict(nested_values)
     nested.validate()
 
     speculators_values = _config_dict(
@@ -105,7 +105,7 @@ def test_config_accepts_nested_and_reflected_dflash_geometry() -> None:
         selector_rank=2,
         selector_top_k=2,
     )
-    speculators = DFlash2Qwen3Config.from_dict(speculators_values)
+    speculators = DFlash2Qwen3Context.from_dict(speculators_values)
     speculators.validate()
 
     assert nested.block_size == reflected.block_size

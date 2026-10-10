@@ -32,9 +32,9 @@ from xllm.python.model_executor.cp_utils import cp_merge_rows, cp_shard_rows
 from xllm.python.model_loader import W8A8WeightLoader
 from xllm.python.models.base import PyModelBase
 from xllm.python.models.deepseek_v32 import (
-    DeepseekV3Config,
     DeepseekV3ForCausalLM,
     DeepseekV3Model,
+    DeepseekV32Context,
     DeepseekYarnRotaryEmbedding,
 )
 
@@ -51,7 +51,7 @@ _MTP_NORM_ALIASES: dict[str, tuple[str, ...]] = {
 class DeepseekV32MtpModel(DeepseekV3Model):
     """MTP body matching ``MtpModelImplBase`` and ``DeepseekV32MtpModel``."""
 
-    def __init__(self, cfg: DeepseekV3Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: DeepseekV32Context, dtype: torch.dtype, device: torch.device) -> None:
         nn.Module.__init__(self)
         tp = cfg.tp_size
         assert cfg.hidden_size % tp == 0

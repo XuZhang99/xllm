@@ -28,8 +28,7 @@ Deepstack flow:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -48,8 +47,9 @@ from xllm.python.model_loader import (
     load_causal_lm_weights,
 )
 from xllm.python.models.base import PyModelBase
+from xllm.python.models.model_config import ModelContext
 from xllm.python.models.qwen3 import (
-    Qwen3Config,
+    Qwen3Context,
     Qwen3DecoderLayer,
 )
 
@@ -58,60 +58,18 @@ from xllm.python.models.qwen3 import (
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class Qwen3VLVisionConfig:
-    """Configuration for the Qwen3-VL vision tower."""
+class Qwen3VLTextContext(Qwen3Context):
+    """Qwen3-VL text architecture with the shared Qwen3 execution helpers."""
 
-    deepstack_visual_indexes: list[int] = field(default_factory=lambda: [8, 16, 24])
-    depth: int = 27
-    hidden_size: int = 1152
-    num_heads: int = 16
-    patch_size: int = 16
-    temporal_patch_size: int = 2
-    spatial_merge_size: int = 2
-    intermediate_size: int = 4304
-    out_hidden_size: int = 5120
-    in_channels: int = 3
-    hidden_act: str = "gelu_pytorch_tanh"
-    num_position_embeddings: int = 2304
+    config_module = "qwen3_vl"
+    config_name = "Qwen3VLTextConfig"
 
-    @classmethod
-    def from_dict(cls, d: dict) -> Qwen3VLVisionConfig:
-        def pick(*keys: str, default: Any = None) -> Any:
-            for k in keys:
-                if k in d and d[k] is not None:
-                    return d[k]
-            return default
 
-        # PyCausalLM passes a flat ModelArgs dict (per REGISTER_MODEL_ARGS in
-        # models/vlm/qwen3_vl.h): vision fields carry the ``mm_`` prefix. Fall
-        # back to the nested HF ``vision_config.*`` layout for standalone tests.
-        return cls(
-            deepstack_visual_indexes=list(
-                pick(
-                    "mm_deepstack_visual_indexes",
-                    "deepstack_visual_indexes",
-                    default=[8, 16, 24],
-                )
-            ),
-            depth=int(pick("mm_num_hidden_layers", "depth", default=27)),
-            hidden_size=int(pick("mm_hidden_size", "hidden_size", default=1152)),
-            num_heads=int(pick("mm_num_attention_heads", "num_heads", default=16)),
-            patch_size=int(pick("mm_patch_size", "patch_size", default=16)),
-            temporal_patch_size=int(pick("mm_temporal_patch_size", "temporal_patch_size", default=2)),
-            spatial_merge_size=int(pick("mm_spatial_merge_size", "spatial_merge_size", default=2)),
-            intermediate_size=int(pick("mm_intermediate_size", "intermediate_size", default=4304)),
-            out_hidden_size=int(pick("mm_projection_dim", "out_hidden_size", default=5120)),
-            in_channels=int(pick("mm_num_channels", "in_channels", default=3)),
-            hidden_act=str(pick("mm_hidden_act", "hidden_act", default="gelu_pytorch_tanh")),
-            num_position_embeddings=int(
-                pick(
-                    "mm_num_position_embeddings",
-                    "num_position_embeddings",
-                    default=2304,
-                )
-            ),
-        )
+class Qwen3VLVisionContext(ModelContext):
+    """Execution view over the Transformers architecture config."""
+
+    config_module = "qwen3_vl"
+    config_name = "Qwen3VLVisionConfig"
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +352,7 @@ class Qwen3VLVisionTransformer(nn.Module):
 
     def __init__(
         self,
-        vision_config: Qwen3VLVisionConfig,
+        vision_config: Qwen3VLVisionContext,
         dtype: torch.dtype,
         device: torch.device,
     ) -> None:
@@ -670,7 +628,7 @@ class Qwen3VLModel(nn.Module):
     corresponding deepstack embedding is added to the hidden states.
     """
 
-    def __init__(self, cfg: Qwen3Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Qwen3VLTextContext, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__()
         self.cfg = cfg
         tp = cfg.tp_size
@@ -811,17 +769,10 @@ class Qwen3VLForConditionalGeneration(PyModelBase):
         # build_config_dict via visit_properties): text fields are top-level
         # (hidden_size, n_layers, n_heads, tie_word_embeddings, tp_size, ...),
         # vision fields are "mm_"-prefixed, and mrope_section is
-        # "rope_scaling_mrope_section". Both Qwen3Config.from_dict and
-        # Qwen3VLVisionConfig.from_dict read this flat layout directly.
-        vision_cfg = Qwen3VLVisionConfig.from_dict(config)
-        text_cfg = Qwen3Config.from_dict(config)
-        # Qwen3-VL uses multimodal RoPE (mRoPE): positions arrive as [3, N]
-        # (time/height/width). Propagate mrope_section so the LLM can build the
-        # mRoPE cos/sin table for prefill.
-        rope_scaling = config.get("text_config", {}).get("rope_scaling", {}) or {}
-        mrope_section = config.get("rope_scaling_mrope_section") or rope_scaling.get("mrope_section") or []
-        text_cfg.mrope_section = list(mrope_section)
-
+        # "rope_scaling_mrope_section". Both Qwen3VLTextContext.from_dict and
+        # Qwen3VLVisionContext.from_dict read this flat layout directly.
+        vision_cfg = Qwen3VLVisionContext.from_dict(config)
+        text_cfg = Qwen3VLTextContext.from_dict(config)
         dtype = self.resolve_dtype(config.get("dtype") or config.get("torch_dtype"))
         device = torch.device(config.get("device", "cuda"))
         self.dtype = dtype

@@ -31,6 +31,10 @@ Repository = "https://github.com/xLLM-AI/xllm"
 [project.scripts]
 xllm = "xllm.launch_server:main"
 
+[project.optional-dependencies]
+# Shared baseline for every supported Python model, including GLM-5-Next.
+python-models = ["transformers>=5.19.0,<5.20"]
+
 [tool.setuptools.dynamic]
 readme = { file = ["README.md"], content-type = "text/markdown" }
 version = { file = ["version.txt"] }

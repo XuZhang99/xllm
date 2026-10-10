@@ -22,7 +22,7 @@ import torch.nn as nn
 
 import xllm.python.models.qwen3 as qwen3_module
 from xllm.python.models.aux_hidden_capture import AuxHiddenCapture
-from xllm.python.models.qwen3 import Qwen3Config, Qwen3Model
+from xllm.python.models.qwen3 import Qwen3Context, Qwen3Model
 
 
 class _Embedding(nn.Module):
@@ -60,8 +60,8 @@ class _FinalNorm(nn.Module):
         return (hidden if residual is None else hidden + residual), residual
 
 
-def _config(*, layers_to_capture: tuple[int, ...]) -> Qwen3Config:
-    return Qwen3Config(
+def _config(*, layers_to_capture: tuple[int, ...]) -> Qwen3Context:
+    return Qwen3Context(
         hidden_size=2,
         n_layers=3,
         n_heads=1,
@@ -88,7 +88,7 @@ def _model(monkeypatch: pytest.MonkeyPatch, layers_to_capture: tuple[int, ...]) 
 
 
 def test_qwen3_config_reads_capture_layers() -> None:
-    config = Qwen3Config.from_dict({"layers_to_capture": [3, 1]})
+    config = Qwen3Context.from_dict({"layers_to_capture": [3, 1]})
 
     assert config.layers_to_capture == (3, 1)
 

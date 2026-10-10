@@ -24,8 +24,7 @@ The model does not import FlashInfer, own wrappers, or call plan.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Any, cast
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -54,60 +53,14 @@ from xllm.python.model_loader import (
 )
 from xllm.python.models.aux_hidden_capture import AuxHiddenCapture
 from xllm.python.models.base import PyModelBase
+from xllm.python.models.model_config import ModelContext
 
 
-@dataclass
-class Qwen3Config:
-    hidden_size: int = 1024
-    n_layers: int = 28
-    n_heads: int = 16
-    n_kv_heads: int = 8
-    head_dim: int = 128
-    intermediate_size: int = 3072
-    rms_norm_eps: float = 1e-6
-    rope_theta: float = 1e6
-    max_position_embeddings: int = 40960
-    vocab_size: int = 151936
-    tie_word_embeddings: bool = True
-    sliding_window: int = 0
-    attention_bias: bool = False
-    tp_size: int = 1
-    tp_rank: int = 0
-    dp_size: int = 1
-    dp_rank: int = 0
-    layers_to_capture: tuple[int, ...] = ()
-    mrope_section: Sequence[int] = ()
+class Qwen3Context(ModelContext):
+    """Execution view over the Transformers architecture config."""
 
-    @classmethod
-    def from_dict(cls, d: dict) -> Qwen3Config:
-        def pick(*keys: str, default: Any = None) -> Any:
-            for k in keys:
-                if k in d and d[k] is not None:
-                    return d[k]
-            return default
-
-        hidden = int(pick("hidden_size", default=1024))
-        n_heads = int(pick("n_heads", "num_attention_heads", default=16))
-        return cls(
-            hidden_size=hidden,
-            n_layers=int(pick("n_layers", "num_hidden_layers", default=28)),
-            n_heads=n_heads,
-            n_kv_heads=int(pick("n_kv_heads", "num_key_value_heads", default=n_heads)),
-            head_dim=int(pick("head_dim", default=hidden // n_heads)),
-            intermediate_size=int(pick("intermediate_size", default=3072)),
-            rms_norm_eps=float(pick("rms_norm_eps", default=1e-6)),
-            rope_theta=float(pick("rope_theta", default=1e6)),
-            max_position_embeddings=int(pick("max_position_embeddings", default=40960)),
-            vocab_size=int(pick("vocab_size", default=151936)),
-            tie_word_embeddings=bool(pick("tie_word_embeddings", default=True)),
-            sliding_window=int(pick("sliding_window", default=0)),
-            attention_bias=bool(pick("attention_bias", default=False)),
-            tp_size=int(pick("tp_size", default=1)),
-            tp_rank=int(pick("tp_rank", default=0)),
-            dp_size=int(pick("dp_size", default=1)),
-            dp_rank=int(pick("dp_rank", default=0)),
-            layers_to_capture=tuple(int(layer_id) for layer_id in pick("layers_to_capture", default=[])),
-        )
+    config_module = "qwen3"
+    config_name = "Qwen3Config"
 
     def head_split(self) -> tuple[int, int]:
         """Per-rank ``(num_heads, num_kv_heads)``."""
@@ -122,7 +75,7 @@ class Qwen3Attention(nn.Module):
 
     def __init__(
         self,
-        cfg: Qwen3Config,
+        cfg: Qwen3Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -233,7 +186,7 @@ class Qwen3Attention(nn.Module):
 class Qwen3DecoderLayer(nn.Module):
     def __init__(
         self,
-        cfg: Qwen3Config,
+        cfg: Qwen3Context,
         layer_id: int,
         dtype: torch.dtype,
         device: torch.device,
@@ -285,7 +238,7 @@ class Qwen3DecoderLayer(nn.Module):
 class Qwen3Model(nn.Module):
     def __init__(
         self,
-        cfg: Qwen3Config,
+        cfg: Qwen3Context,
         dtype: torch.dtype,
         device: torch.device,
         *,
@@ -371,7 +324,7 @@ class Qwen3ForCausalLM(PyModelBase):
 
     def __init__(self, config: dict) -> None:
         super().__init__()
-        self.cfg = Qwen3Config.from_dict(config)
+        self.cfg = Qwen3Context.from_dict(config)
         dtype = self.resolve_dtype(config.get("dtype") or config.get("torch_dtype"))
         device = torch.device(config.get("device", "cuda"))
         self.dtype = dtype

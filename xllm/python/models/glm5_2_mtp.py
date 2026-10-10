@@ -22,7 +22,7 @@ from xllm.python.model_executor.cp_utils import CpContext
 from xllm.python.model_executor.forward_context import get_forward_context, record_layer_event
 from xllm.python.models.deepseek_v32_mtp import DeepseekV32MtpModel, _compute_mtp_logits, _load_mtp_weights
 from xllm.python.models.glm5_2 import (
-    Glm52Config,
+    Glm52Context,
     Glm52DecoderLayer,
     Glm52ForCausalLM,
     _attn_dp_gather_inputs,
@@ -30,7 +30,7 @@ from xllm.python.models.glm5_2 import (
 )
 
 
-def _resolve_mtp_topk_reuse(cfg: Glm52Config) -> tuple[bool, ...]:
+def _resolve_mtp_topk_reuse(cfg: Glm52Context) -> tuple[bool, ...]:
     """Resolve the native DSA cross-layer/cross-draft reuse plan."""
     if not cfg.index_share_for_mtp_iteration:
         return (False,) * cfg.n_layers
@@ -62,12 +62,12 @@ def _resolve_mtp_topk_reuse(cfg: Glm52Config) -> tuple[bool, ...]:
 class Glm52MtpModel(DeepseekV32MtpModel):
     """GLM checkpoint, position-zero, top-k and recurrent-output adapters."""
 
-    def __init__(self, cfg: Glm52Config, dtype: torch.dtype, device: torch.device) -> None:
+    def __init__(self, cfg: Glm52Context, dtype: torch.dtype, device: torch.device) -> None:
         super().__init__(cfg, dtype, device)
         self._reuse_topk_by_layer = _resolve_mtp_topk_reuse(cfg)
 
     def _make_decoder(
-        self, cfg: Glm52Config, layer_id: int, dtype: torch.dtype, device: torch.device
+        self, cfg: Glm52Context, layer_id: int, dtype: torch.dtype, device: torch.device
     ) -> Glm52DecoderLayer:
         return Glm52DecoderLayer(cfg, layer_id, dtype, device)
 

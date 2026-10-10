@@ -23,7 +23,7 @@ from xllm.python import distributed, kernels
 from xllm.python.models.qwen3 import Qwen3Model
 from xllm.python.models.qwen3_dflash import (
     DFlashContextProjection,
-    DFlashQwen3Config,
+    DFlashQwen3Context,
     DFlashQwen3ForCausalLM,
     DFlashQwen3Model,
 )
@@ -53,8 +53,8 @@ def _config_dict(**overrides) -> dict:
     return values
 
 
-def _config(**overrides) -> DFlashQwen3Config:
-    config = DFlashQwen3Config.from_dict(_config_dict(**overrides))
+def _config(**overrides) -> DFlashQwen3Context:
+    config = DFlashQwen3Context.from_dict(_config_dict(**overrides))
     config.validate()
     return config
 

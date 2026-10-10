@@ -28,7 +28,7 @@ from xllm.python.layers.npu.qwen3_5.gdn_metadata import (
 )
 
 if TYPE_CHECKING:
-    from xllm.python.models.qwen3_5 import Qwen3_5Config
+    from xllm.python.models.qwen3_5 import Qwen35Context
 
 _MEGA_GDN_CHUNK_SIZE = 128
 
@@ -66,7 +66,7 @@ def _compute_mega_prefill_num_matrices(query_lengths: list[int], num_value_heads
 class Qwen3_5GdnMetadataBuilder:
     metadata_type: type[object] = GdnMetadata
 
-    def __init__(self, cfg: Qwen3_5Config) -> None:
+    def __init__(self, cfg: Qwen35Context) -> None:
         if cfg.linear_conv_kernel_dim != 4:
             raise NotImplementedError("Qwen3.5 MegaGdn requires convolution width 4")
         if cfg.linear_key_head_dim != 128 or cfg.linear_value_head_dim != 128:
