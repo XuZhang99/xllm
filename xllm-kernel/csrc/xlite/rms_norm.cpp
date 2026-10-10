@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/library.h>
 #include <torch/types.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -103,7 +104,9 @@ torch::Tensor xlite_rms_norm(const torch::Tensor& input,
                                 ACL_DEVICE_INFO_VECTOR_CORE_NUM,
                                 &vector_cores)) == (ACL_SUCCESS));
   CHECK((vector_cores) > (0));
-  const uint32_t blocks = static_cast<uint32_t>(vector_cores);
+  // GVirt distributes rows across blocks. Idle blocks add device overhead
+  // without contributing work for decode-sized inputs.
+  const uint32_t blocks = static_cast<uint32_t>(std::min(rows, vector_cores));
   const aclrtStream stream =
       c10_npu::getCurrentNPUStream(input.device().index()).stream();
   XliteNormLauncher* launcher = input.scalar_type() == torch::kBFloat16
