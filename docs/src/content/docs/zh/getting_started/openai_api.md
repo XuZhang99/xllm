@@ -231,7 +231,7 @@ for choice in response.choices:
 | --- | --- |
 | `max_tokens` | 正整数，限制输出 token 数。文本补全和 Python `SamplingParams` 默认值为 16；对话接口省略该值或 Python 设置 `max_tokens=None` 时使用剩余模型上下文长度。 |
 | `max_completion_tokens` | 仅用于对话；与 `max_tokens` 同时提供时优先使用该值。 |
-| `temperature` | `[0, 2]` 内的有限数，默认 `1.0`。小于 `0.01` 的正数会提高到 `0.01`；`0` 表示贪心解码，并关闭 `top_k`、`top_p` 和 `min_p`。 |
+| `temperature` | 非负有限数，默认 `1.0`；与 vLLM `0.23.0` 一致，允许大于 `2`。小于 `0.01` 的正数会提高到 `0.01`；`0` 表示贪心解码，并关闭 `top_k`、`top_p` 和 `min_p`。 |
 | `top_p` | 采样截断阈值，范围为 `(0, 1]`。 |
 | `n` | 返回候选数；`temperature=0` 时必须为 `1`。 |
 | `stop` | 字符串或由非空字符串组成的列表。 |
@@ -270,7 +270,7 @@ xLLM 的 `beam_width` 扩展请参阅[在线服务](/zh/getting_started/online_s
 ## 兼容性限制与错误处理
 
 - `seed`、`min_tokens`、`logit_bias`、`allowed_token_ids`、`bad_words` 和全词表 logprobs 要求 `enable_task_pipeline=false`。`seed`、`min_tokens` 和 `bad_words` 还要求 `num_speculative_tokens=0`；`bad_words` 要求 `enable_schedule_overlap=false`。REC 接口会拒绝新增的随机种子和 token 约束参数。
-- 非空的 `prompt_logprobs`、`logprob_token_ids`、`structured_outputs` 和 `prompt_embeds` 仍不受支持，会返回 HTTP 400。此接口没有实现 vLLM `SamplingParams` 的全部引擎层字段。
+- 非空的 `prompt_logprobs`、`logprob_token_ids`、`structured_outputs` 和 `prompt_embeds` 仍不受支持，会返回 HTTP 400。此接口没有实现 vLLM `0.23.0` `SamplingParams` 的全部引擎层字段。
 - 频率惩罚和存在惩罚仅统计生成 token，重复惩罚同时考虑提示词。`ignore_eos=true` 时显式指定的 `stop_token_ids` 仍然生效。
 - 不支持 `response_format={"type": "json_schema"}`。对话接口的 `json_object` 需要服务端 JSON 输出配置，不能视为支持 JSON Schema。
 - Embedding 请求不支持 `dimensions`，详见 [Embedding 使用说明](/zh/getting_started/openai_api_embeddings/)。

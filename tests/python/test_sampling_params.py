@@ -44,8 +44,8 @@ def test_normalizes_greedy_sampling_and_optional_values() -> None:
     assert params.bad_words == []
     assert params.logit_bias == {}
     assert SamplingParams(stop=None, stop_token_ids=None).stop_token_ids == []
-    assert SamplingParams(stop_token_ids=[2, 2, 3]).stop_token_ids == [2, 3]
-    assert SamplingParams(bad_words=["bad", "bad"]).bad_words == ["bad"]
+    assert SamplingParams(stop_token_ids=[2, 2, 3]).stop_token_ids == [2, 2, 3]
+    assert SamplingParams(bad_words=["bad", "bad"]).bad_words == ["bad", "bad"]
 
 
 def test_preserves_sampling_constraints() -> None:
@@ -60,11 +60,19 @@ def test_preserves_sampling_constraints() -> None:
     assert params.bad_words == ["bad"]
 
 
+@pytest.mark.parametrize("temperature", [2.01, 3.0, 100.0, 1e30])
+def test_accepts_finite_temperatures_above_two(temperature: float) -> None:
+    params = SamplingParams(temperature=temperature)
+    assert params.temperature == pytest.approx(temperature)
+    assert params.to_request_params().temperature == pytest.approx(temperature)
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"temperature": 3},
+        {"temperature": -0.01},
         {"temperature": float("nan")},
+        {"temperature": float("inf")},
         {"temperature": 0, "n": 2},
         {"top_p": 0},
         {"top_k": -2},

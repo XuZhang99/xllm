@@ -110,12 +110,13 @@ TEST(ChatCompletionRequestTest, GreedySamplingRequiresOneChoice) {
   }
 }
 
-TEST(ChatCompletionRequestTest, RejectsTemperaturesAboveTwo) {
+TEST(ChatCompletionRequestTest, AcceptsTemperaturesAboveTwo) {
   const auto [status, body] = normalize_openai_request(
       R"({"prompt":"hi","messages":[{"role":"user","content":"hi"}],"temperature":3})",
       OpenAIEndpoint::CHAT,
       "model");
-  EXPECT_FALSE(status.ok());
+  ASSERT_TRUE(status.ok()) << status.message();
+  EXPECT_EQ(nlohmann::json::parse(body)["temperature"], 3);
 }
 
 TEST(ChatCompletionRequestTest, SchemaAndSamplingErrorsHaveDistinctTypes) {

@@ -672,9 +672,9 @@ bool RequestParams::verify_params(OutputCallback callback) const {
     }
   }
 
-  if (!std::isfinite(temperature) || temperature < 0.0 || temperature > 2.0) {
+  if (!std::isfinite(temperature) || temperature < 0.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "temperature must be finite and in [0, 2]",
+                        "temperature must be finite and non-negative",
                         service_request_id,
                         source_xservice_addr);
     return false;

@@ -40,7 +40,7 @@ message CompletionRequest {
   // the prompt token count + max_tokens can't exceed the model's max context length.
   optional uint32 max_tokens = 4;
 
-  // temperature of the sampling, between [0, 2]. default = 1.0
+  // finite, non-negative sampling temperature. default = 1.0
   // higher value will make the output more random.
   optional float temperature = 5;
 

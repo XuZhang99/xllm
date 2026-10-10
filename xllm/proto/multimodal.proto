@@ -80,7 +80,7 @@ message MMChatRequest {
   // "auto" - the model can pick between an end-user or calling a function.
   // string function_call = 4;
 
-  // temperature of the sampling, between [0, 2]. default = 1.0
+  // finite, non-negative sampling temperature. default = 1.0
   // higher value will make the output more random, while a lower value will make it more deterministic.
   // it is recommended altering this or top_p but not both.
   optional float temperature = 5;

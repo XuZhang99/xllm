@@ -231,7 +231,7 @@ for choice in response.choices:
 | --- | --- |
 | `max_tokens` | Positive output-token limit. Completions and Python `SamplingParams` default to 16. Omitted chat limits and Python `max_tokens=None` use the remaining model context. |
 | `max_completion_tokens` | Chat-only alias; takes precedence over `max_tokens` when both are present. |
-| `temperature` | Finite value in `[0, 2]`, default `1.0`. Positive values below `0.01` are raised to `0.01`; `0` selects greedy decoding and disables `top_k`, `top_p`, and `min_p`. |
+| `temperature` | Finite, non-negative value, default `1.0`; values above `2` are accepted, matching vLLM `0.23.0`. Positive values below `0.01` are raised to `0.01`; `0` selects greedy decoding and disables `top_k`, `top_p`, and `min_p`. |
 | `top_p` | Sampling cutoff in `(0, 1]`. |
 | `n` | Number of returned candidates; must be `1` with `temperature=0`. |
 | `stop` | A string or list of non-empty strings. |
@@ -270,7 +270,7 @@ For xLLM's `beam_width` extension, see [Online Service](/en/getting_started/onli
 ## Compatibility limits and errors
 
 - `seed`, `min_tokens`, `logit_bias`, `allowed_token_ids`, `bad_words`, and full-vocabulary logprobs require `enable_task_pipeline=false`. `seed`, `min_tokens`, and `bad_words` also require `num_speculative_tokens=0`; `bad_words` requires `enable_schedule_overlap=false`. REC endpoints reject the new seed and token-constraint controls.
-- Non-null `prompt_logprobs`, `logprob_token_ids`, `structured_outputs`, and `prompt_embeds` remain unsupported and return HTTP 400. This interface does not implement all engine-level fields of vLLM's `SamplingParams`.
+- Non-null `prompt_logprobs`, `logprob_token_ids`, `structured_outputs`, and `prompt_embeds` remain unsupported and return HTTP 400. This interface does not implement all engine-level fields of vLLM `0.23.0` `SamplingParams`.
 - Frequency and presence penalties count generated tokens only; repetition penalties include prompt tokens. Explicit `stop_token_ids` remain active when `ignore_eos=true`.
 - `response_format={"type": "json_schema"}` is unsupported. Chat `json_object` requires the server's JSON-output configuration; it is not JSON Schema support.
 - Embedding requests do not support `dimensions`; see the [Embedding guide](/en/getting_started/openai_api_embeddings/).

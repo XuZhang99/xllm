@@ -79,7 +79,8 @@ TEST(SamplingProtocolTest, RejectsInvalidControlsBeforeGeneration) {
   for (const auto endpoint :
        {OpenAIEndpoint::CHAT, OpenAIEndpoint::COMPLETION}) {
     for (const auto& patch : std::vector<nlohmann::json>{
-             {{"temperature", 2.01}},
+             {{"temperature", -0.01}},
+             {{"temperature", 1e100}},
              {{"top_p", 0}},
              {{"min_p", -0.1}},
              {{"min_p", 1.1}},

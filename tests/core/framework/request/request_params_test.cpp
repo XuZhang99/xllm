@@ -121,15 +121,14 @@ TEST(RequestParamsTest, AcceptsNegativeFrequencyPenaltyAndMoreThanFourStops) {
   EXPECT_TRUE(params.verify_params([](RequestOutput) { return false; }));
 }
 
-TEST(RequestParamsTest, TemperatureMustBeFiniteAndWithinRange) {
+TEST(RequestParamsTest, TemperatureMustBeFiniteAndNonNegative) {
   RequestParams params;
-  for (const float temperature : {0.0f, 1.0f, 2.0f}) {
+  for (const float temperature :
+       {0.0f, 1.0f, 2.0f, 3.0f, 100.0f, std::numeric_limits<float>::max()}) {
     params.temperature = temperature;
     EXPECT_TRUE(params.verify_params([](RequestOutput) { return false; }));
   }
   for (const float temperature : {-1.0f,
-                                  3.0f,
-                                  100.0f,
                                   std::numeric_limits<float>::infinity(),
                                   std::numeric_limits<float>::quiet_NaN()}) {
     params.temperature = temperature;

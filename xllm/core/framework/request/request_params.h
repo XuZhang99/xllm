@@ -143,7 +143,7 @@ class RequestParams final {
   // < 1.0 encourage the model to repeat tokens. default = 1.0
   float repetition_penalty = 1.0;
 
-  // Finite sampling temperature in [0, 2]. Zero selects greedy decoding.
+  // Finite, non-negative sampling temperature. Zero selects greedy decoding.
   // higher value will make the output more random.
   float temperature = 1.0;
 

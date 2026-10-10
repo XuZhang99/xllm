@@ -82,8 +82,6 @@ class SamplingParams(_RequestParamsProxy):
             value = [value]
         if key in {"stop", "stop_token_ids", "bad_words"} and value is None:
             value = []
-        if key in {"stop_token_ids", "bad_words"}:
-            value = list(dict.fromkeys(value))
         if key == "max_tokens" and value is None:
             value = 0
         elif key == "max_tokens" and value < 1:
