@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <tuple>
@@ -75,7 +76,7 @@ TEST(TextCompletionRequestTest, GreedySamplingRequiresOneChoice) {
   }
 }
 
-TEST(TextCompletionRequestTest, Vllm023AcceptsTemperaturesAboveTwo) {
+TEST(TextCompletionRequestTest, AcceptsTemperaturesAboveTwo) {
   const auto [status, body] = normalize_openai_request(
       R"({"prompt":"hi","messages":[{"role":"user","content":"hi"}],"temperature":3})",
       OpenAIEndpoint::COMPLETION,
@@ -115,7 +116,7 @@ TEST(TextCompletionRequestTest, CompletionDefaultsAndExtendedStops) {
 
 TEST(TextCompletionRequestTest, UnsupportedSamplingControlsFailExplicitly) {
   for (const char* field :
-       {"seed", "min_p", "min_tokens", "logit_bias", "structured_outputs"}) {
+       {"prompt_logprobs", "structured_outputs", "logprob_token_ids"}) {
     auto request = nlohmann::json({{"prompt", "hi"}, {field, 1}});
     const auto [status, body] = normalize_openai_request(
         request.dump(), OpenAIEndpoint::COMPLETION, "model");
@@ -181,6 +182,46 @@ TEST(TextCompletionResponseTest, CompletionSeparatesFullAndStreamMetadata) {
     EXPECT_EQ(json["choices"][0].contains("prompt_logprobs"), !stream);
     EXPECT_EQ(json["usage"].contains("prompt_tokens_details"), !stream);
     EXPECT_FALSE(json["choices"][0]["logprobs"].contains("token_ids"));
+  }
+}
+
+TEST(TextCompletionResponseTest, TopLogprobsIncludesTheSampledToken) {
+  proto::CompletionResponse response;
+  auto* logprobs = response.add_choices()->mutable_logprobs();
+
+  // Sampled token outside top-k.
+  logprobs->add_tokens("A");
+  logprobs->add_token_logprobs(-32.5f);
+  auto* outside_top = logprobs->add_top_logprobs()->mutable_values();
+  (*outside_top)["Paris"] = -0.25f;
+  (*outside_top)["Par"] = -16.75f;
+
+  // Sampled token already inside top-k must not be duplicated.
+  logprobs->add_tokens("B");
+  logprobs->add_token_logprobs(-0.5f);
+  auto* inside_top = logprobs->add_top_logprobs()->mutable_values();
+  (*inside_top)["B"] = -0.5f;
+  (*inside_top)["C"] = -1.5f;
+
+  // A logprobs=0 request still returns the sampled token probability.
+  logprobs->add_tokens("D");
+  logprobs->add_token_logprobs(-2.0f);
+  logprobs->add_top_logprobs();
+
+  // Both sampled and top-k probabilities use the JSON probability floor.
+  logprobs->add_tokens("E");
+  logprobs->add_token_logprobs(-std::numeric_limits<float>::infinity());
+  auto* clipped_top = logprobs->add_top_logprobs()->mutable_values();
+  (*clipped_top)["F"] = -std::numeric_limits<float>::infinity();
+
+  const nlohmann::json expected =
+      nlohmann::json::array({{{"A", -32.5}, {"Paris", -0.25}, {"Par", -16.75}},
+                             {{"B", -0.5}, {"C", -1.5}},
+                             {{"D", -2.0}},
+                             {{"E", -9999.0}, {"F", -9999.0}}});
+  for (const bool stream : {false, true}) {
+    const auto json = openai_response_json(response, stream);
+    EXPECT_EQ(json["choices"][0]["logprobs"]["top_logprobs"], expected);
   }
 }
 

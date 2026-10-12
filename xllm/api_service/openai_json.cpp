@@ -21,6 +21,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <bit>
+#include <cstdint>
 
 #include "core/common/xllm_build_info.h"
 #include "core/util/uuid.h"
@@ -275,8 +276,12 @@ nlohmann::json openai_response_json(const proto::CompletionResponse& response,
                                  {"token_logprobs", values.token_logprobs()},
                                  {"text_offset", values.text_offset()},
                                  {"top_logprobs", nlohmann::json::array()}};
-      for (const auto& top : values.top_logprobs()) {
+      for (int32_t index = 0; index < values.top_logprobs_size(); ++index) {
+        const auto& top = values.top_logprobs(index);
         auto entry = nlohmann::json::object();
+        // Completion responses include the sampled token even outside top-k.
+        entry[values.tokens(index)] =
+            std::max(-9999.0f, values.token_logprobs(index));
         for (const auto& [token, value] : top.values()) {
           entry[token] = std::max(-9999.0f, value);
         }
