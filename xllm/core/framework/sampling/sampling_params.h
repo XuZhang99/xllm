@@ -36,6 +36,7 @@ struct RequestSamplingParam {
   float min_p = 0.0;
   std::optional<int64_t> seed;
   uint32_t min_tokens = 0;
+  bool use_speculative_sampling = false;
   int64_t vocab_size = 0;
   std::unordered_map<int32_t, float> logit_bias;
   std::optional<std::vector<int32_t>> allowed_token_ids;
@@ -150,6 +151,10 @@ struct SamplingParameters {
   torch::Tensor logits_bias;
   torch::Tensor seeds;
   torch::Tensor seed_offsets;
+  // Positions represented by the scheduler, before speculative/overlap repair.
+  torch::Tensor sampling_positions;
+  torch::Tensor min_tokens_remaining;
+  torch::Tensor min_token_mask;
 
   // [num_tokens] LongTensor
   torch::Tensor top_k;
@@ -201,8 +206,12 @@ struct SamplingParameters {
   bool use_beam_search = false;
 };
 
-// Draft proposals and acceptances executed by the verifier, before output
-// truncation. Accepted drafts exclude the target replacement/bonus token.
+// Correct scheduler sampling metadata with actual executed token positions.
+SamplingParameters sampling_params_for_positions(
+    const SamplingParameters& params,
+    const torch::Tensor& positions);
+
+// Draft proposals and acceptances before output truncation.
 struct SpeculativeTokenStats {
   int64_t accepted_tokens = 0;
   int64_t proposed_tokens = 0;
@@ -214,6 +223,9 @@ struct SampleOutput {
 
   // [num_seq, ...] FloatTensor
   torch::Tensor probs;
+
+  // Internal target-verification metadata; offsets use actual model positions.
+  torch::Tensor seed_offsets;
 
   // [num_seq, ...] FloatTensor
   torch::Tensor logprobs;
