@@ -378,6 +378,7 @@ export default defineConfig({
 						'design/graph_mode_design',
 						'design/generative_recommendation_design',
 						'dev_guide/ai_coding_workflow',
+						'dev_guide/xllm_kernel_dev',
 						'dev_guide/tilelang_ascend_kernel_dev',
 						'dev_guide/auto_config_dev',
 						'dev_guide/accuracy_testing',
