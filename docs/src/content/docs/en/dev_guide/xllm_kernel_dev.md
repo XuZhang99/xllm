@@ -242,7 +242,7 @@ described in its README.
 
 ```bash
 # CPU tests for shared infrastructure, numerical reports, and CLIs
-python -m pytest -q xllm-kernel/test --ignore=xllm-kernel/test/npu
+python -m pytest -q xllm-kernel/test --ignore=xllm-kernel/test/npu --ignore=xllm-kernel/test/distributed
 
 # Device integration tests: build the matching host/bridge first, then run
 # sequentially on idle devices
@@ -303,3 +303,120 @@ behavior. They are not evidence of NPU accuracy or performance.
   description.
 - Before adding JIT, state reset, multiple devices, or a new platform, define
   explicit interfaces and lifecycles, then add implementations.
+
+## 8. GLM-5.3 operator inventory and explicit adapters
+
+The initial expanded inventory follows `xllm/python/models/glm5_2.py`, its
+`deepseek_v32.py` parent path, `layers/embedding.py`, `layers/linear.py`, and
+`kernels_npu/{normalization,activation,quantization,rotary_embedding,moe,mla,sparse_attention}.py`.
+This is the full GLM-5.3 DSA model path, not the GLM-5.3 Flash model. The base
+is `feat/glm53-pytorch-kernel-package` at `26c4d550`.
+
+| Operation | NPU implementations |
+| --- | --- |
+| `add` | `torch`, `xlite` |
+| `all_gather` | `xllm_native`, `cann` |
+| `all_reduce` | `xllm_native`, `cann` |
+| `all_to_all_single` | `cann` |
+| `atb_matmul_ein_sum` | `xllm_native`, `torch`, `xlite` |
+| `atb_matmul_ein_sum_out` | `xllm_native` |
+| `dequant_swiglu_quant` | `xllm_native`, `cann` |
+| `dynamic_quant` | `xllm_native`, `cann`, `xlite` |
+| `embedding` | `torch`, `xlite` |
+| `fused_add_rms_norm` | `xllm_native`, `cann`, `xlite` |
+| `fused_add_rms_norm_dynamic_quant` | `cann` |
+| `grouped_matmul` | `cann` |
+| `grouped_matmul_out` | `xllm_native` |
+| `inplace_partial_rotary_mul` | `xllm_native`, `cann` |
+| `interleaved_rotary_embedding` | `cann`, `xlite` |
+| `layer_norm` | `torch`, `xlite` |
+| `lightning_indexer` | `xlite`, `xllm_native`, `torch` |
+| `lightning_indexer_out` | `xlite`, `xllm_native` |
+| `linear` | `torch`, `xlite` |
+| `moe_finalize_routing` | `cann` |
+| `moe_gate_routing` | `xlite`, `cann` |
+| `moe_gmm1` | `cann`, `xllm_native` |
+| `moe_token_dispatch` | `cann`, `xllm_native` |
+| `moe_token_unpermute` | `cann` |
+| `quant_matmul` | `xllm_native`, `cann` |
+| `quant_matmul_out` | `xllm_native` |
+| `quantize_per_tensor` | `xllm_native` |
+| `reduce_scatter` | `xllm_native`, `cann` |
+| `reshape_paged_cache` | `xllm_native`, `torch` |
+| `rms_norm` | `xllm_native`, `cann`, `xlite` |
+| `rms_norm_dynamic_quant` | `xllm_native`, `cann` |
+| `router_matmul` | `torch` |
+| `scatter_nd_update` | `xllm_native`, `torch` |
+| `sfa_dcp_remap` | `tilelang`, `torch` |
+| `silu_and_mul` | `xllm_native`, `cann`, `xlite` |
+| `sparse_flash_attention` | `xllm_native`, `torch` |
+| `sparse_flash_attention_out` | `xlite`, `xllm_native` |
+
+`torch` denotes an explicit PyTorch NPU composition. `cann` denotes a
+TorchNPU operator; `xllm_native` reuses the existing host schema, and
+`tilelang` resolves an existing compiled AOT operator. xlite uses pinned
+GVirt launchers on the current stream. Only the requested provider is loaded.
+
+New operation modules declare an `OPERATOR` and export `prepare`:
+
+```python
+from xllm_kernel.ops.dynamic_quant import prepare
+plan = prepare("npu", "aclgraph", "npu.cann.dynamic_quant")
+quantized, scale = plan.function(hidden)
+```
+
+Loaders return a callable before capture; `Operator` performs registration,
+freezing and preparation. The legacy explicit `register(registry)` entry point
+remains supported for existing integrations. Adding an adapter does not change
+the model's backend policy. Existing model calls, including compound MLA and
+MoE schedules, remain host-owned.
+
+For new numerical suites, `tensor_suite` builds operation-owned shape matrices.
+`Example` binds a tensor tree, a CPU reference, declared mutations, comparison
+tolerances and optional semantic canonicalizers. `TensorCase` carries metadata
+without loading a device SDK. `PreparedCase.reset` restores mutable inputs
+outside the timed event pairs; graph capture uses one operation for mutable
+cases. Per-operator test files share the lifecycle in `test/npu/operator_checks.py`.
+No package test is added to `tests/CMakeLists.txt`.
+
+Source audit boundaries:
+
+- Model defaults include hidden size 6144, vocabulary 154880, 256 experts and
+  top-8 routing. Embedding uses hidden-dimension TP shards (384 at TP=16).
+  Cases use decode/prefill row counts; local head and expert counts are explicit
+  CLI dimensions, not an inferred full deployment configuration.
+- xlite fused RMSNorm then BF16 quantization, FP16 intermediate quantized GEMMs,
+  and bitmap dispatch do not match the fused FP32/NZ contracts directly.
+  No duplicate name is registered to hide an extra rounding or layout change.
+- xlite indexer adapters pack the head weights and own/reset scratch tensors.
+  The sparse-attention `_out` adapter supports one-query BF16 decode without
+  LSE; compaction of padding indices, KV gather and all workspace costs are
+  timed. Fused MLA preparation remains host-owned. The existing TileLang
+  half-layout RoPE is not interleaved.
+- Native sparse attention keeps its distinct RoPE ACLNN entry point; the
+  legacy same-name CANN ABI is not used as a substitute. The independent CPU
+  attention reference checks the output and log-sum-exp, including causal
+  masks, shuffled pages and -1 sparse-index padding.
+- Lightning Indexer compares unique causal selections by their CPU scores
+  (1.5% tolerance), allowing numerical ties; exact index equality is not claimed.
+- MegaMoE, optional FP8 KV/INT8 index caches, fixed-shape MLAPO v2, and MTP
+  scheduler metadata need separate state/layout contracts. Ordinary ATen
+  tensor manipulation remains in the host. The present inventory is BF16/W8A8.
+
+Communication uses the generic `--distributed` CLI lifecycle under `torchrun`.
+It owns the default HCCL group, produces rank-specific reports and records
+per-repeat rank maxima. CANN ProcessGroup providers are eager-only; the native
+current-stream all-reduce/gather/reduce-scatter providers expose ACLGraph.
+Set `HCCL_OP_EXPANSION_MODE=AIV` before their graph tests. All-to-all is equal
+split and eager-only. See the package README for commands and exact domains.
+
+**Delivery status:** source and formatting checks only. No build, unit test,
+numerical run, benchmark, device execution or end-to-end measurement was
+performed for this draft. The new cases are validation specifications, not
+passing results.
+
+Routing and SwiGLU semantics were cross-checked against the official
+[MoeInitRoutingV2 API](https://www.hiascend.com/document/detail/en/Pytorch/2610/apiref/customapi/docs/en/custom_APIs/torch_npu/torch_npu-npu_moe_init_routing_v2.md)
+and [DequantSwigluQuant API](https://www.hiascend.com/document/detail/en/Pytorch/2610/apiref/customapi/docs/en/custom_APIs/torch_npu/torch_npu-npu_dequant_swiglu_quant.md).
+The installed runtime must provide those requested interfaces; preparation or
+execution fails visibly when it does not. Documentation is not binary ABI proof.

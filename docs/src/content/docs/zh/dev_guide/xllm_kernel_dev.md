@@ -183,7 +183,7 @@ reference。`numerics/report.py` 和 `benchmark/report.py` 使用通用标题，
 
 ```bash
 # 公共基础设施、数值报告和 CLI 的 CPU 测试
-python -m pytest -q xllm-kernel/test --ignore=xllm-kernel/test/npu
+python -m pytest -q xllm-kernel/test --ignore=xllm-kernel/test/npu --ignore=xllm-kernel/test/distributed
 
 # 设备集成测试：先构建匹配的 host/bridge，在空闲设备上顺序运行
 XLLM_KERNEL_RMS_NORM_IMPL=npu.xllm_native.rms_norm \
@@ -227,3 +227,105 @@ CPU double 和 FakeTensor 只证明对应逻辑，不能作为 NPU 精度或性�
 - 单测仍位于独立包 `test/`，不修改宿主的测试目标来自动运行它们。
 - 检查格式、安装包内容、CLI 示例和报告；提交说明区分源码检查、CPU、构建、NPU 和模型证据。
 - 如需 JIT、状态 reset、多设备或新平台服务，先补齐显式接口及生命周期，再增加实现。
+
+## 8. GLM-5.3 算子清单与显式后端接入
+
+本轮扩展对照 `xllm/python/models/glm5_2.py`、共享的 `deepseek_v32.py` 路径、
+`layers/embedding.py`、`layers/linear.py`，以及
+`kernels_npu/{normalization,activation,quantization,rotary_embedding,moe,mla,sparse_attention}.py`。
+这里指完整的 GLM-5.3 DSA 模型，不是 GLM-5.3 Flash。开发基线为
+`feat/glm53-pytorch-kernel-package` 的 `26c4d550`。
+
+| 算子 | NPU 实现 |
+| --- | --- |
+| `add` | `torch`, `xlite` |
+| `all_gather` | `xllm_native`, `cann` |
+| `all_reduce` | `xllm_native`, `cann` |
+| `all_to_all_single` | `cann` |
+| `atb_matmul_ein_sum` | `xllm_native`, `torch`, `xlite` |
+| `atb_matmul_ein_sum_out` | `xllm_native` |
+| `dequant_swiglu_quant` | `xllm_native`, `cann` |
+| `dynamic_quant` | `xllm_native`, `cann`, `xlite` |
+| `embedding` | `torch`, `xlite` |
+| `fused_add_rms_norm` | `xllm_native`, `cann`, `xlite` |
+| `fused_add_rms_norm_dynamic_quant` | `cann` |
+| `grouped_matmul` | `cann` |
+| `grouped_matmul_out` | `xllm_native` |
+| `inplace_partial_rotary_mul` | `xllm_native`, `cann` |
+| `interleaved_rotary_embedding` | `cann`, `xlite` |
+| `layer_norm` | `torch`, `xlite` |
+| `lightning_indexer` | `xlite`, `xllm_native`, `torch` |
+| `lightning_indexer_out` | `xlite`, `xllm_native` |
+| `linear` | `torch`, `xlite` |
+| `moe_finalize_routing` | `cann` |
+| `moe_gate_routing` | `xlite`, `cann` |
+| `moe_gmm1` | `cann`, `xllm_native` |
+| `moe_token_dispatch` | `cann`, `xllm_native` |
+| `moe_token_unpermute` | `cann` |
+| `quant_matmul` | `xllm_native`, `cann` |
+| `quant_matmul_out` | `xllm_native` |
+| `quantize_per_tensor` | `xllm_native` |
+| `reduce_scatter` | `xllm_native`, `cann` |
+| `reshape_paged_cache` | `xllm_native`, `torch` |
+| `rms_norm` | `xllm_native`, `cann`, `xlite` |
+| `rms_norm_dynamic_quant` | `xllm_native`, `cann` |
+| `router_matmul` | `torch` |
+| `scatter_nd_update` | `xllm_native`, `torch` |
+| `sfa_dcp_remap` | `tilelang`, `torch` |
+| `silu_and_mul` | `xllm_native`, `cann`, `xlite` |
+| `sparse_flash_attention` | `xllm_native`, `torch` |
+| `sparse_flash_attention_out` | `xlite`, `xllm_native` |
+
+`torch` 表示显式的 PyTorch NPU 组合实现，`cann` 调用 TorchNPU 算子，
+`xllm_native` 复用宿主已有 schema，`tilelang` 解析已有 AOT 算子。
+xlite 使用固定 GVirt 版本的 launcher，并提交到当前 stream。准备阶段仅加载指定后端。
+
+新增算子模块声明 `OPERATOR` 并导出 `prepare`：
+
+```python
+from xllm_kernel.ops.dynamic_quant import prepare
+plan = prepare("npu", "aclgraph", "npu.cann.dynamic_quant")
+quantized, scale = plan.function(hidden)
+```
+
+loader 在 capture 前返回 callable；`Operator` 负责注册、冻结和准备。
+已有集成仍可使用显式的 `register(registry)`。增加 adapter 不会自动改变模型后端策略；
+已有模型调用以及 MLA、MoE 等组合调度继续由宿主管理。
+
+新增精度 suite 通过 `tensor_suite` 组织算子自己的形状矩阵。`Example` 绑定输入 tensor tree、
+CPU 参考、声明的输入修改、容差及可选的语义归一化比较方法。`TensorCase` 只携带元信息，
+发现 suite 时不加载设备 SDK。`PreparedCase.reset` 在计时 event 区间外恢复可变输入；
+有输入修改的算子每张图只捕获一次调用。各算子的测试文件复用
+`test/npu/operator_checks.py` 的执行流程，不接入 `tests/CMakeLists.txt`。
+
+源码核对与覆盖边界：
+
+- 模型默认 hidden size 6144、词表 154880、256 个专家、top-8 路由。
+  Embedding 按 hidden 维进行 TP 切分，TP=16 时单卡宽度为 384。
+  用例包含 decode/prefill 行数；本地 head 数、expert 数通过 CLI 显式指定，
+  不把一组单算子形状当作完整部署配置。
+- xlite 的 RMSNorm 后接 BF16 量化、经 FP16 中间结果的量化 GEMM、bitmap dispatch，
+  不能直接替代融合 FP32/NZ 契约。不通过相同后端名称隐藏额外舍入或布局差异。
+- xlite indexer adapter 负责 head weight 打包及 scratch 分配、清零。稀疏 attention 的 `_out`
+  接口支持单 query 的 BF16 decode，不返回 LSE；填充索引压缩、KV gather 和 workspace 开销均计入计时。
+  融合 MLA preparation 继续由宿主管理。已有 TileLang 半分布局 RoPE 不能冒充交错 RoPE。
+- Native 稀疏 attention 保留独立的 RoPE ACLNN 入口，不替换成同名旧 CANN ABI。
+  独立 CPU 参考核对输出和 log-sum-exp，包含因果 mask、打乱的物理页和 -1 稀疏索引填充。
+- Lightning Indexer 核对索引唯一性、因果边界和所选 CPU 分数，分数相对容差为 1.5%，
+  允许数值并列，不声称索引逐元素完全相同。
+- MegaMoE、可选 FP8 KV/INT8 index cache、固定形状 MLAPO v2、MTP 调度元数据需要独立状态及布局契约。
+  普通 ATen 张量操作保留在宿主。本轮算子清单覆盖 BF16/W8A8 路径。
+
+通信算子通过 `torchrun` 和通用 `--distributed` CLI 流程测试：显式创建默认 HCCL group，
+各 rank 独立生成报告，并记录每轮各 rank 的最大耗时。CANN ProcessGroup 后端仅声明 eager；
+native 当前 stream 的 all-reduce/gather/reduce-scatter 提供 ACLGraph 入口，运行前设置
+`HCCL_OP_EXPANSION_MODE=AIV`。All-to-all 仅支持等长分片和 eager。
+具体命令及输入域见包 README。
+
+**交付状态：** 仅完成源码和格式检查。本轮未编译、未执行单测、精度、benchmark、设备调用或端到端测试。
+新增用例是后续验证规范，不是通过结果。
+
+路由及 SwiGLU 语义同时参考官方
+[MoeInitRoutingV2 API](https://www.hiascend.com/document/detail/en/Pytorch/2610/apiref/customapi/docs/en/custom_APIs/torch_npu/torch_npu-npu_moe_init_routing_v2.md) 和
+[DequantSwigluQuant API](https://www.hiascend.com/document/detail/en/Pytorch/2610/apiref/customapi/docs/en/custom_APIs/torch_npu/torch_npu-npu_dequant_swiglu_quant.md)。
+安装的 runtime 必须提供所选接口；缺失时准备或执行明确报错。文档不能替代二进制 ABI 验证。
