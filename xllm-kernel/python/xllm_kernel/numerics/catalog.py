@@ -29,6 +29,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.quant_matmul_out",
     "xllm_kernel.numerics.quant_matmul",
     "xllm_kernel.numerics.fused_add_rms_norm_dynamic_quant",
+    "xllm_kernel.numerics.rms_norm_dynamic_quant",
     "xllm_kernel.numerics.dynamic_quant",
     "xllm_kernel.numerics.atb_matmul_ein_sum",
     "xllm_kernel.numerics.linear",
