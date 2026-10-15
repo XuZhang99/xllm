@@ -11,6 +11,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.all_gather",
     "xllm_kernel.numerics.all_reduce",
     "xllm_kernel.numerics.moe_gmm1",
+    "xllm_kernel.numerics.atb_matmul_ein_sum",
     "xllm_kernel.numerics.add",
     "xllm_kernel.numerics.rms_norm",
 )
