@@ -11,6 +11,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.atb_matmul_ein_sum_out",
     "xllm_kernel.numerics.all_gather",
     "xllm_kernel.numerics.all_reduce",
+    "xllm_kernel.numerics.lightning_indexer",
     "xllm_kernel.numerics.inplace_partial_rotary_mul",
     "xllm_kernel.numerics.interleaved_rotary_embedding",
     "xllm_kernel.numerics.moe_gmm1",
