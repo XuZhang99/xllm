@@ -19,6 +19,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.moe_gmm1",
     "xllm_kernel.numerics.grouped_matmul_out",
     "xllm_kernel.numerics.grouped_matmul",
+    "xllm_kernel.numerics.moe_gate_routing",
     "xllm_kernel.numerics.dequant_swiglu_quant",
     "xllm_kernel.numerics.fused_add_rms_norm_dynamic_quant",
     "xllm_kernel.numerics.dynamic_quant",
