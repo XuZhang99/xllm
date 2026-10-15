@@ -15,6 +15,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.lightning_indexer",
     "xllm_kernel.numerics.inplace_partial_rotary_mul",
     "xllm_kernel.numerics.interleaved_rotary_embedding",
+    "xllm_kernel.numerics.moe_finalize_routing",
     "xllm_kernel.numerics.moe_gmm1",
     "xllm_kernel.numerics.grouped_matmul_out",
     "xllm_kernel.numerics.grouped_matmul",
