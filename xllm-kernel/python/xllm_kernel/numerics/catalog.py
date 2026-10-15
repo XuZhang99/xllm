@@ -13,6 +13,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.reduce_scatter",
     "xllm_kernel.numerics.all_gather",
     "xllm_kernel.numerics.all_reduce",
+    "xllm_kernel.numerics.sparse_flash_attention_out",
     "xllm_kernel.numerics.sparse_flash_attention",
     "xllm_kernel.numerics.lightning_indexer_out",
     "xllm_kernel.numerics.lightning_indexer",
