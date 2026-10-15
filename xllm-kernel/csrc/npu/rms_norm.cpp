@@ -21,9 +21,6 @@ limitations under the License.
 
 namespace {
 
-// Copy of the plain RMSNorm path in
-// xllm/core/kernels/npu/fused_layernorm.cpp. Keep the original host operator
-// intact; this extension must not depend on or register xllm_ops symbols.
 torch::Tensor rms_norm(const torch::Tensor& input,
                        const torch::Tensor& weight,
                        double eps) {

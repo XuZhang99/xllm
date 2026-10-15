@@ -15,7 +15,8 @@ sidebar:
 | `python/xllm_kernel/ops/<operation>/` | 公共算子语义、各 solution 的实现与注册、运行时绑定 | 定义接口或增加实现 |
 | `python/xllm_kernel/registry.py` | `OpContract`、`KernelSpec`、`PreparedKernel` 与准备阶段选择 | 复用；不增加按算子名分支 |
 | `python/xllm_kernel/fake/` | 本包拥有的 Torch operator 的 fake 实现 | 按实际需要增加 |
-| `csrc/<solution>/` | 可选本地扩展、Torch bridge 和设备 launcher 适配 | Python/已有 Torch op 不够时再增加 |
+| `csrc/<solution>/` | 可选本地扩展、Torch bridge 和设备 launcher 适配；当前为 `npu/`、`xlite/` | 增加对应实现与设备注册 |
+| `setup.py` | 扩展源文件、依赖库和独立构建选项 | 接入所需扩展，保持默认安装为纯 Python |
 | `python/xllm_kernel/numerics/<operation>.py` | 该算子的参数、输入、reference、容差、支持域和 `OperationSuite` | 每个算子提供自己的 suite |
 | `python/xllm_kernel/numerics/catalog.py` | 显式发现内置 suite | 增加模块入口；不放算子逻辑 |
 | `python/xllm_kernel/numerics/{arguments,suite,verify,report}.py` | 公共 CLI 参数、用例接口、验证生命周期、数值报告 | 通过接口复用 |
@@ -89,6 +90,40 @@ NPU 实现使用当前 PyTorch stream，并遵循 torch_npu 的提交队列和 T
 
 模型接入只替换目标调用点。公共 API、输入布局和 cache view 先保持语义一致，再验证模型层的
 实际路径；单算子精度通过不能替代模型接入测试。
+
+### 3.3 包内扩展与构建
+
+当前 RMSNorm 的实现入口如下：
+
+| 实现名 | C++ 源文件 | Torch operator | 构建选项 |
+| --- | --- | --- | --- |
+| `npu.xllm_native.rms_norm` | `csrc/npu/rms_norm.cpp` | `xllm_kernel::rms_norm` | `XLLM_KERNEL_BUILD_NPU=1` |
+| `npu.xlite.rms_norm` | `csrc/xlite/rms_norm.cpp` | `xllm_kernel::xlite_rms_norm` | `XLLM_KERNEL_BUILD_XLITE=1` |
+
+Native 扩展直接调用 torch_npu 的 RMSNorm，无需链接 xLLM host。`ops/rms_norm/npu.py`
+在准备阶段检查 `xllm_kernel._npu`：扩展存在时加载并绑定包内 operator；不存在时要求 host
+已注册 `xllm_ops::rms_norm`。两条路径使用同一个实现名和契约。扩展存在但加载失败时直接报错，
+不会转用 host。这是准备阶段的依赖选择，不是执行失败后的 fallback。
+
+在匹配的 Torch/torch_npu 环境中，从仓库根目录构建：
+
+```bash
+python -m pip install --no-deps -e ./xllm-kernel
+(cd xllm-kernel && XLLM_KERNEL_BUILD_NPU=1 MAX_JOBS=4 python setup.py build_ext --inplace)
+
+# 构建可独立安装的 native wheel
+XLLM_KERNEL_BUILD_NPU=1 MAX_JOBS=4 \
+  python -m pip wheel --no-build-isolation --no-deps ./xllm-kernel
+```
+
+同时设置 `XLLM_KERNEL_BUILD_NPU=1` 和 `XLLM_KERNEL_BUILD_XLITE=1` 可构建包含两种扩展的
+wheel；xlite 还需要 README 指定版本的 GVirt 和匹配的 CANN 环境。不设置构建选项时仍为
+纯 Python 安装。构建目录按选项隔离，生成的 `.so` 不提交到源码仓库。
+
+扩展由 `torch.ops.load_library` 在准备阶段加载，不在普通包导入时加载。共享
+`xllm_kernel` namespace 的扩展使用 `TORCH_LIBRARY_FRAGMENT` 增加 schema，避免重复定义
+整个 namespace；设备实现注册到 `PrivateUse1`。在 schema 加载后注册对应 fake，并保证
+重复准备不会重复注册。测试应覆盖无 host 执行、与 host 共存，以及多扩展的不同加载顺序。
 
 ## 4. 提供算子专属的离线 suite
 
@@ -193,10 +228,14 @@ XLLM_KERNEL_RMS_NORM_IMPL=npu.xlite.rms_norm \
 ```
 
 设备 fixture 在 `test/npu/conftest.py` 中加载宿主并初始化 Python kernels；pytest 不负责构建。
+构建包内 native 扩展后，native 测试验证包内 operator 与 host 的结果一致，并通过独立子进程
+检查不导入 xLLM host 的执行和 FakeTensor 行为；未构建扩展时测试 host 路径，跳过独立扩展用例。
 同一进程的实现绑定不可切换，因此 native/xlite 使用不同进程。直接 pytest 不获得 CTest 的
 设备资源锁，需要自行确保设备空闲；设备切换测试需要两张可见 NPU。
 
-离线工具示例使用当前已支持的算子。新增算子接入后，替换 operation、implementation 和专属参数：
+离线工具示例使用当前已支持的算子。存在包内 native 扩展时，native suite 不加载 xLLM host；
+否则会加载 `xllm_export`。因此只验证独立扩展时，可直接使用以下 CLI，不必运行依赖 host 的
+pytest fixture。新增算子接入后，替换 operation、implementation 和专属参数：
 
 ```bash
 python -m xllm_kernel.numerics --operation rms_norm --device npu --mode eager \

@@ -18,7 +18,8 @@ for installation and public APIs.
 | `python/xllm_kernel/ops/<operation>/` | Public operator semantics, solution implementations and registration, runtime binding | Define the interface or add an implementation |
 | `python/xllm_kernel/registry.py` | `OpContract`, `KernelSpec`, `PreparedKernel`, and preparation-time selection | Reuse without branches on operator names |
 | `python/xllm_kernel/fake/` | Fake implementations for package-owned Torch operators | Extend when needed |
-| `csrc/<solution>/` | Optional native extensions, Torch bridges, and device launcher adapters | Extend when Python or existing Torch operators are insufficient |
+| `csrc/<solution>/` | Optional native extensions, Torch bridges, and device launcher adapters; currently `npu/` and `xlite/` | Add the implementation and device registration |
+| `setup.py` | Extension sources, library dependencies, and independent build options | Wire the required extension while keeping default installation pure Python |
 | `python/xllm_kernel/numerics/<operation>.py` | Operator arguments, inputs, reference, tolerances, supported domain, and `OperationSuite` | Provide a suite for each operator |
 | `python/xllm_kernel/numerics/catalog.py` | Explicit discovery of built-in suites | Add the module entry, without operator logic |
 | `python/xllm_kernel/numerics/{arguments,suite,verify,report}.py` | Common CLI arguments, case interfaces, validation lifecycle, and numerical reports | Reuse through the interfaces |
@@ -121,6 +122,48 @@ Model integration replaces the intended call sites. Preserve the semantics of
 the public API, input layouts, and cache views, then validate the actual model
 path. Passing operator-level accuracy checks does not replace model integration
 tests.
+
+### 3.3 Package-owned extensions and builds
+
+RMSNorm currently provides these implementation entry points:
+
+| Implementation | C++ source | Torch operator | Build option |
+| --- | --- | --- | --- |
+| `npu.xllm_native.rms_norm` | `csrc/npu/rms_norm.cpp` | `xllm_kernel::rms_norm` | `XLLM_KERNEL_BUILD_NPU=1` |
+| `npu.xlite.rms_norm` | `csrc/xlite/rms_norm.cpp` | `xllm_kernel::xlite_rms_norm` | `XLLM_KERNEL_BUILD_XLITE=1` |
+
+The native extension calls torch_npu's RMSNorm directly without linking the
+xLLM host. During preparation, `ops/rms_norm/npu.py` checks for
+`xllm_kernel._npu`: when present, it loads and binds the package operator;
+otherwise, it requires the host to have registered `xllm_ops::rms_norm`.
+Both paths use the same implementation name and contract. A failure to load
+an installed extension is an error, not a reason to switch to the host.
+This is preparation-time dependency selection, not execution-error fallback.
+
+Build from the repository root in a matching Torch/torch_npu environment:
+
+```bash
+python -m pip install --no-deps -e ./xllm-kernel
+(cd xllm-kernel && XLLM_KERNEL_BUILD_NPU=1 MAX_JOBS=4 python setup.py build_ext --inplace)
+
+# Build an independently installable native wheel
+XLLM_KERNEL_BUILD_NPU=1 MAX_JOBS=4 \
+  python -m pip wheel --no-build-isolation --no-deps ./xllm-kernel
+```
+
+Set both `XLLM_KERNEL_BUILD_NPU=1` and `XLLM_KERNEL_BUILD_XLITE=1` to include
+both extensions in one wheel. The xlite extension also requires the GVirt
+revision specified in the README and a matching CANN environment. With neither
+option set, installation stays pure Python. Build directories are isolated by
+option; generated `.so` files do not belong in the source repository.
+
+Extensions load through `torch.ops.load_library` during preparation, not during
+ordinary package import. Extensions sharing the `xllm_kernel` namespace use
+`TORCH_LIBRARY_FRAGMENT` to add schemas without redefining the entire namespace;
+device implementations register for `PrivateUse1`. Register the corresponding
+fake implementation after loading its schema, and avoid duplicate registration
+on repeated preparation. Tests should cover execution without the host,
+coexistence with host operators, and different extension loading orders.
 
 ## 4. Provide an operator-specific offline suite
 
@@ -253,13 +296,20 @@ XLLM_KERNEL_RMS_NORM_IMPL=npu.xlite.rms_norm \
 ```
 
 The device fixture in `test/npu/conftest.py` loads the host and initializes
-Python kernels; pytest does not build them. Implementation bindings cannot be
-switched within one process, so native and xlite tests use separate processes.
+Python kernels; pytest does not build them. With the package native extension
+built, native tests compare the package operator against the host and use a
+separate subprocess to check execution and FakeTensor behavior without importing
+the xLLM host. Without that extension, tests exercise the host path and skip the
+standalone extension case. Implementation bindings cannot be switched within
+one process, so native and xlite tests use separate processes.
 Direct pytest runs do not acquire CTest device resource locks; ensure devices
 are idle separately. Device-switching tests require two visible NPUs.
 
-The offline tool examples use a currently supported operator. After integrating
-a new operator, replace the operation, implementation, and specific arguments:
+The offline tool examples use a currently supported operator. With the package
+native extension installed, the native suite does not load the xLLM host;
+otherwise it loads `xllm_export`. Use these CLIs to validate the standalone
+extension without the host-dependent pytest fixture. After integrating a new
+operator, replace the operation, implementation, and specific arguments:
 
 ```bash
 python -m xllm_kernel.numerics --operation rms_norm --device npu --mode eager \

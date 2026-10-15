@@ -44,14 +44,6 @@ XLLM_KERNEL_BUILD_NPU=1 MAX_JOBS=4 python setup.py build_ext --inplace
 cd ..
 ```
 
-The extension contains a copy of the plain RMSNorm implementation from
-`xllm/core/kernels/npu/fused_layernorm.cpp` and registers it as
-`xllm_kernel::rms_norm`. The original C++ implementation and
-`xllm_ops::rms_norm` registration remain unchanged. During preparation,
-`npu.xllm_native.rms_norm` binds the package extension when installed; otherwise
-it requires the already-loaded host operator. An installed extension that fails
-to load is an error, not a reason to switch to the host.
-
 A standalone native wheel can be built with:
 
 ```bash
@@ -150,7 +142,7 @@ xllm-kernel/
 │   ├── fake/                      # Fake implementations for package-owned Torch ops
 │   ├── numerics/                  # Inputs, reference, tolerance, validation and CLI
 │   └── benchmark/                 # Timing, statistics, performance reports and CLI
-├── csrc/npu/                      # Standalone native RMSNorm copy and registration
+├── csrc/npu/                      # Native NPU operators and Torch registration
 ├── csrc/xlite/                    # Optional xlite bridge sources
 └── test/
     ├── test_*.py                  # Package, registry, numerical-report and CLI tests
@@ -163,9 +155,8 @@ an explicit contract and register through `KernelRegistry`.
 
 ### Solution choices
 
-- **Native adapters** use the package-owned NPU extension when present, or the
-  xLLM host's Torch operator for pure-Python installations. The original host
-  schemas, native implementations and fake registrations retain their owners.
+- **Native adapters** expose operators provided by device libraries or the
+  xLLM host through the package's contracts and preparation interface.
 - **Package-owned extensions** own their Torch namespace, device bridge and
   fake implementation. The current xlite bridge submits work on the current
   PyTorch NPU stream through the torch_npu queue, without a private stream or
@@ -173,13 +164,9 @@ an explicit contract and register through `KernelRegistry`.
 - **Numerical references** live under `numerics/` and provide independent
   correctness checks. They are not serving implementations or error fallbacks.
 
-Existing C++ interfaces and callers retain their current paths. Python model
-integration is incremental; adding an adapter does not migrate unrelated
-operators automatically.
-
 ## Independent validation tools
 
-The tools follow the same responsibility split as TokenSpeed:
+The tools separate numerical validation, performance measurement, and tests:
 
 - `python -m xllm_kernel.numerics` owns input generation, reference evaluation,
   tolerances, mutation/alias checks and numerical reports.
@@ -279,7 +266,7 @@ The host reads `XLLM_KERNEL_RMS_NORM_IMPL` at startup; set it to
 `npu.xlite.rms_norm` before starting workers to select xlite. Direct package
 users can call `xllm_kernel.initialize(device="npu", implementation=...)`
 after providing the selected implementation's dependencies. Native execution
-requires the host's Torch operator registrations to be loaded first.
+requires either the package NPU extension or preloaded host Torch operators.
 
 The native adapter preserves its existing tensor domain. xlite accepts
 FP16/BF16 inputs and weights on the same NPU, ND layout, widths divisible by
@@ -314,3 +301,9 @@ See the operator development guide
 ([English](../docs/src/content/docs/en/dev_guide/xllm_kernel_dev.md) |
 [简体中文](../docs/src/content/docs/zh/dev_guide/xllm_kernel_dev.md))
 for the implementation workflow and validation requirements.
+
+## Acknowledgment
+
+This project was made possible thanks to the following open-source projects:
+
+- [TokenSpeed](https://github.com/lightseekorg/tokenspeed) - xLLM Kernel draws inspiration from TokenSpeed's kernel architecture design.
