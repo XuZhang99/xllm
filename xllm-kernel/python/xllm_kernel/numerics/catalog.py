@@ -10,6 +10,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.all_to_all_single",
     "xllm_kernel.numerics.quantize_per_tensor",
     "xllm_kernel.numerics.atb_matmul_ein_sum_out",
+    "xllm_kernel.numerics.reduce_scatter",
     "xllm_kernel.numerics.all_gather",
     "xllm_kernel.numerics.all_reduce",
     "xllm_kernel.numerics.lightning_indexer_out",
