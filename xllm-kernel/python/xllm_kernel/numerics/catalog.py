@@ -8,6 +8,7 @@ from xllm_kernel.numerics.suite import OperationSuite
 # Only this catalog needs a new entry when adding an operation's tool support.
 _BUILTINS = (
     "xllm_kernel.numerics.all_to_all_single",
+    "xllm_kernel.numerics.atb_matmul_ein_sum_out",
     "xllm_kernel.numerics.all_gather",
     "xllm_kernel.numerics.all_reduce",
     "xllm_kernel.numerics.moe_gmm1",
