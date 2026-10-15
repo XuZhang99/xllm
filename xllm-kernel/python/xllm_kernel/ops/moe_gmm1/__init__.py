@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Versioned moe_gmm1 contract and explicit backend preparation."""
+"""Backend-independent moe_gmm1 contract and explicit solution preparation."""
 
 from xllm_kernel.operator import Backend, Operator
 from xllm_kernel.registry import OpContract
@@ -9,14 +9,20 @@ OPERATOR = Operator(
     CONTRACT,
     (
         Backend(
-            "cann",
-            "xllm_kernel.ops.moe_gmm1.cann:load",
+            "aclnn",
+            "xllm_kernel.ops.moe_gmm1.aclnn:load_torch_npu",
             "Grouped INT8 gate/up + standard SwiGLU + per-token INT8 quant; private NZ weights and FP32 scales; metadata conversion timed.",
+            ("eager", "aclgraph"),
+            variant="torch_npu",
+            binding="torch_npu",
         ),
         Backend(
-            "xllm_native",
-            "xllm_kernel.ops.moe_gmm1.xllm_native:load",
+            "aclnn",
+            "xllm_kernel.ops.moe_gmm1.aclnn:load_xllm",
             "Grouped INT8 gate/up + standard SwiGLU + per-token INT8 quant; private NZ weights and FP32 scales; metadata conversion timed.",
+            ("eager", "aclgraph"),
+            variant="xllm",
+            binding="torch.ops.xllm_ops",
         ),
     ),
 )

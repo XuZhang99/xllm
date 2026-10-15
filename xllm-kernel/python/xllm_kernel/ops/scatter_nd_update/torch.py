@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""scatter_nd_update torch provider, resolved before graph capture."""
+"""scatter_nd_update implementations supplied by torch; variants name bindings."""
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ if TYPE_CHECKING:
 
 
 def load() -> Callable[..., Any]:
-    import torch
-
     def run(value: torch.Tensor, indices: torch.Tensor, updates: torch.Tensor) -> None:
         value.index_put_(tuple(indices.unbind(-1)), updates, accumulate=False)
 

@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Versioned dequant_swiglu_quant contract and explicit backend preparation."""
+"""Backend-independent dequant_swiglu_quant contract and explicit solution preparation."""
 
 from xllm_kernel.operator import Backend, Operator
 from xllm_kernel.registry import OpContract
@@ -9,14 +9,20 @@ OPERATOR = Operator(
     CONTRACT,
     (
         Backend(
-            "xllm_native",
-            "xllm_kernel.ops.dequant_swiglu_quant.xllm_native:load",
+            "aclnn",
+            "xllm_kernel.ops.dequant_swiglu_quant.aclnn:load_xllm",
             "INT32[T,2H] with FP32 dequantization scales; explicit standard or interleaved SwiGLU; dynamic INT8 output.",
+            ("eager", "aclgraph"),
+            variant="xllm",
+            binding="torch.ops.xllm_ops",
         ),
         Backend(
-            "cann",
-            "xllm_kernel.ops.dequant_swiglu_quant.cann:load",
+            "aclnn",
+            "xllm_kernel.ops.dequant_swiglu_quant.aclnn:load_torch_npu",
             "INT32[T,2H] with FP32 dequantization scales; explicit standard or interleaved SwiGLU; dynamic INT8 output.",
+            ("eager", "aclgraph"),
+            variant="torch_npu",
+            binding="torch_npu",
         ),
     ),
 )

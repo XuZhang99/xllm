@@ -6,4 +6,4 @@ from xllm_kernel.numerics.all_to_all_single import SUITE
 
 
 def test_all_to_all_single() -> None:
-    check_collective(SUITE, "npu.cann.all_to_all_single", "eager")
+    check_collective(SUITE, "npu.hccl.all_to_all_single.process_group", "eager")

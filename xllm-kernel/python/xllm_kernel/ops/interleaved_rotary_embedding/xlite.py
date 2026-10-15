@@ -1,13 +1,10 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""interleaved_rotary_embedding xlite provider, resolved before graph capture."""
+"""interleaved_rotary_embedding implementations supplied by xlite; variants name bindings."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    import torch
+from typing import Any
 
 
 def load() -> Callable[..., Any]:

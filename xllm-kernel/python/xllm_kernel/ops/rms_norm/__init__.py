@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Functional RMSNorm with a fixed native or explicitly selected xlite binding."""
+"""Functional RMSNorm with explicit ACLNN and xlite implementations."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from xllm_kernel.registry import KernelRegistry, OpContract, PreparedKernel
+from xllm_kernel.operator import Backend, Operator
+from xllm_kernel.registry import OpContract, PreparedKernel
 
 if TYPE_CHECKING:
     import torch
@@ -28,10 +29,36 @@ RMS_NORM_CONTRACT = OpContract(
     version=1,
     mutates=(),
     aliases_inputs=False,
-    numerical_mode="xllm_native",
+    numerical_mode="fp32_norm_cast",
 )
+OPERATOR = Operator(
+    RMS_NORM_CONTRACT,
+    (
+        Backend(
+            "aclnn",
+            "xllm_kernel.ops.rms_norm.aclnn:load_xllm",
+            "ACLNN RMSNorm through the host xllm_ops schema; no shape specialization",
+            variant="xllm",
+            binding="torch.ops.xllm_ops",
+        ),
+        Backend(
+            "aclnn",
+            "xllm_kernel.ops.rms_norm.aclnn:load_torch_npu",
+            "torch_npu RMSNorm tensor domain",
+            variant="torch_npu",
+            binding="torch_npu",
+        ),
+        Backend(
+            "xlite",
+            "xllm_kernel.ops.rms_norm.xlite:load",
+            "FP16/BF16, same NPU/dtype, ND, width divisible by 64 and <=8192, numel<=2**32-1",
+            binding="xllm_kernel._xlite",
+        ),
+    ),
+)
+prepare = OPERATOR.prepare
 _prepared: PreparedKernel | None = None
-_configuration: tuple[str, str | None] | None = None
+_configuration: tuple[str, str] | None = None
 
 
 def initialize(*, device: str, implementation: str | None = None) -> PreparedKernel:
@@ -44,6 +71,8 @@ def initialize(*, device: str, implementation: str | None = None) -> PreparedKer
     requires a fresh worker and fresh graphs.
     """
     global _prepared, _configuration
+    if implementation is None:
+        implementation = "npu.aclnn.rms_norm.xllm"
     configuration = (device, implementation)
     if _prepared is not None:
         if configuration != _configuration:
@@ -52,22 +81,7 @@ def initialize(*, device: str, implementation: str | None = None) -> PreparedKer
     if device != "npu":
         raise ValueError(f"xllm_kernel does not yet provide a {device!r} adapter")
 
-    if implementation == "npu.xlite.rms_norm":
-        from xllm_kernel.ops.rms_norm.xlite import register
-    elif implementation == "npu.cann.rms_norm":
-        from xllm_kernel.ops.rms_norm.cann import register
-    else:
-        from xllm_kernel.ops.rms_norm.npu import register
-
-    registry = KernelRegistry()
-    register(registry)
-    registry.freeze()
-    prepared = registry.prepare(
-        RMS_NORM_CONTRACT,
-        device=device,
-        execution_mode="aclgraph",
-        implementation=implementation,
-    )
+    prepared = prepare(device, "aclgraph", implementation)
     _configuration = configuration
     _prepared = prepared
     return prepared

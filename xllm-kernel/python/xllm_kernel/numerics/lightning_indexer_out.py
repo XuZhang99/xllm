@@ -75,7 +75,7 @@ def _restrict(plan: PreparedKernel, dimensions: tuple[int, ...], dtype: str) -> 
         return "xlite indexer requires T<=128,H=32,D=128,K=2048"
     if topk > length - rows + 1:
         return "this profile requires at least topk visible tokens for every query"
-    if plan.spec.solution == "xllm_native" and (width != 128 or topk != 2048):
+    if plan.spec.solution == "aclnn" and (width != 128 or topk != 2048):
         return "native GLM profile requires head_dim=128 and topk=2048"
     return None
 

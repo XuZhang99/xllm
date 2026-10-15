@@ -3,22 +3,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any
 
 from xllm_kernel.registry import KernelRegistry, KernelSpec, OpContract, PreparedKernel
 
 
 @dataclass(frozen=True)
 class Backend:
-    """Declare a loader, supported execution modes, and a backend's input domain."""
+    """Separate the kernel solution from its binding and implementation variant."""
 
-    name: str
+    solution: str
     loader: str
     input_domain: str
     execution_modes: tuple[str, ...] = ("eager", "aclgraph")
+    variant: str = ""
+    binding: str = ""
+
+    def implementation_name(self, operation: str) -> str:
+        suffix = f".{self.variant}" if self.variant else ""
+        return f"npu.{self.solution}.{operation}{suffix}"
 
 
 @dataclass(frozen=True)
@@ -30,12 +34,14 @@ class Operator:
 
     @property
     def implementations(self) -> tuple[str, ...]:
-        return tuple(f"npu.{backend.name}.{self.contract.operation}" for backend in self.backends)
+        return tuple(backend.implementation_name(self.contract.operation) for backend in self.backends)
 
     def prepare(self, device: str, mode: str, implementation: str) -> PreparedKernel:
         if device != "npu":
             raise ValueError(f"{self.contract.operation} requires device='npu'")
         names = dict(zip(self.implementations, self.backends, strict=True))
+        if len(names) != len(self.backends):
+            raise ValueError(f"duplicate implementation names for {self.contract.operation}")
         if implementation not in names:
             raise ValueError(f"unsupported implementation {implementation!r}; choose from {tuple(names)}")
         backend = names[implementation]
@@ -53,23 +59,11 @@ class Operator:
                 device,
                 backend.execution_modes,
                 backend.input_domain,
-                solution=backend.name,
+                solution=backend.solution,
+                variant=backend.variant,
+                binding=backend.binding,
             ),
             function,
         )
         registry.freeze()
         return registry.prepare(self.contract, device=device, execution_mode=mode, implementation=implementation)
-
-
-def native_operator(name: str) -> Callable[..., Any]:
-    """Resolve a host-owned schema after the caller has loaded its native library."""
-    import torch
-
-    operator = getattr(torch.ops.xllm_ops, name, None)
-    if operator is None:
-        from xllm import xllm_export  # noqa: F401
-
-        operator = getattr(torch.ops.xllm_ops, name, None)
-    if operator is None:
-        raise RuntimeError(f"load the matching xLLM native library before preparing xllm_ops::{name}")
-    return operator

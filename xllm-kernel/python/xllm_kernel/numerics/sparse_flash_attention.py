@@ -79,7 +79,7 @@ def _restrict(plan: PreparedKernel, dimensions: tuple[int, ...], dtype: str) -> 
     rows, heads, width, length, topk = dimensions
     if rows > length or topk > length or topk < 16:
         return "require rows<=length, 16<=topk<=length"
-    if plan.spec.solution == "xllm_native" and (width != 512 or topk != 2048):
+    if plan.spec.solution == "aclnn" and (width != 512 or topk != 2048):
         return "native GLM profile requires latent width=512 and topk=2048"
     return None
 

@@ -1,6 +1,7 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
 """Preparation selects exactly one provider before device execution."""
 
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -47,3 +48,69 @@ def test_unsupported_selection_fails_before_loading(monkeypatch: pytest.MonkeyPa
     ):
         with pytest.raises(ValueError):
             operation.prepare(device, mode, implementation)
+
+
+def test_variants_share_a_solution_without_loading_each_other(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    def load_xllm() -> object:
+        raise AssertionError("the unselected binding must not load")
+
+    def load_torch_npu() -> object:
+        calls.append("torch_npu")
+        return lambda value: value
+
+    monkeypatch.setattr(
+        preparation,
+        "import_module",
+        lambda name: SimpleNamespace(load_xllm=load_xllm, load_torch_npu=load_torch_npu),
+    )
+    operation = Operator(
+        OpContract("example", 1, (), False, "exact"),
+        (
+            Backend("aclnn", "example:load_xllm", "domain", variant="xllm", binding="torch.ops.xllm_ops"),
+            Backend("aclnn", "example:load_torch_npu", "domain", variant="torch_npu", binding="torch_npu"),
+        ),
+    )
+    plan = operation.prepare("npu", "eager", "npu.aclnn.example.torch_npu")
+    assert calls == ["torch_npu"]
+    assert plan.function(42) == 42
+    assert (plan.spec.solution, plan.spec.variant, plan.spec.binding) == ("aclnn", "torch_npu", "torch_npu")
+
+
+def test_duplicate_variant_names_fail_before_loading(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected(name: str) -> None:
+        raise AssertionError(f"must not import {name}")
+
+    monkeypatch.setattr(preparation, "import_module", unexpected)
+    operation = Operator(
+        OpContract("example", 1, (), False, "exact"),
+        (Backend("aclnn", "first:load", "domain"), Backend("aclnn", "second:load", "domain")),
+    )
+    with pytest.raises(ValueError, match="duplicate implementation names"):
+        operation.prepare("npu", "eager", "npu.aclnn.example")
+
+
+@pytest.mark.parametrize("device_name", ("Ascend910_9391", "Ascend950PR_9599"))
+def test_atb_cache_loader_rejects_the_hosts_aclnn_device_path(
+    monkeypatch: pytest.MonkeyPatch, device_name: str
+) -> None:
+    from xllm_kernel.backends import xllm
+    from xllm_kernel.ops.reshape_paged_cache import atb
+
+    loaded = []
+
+    def load_operator(name: str) -> object:
+        loaded.append(name)
+        return lambda: None
+
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(npu=SimpleNamespace(get_device_name=lambda: device_name)))
+    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace())
+    monkeypatch.setattr(xllm, "load_operator", load_operator)
+    if device_name.startswith("Ascend950"):
+        with pytest.raises(ValueError, match="Ascend 950 path uses ACLNN"):
+            atb.load()
+        assert not loaded
+    else:
+        assert callable(atb.load())
+        assert loaded == ["reshape_paged_cache"]

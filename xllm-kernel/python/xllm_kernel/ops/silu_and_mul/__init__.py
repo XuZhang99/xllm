@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Versioned silu_and_mul contract and explicit backend preparation."""
+"""Backend-independent silu_and_mul contract and explicit solution preparation."""
 
 from xllm_kernel.operator import Backend, Operator
 from xllm_kernel.registry import OpContract
@@ -9,19 +9,28 @@ OPERATOR = Operator(
     CONTRACT,
     (
         Backend(
-            "xllm_native",
-            "xllm_kernel.ops.silu_and_mul.xllm_native:load",
+            "aclnn",
+            "xllm_kernel.ops.silu_and_mul.aclnn:load_xllm",
             "Contiguous NPU tensors; see operation module for the exact signature.",
+            ("eager", "aclgraph"),
+            variant="xllm",
+            binding="torch.ops.xllm_ops",
         ),
         Backend(
-            "cann",
-            "xllm_kernel.ops.silu_and_mul.cann:load",
+            "aclnn",
+            "xllm_kernel.ops.silu_and_mul.aclnn:load_torch_npu",
             "Contiguous NPU tensors; see operation module for the exact signature.",
+            ("eager", "aclgraph"),
+            variant="torch_npu",
+            binding="torch_npu",
         ),
         Backend(
             "xlite",
             "xllm_kernel.ops.silu_and_mul.xlite:load",
             "Contiguous NPU tensors; see operation module for the exact signature.",
+            ("eager", "aclgraph"),
+            variant="",
+            binding="xllm_kernel._xlite",
         ),
     ),
 )

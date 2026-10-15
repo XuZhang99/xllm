@@ -1,5 +1,7 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""FP32 xlite sigmoid routing with timed bitmap-to-index conversion."""
+"""moe_gate_routing implementations supplied by xlite; variants name bindings."""
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

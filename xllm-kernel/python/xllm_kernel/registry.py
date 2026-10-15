@@ -38,7 +38,9 @@ class KernelSpec:
     execution_modes: tuple[str, ...]
     input_domain: str
     priority: int = 0
-    solution: str = "native"
+    solution: str = ""
+    variant: str = ""
+    binding: str = ""
 
 
 @dataclass(frozen=True)

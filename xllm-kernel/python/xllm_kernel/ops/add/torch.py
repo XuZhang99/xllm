@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""add torch provider, resolved before graph capture."""
+"""add implementations supplied by torch; variants name bindings."""
 
 from __future__ import annotations
 

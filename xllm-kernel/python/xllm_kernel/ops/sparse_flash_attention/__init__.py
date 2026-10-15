@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Versioned sparse_flash_attention contract and explicit backend preparation."""
+"""Backend-independent sparse_flash_attention contract and explicit solution preparation."""
 
 from xllm_kernel.operator import Backend, Operator
 from xllm_kernel.registry import OpContract
@@ -9,14 +9,20 @@ OPERATOR = Operator(
     CONTRACT,
     (
         Backend(
-            "xllm_native",
-            "xllm_kernel.ops.sparse_flash_attention.xllm_native:load",
+            "aclnn",
+            "xllm_kernel.ops.sparse_flash_attention.aclnn:load_xllm",
             "Single-sequence causal MLA with paged latent KV and interleaved RoPE; sparse token indices (-1 padding); output plus FP32 softmax max/sum.",
+            ("eager", "aclgraph"),
+            variant="xllm",
+            binding="torch.ops.xllm_ops",
         ),
         Backend(
             "torch",
             "xllm_kernel.ops.sparse_flash_attention.torch:load",
             "Single-sequence causal MLA with paged latent KV and interleaved RoPE; sparse token indices (-1 padding); output plus FP32 softmax max/sum.",
+            ("eager", "aclgraph"),
+            variant="",
+            binding="torch",
         ),
     ),
 )

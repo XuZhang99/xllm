@@ -11,7 +11,7 @@ from itertools import product
 from typing import TYPE_CHECKING, Any
 
 from xllm_kernel.numerics.suite import OperationSuite, PreparedCase
-from xllm_kernel.registry import KernelRegistry, PreparedKernel
+from xllm_kernel.registry import PreparedKernel
 
 if TYPE_CHECKING:
     import torch
@@ -142,24 +142,14 @@ def _cases(args: argparse.Namespace) -> tuple[NumericsCase, ...]:
 
 
 def _prepare(device: str, mode: str, implementation: str) -> PreparedKernel:
-    from xllm_kernel.ops.rms_norm import RMS_NORM_CONTRACT
+    from xllm_kernel.ops.rms_norm import prepare
 
-    if implementation == "npu.xlite.rms_norm":
-        from xllm_kernel.ops.rms_norm.xlite import register
-    elif implementation == "npu.cann.rms_norm":
-        from xllm_kernel.ops.rms_norm.cann import register
-    else:
-        from xllm import xllm_export  # noqa: F401
-        from xllm_kernel.ops.rms_norm.npu import register
-    registry = KernelRegistry()
-    register(registry)
-    registry.freeze()
-    return registry.prepare(RMS_NORM_CONTRACT, device=device, execution_mode=mode, implementation=implementation)
+    return prepare(device, mode, implementation)
 
 
 SUITE = OperationSuite(
     operation="rms_norm",
-    implementations=("npu.xllm_native.rms_norm", "npu.cann.rms_norm", "npu.xlite.rms_norm"),
+    implementations=("npu.aclnn.rms_norm.xllm", "npu.aclnn.rms_norm.torch_npu", "npu.xlite.rms_norm"),
     add_arguments=_add_arguments,
     cases=_cases,
     prepare=_prepare,

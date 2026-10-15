@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""embedding torch provider, resolved before graph capture."""
+"""embedding implementations supplied by torch; variants name bindings."""
 
 from __future__ import annotations
 

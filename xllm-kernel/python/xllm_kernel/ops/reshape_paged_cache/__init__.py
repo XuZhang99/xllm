@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Versioned reshape_paged_cache contract and explicit backend preparation."""
+"""Backend-independent reshape_paged_cache contract and explicit solution preparation."""
 
 from xllm_kernel.operator import Backend, Operator
 from xllm_kernel.registry import OpContract
@@ -9,14 +9,20 @@ OPERATOR = Operator(
     CONTRACT,
     (
         Backend(
-            "xllm_native",
-            "xllm_kernel.ops.reshape_paged_cache.xllm_native:load",
-            "INT32 unique nonnegative slots[T]; key/value[T,1,D] -> paged cache[B,S,1,D]; updates both caches; no padding slots.",
+            "atb",
+            "xllm_kernel.ops.reshape_paged_cache.atb:load",
+            "INT32 unique nonnegative slots[T]; key/value[T,1,D] -> paged cache[B,S,1,D]; updates both caches; no padding slots. Ascend 910 series only; the host Ascend 950 ACLNN path is excluded.",
+            ("eager", "aclgraph"),
+            variant="",
+            binding="torch.ops.xllm_ops",
         ),
         Backend(
             "torch",
             "xllm_kernel.ops.reshape_paged_cache.torch:load",
             "INT32 unique nonnegative slots[T]; key/value[T,1,D] -> paged cache[B,S,1,D]; updates both caches; no padding slots.",
+            ("eager", "aclgraph"),
+            variant="",
+            binding="torch",
         ),
     ),
 )

@@ -20,14 +20,15 @@ def test_operator_case_matrix_is_nonempty(suite: OperationSuite) -> None:
     assert len(suite.implementations) == len(set(suite.implementations))
 
 
-@pytest.mark.parametrize("operation", [suite.operation for suite in load_suites()])
-def test_backend_metadata_and_loader_modules(operation: str) -> None:
-    module = import_module(f"xllm_kernel.ops.{operation}")
-    if not hasattr(module, "OPERATOR"):
-        pytest.skip("legacy explicit-registration adapter")
+@pytest.mark.parametrize("suite", load_suites(), ids=lambda suite: suite.operation)
+def test_backend_metadata_and_loader_modules(suite: OperationSuite) -> None:
+    module = import_module(f"xllm_kernel.ops.{suite.operation}")
     operator = module.OPERATOR
-    assert operator.contract.operation == operation
+    assert operator.contract.operation == suite.operation
+    assert operator.implementations == suite.implementations
     for backend in operator.backends:
         module, symbol = backend.loader.split(":")
+        assert module.rsplit(".", 1)[1] == backend.solution
         assert callable(getattr(import_module(module), symbol))
         assert backend.input_domain
+        assert backend.binding

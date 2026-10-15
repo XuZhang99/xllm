@@ -1,4 +1,8 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
+"""lightning_indexer implementations supplied by xlite; variants name bindings."""
+
+from __future__ import annotations
+
 from collections.abc import Callable
 from typing import Any
 

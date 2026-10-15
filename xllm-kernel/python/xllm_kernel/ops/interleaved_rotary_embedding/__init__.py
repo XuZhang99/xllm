@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Versioned interleaved_rotary_embedding contract and explicit backend preparation."""
+"""Backend-independent interleaved_rotary_embedding contract and explicit solution preparation."""
 
 from xllm_kernel.operator import Backend, Operator
 from xllm_kernel.registry import OpContract
@@ -9,14 +9,20 @@ OPERATOR = Operator(
     CONTRACT,
     (
         Backend(
-            "cann",
-            "xllm_kernel.ops.interleaved_rotary_embedding.cann:load",
+            "aclnn",
+            "xllm_kernel.ops.interleaved_rotary_embedding.aclnn:load_torch_npu",
             "value[T,H,D], cosine/sine[T,1,1,D] with duplicated even/odd frequencies; functional interleaved RoPE; xlite table packing timed.",
+            ("eager", "aclgraph"),
+            variant="torch_npu",
+            binding="torch_npu",
         ),
         Backend(
             "xlite",
             "xllm_kernel.ops.interleaved_rotary_embedding.xlite:load",
             "value[T,H,D], cosine/sine[T,1,1,D] with duplicated even/odd frequencies; functional interleaved RoPE; xlite table packing timed.",
+            ("eager", "aclgraph"),
+            variant="",
+            binding="xllm_kernel._xlite",
         ),
     ),
 )

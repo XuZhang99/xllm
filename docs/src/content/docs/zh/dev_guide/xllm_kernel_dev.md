@@ -41,7 +41,7 @@ xLLM runtime。算子接收准备好的输入，不在 solution 内另建请求�
 
 [`OpContract`](https://github.com/xLLM-AI/xllm/blob/main/xllm-kernel/python/xllm_kernel/registry.py) 当前表达 operation、version、mutates、
 aliases_inputs 和 numerical_mode。`KernelSpec` 另外声明实现名、device、execution_modes、
-input_domain、solution 和 priority。`input_domain` 当前是描述字符串，注册表不会据此自动验证
+input_domain、solution、variant、binding 和 priority。`input_domain` 当前是描述字符串，注册表不会据此自动验证
 shape 或布局；真实实现仍须在 launch 前检查参数。
 
 给同一个算子新增 solution 时，只有语义一致的实现才能使用相同的 `OpContract`。
@@ -52,10 +52,26 @@ shape 或布局；真实实现仍须在 launch 前检查参数。
 
 ### 3.1 实现与注册
 
-在 `ops/<operation>/<solution>.py` 中提供 `register(registry)`：先解析依赖并检查运行条件，
-再把 `KernelSpec` 和 callable 注册进去。对照现有
-[native adapter](https://github.com/xLLM-AI/xllm/blob/main/xllm-kernel/python/xllm_kernel/ops/rms_norm/npu.py) 和
-[xlite adapter](https://github.com/xLLM-AI/xllm/blob/main/xllm-kernel/python/xllm_kernel/ops/rms_norm/xlite.py) 阅读。
+参考 TokenSpeed，将算子语义与实现方案分开：`ops/<operation>/__init__.py` 定义与后端无关的
+契约，各方案放到 `ops/<operation>/<solution>.py`。当前方案为
+`aclnn`、`atb`、`hccl`、`xlite`、`tilelang`、`torch`。
+
+- `solution` 标识实现库或组合方式：ACLNN API、ATB 算子、HCCL 通信、GVirt launcher、
+  TileLang AOT 或 PyTorch 组合。
+- `variant` 区分同一方案下的实现。ACLNN 使用 `xllm`、`torch_npu`，HCCL 使用
+  `current_stream`、`process_group`。
+- `binding` 记录调用入口，如 `torch.ops.xllm_ops`、`torch_npu`、`torch.distributed` 或
+  `xllm_kernel._xlite`；不同绑定入口不等于不同实现库。
+
+方案文件提供延迟加载的 `load()` 或 `load_<variant>()`，返回 callable。在 `OPERATOR` 中用
+`Backend` 声明 loader 路径、输入域、模式和元信息，并导出 `prepare = OPERATOR.prepare`。
+公共 `Operator` 只注册、冻结和准备指定实现。可参考
+[ACLNN adapter](https://github.com/xLLM-AI/xllm/blob/main/xllm-kernel/python/xllm_kernel/ops/rms_norm/aclnn.py)。
+
+实现名采用 `npu.<solution>.<operation>[.<variant>]`，例如
+`npu.aclnn.rms_norm.xllm` 和 `npu.aclnn.rms_norm.torch_npu`。两者都属于 ACLNN，
+其性能比较应描述为绑定变体比较，不能当成两种独立 kernel 库。
+原 `npu.xllm_native.*`、`npu.cann.*` 选择器已替换；更新此 draft 时需要同步修改 CLI 参数及环境变量。
 
 复用宿主已有 Torch op 时，保留原有 schema、实现和 fake 的所有权。
 新增本包拥有的 Torch op 时，使用本包 namespace，同时提供真实设备 bridge 和相应 fake。
@@ -126,13 +142,14 @@ shape、dtype 组合等算子参数由 `add_arguments` 和 `cases` 负责，不�
 | `unsupported_reason(plan)` | 不适用时返回原因，适用时返回 `None`；不得通过执行失败来猜支持域 |
 | `prepare(plan)` | 生成输入，返回 `PreparedCase` |
 
-`PreparedCase` 的三个字段是：
+`PreparedCase` 的四个字段是：
 
 - `function()`：绑定输入、标量参数和已准备实现的零参数 callable，返回值可以是 tensor、tuple
   或其他由该算子定义的结构。
 - `validate(function)`：调用传入的零参数 callable，按该算子的 reference 和容差返回包含
   `status` 的验证结果；校验输出结构、数值、mutation 和 alias 等契约。
 - `metadata`：输入 stride、格式等可序列化的专属记录。
+- `reset()`：可选回调，在计时 event 区间外恢复被修改的输入。
 
 验证器必须检查传入 callable 的结果，不能无视它而重新调用原始实现。ACLGraph 验证传入的是
 捕获输出的读取函数；重新执行 eager 算子会掩盖错误的 graph 输出。验证结果和 metadata
@@ -162,15 +179,16 @@ input/weight/eps 结构。这个测试算子只是公共流程的单测，不代
 
 `numerics/verify.py` 只管理准备、状态和报告生命周期；不解释 tensor 角色，也不选择某个算子的
 reference。`numerics/report.py` 和 `benchmark/report.py` 使用通用标题，逐行记录 operation，
-不通过名字猜测算子类型或读取某个算子的 shape 字段。
+不通过名字猜测算子类型或读取某个算子的 shape 字段。报告 schema version 2 在 JSON 和 Markdown 中
+分别记录 `solution`、`variant`、`binding` 及完整实现名。
 
 失败状态需保持可见：不适用记录原因；数值失败不计时；capture/replay 失败直接报告并抛出；
 没有任何通过的用例不能产生成功报告。对设备执行错误不得切换到 eager 或其他 solution 后
 继续给出有效性能结果。
 
-当前计时器支持 NPU eager 和 ACLGraph，graph benchmark 每次 capture 包含 64 次独立调用。
-这要求用例能安全地反复调用且性能期间输入状态可复用。对会修改输入、消费状态或依赖随机数的
-新算子，应先设计显式 reset 和计时边界，再扩展公共用例接口；不要直接套用当前循环。
+当前计时器支持 NPU eager 和 ACLGraph。纯算子的 benchmark 每次 capture 包含 64 次调用；
+带 `PreparedCase.reset` 的用例每张图只捕获一次调用，replay 前在计时 event 区间外恢复状态。
+新增有状态算子须在 suite 中定义 reset 和计时边界，不能直接复用已被修改的输入。
 
 准备、warmup 和 capture 不进入稳态计时。保持输入、case、设备、执行模式和计时设置一致，
 报告原始样本与离散程度，并记录资源占用。eager 的设备事件间隔包含主机提交间隙，不能简单
@@ -186,24 +204,24 @@ reference。`numerics/report.py` 和 `benchmark/report.py` 使用通用标题，
 python -m pytest -q xllm-kernel/test --ignore=xllm-kernel/test/npu --ignore=xllm-kernel/test/distributed
 
 # 设备集成测试：先构建匹配的 host/bridge，在空闲设备上顺序运行
-XLLM_KERNEL_RMS_NORM_IMPL=npu.xllm_native.rms_norm \
+XLLM_KERNEL_RMS_NORM_IMPL=npu.aclnn.rms_norm.xllm \
   python -m pytest -q xllm-kernel/test/npu/test_kernel_rms_norm_npu.py
 XLLM_KERNEL_RMS_NORM_IMPL=npu.xlite.rms_norm \
   python -m pytest -q xllm-kernel/test/npu/test_kernel_xlite_rms_norm_npu.py
 ```
 
 设备 fixture 在 `test/npu/conftest.py` 中加载宿主并初始化 Python kernels；pytest 不负责构建。
-同一进程的实现绑定不可切换，因此 native/xlite 使用不同进程。直接 pytest 不获得 CTest 的
+同一进程的实现绑定不可切换，因此 ACLNN 宿主绑定和 xlite 使用不同进程。直接 pytest 不获得 CTest 的
 设备资源锁，需要自行确保设备空闲；设备切换测试需要两张可见 NPU。
 
 离线工具示例使用当前已支持的算子。新增算子接入后，替换 operation、implementation 和专属参数：
 
 ```bash
 python -m xllm_kernel.numerics --operation rms_norm --device npu --mode eager \
-  --implementation npu.xllm_native.rms_norm --rows 1 16 --widths 6144 \
+  --implementation npu.aclnn.rms_norm.xllm --rows 1 16 --widths 6144 \
   --revision "$(git rev-parse HEAD)" --output numerics.json
 python -m xllm_kernel.benchmark --operation rms_norm --device npu --mode aclgraph \
-  --implementation npu.xllm_native.rms_norm --rows 1 16 --widths 6144 \
+  --implementation npu.aclnn.rms_norm.xllm --rows 1 16 --widths 6144 \
   --iterations 50 --revision "$(git rev-parse HEAD)" --output benchmark.json
 ```
 
@@ -236,60 +254,67 @@ CPU double 和 FakeTensor 只证明对应逻辑，不能作为 NPU 精度或性�
 这里指完整的 GLM-5.3 DSA 模型，不是 GLM-5.3 Flash。开发基线为
 `feat/glm53-pytorch-kernel-package` 的 `26c4d550`。
 
-| 算子 | NPU 实现 |
+| 算子 | 方案及可选变体 |
 | --- | --- |
 | `add` | `torch`, `xlite` |
-| `all_gather` | `xllm_native`, `cann` |
-| `all_reduce` | `xllm_native`, `cann` |
-| `all_to_all_single` | `cann` |
-| `atb_matmul_ein_sum` | `xllm_native`, `torch`, `xlite` |
-| `atb_matmul_ein_sum_out` | `xllm_native` |
-| `dequant_swiglu_quant` | `xllm_native`, `cann` |
-| `dynamic_quant` | `xllm_native`, `cann`, `xlite` |
+| `all_gather` | `hccl.current_stream`, `hccl.process_group` |
+| `all_reduce` | `hccl.current_stream`, `hccl.process_group` |
+| `all_to_all_single` | `hccl.process_group` |
+| `dequant_swiglu_quant` | `aclnn.xllm`, `aclnn.torch_npu` |
+| `dynamic_quant` | `aclnn.xllm`, `aclnn.torch_npu`, `xlite` |
+| `einsum` | `atb`, `torch`, `xlite` |
+| `einsum_out` | `atb` |
 | `embedding` | `torch`, `xlite` |
-| `fused_add_rms_norm` | `xllm_native`, `cann`, `xlite` |
-| `fused_add_rms_norm_dynamic_quant` | `cann` |
-| `grouped_matmul` | `cann` |
-| `grouped_matmul_out` | `xllm_native` |
-| `inplace_partial_rotary_mul` | `xllm_native`, `cann` |
-| `interleaved_rotary_embedding` | `cann`, `xlite` |
+| `fused_add_rms_norm` | `aclnn.xllm`, `aclnn.torch_npu`, `xlite` |
+| `fused_add_rms_norm_dynamic_quant` | `aclnn.torch_npu` |
+| `grouped_matmul` | `aclnn.torch_npu` |
+| `grouped_matmul_out` | `aclnn.xllm` |
+| `inplace_partial_rotary_mul` | `aclnn.xllm`, `aclnn.torch_npu` |
+| `interleaved_rotary_embedding` | `aclnn.torch_npu`, `xlite` |
 | `layer_norm` | `torch`, `xlite` |
-| `lightning_indexer` | `xlite`, `xllm_native`, `torch` |
-| `lightning_indexer_out` | `xlite`, `xllm_native` |
+| `lightning_indexer` | `xlite`, `aclnn.xllm`, `torch` |
+| `lightning_indexer_out` | `xlite`, `aclnn.xllm` |
 | `linear` | `torch`, `xlite` |
-| `moe_finalize_routing` | `cann` |
-| `moe_gate_routing` | `xlite`, `cann` |
-| `moe_gmm1` | `cann`, `xllm_native` |
-| `moe_token_dispatch` | `cann`, `xllm_native` |
-| `moe_token_unpermute` | `cann` |
-| `quant_matmul` | `xllm_native`, `cann` |
-| `quant_matmul_out` | `xllm_native` |
-| `quantize_per_tensor` | `xllm_native` |
-| `reduce_scatter` | `xllm_native`, `cann` |
-| `reshape_paged_cache` | `xllm_native`, `torch` |
-| `rms_norm` | `xllm_native`, `cann`, `xlite` |
-| `rms_norm_dynamic_quant` | `xllm_native`, `cann` |
+| `moe_finalize_routing` | `aclnn.torch_npu` |
+| `moe_gate_routing` | `xlite`, `aclnn.torch_npu` |
+| `moe_gmm1` | `aclnn.torch_npu`, `aclnn.xllm` |
+| `moe_token_dispatch` | `aclnn.torch_npu`, `aclnn.xllm` |
+| `moe_token_unpermute` | `aclnn.torch_npu` |
+| `quant_matmul` | `aclnn.xllm`, `aclnn.torch_npu` |
+| `quant_matmul_out` | `aclnn.xllm` |
+| `quantize_per_tensor` | `aclnn.xllm` |
+| `reduce_scatter` | `hccl.current_stream`, `hccl.process_group` |
+| `reshape_paged_cache` | `atb`, `torch` |
+| `rms_norm` | `aclnn.xllm`, `aclnn.torch_npu`, `xlite` |
+| `rms_norm_dynamic_quant` | `aclnn.xllm`, `aclnn.torch_npu` |
 | `router_matmul` | `torch` |
-| `scatter_nd_update` | `xllm_native`, `torch` |
+| `scatter_nd_update` | `aclnn.xllm`, `torch` |
 | `sfa_dcp_remap` | `tilelang`, `torch` |
-| `silu_and_mul` | `xllm_native`, `cann`, `xlite` |
-| `sparse_flash_attention` | `xllm_native`, `torch` |
-| `sparse_flash_attention_out` | `xlite`, `xllm_native` |
+| `silu_and_mul` | `aclnn.xllm`, `aclnn.torch_npu`, `xlite` |
+| `sparse_flash_attention` | `aclnn.xllm`, `torch` |
+| `sparse_flash_attention_out` | `xlite`, `aclnn.xllm` |
 
-`torch` 表示显式的 PyTorch NPU 组合实现，`cann` 调用 TorchNPU 算子，
-`xllm_native` 复用宿主已有 schema，`tilelang` 解析已有 AOT 算子。
-xlite 使用固定 GVirt 版本的 launcher，并提交到当前 stream。准备阶段仅加载指定后端。
+清单共 37 个算子契约、70 个实现变体，归属六种方案。`aclnn` 包括标准 CANN 算子和通过 ACLNN
+API 调用的自定义算子。xLLM 绑定内部可能分派到不同 ACLNN kernel，变体名标识封装入口，
+不承诺固定二进制实现。`atb` 对应实际 ATB 调用，`hccl` 对应通信库，`torch` 是显式 PyTorch NPU
+组合实现，`tilelang` 解析已有 AOT 算子。xlite 使用固定 GVirt 版本的 launcher，提交到当前 stream。
+准备阶段只加载指定方案及绑定。
+
+公共 `einsum` / `einsum_out` 表达固定的 `[T,H,D] x [H,D,O] -> [T,H,O]` 计算，替换
+`atb_matmul_ein_sum` / `_out`，避免把 Torch、xlite 实现也冠以 ATB 名称。ATB loader 内部保留
+宿主原有 schema 名字。`reshape_paged_cache` 的 ATB 适配仅限 Ascend 910；loader 拒绝其他
+设备系列，因为宿主在 Ascend 950 上会切换为 ACLNN 实现。
 
 新增算子模块声明 `OPERATOR` 并导出 `prepare`：
 
 ```python
 from xllm_kernel.ops.dynamic_quant import prepare
-plan = prepare("npu", "aclgraph", "npu.cann.dynamic_quant")
+plan = prepare("npu", "aclgraph", "npu.aclnn.dynamic_quant.torch_npu")
 quantized, scale = plan.function(hidden)
 ```
 
 loader 在 capture 前返回 callable；`Operator` 负责注册、冻结和准备。
-已有集成仍可使用显式的 `register(registry)`。增加 adapter 不会自动改变模型后端策略；
+增加 adapter 不会自动改变模型后端策略；
 已有模型调用以及 MLA、MoE 等组合调度继续由宿主管理。
 
 新增精度 suite 通过 `tensor_suite` 组织算子自己的形状矩阵。`Example` 绑定输入 tensor tree、
@@ -317,13 +342,14 @@ CPU 参考、声明的输入修改、容差及可选的语义归一化比较方�
   普通 ATen 张量操作保留在宿主。本轮算子清单覆盖 BF16/W8A8 路径。
 
 通信算子通过 `torchrun` 和通用 `--distributed` CLI 流程测试：显式创建默认 HCCL group，
-各 rank 独立生成报告，并记录每轮各 rank 的最大耗时。CANN ProcessGroup 后端仅声明 eager；
-native 当前 stream 的 all-reduce/gather/reduce-scatter 提供 ACLGraph 入口，运行前设置
+各 rank 独立生成报告，并记录每轮各 rank 的最大耗时。HCCL `process_group` 变体仅声明 eager；
+HCCL `current_stream` 变体的 all-reduce/gather/reduce-scatter 提供 ACLGraph 入口，运行前设置
 `HCCL_OP_EXPANSION_MODE=AIV`。All-to-all 仅支持等长分片和 eager。
 具体命令及输入域见包 README。
 
-**交付状态：** 仅完成源码和格式检查。本轮未编译、未执行单测、精度、benchmark、设备调用或端到端测试。
-新增用例是后续验证规范，不是通过结果。
+**交付状态：** 本次方案重分类只做源码和格式检查，当前版本未编译或测试。此前 `5c93a0f6` 的
+xlite bridge 和包 wheel 已构建成功，但不能证明这里重命名后的 schema 和 loader 可用。
+完整宿主编译按要求继续暂停。新增用例是后续验证规范，不是设备测试通过结果。
 
 路由及 SwiGLU 语义同时参考官方
 [MoeInitRoutingV2 API](https://www.hiascend.com/document/detail/en/Pytorch/2610/apiref/customapi/docs/en/custom_APIs/torch_npu/torch_npu-npu_moe_init_routing_v2.md) 和

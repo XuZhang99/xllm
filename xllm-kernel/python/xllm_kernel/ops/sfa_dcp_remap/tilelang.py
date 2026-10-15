@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""sfa_dcp_remap tilelang provider, resolved before graph capture."""
+"""sfa_dcp_remap implementations supplied by tilelang; variants name bindings."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 def load() -> Callable[..., Any]:
     import torch
 
-    from xllm_kernel.operator import native_operator
+    from xllm_kernel.backends.xllm import load_operator
 
-    op = native_operator("sfa_dcp_remap_out")
+    op = load_operator("sfa_dcp_remap_out")
 
     def run(indices: torch.Tensor, block_size: int, shards: int, rank: int) -> torch.Tensor:
         if not 0 < indices.numel() // 2048 <= 256 or indices.shape[-1] != 2048:

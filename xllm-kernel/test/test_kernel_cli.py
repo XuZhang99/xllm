@@ -19,26 +19,13 @@ import torch
 from xllm_kernel.numerics import rms_norm
 from xllm_kernel.numerics import verify as verification
 from xllm_kernel.numerics.suite import OperationSuite, PreparedCase
-from xllm_kernel.ops.rms_norm import RMS_NORM_CONTRACT, xlite
+from xllm_kernel.ops.rms_norm import xlite
 from xllm_kernel.registry import KernelRegistry, KernelSpec, OpContract, PreparedKernel
 
 
 @pytest.fixture
 def cpu_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     runtime = SimpleNamespace(function=rms_norm.reference, measurements=[])
-
-    def register(registry: KernelRegistry) -> None:
-        registry.register(
-            KernelSpec(
-                xlite.IMPLEMENTATION,
-                RMS_NORM_CONTRACT,
-                "npu",
-                ("eager", "aclgraph"),
-                "CPU test double",
-                solution="xlite",
-            ),
-            runtime.function,
-        )
 
     def inputs(case: rms_norm.NumericsCase) -> tuple[torch.Tensor, torch.Tensor]:
         dtype = getattr(torch, case.dtype)
@@ -51,7 +38,7 @@ def cpu_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         SimpleNamespace(get_device_name=lambda: "CPU test double", synchronize=lambda: None),
         raising=False,
     )
-    monkeypatch.setattr(xlite, "register", register)
+    monkeypatch.setattr(xlite, "load", lambda: runtime.function)
     monkeypatch.setattr(rms_norm, "inputs", inputs)
     monkeypatch.setattr(
         verification, "subprocess", SimpleNamespace(check_output=lambda *args, **kwargs: "test inventory")
@@ -129,6 +116,9 @@ def test_successful_validation_and_optional_timing(
     report = json.loads(output.read_text())
     assert report["status"] == "passed"
     assert report["coverage"]["passed"] == 1
+    assert report["schema_version"] == 2
+    row = report["cases"][0]
+    assert (row["solution"], row["variant"], row["binding"]) == ("xlite", "", "xllm_kernel._xlite")
     assert ("timing" in report["cases"][0]) == (module == "benchmark")
     assert len(cpu_runtime.measurements) == int(module == "benchmark")
     assert "passed" in output.with_suffix(".md").read_text()
@@ -346,13 +336,30 @@ def test_reports_render_multiple_operations_without_loading_them(module: str, tm
     report = {
         "status": "passed",
         "cases": [
-            {"case_id": "add/1", "operation": "add", "implementation": "test.add", "status": "passed"},
-            {"case_id": "matmul/2", "operation": "matmul", "implementation": "test.matmul", "status": "passed"},
+            {
+                "case_id": "add/1",
+                "operation": "add",
+                "implementation": "npu.aclnn.add.xllm",
+                "solution": "aclnn",
+                "variant": "xllm",
+                "binding": "torch.ops.xllm_ops",
+                "status": "passed",
+            },
+            {
+                "case_id": "matmul/2",
+                "operation": "matmul",
+                "implementation": "npu.aclnn.matmul.torch_npu",
+                "solution": "aclnn",
+                "variant": "torch_npu",
+                "binding": "torch_npu",
+                "status": "passed",
+            },
         ],
     }
     output = tmp_path / "mixed.json"
     importlib.import_module(f"xllm_kernel.{module}.report").write_report(output, report)
     assert json.loads(output.read_text()) == report
     markdown = output.with_suffix(".md").read_text()
-    assert "add/1 | add |" in markdown and "matmul/2 | matmul |" in markdown
+    assert "add/1 | add | aclnn | xllm | torch.ops.xllm_ops |" in markdown
+    assert "matmul/2 | matmul | aclnn | torch_npu | torch_npu |" in markdown
     assert "RMSNorm" not in markdown

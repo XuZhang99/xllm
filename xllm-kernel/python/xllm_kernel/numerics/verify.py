@@ -32,7 +32,7 @@ def validation_session(
 ) -> Iterator[tuple[PreparedKernel, dict[str, Any]]]:
     """Prepare one implementation and preserve failures in the final report."""
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "operation": suite.operation,
         "status": "not_run",
         "cases": [],
@@ -97,6 +97,9 @@ def verify_case(
         "case_id": case.case_id,
         "operation": plan.spec.contract.operation,
         "implementation": plan.spec.name,
+        "solution": plan.spec.solution,
+        "variant": plan.spec.variant,
+        "binding": plan.spec.binding,
         "case": case.parameters,
         "status": "not_run",
     }

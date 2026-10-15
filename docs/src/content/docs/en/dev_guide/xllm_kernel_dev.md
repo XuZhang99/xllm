@@ -55,7 +55,7 @@ consistent:
 [`OpContract`](https://github.com/xLLM-AI/xllm/blob/main/xllm-kernel/python/xllm_kernel/registry.py)
 currently describes `operation`, `version`, `mutates`, `aliases_inputs`, and
 `numerical_mode`. `KernelSpec` also declares the implementation name, `device`,
-`execution_modes`, `input_domain`, `solution`, and `priority`. `input_domain` is
+`execution_modes`, `input_domain`, `solution`, `variant`, `binding`, and `priority`. `input_domain` is
 currently a descriptive string: the registry does not use it to validate shapes
 or layouts automatically. The implementation must check arguments before launch.
 
@@ -69,12 +69,29 @@ declared tolerances and should not imply bitwise equality by default.
 
 ### 3.1 Implementation and registration
 
-Provide `register(registry)` in `ops/<operation>/<solution>.py`. Resolve dependencies
-and check runtime conditions before registering the `KernelSpec` and callable.
-See the existing
-[native adapter](https://github.com/xLLM-AI/xllm/blob/main/xllm-kernel/python/xllm_kernel/ops/rms_norm/npu.py)
-and
-[xlite adapter](https://github.com/xLLM-AI/xllm/blob/main/xllm-kernel/python/xllm_kernel/ops/rms_norm/xlite.py).
+Follow TokenSpeed's separation of operation semantics and implementation solution.
+Keep `ops/<operation>/__init__.py` independent of the implementation library, and
+put each solution in `ops/<operation>/<solution>.py`. The current solutions are
+`aclnn`, `atb`, `hccl`, `xlite`, `tilelang`, and `torch`.
+
+- `solution` names the implementation library or composition: ACLNN API calls,
+  ATB operations, HCCL communication, GVirt launchers, TileLang AOT, or PyTorch.
+- `variant` distinguishes implementations within a solution. ACLNN uses `xllm`
+  and `torch_npu`; HCCL uses `current_stream` and `process_group`.
+- `binding` records the entry point, such as `torch.ops.xllm_ops`, `torch_npu`,
+  `torch.distributed`, or `xllm_kernel._xlite`. A binding is not another solution.
+
+A solution file exports lazy `load()` or `load_<variant>()` functions returning
+callables. Declare their paths, domains, modes and metadata with `Backend` in
+`OPERATOR`, and export `prepare = OPERATOR.prepare`. The shared `Operator`
+registers and freezes only the selected implementation. See the
+[ACLNN adapter](https://github.com/xLLM-AI/xllm/blob/main/xllm-kernel/python/xllm_kernel/ops/rms_norm/aclnn.py).
+
+Names have the form `npu.<solution>.<operation>[.<variant>]`, for example
+`npu.aclnn.rms_norm.xllm` and `npu.aclnn.rms_norm.torch_npu`. Both belong to ACLNN;
+a comparison between their bindings must not be labeled as two kernel libraries.
+The former `npu.xllm_native.*` and `npu.cann.*` selectors have been replaced;
+update CLI arguments and environment overrides when upgrading this draft.
 
 When reusing a host-owned Torch operator, preserve ownership of its schema,
 implementation, and fake registration. For a new package-owned Torch operator,
@@ -163,7 +180,7 @@ Each logical case implements these interfaces:
 | `unsupported_reason(plan)` | Returns a reason when inapplicable, otherwise `None`; do not infer support from execution failures |
 | `prepare(plan)` | Creates inputs and returns a `PreparedCase` |
 
-`PreparedCase` has three fields:
+`PreparedCase` has four fields:
 
 - `function()`: a zero-argument callable binding the inputs, scalar parameters,
   and prepared implementation. It may return a tensor, tuple, or another
@@ -174,6 +191,7 @@ Each logical case implements these interfaces:
   other contract requirements.
 - `metadata`: serializable operator-specific details such as input strides and
   formats.
+- `reset()`: optional callback restoring mutated inputs outside timed event pairs.
 
 The validator must check the supplied callable's result. It must not ignore
 that callable and invoke the original implementation again. ACLGraph validation
@@ -212,19 +230,19 @@ Parse common arguments + suite-specific arguments
 does not interpret tensor roles or choose an operator's reference.
 `numerics/report.py` and `benchmark/report.py` use generic titles and record the
 operation per row, without inferring operator types from names or reading an
-operator's shape fields.
+operator's shape fields. Report schema version 2 includes `solution`, `variant`,
+and `binding` alongside the full implementation name in JSON and Markdown.
 
 Failures must remain visible: record reasons for inapplicable cases; do not time
 numerical failures; report and raise capture/replay failures. A run with no
 passing cases cannot produce a successful report. Device execution errors must
 not trigger eager or solution fallback followed by accepted performance results.
 
-The current timer supports NPU eager and ACLGraph execution. Each graph benchmark
-capture contains 64 independent calls. Cases must therefore be safe to invoke
-repeatedly, with reusable input state during timing. For new operators that
-mutate inputs, consume state, or depend on randomness, first design explicit
-reset behavior and timing boundaries, then extend the common case interface.
-Do not apply the current loop unchanged.
+The current timer supports NPU eager and ACLGraph execution. Pure cases use 64
+calls per benchmark capture; cases with `PreparedCase.reset` use one call per
+capture and restore their state before replay, outside timed event pairs.
+New stateful operators must define reset behavior and timing boundaries in their
+suite; do not reuse mutated inputs without restoring them.
 
 Preparation, warmup, and capture are excluded from steady-state timing. Keep
 inputs, cases, devices, execution modes, and timing settings consistent. Report
@@ -246,7 +264,7 @@ python -m pytest -q xllm-kernel/test --ignore=xllm-kernel/test/npu --ignore=xllm
 
 # Device integration tests: build the matching host/bridge first, then run
 # sequentially on idle devices
-XLLM_KERNEL_RMS_NORM_IMPL=npu.xllm_native.rms_norm \
+XLLM_KERNEL_RMS_NORM_IMPL=npu.aclnn.rms_norm.xllm \
   python -m pytest -q xllm-kernel/test/npu/test_kernel_rms_norm_npu.py
 XLLM_KERNEL_RMS_NORM_IMPL=npu.xlite.rms_norm \
   python -m pytest -q xllm-kernel/test/npu/test_kernel_xlite_rms_norm_npu.py
@@ -254,7 +272,7 @@ XLLM_KERNEL_RMS_NORM_IMPL=npu.xlite.rms_norm \
 
 The device fixture in `test/npu/conftest.py` loads the host and initializes
 Python kernels; pytest does not build them. Implementation bindings cannot be
-switched within one process, so native and xlite tests use separate processes.
+switched within one process, so ACLNN host-binding and xlite tests use separate processes.
 Direct pytest runs do not acquire CTest device resource locks; ensure devices
 are idle separately. Device-switching tests require two visible NPUs.
 
@@ -263,10 +281,10 @@ a new operator, replace the operation, implementation, and specific arguments:
 
 ```bash
 python -m xllm_kernel.numerics --operation rms_norm --device npu --mode eager \
-  --implementation npu.xllm_native.rms_norm --rows 1 16 --widths 6144 \
+  --implementation npu.aclnn.rms_norm.xllm --rows 1 16 --widths 6144 \
   --revision "$(git rev-parse HEAD)" --output numerics.json
 python -m xllm_kernel.benchmark --operation rms_norm --device npu --mode aclgraph \
-  --implementation npu.xllm_native.rms_norm --rows 1 16 --widths 6144 \
+  --implementation npu.aclnn.rms_norm.xllm --rows 1 16 --widths 6144 \
   --iterations 50 --revision "$(git rev-parse HEAD)" --output benchmark.json
 ```
 
@@ -312,62 +330,72 @@ The initial expanded inventory follows `xllm/python/models/glm5_2.py`, its
 This is the full GLM-5.3 DSA model path, not the GLM-5.3 Flash model. The base
 is `feat/glm53-pytorch-kernel-package` at `26c4d550`.
 
-| Operation | NPU implementations |
+| Operation | Solution and optional variant |
 | --- | --- |
 | `add` | `torch`, `xlite` |
-| `all_gather` | `xllm_native`, `cann` |
-| `all_reduce` | `xllm_native`, `cann` |
-| `all_to_all_single` | `cann` |
-| `atb_matmul_ein_sum` | `xllm_native`, `torch`, `xlite` |
-| `atb_matmul_ein_sum_out` | `xllm_native` |
-| `dequant_swiglu_quant` | `xllm_native`, `cann` |
-| `dynamic_quant` | `xllm_native`, `cann`, `xlite` |
+| `all_gather` | `hccl.current_stream`, `hccl.process_group` |
+| `all_reduce` | `hccl.current_stream`, `hccl.process_group` |
+| `all_to_all_single` | `hccl.process_group` |
+| `dequant_swiglu_quant` | `aclnn.xllm`, `aclnn.torch_npu` |
+| `dynamic_quant` | `aclnn.xllm`, `aclnn.torch_npu`, `xlite` |
+| `einsum` | `atb`, `torch`, `xlite` |
+| `einsum_out` | `atb` |
 | `embedding` | `torch`, `xlite` |
-| `fused_add_rms_norm` | `xllm_native`, `cann`, `xlite` |
-| `fused_add_rms_norm_dynamic_quant` | `cann` |
-| `grouped_matmul` | `cann` |
-| `grouped_matmul_out` | `xllm_native` |
-| `inplace_partial_rotary_mul` | `xllm_native`, `cann` |
-| `interleaved_rotary_embedding` | `cann`, `xlite` |
+| `fused_add_rms_norm` | `aclnn.xllm`, `aclnn.torch_npu`, `xlite` |
+| `fused_add_rms_norm_dynamic_quant` | `aclnn.torch_npu` |
+| `grouped_matmul` | `aclnn.torch_npu` |
+| `grouped_matmul_out` | `aclnn.xllm` |
+| `inplace_partial_rotary_mul` | `aclnn.xllm`, `aclnn.torch_npu` |
+| `interleaved_rotary_embedding` | `aclnn.torch_npu`, `xlite` |
 | `layer_norm` | `torch`, `xlite` |
-| `lightning_indexer` | `xlite`, `xllm_native`, `torch` |
-| `lightning_indexer_out` | `xlite`, `xllm_native` |
+| `lightning_indexer` | `xlite`, `aclnn.xllm`, `torch` |
+| `lightning_indexer_out` | `xlite`, `aclnn.xllm` |
 | `linear` | `torch`, `xlite` |
-| `moe_finalize_routing` | `cann` |
-| `moe_gate_routing` | `xlite`, `cann` |
-| `moe_gmm1` | `cann`, `xllm_native` |
-| `moe_token_dispatch` | `cann`, `xllm_native` |
-| `moe_token_unpermute` | `cann` |
-| `quant_matmul` | `xllm_native`, `cann` |
-| `quant_matmul_out` | `xllm_native` |
-| `quantize_per_tensor` | `xllm_native` |
-| `reduce_scatter` | `xllm_native`, `cann` |
-| `reshape_paged_cache` | `xllm_native`, `torch` |
-| `rms_norm` | `xllm_native`, `cann`, `xlite` |
-| `rms_norm_dynamic_quant` | `xllm_native`, `cann` |
+| `moe_finalize_routing` | `aclnn.torch_npu` |
+| `moe_gate_routing` | `xlite`, `aclnn.torch_npu` |
+| `moe_gmm1` | `aclnn.torch_npu`, `aclnn.xllm` |
+| `moe_token_dispatch` | `aclnn.torch_npu`, `aclnn.xllm` |
+| `moe_token_unpermute` | `aclnn.torch_npu` |
+| `quant_matmul` | `aclnn.xllm`, `aclnn.torch_npu` |
+| `quant_matmul_out` | `aclnn.xllm` |
+| `quantize_per_tensor` | `aclnn.xllm` |
+| `reduce_scatter` | `hccl.current_stream`, `hccl.process_group` |
+| `reshape_paged_cache` | `atb`, `torch` |
+| `rms_norm` | `aclnn.xllm`, `aclnn.torch_npu`, `xlite` |
+| `rms_norm_dynamic_quant` | `aclnn.xllm`, `aclnn.torch_npu` |
 | `router_matmul` | `torch` |
-| `scatter_nd_update` | `xllm_native`, `torch` |
+| `scatter_nd_update` | `aclnn.xllm`, `torch` |
 | `sfa_dcp_remap` | `tilelang`, `torch` |
-| `silu_and_mul` | `xllm_native`, `cann`, `xlite` |
-| `sparse_flash_attention` | `xllm_native`, `torch` |
-| `sparse_flash_attention_out` | `xlite`, `xllm_native` |
+| `silu_and_mul` | `aclnn.xllm`, `aclnn.torch_npu`, `xlite` |
+| `sparse_flash_attention` | `aclnn.xllm`, `torch` |
+| `sparse_flash_attention_out` | `xlite`, `aclnn.xllm` |
 
-`torch` denotes an explicit PyTorch NPU composition. `cann` denotes a
-TorchNPU operator; `xllm_native` reuses the existing host schema, and
-`tilelang` resolves an existing compiled AOT operator. xlite uses pinned
-GVirt launchers on the current stream. Only the requested provider is loaded.
+The inventory contains 37 operation contracts and 70 implementation variants
+across six solutions. `aclnn` includes both standard CANN operators and custom
+operators exposed through the ACLNN API. An xLLM binding can dispatch to multiple
+ACLNN kernels; the variant name identifies the wrapper, not a fixed binary.
+`atb` wraps actual ATB execution. `hccl` identifies the communication library.
+`torch` is an explicit PyTorch NPU composition, and `tilelang` resolves an existing
+compiled AOT operator. xlite uses pinned GVirt launchers on the current stream.
+Only the selected solution and binding are loaded.
+
+The public `einsum` / `einsum_out` names describe the fixed contraction
+`[T,H,D] x [H,D,O] -> [T,H,O]`. They replace `atb_matmul_ein_sum` / `_out` so the
+operation name does not imply ATB for its Torch or xlite implementations. The
+ATB loader preserves the host's original schema names. `reshape_paged_cache`
+is labeled ATB only on Ascend 910; its loader rejects other device families
+because the host switches to ACLNN on Ascend 950.
 
 New operation modules declare an `OPERATOR` and export `prepare`:
 
 ```python
 from xllm_kernel.ops.dynamic_quant import prepare
-plan = prepare("npu", "aclgraph", "npu.cann.dynamic_quant")
+plan = prepare("npu", "aclgraph", "npu.aclnn.dynamic_quant.torch_npu")
 quantized, scale = plan.function(hidden)
 ```
 
 Loaders return a callable before capture; `Operator` performs registration,
-freezing and preparation. The legacy explicit `register(registry)` entry point
-remains supported for existing integrations. Adding an adapter does not change
+freezing and preparation. Adding an adapter does not change
 the model's backend policy. Existing model calls, including compound MLA and
 MoE schedules, remain host-owned.
 
@@ -405,15 +433,16 @@ Source audit boundaries:
 
 Communication uses the generic `--distributed` CLI lifecycle under `torchrun`.
 It owns the default HCCL group, produces rank-specific reports and records
-per-repeat rank maxima. CANN ProcessGroup providers are eager-only; the native
-current-stream all-reduce/gather/reduce-scatter providers expose ACLGraph.
+per-repeat rank maxima. HCCL `process_group` variants are eager-only; the HCCL
+`current_stream` all-reduce/gather/reduce-scatter providers expose ACLGraph.
 Set `HCCL_OP_EXPANSION_MODE=AIV` before their graph tests. All-to-all is equal
 split and eager-only. See the package README for commands and exact domains.
 
-**Delivery status:** source and formatting checks only. No build, unit test,
-numerical run, benchmark, device execution or end-to-end measurement was
-performed for this draft. The new cases are validation specifications, not
-passing results.
+**Delivery status:** this solution reclassification has only source and formatting
+checks; no build or tests have run on this revision. The earlier `5c93a0f6`
+revision built the xlite bridge and package wheel, which does not validate the
+renamed schemas or loaders here. The full host build remains paused by request.
+The new cases are validation specifications, not passing device results.
 
 Routing and SwiGLU semantics were cross-checked against the official
 [MoeInitRoutingV2 API](https://www.hiascend.com/document/detail/en/Pytorch/2610/apiref/customapi/docs/en/custom_APIs/torch_npu/torch_npu-npu_moe_init_routing_v2.md)

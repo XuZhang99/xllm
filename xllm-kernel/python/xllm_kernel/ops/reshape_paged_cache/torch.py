@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""reshape_paged_cache torch provider, resolved before graph capture."""
+"""reshape_paged_cache implementations supplied by torch; variants name bindings."""
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ if TYPE_CHECKING:
 
 
 def load() -> Callable[..., Any]:
-    import torch
-
     def run(
         slots: torch.Tensor,
         keys: torch.Tensor,

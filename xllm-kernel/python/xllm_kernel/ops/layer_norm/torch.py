@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""layer_norm torch provider, resolved before graph capture."""
+"""layer_norm implementations supplied by torch; variants name bindings."""
 
 from __future__ import annotations
 

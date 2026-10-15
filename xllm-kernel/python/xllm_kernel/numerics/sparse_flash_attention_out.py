@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from xllm_kernel.numerics.factory import tensor_suite
 from xllm_kernel.numerics.inputs import Inputs
 from xllm_kernel.numerics.tensor_case import Example
@@ -80,7 +78,7 @@ def _restrict(plan: PreparedKernel, dimensions: tuple[int, ...], dtype: str) -> 
         return "xlite sparse attention supports BF16 single-token decode, H<=32,D=512,K=2048"
     if rows > length or topk > length or topk < 16:
         return "require rows<=length, 16<=topk<=length"
-    if plan.spec.solution == "xllm_native" and (width != 512 or topk != 2048):
+    if plan.spec.solution == "aclnn" and (width != 512 or topk != 2048):
         return "native GLM profile requires latent width=512 and topk=2048"
     return None
 

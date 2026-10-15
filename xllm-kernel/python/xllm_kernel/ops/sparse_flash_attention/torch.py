@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""sparse_flash_attention torch provider, resolved before graph capture."""
+"""sparse_flash_attention implementations supplied by torch; variants name bindings."""
 
 from __future__ import annotations
 

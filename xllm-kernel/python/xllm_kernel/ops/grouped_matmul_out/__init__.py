@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Versioned grouped_matmul_out contract and explicit backend preparation."""
+"""Backend-independent grouped_matmul_out contract and explicit solution preparation."""
 
 from xllm_kernel.operator import Backend, Operator
 from xllm_kernel.registry import OpContract
@@ -9,9 +9,12 @@ OPERATOR = Operator(
     CONTRACT,
     (
         Backend(
-            "xllm_native",
-            "xllm_kernel.ops.grouped_matmul_out.xllm_native:load",
+            "aclnn",
+            "xllm_kernel.ops.grouped_matmul_out.aclnn:load_xllm",
             "Caller-owned BF16 output of grouped INT8 down projection; private NZ weights and cumulative group list.",
+            ("eager", "aclgraph"),
+            variant="xllm",
+            binding="torch.ops.xllm_ops",
         ),
     ),
 )

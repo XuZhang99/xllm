@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Versioned moe_token_dispatch contract and explicit backend preparation."""
+"""Backend-independent moe_token_dispatch contract and explicit solution preparation."""
 
 from xllm_kernel.operator import Backend, Operator
 from xllm_kernel.registry import OpContract
@@ -9,14 +9,20 @@ OPERATOR = Operator(
     CONTRACT,
     (
         Backend(
-            "cann",
-            "xllm_kernel.ops.moe_token_dispatch.cann:load",
+            "aclnn",
+            "xllm_kernel.ops.moe_token_dispatch.aclnn:load_torch_npu",
             "Full-load W8A8 dispatch; cumulative group offsets and gather row indices; native V3 metadata conversion is included.",
+            ("eager", "aclgraph"),
+            variant="torch_npu",
+            binding="torch_npu",
         ),
         Backend(
-            "xllm_native",
-            "xllm_kernel.ops.moe_token_dispatch.xllm_native:load",
+            "aclnn",
+            "xllm_kernel.ops.moe_token_dispatch.aclnn:load_xllm",
             "Full-load W8A8 dispatch; cumulative group offsets and gather row indices; native V3 metadata conversion is included.",
+            ("eager", "aclgraph"),
+            variant="xllm",
+            binding="torch.ops.xllm_ops",
         ),
     ),
 )

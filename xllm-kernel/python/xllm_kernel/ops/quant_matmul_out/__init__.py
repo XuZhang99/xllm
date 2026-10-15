@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Versioned quant_matmul_out contract and explicit backend preparation."""
+"""Backend-independent quant_matmul_out contract and explicit solution preparation."""
 
 from xllm_kernel.operator import Backend, Operator
 from xllm_kernel.registry import OpContract
@@ -9,9 +9,12 @@ OPERATOR = Operator(
     CONTRACT,
     (
         Backend(
-            "xllm_native",
-            "xllm_kernel.ops.quant_matmul_out.xllm_native:load",
+            "aclnn",
+            "xllm_kernel.ops.quant_matmul_out.aclnn:load_xllm",
             "Same quantized matmul, writing caller-owned BF16/FP16 output; output aliases supplied tensor.",
+            ("eager", "aclgraph"),
+            variant="xllm",
+            binding="torch.ops.xllm_ops",
         ),
     ),
 )

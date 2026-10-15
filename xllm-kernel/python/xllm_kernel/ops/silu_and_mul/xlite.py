@@ -1,13 +1,10 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""silu_and_mul xlite provider, resolved before graph capture."""
+"""silu_and_mul implementations supplied by xlite; variants name bindings."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    import torch
+from typing import Any
 
 
 def load() -> Callable[..., Any]:
