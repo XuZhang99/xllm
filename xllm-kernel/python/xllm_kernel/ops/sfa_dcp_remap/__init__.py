@@ -1,0 +1,23 @@
+# Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
+"""Versioned sfa_dcp_remap contract and explicit backend preparation."""
+
+from xllm_kernel.operator import Backend, Operator
+from xllm_kernel.registry import OpContract
+
+CONTRACT = OpContract("sfa_dcp_remap", 1, (), False, "exact_stable_compaction")
+OPERATOR = Operator(
+    CONTRACT,
+    (
+        Backend(
+            "tilelang",
+            "xllm_kernel.ops.sfa_dcp_remap.tilelang:load",
+            "DCP owner filtering, stable compaction and local token remap; INT32[T,1,2048], T<=256; TileLang AOT only, no JIT.",
+        ),
+        Backend(
+            "torch",
+            "xllm_kernel.ops.sfa_dcp_remap.torch:load",
+            "DCP owner filtering, stable compaction and local token remap; INT32[T,1,2048], T<=256; TileLang AOT only, no JIT.",
+        ),
+    ),
+)
+prepare = OPERATOR.prepare

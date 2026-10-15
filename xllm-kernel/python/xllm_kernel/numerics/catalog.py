@@ -15,6 +15,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.all_reduce",
     "xllm_kernel.numerics.lightning_indexer_out",
     "xllm_kernel.numerics.lightning_indexer",
+    "xllm_kernel.numerics.sfa_dcp_remap",
     "xllm_kernel.numerics.reshape_paged_cache",
     "xllm_kernel.numerics.scatter_nd_update",
     "xllm_kernel.numerics.inplace_partial_rotary_mul",
