@@ -39,6 +39,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.fused_add_rms_norm",
     "xllm_kernel.numerics.layer_norm",
     "xllm_kernel.numerics.embedding",
+    "xllm_kernel.numerics.silu_and_mul",
     "xllm_kernel.numerics.add",
     "xllm_kernel.numerics.rms_norm",
 )
