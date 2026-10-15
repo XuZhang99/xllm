@@ -6,6 +6,7 @@ import time
 
 from xllm_kernel.benchmark.report import write_report
 from xllm_kernel.numerics.arguments import parse_arguments
+from xllm_kernel.numerics.distributed import agree, rank_max_samples
 from xllm_kernel.numerics.verify import validation_session, verify_case
 
 
@@ -25,6 +26,7 @@ def main() -> None:
         revision=args.revision,
         output=args.output,
         report_writer=write_report,
+        distributed=args.distributed,
     ) as (plan, report):
         import torch
 
@@ -43,6 +45,8 @@ def main() -> None:
             function = prepared.function
             warmup_start = time.perf_counter()
             for _ in range(args.warmup):
+                if prepared.reset is not None:
+                    prepared.reset()
                 function()
             torch.npu.synchronize()
             row["warmup_s"] = time.perf_counter() - warmup_start
@@ -50,15 +54,23 @@ def main() -> None:
             if args.mode == "aclgraph":
                 capture_start = time.perf_counter()
                 graph = torch.npu.NPUGraph()
-                divisor = 64
+                divisor = 64 if prepared.reset is None else 1
+                if prepared.reset is not None:
+                    prepared.reset()
                 with torch.npu.graph(graph):
                     outputs = [function() for _ in range(divisor)]
+                if prepared.reset is not None:
+                    prepared.reset()
                 graph.replay()
                 torch.npu.synchronize()
                 row["graph_accuracy"] = prepared.validate(lambda output=outputs[-1]: output)
-                row["status"] = row["graph_accuracy"]["status"]
+                row["status"] = "passed" if agree(row["graph_accuracy"]["status"] == "passed") else "failed"
                 row["capture_s"] = time.perf_counter() - capture_start
                 function = graph.replay
             if row["status"] == "passed":
-                row["timing"] = measure(function, iterations=args.iterations, repeats=args.repeats, divisor=divisor)
+                options = {} if prepared.reset is None else {"reset": prepared.reset}
+                row["timing"] = measure(
+                    function, iterations=args.iterations, repeats=args.repeats, divisor=divisor, **options
+                )
+                row["timing"]["rank_max_samples"] = rank_max_samples(row["timing"])
             write_report(args.output, report)
