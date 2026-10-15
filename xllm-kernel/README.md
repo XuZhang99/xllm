@@ -35,8 +35,31 @@ of the selected implementation; the package does not install a generic Torch
 wheel over an existing vendor environment. The xLLM host wheel also includes
 `xllm_kernel`.
 
-For native execution, build the matching xLLM host in its configured PyTorch,
-torch_npu and CANN environment:
+For standalone native execution, build the package-owned NPU extension in a
+matching PyTorch/torch_npu environment (no xLLM host build is needed):
+
+```bash
+cd xllm-kernel
+XLLM_KERNEL_BUILD_NPU=1 MAX_JOBS=4 python setup.py build_ext --inplace
+cd ..
+```
+
+The extension contains a copy of the plain RMSNorm implementation from
+`xllm/core/kernels/npu/fused_layernorm.cpp` and registers it as
+`xllm_kernel::rms_norm`. The original C++ implementation and
+`xllm_ops::rms_norm` registration remain unchanged. During preparation,
+`npu.xllm_native.rms_norm` binds the package extension when installed; otherwise
+it requires the already-loaded host operator. An installed extension that fails
+to load is an error, not a reason to switch to the host.
+
+A standalone native wheel can be built with:
+
+```bash
+XLLM_KERNEL_BUILD_NPU=1 python -m pip wheel --no-build-isolation --no-deps ./xllm-kernel
+```
+
+Without the package extension, native execution still uses the matching xLLM
+host built in its configured PyTorch, torch_npu and CANN environment:
 
 ```bash
 python setup.py build
@@ -59,7 +82,8 @@ It contains the bridge and build manifest; GVirt launcher libraries and the
 NPU software stack remain external dependencies. Preparation checks the
 recorded GVirt revision, Torch/torch_npu versions and launcher-library hashes
 before loading the extension. Ordinary pure-Python installation does not
-build or load it.
+build or load it. Set both `XLLM_KERNEL_BUILD_NPU=1` and
+`XLLM_KERNEL_BUILD_XLITE=1` to include both extensions in one build.
 
 ## Design Goals
 
@@ -126,7 +150,8 @@ xllm-kernel/
 │   ├── fake/                      # Fake implementations for package-owned Torch ops
 │   ├── numerics/                  # Inputs, reference, tolerance, validation and CLI
 │   └── benchmark/                 # Timing, statistics, performance reports and CLI
-├── csrc/xlite/                    # Optional native bridge sources
+├── csrc/npu/                      # Standalone native RMSNorm copy and registration
+├── csrc/xlite/                    # Optional xlite bridge sources
 └── test/
     ├── test_*.py                  # Package, registry, numerical-report and CLI tests
     └── npu/                       # NPU fixtures and integration tests
@@ -138,8 +163,9 @@ an explicit contract and register through `KernelRegistry`.
 
 ### Solution choices
 
-- **Native adapters** reuse the xLLM host's Torch operators. Their schemas,
-  native implementations and existing fake registrations retain their owners.
+- **Native adapters** use the package-owned NPU extension when present, or the
+  xLLM host's Torch operator for pure-Python installations. The original host
+  schemas, native implementations and fake registrations retain their owners.
 - **Package-owned extensions** own their Torch namespace, device bridge and
   fake implementation. The current xlite bridge submits work on the current
   PyTorch NPU stream through the torch_npu queue, without a private stream or
@@ -174,7 +200,7 @@ Both CLIs provide `--help` without loading Torch or a device SDK. They currently
 run RMSNorm cases with deterministic CPU-generated inputs and an FP32 CPU
 reference. `--operation` selects a suite, or is inferred from the explicit
 `--implementation`. Use `--operation NAME --help` for its options. For example,
-with a built native host:
+with a built package NPU extension or native host:
 
 ```bash
 python -m xllm_kernel.numerics --operation rms_norm --device npu --mode eager \

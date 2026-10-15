@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import importlib
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 import torch
@@ -92,13 +95,52 @@ def test_initialization_is_idempotent_and_policy_is_fixed() -> None:
     plan = prepare_rms_norm()
     initialize_runtime()
     assert initialize(device="npu", implementation=os.environ.get("XLLM_KERNEL_RMS_NORM_IMPL")) is plan
-    assert plan.function is torch.ops.xllm_ops.rms_norm
+    from xllm_kernel.ops.rms_norm.npu import has_package_extension
+
+    ops = torch.ops.xllm_kernel if has_package_extension() else torch.ops.xllm_ops
+    assert plan.function is ops.rms_norm
     with pytest.raises(RuntimeError, match="restart"):
         initialize(device="cuda")
     with pytest.raises(RuntimeError, match="restart"):
         initialize(device="npu", implementation="missing")
     importlib.import_module("xllm.python.kernels_npu._custom_op")
     assert prepare_rms_norm() is plan
+
+
+def test_package_extension_runs_without_xllm_host(tmp_path: Path) -> None:
+    from xllm_kernel.ops.rms_norm.npu import has_package_extension
+
+    if not has_package_extension():
+        pytest.skip("build with XLLM_KERNEL_BUILD_NPU=1 to validate standalone execution")
+    script = """
+import importlib.abc
+import sys
+class BlockHostImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] == 'xllm':
+            raise AssertionError(f'unexpected host import: {fullname}')
+sys.meta_path.insert(0, BlockHostImports())
+import torch
+import torch_npu
+from xllm_kernel import initialize
+from xllm_kernel.ops import rms_norm
+plan = initialize(device='npu')
+assert plan.function is torch.ops.xllm_kernel.rms_norm
+assert not hasattr(torch.ops.xllm_ops, 'rms_norm')
+for dtype in (torch.float16, torch.bfloat16, torch.float32):
+    value = torch.randn(17, 512, dtype=dtype, device='npu')
+    weight = torch.randn(512, dtype=dtype, device='npu')
+    torch.testing.assert_close(
+        rms_norm(value, weight, 1e-5), torch_npu.npu_rms_norm(value, weight, epsilon=1e-5)[0], rtol=0, atol=0
+    )
+from torch._subclasses.fake_tensor import FakeTensorMode
+with FakeTensorMode():
+    value = torch.empty(7, 512, device='npu')
+    weight = torch.empty(512, device='npu')
+    assert rms_norm(value, weight, 1e-5).shape == value.shape
+assert initialize(device='npu') is plan
+"""
+    subprocess.run([sys.executable, "-c", script], cwd=tmp_path, check=True)
 
 
 def test_fake_preserves_existing_native_contract() -> None:

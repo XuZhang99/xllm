@@ -1,5 +1,5 @@
 # Copyright 2026 The xLLM Authors. Licensed under Apache-2.0.
-"""Fake registration for the optional package-owned xlite RMSNorm bridge."""
+"""Fake registrations for the optional package-owned RMSNorm extensions."""
 
 import math
 
@@ -20,6 +20,16 @@ def _xlite_rms_norm(input: torch.Tensor, weight: torch.Tensor, eps: float) -> to
     if not math.isfinite(eps) or eps < 0 or eps > torch.finfo(torch.float32).max:
         raise ValueError("xlite RMSNorm requires a finite nonnegative FP32 epsilon")
     return torch.empty(input.shape, dtype=input.dtype, device=input.device)
+
+
+def _native_rms_norm(input: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
+    del weight, eps
+    return torch.empty_like(input)
+
+
+def register_native_fake() -> None:
+    """Preserve the original xllm_ops::rms_norm FakeTensor contract."""
+    torch.library.register_fake("xllm_kernel::rms_norm")(_native_rms_norm)
 
 
 def register_fake() -> None:

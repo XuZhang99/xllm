@@ -16,13 +16,37 @@ _GVIRT_REVISION = "4a6dc3102d5778928e4d21116bc4d4694d51e584"
 def _package_path(name: str) -> Path:
     spec = importlib.util.find_spec(name)
     if spec is None or spec.origin is None:
-        raise RuntimeError(f"Building the xlite bridge requires installed {name}")
+        raise RuntimeError(f"Building kernel extensions requires installed {name}")
     return Path(spec.origin).parent
 
 
-def _extension_options() -> dict:
-    if os.environ.get("XLLM_KERNEL_BUILD_XLITE", "0") != "1":
+def _native_extension_options() -> dict:
+    if os.environ.get("XLLM_KERNEL_BUILD_NPU", "0") != "1":
         return {}
+
+    from torch.utils.cpp_extension import BuildExtension, CppExtension
+
+    npu = _package_path("torch_npu")
+    return {
+        "ext_modules": [
+            CppExtension(
+                "xllm_kernel._npu",
+                sources=["csrc/npu/rms_norm.cpp"],
+                include_dirs=[str(npu / "include")],
+                library_dirs=[str(npu / "lib")],
+                libraries=["torch_npu"],
+                runtime_library_dirs=["$ORIGIN/../torch_npu/lib", str(npu / "lib")],
+                extra_compile_args=["-O2", "-std=c++17"],
+            )
+        ],
+        "cmdclass": {"build_ext": BuildExtension},
+    }
+
+
+def _extension_options() -> dict:
+    native_options = _native_extension_options()
+    if os.environ.get("XLLM_KERNEL_BUILD_XLITE", "0") != "1":
+        return native_options
 
     import torch
     import torch_npu
@@ -52,6 +76,7 @@ def _extension_options() -> dict:
     library_dirs = [str(npu / "lib"), str(xlite / "lib"), str(cann / "lib64")]
     return {
         "ext_modules": [
+            *native_options.get("ext_modules", []),
             CppExtension(
                 "xllm_kernel._xlite",
                 sources=["csrc/xlite/rms_norm.cpp"],
@@ -60,15 +85,15 @@ def _extension_options() -> dict:
                 libraries=["torch_npu", "ascendcl", "xlite_kernels_bf16_npu", "xlite_kernels_f16_npu"],
                 runtime_library_dirs=["$ORIGIN/../torch_npu/lib", "$ORIGIN/../xlite/lib", *library_dirs],
                 extra_compile_args=["-O2", "-std=c++17"],
-            )
+            ),
         ],
         "cmdclass": {"build_ext": XliteBuildExtension},
     }
 
 
-setup(
-    options={
-        "build": {"build_base": "build/xlite" if os.environ.get("XLLM_KERNEL_BUILD_XLITE") == "1" else "build/python"}
-    },
-    **_extension_options(),
-)
+def _build_base() -> str:
+    backends = [name for name in ("npu", "xlite") if os.environ.get(f"XLLM_KERNEL_BUILD_{name.upper()}") == "1"]
+    return "build/" + ("_".join(backends) or "python")
+
+
+setup(options={"build": {"build_base": _build_base()}}, **_extension_options())

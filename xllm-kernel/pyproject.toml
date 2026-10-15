@@ -11,7 +11,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 
-# Torch, torch_npu and native xllm_ops are provided by the matching xLLM host.
+# Torch and torch_npu are provided by the matching NPU environment.
 # Do not install a generic Torch wheel over a vendor-specific deployment.
 [tool.setuptools.packages.find]
 where = ["python"]

@@ -147,8 +147,10 @@ def _prepare(device: str, mode: str, implementation: str) -> PreparedKernel:
     if implementation == "npu.xlite.rms_norm":
         from xllm_kernel.ops.rms_norm.xlite import register
     else:
-        from xllm import xllm_export  # noqa: F401
-        from xllm_kernel.ops.rms_norm.npu import register
+        from xllm_kernel.ops.rms_norm.npu import has_package_extension, register
+
+        if not has_package_extension():
+            from xllm import xllm_export  # noqa: F401
     registry = KernelRegistry()
     register(registry)
     registry.freeze()

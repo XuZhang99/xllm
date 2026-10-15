@@ -22,6 +22,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -118,6 +119,65 @@ else:
     raise AssertionError('unsupported platform accepted')
 """
     subprocess.run([sys.executable, "-c", script], cwd=tmp_path, check=True)
+
+
+@pytest.mark.parametrize("packaged", [False, True])
+@pytest.mark.parametrize("host_available", [False, True])
+def test_native_binding_resolves_package_or_host(
+    monkeypatch: pytest.MonkeyPatch, packaged: bool, host_available: bool
+) -> None:
+    from xllm_kernel.ops.rms_norm import npu
+
+    calls = []
+    host_op = lambda *args: None
+    package_op = lambda *args: None
+    torch = SimpleNamespace(
+        ops=SimpleNamespace(
+            xllm_ops=SimpleNamespace(**({"rms_norm": host_op} if host_available else {})),
+            xllm_kernel=SimpleNamespace(rms_norm=package_op),
+            load_library=lambda path: calls.append(path),
+        ),
+        _C=SimpleNamespace(_dispatch_has_kernel_for_dispatch_key=lambda *args: True),
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules, "xllm_kernel.fake.rms_norm", SimpleNamespace(register_native_fake=lambda: calls.append("fake"))
+    )
+    monkeypatch.setattr(npu, "_LOADED", False)
+    monkeypatch.setattr(
+        npu.importlib.util, "find_spec", lambda name: SimpleNamespace(origin="_npu.so") if packaged else None
+    )
+    if not packaged and not host_available:
+        with pytest.raises(RuntimeError, match="XLLM_KERNEL_BUILD_NPU=1"):
+            npu.register(KernelRegistry())
+        return
+    for _ in range(2):
+        registry = KernelRegistry()
+        npu.register(registry)
+        registry.freeze()
+        plan = registry.prepare(RMS_NORM_CONTRACT, device="npu", execution_mode="aclgraph")
+        assert plan.function is (package_op if packaged else host_op)
+    assert calls == (["_npu.so", "fake"] if packaged else [])
+
+
+def test_native_extension_load_failure_does_not_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    from xllm_kernel.ops.rms_norm import npu
+
+    def fail_load(path: str) -> None:
+        raise OSError("incompatible NPU extension")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(ops=SimpleNamespace(load_library=fail_load, xllm_ops=SimpleNamespace(rms_norm=_identity))),
+    )
+    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace())
+    monkeypatch.setattr(npu, "_LOADED", False)
+    monkeypatch.setattr(npu.importlib.util, "find_spec", lambda name: SimpleNamespace(origin="_npu.so"))
+    with pytest.raises(OSError, match="incompatible NPU extension"):
+        npu.register(KernelRegistry())
+    assert not npu._LOADED
 
 
 def test_main_wheel_includes_independent_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

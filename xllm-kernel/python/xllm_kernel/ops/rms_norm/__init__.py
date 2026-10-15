@@ -37,7 +37,8 @@ _configuration: tuple[str, str | None] | None = None
 def initialize(*, device: str, implementation: str | None = None) -> PreparedKernel:
     """Bind an NPU operator once, before model import or graph capture.
 
-    The default adapter requires the host's ``torch.ops.xllm_ops`` registration.
+    The default adapter uses the prebuilt package NPU extension when present,
+    otherwise it requires the host's ``torch.ops.xllm_ops`` registration.
     The explicit xlite solution loads its package-owned, prebuilt extension
     here. Dependency checks and binding happen only during preparation, with
     no runtime compilation or execution-error fallback. Changing policy
@@ -74,7 +75,7 @@ def initialize(*, device: str, implementation: str | None = None) -> PreparedKer
 def prepare_rms_norm() -> PreparedKernel:
     """Return the existing binding; this never searches for an implementation."""
     if _prepared is None:
-        raise RuntimeError("call xllm_kernel.initialize(device='npu') after loading the host native Torch ops")
+        raise RuntimeError("call xllm_kernel.initialize(device='npu') after building the extension or loading host ops")
     return _prepared
 
 
