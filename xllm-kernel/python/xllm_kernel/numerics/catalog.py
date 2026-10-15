@@ -6,7 +6,11 @@ from importlib import import_module
 from xllm_kernel.numerics.suite import OperationSuite
 
 # Only this catalog needs a new entry when adding an operation's tool support.
-_BUILTINS = ("xllm_kernel.numerics.rms_norm",)
+_BUILTINS = (
+    "xllm_kernel.numerics.moe_gmm1",
+    "xllm_kernel.numerics.add",
+    "xllm_kernel.numerics.rms_norm",
+)
 
 
 def load_suites() -> tuple[OperationSuite, ...]:
