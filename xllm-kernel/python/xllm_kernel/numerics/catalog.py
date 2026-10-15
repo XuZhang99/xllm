@@ -7,6 +7,7 @@ from xllm_kernel.numerics.suite import OperationSuite
 
 # Only this catalog needs a new entry when adding an operation's tool support.
 _BUILTINS = (
+    "xllm_kernel.numerics.all_gather",
     "xllm_kernel.numerics.moe_gmm1",
     "xllm_kernel.numerics.add",
     "xllm_kernel.numerics.rms_norm",
