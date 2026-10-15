@@ -15,6 +15,7 @@ _BUILTINS = (
     "xllm_kernel.numerics.dequant_swiglu_quant",
     "xllm_kernel.numerics.dynamic_quant",
     "xllm_kernel.numerics.atb_matmul_ein_sum",
+    "xllm_kernel.numerics.embedding",
     "xllm_kernel.numerics.add",
     "xllm_kernel.numerics.rms_norm",
 )
