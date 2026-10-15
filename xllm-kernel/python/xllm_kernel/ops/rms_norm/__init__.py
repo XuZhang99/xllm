@@ -54,6 +54,8 @@ def initialize(*, device: str, implementation: str | None = None) -> PreparedKer
 
     if implementation == "npu.xlite.rms_norm":
         from xllm_kernel.ops.rms_norm.xlite import register
+    elif implementation == "npu.cann.rms_norm":
+        from xllm_kernel.ops.rms_norm.cann import register
     else:
         from xllm_kernel.ops.rms_norm.npu import register
 

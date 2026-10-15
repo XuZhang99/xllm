@@ -146,6 +146,8 @@ def _prepare(device: str, mode: str, implementation: str) -> PreparedKernel:
 
     if implementation == "npu.xlite.rms_norm":
         from xllm_kernel.ops.rms_norm.xlite import register
+    elif implementation == "npu.cann.rms_norm":
+        from xllm_kernel.ops.rms_norm.cann import register
     else:
         from xllm import xllm_export  # noqa: F401
         from xllm_kernel.ops.rms_norm.npu import register
@@ -157,7 +159,7 @@ def _prepare(device: str, mode: str, implementation: str) -> PreparedKernel:
 
 SUITE = OperationSuite(
     operation="rms_norm",
-    implementations=("npu.xllm_native.rms_norm", "npu.xlite.rms_norm"),
+    implementations=("npu.xllm_native.rms_norm", "npu.cann.rms_norm", "npu.xlite.rms_norm"),
     add_arguments=_add_arguments,
     cases=_cases,
     prepare=_prepare,
