@@ -29,10 +29,20 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 _runtime_kernels: ModuleType | None = None
+
+
+def _load_kernel_package() -> ModuleType:
+    source_root = Path(__file__).resolve().parents[2]
+    if (source_root / "setup.py").is_file() and (source_root / "CMakeLists.txt").is_file():
+        kernel_path = str(source_root / "xllm-kernel" / "python")
+        if kernel_path not in sys.path:
+            sys.path.insert(0, kernel_path)
+    return importlib.import_module("xllm_kernel")
 
 
 def initialize_runtime() -> None:
@@ -47,7 +57,7 @@ def initialize_runtime() -> None:
     if current_platform.is_cuda():
         backend_name = "xllm.python.kernels_cuda"
     elif current_platform.is_npu():
-        import xllm_kernel
+        xllm_kernel = _load_kernel_package()
 
         from scripts.logger import logger
 

@@ -273,12 +273,15 @@ With `--python_model_path` pointing to the checkout root, a service restart
 picks up Python model and layer edits. Changes to C++ or Python DSL kernels
 compiled into native AOT artifacts require rebuilding those artifacts.
 
-NPU source checkouts also use the independent `xllm_kernel` Python package.
-Install the matching source revision with
-`python -m pip install --no-deps -e ./xllm-kernel` before starting workers or
-running Python tests. The regular xLLM wheel includes this package. Its first
-adapter routes plain RMSNorm through the existing native operator; fused and
-quantized normalization retain their current paths.
+NPU runtime initialization in a source checkout adds that checkout's
+`xllm-kernel/python` directory to the package search path before loading
+`xllm_kernel`. This applies to CTest, direct pytest, and embedded Python workers;
+no separate kernel-package installation or extra `PYTHONPATH` entry is required.
+Ordinary `xllm.python` imports do not change the search path or load kernels.
+The regular xLLM wheel includes `xllm_kernel` and uses normal package lookup.
+Standalone kernel CLIs still require installing `xllm-kernel` as described in its
+README. Plain RMSNorm uses the prepared kernel binding; fused and quantized
+normalization retain their current paths.
 
 ## Adding an operator
 

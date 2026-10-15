@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import runpy
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
@@ -178,6 +179,64 @@ def test_native_extension_load_failure_does_not_fall_back(monkeypatch: pytest.Mo
     with pytest.raises(OSError, match="incompatible NPU extension"):
         npu.register(KernelRegistry())
     assert not npu._LOADED
+
+
+@pytest.mark.parametrize("layout", ["source", "source_with_installed_package", "installed"])
+def test_host_kernel_import_without_site_initialization(tmp_path: Path, layout: str) -> None:
+    installed_root = tmp_path / "site-packages"
+    installed_root.mkdir()
+    if layout == "installed":
+        (installed_root / "xllm/python").mkdir(parents=True)
+        for relative in ("xllm/__init__.py", "xllm/python/__init__.py"):
+            shutil.copy2(_ROOT / relative, installed_root / relative)
+        shutil.copytree(
+            _ROOT / "xllm-kernel/python/xllm_kernel",
+            installed_root / "xllm_kernel",
+            ignore=shutil.ignore_patterns("__pycache__", "*.so", "_xlite_build.json"),
+        )
+        python_path = str(installed_root)
+        expected = installed_root / "xllm_kernel/__init__.py"
+    else:
+        python_path = str(_ROOT)
+        expected = _ROOT / "xllm-kernel/python/xllm_kernel/__init__.py"
+        if layout == "source_with_installed_package":
+            (installed_root / "xllm_kernel").mkdir()
+            (installed_root / "xllm_kernel/__init__.py").write_text(
+                "raise AssertionError('loaded an unrelated installed kernel package')\n"
+            )
+            python_path += os.pathsep + str(installed_root)
+
+    # A checkout-shaped working directory must not affect installed packages.
+    (tmp_path / "setup.py").touch()
+    (tmp_path / "CMakeLists.txt").touch()
+    script = """
+import importlib.util
+import sys
+from pathlib import Path
+
+original_path = sys.path.copy()
+import xllm.python as runtime
+assert sys.path == original_path
+assert 'xllm_kernel' not in sys.modules
+if sys.argv[1] == 'source':
+    assert importlib.util.find_spec('xllm_kernel') is None
+package = runtime._load_kernel_package()
+assert Path(package.__file__).resolve() == Path(sys.argv[2]).resolve()
+prepared_path = sys.path.copy()
+assert runtime._load_kernel_package() is package
+assert sys.path == prepared_path
+if sys.argv[1] == 'installed':
+    assert sys.path == original_path
+else:
+    assert sys.path[1:] == original_path
+assert not {'torch', 'torch_npu', 'xllm_export'} & sys.modules.keys()
+"""
+    subprocess.run(
+        [sys.executable, "-S", "-c", script, layout, str(expected)],
+        cwd=tmp_path,
+        env=dict(os.environ, PYTHONPATH=python_path),
+        check=True,
+    )
 
 
 def test_main_wheel_includes_independent_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
