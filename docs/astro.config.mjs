@@ -5,6 +5,29 @@ import starlightThemeRapide from 'starlight-theme-rapide';
 import rehypeSimpleIcons from './src/plugins/rehypeSimpleIcons.mjs';
 import remarkReadmeHomepage from './src/plugins/remarkReadmeHomepage.mjs';
 
+/**
+ * Replaces the theme picker installed by `starlight-theme-rapide`.
+ *
+ * Starlight plugins run in order, so registering the override here (after the
+ * Rapide plugin) avoids its component-conflict warning while still swapping in
+ * the picker that can return to automatic system appearance mode.
+ *
+ * @type {import('@astrojs/starlight/types').StarlightPlugin}
+ */
+const docsThemeSelect = {
+	name: 'docs-theme-select',
+	hooks: {
+		'config:setup'({ config, updateConfig }) {
+			updateConfig({
+				components: {
+					...(config.components ?? {}),
+					ThemeSelect: './src/components/ThemeSelect.astro',
+				},
+			});
+		},
+	},
+};
+
 // https://astro.build/config
 export default defineConfig({
 	markdown: {
@@ -13,7 +36,7 @@ export default defineConfig({
 	},
 	integrations: [
 		starlight({
-			plugins: [starlightThemeRapide()],
+			plugins: [starlightThemeRapide(), docsThemeSelect],
 			customCss: ['./src/styles/theme.css'],
 			lastUpdated: true,
 			components: {

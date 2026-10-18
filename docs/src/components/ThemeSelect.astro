@@ -1,0 +1,237 @@
+---
+import { randomBytes } from 'node:crypto';
+
+const maskId = `theme-moon-${randomBytes(4).toString('hex')}`;
+
+const labels = {
+	accessible: Astro.locals.t('themeSelect.accessibleLabel'),
+	auto: Astro.locals.t('themeSelect.auto'),
+	dark: Astro.locals.t('themeSelect.dark'),
+	light: Astro.locals.t('themeSelect.light'),
+};
+---
+
+<starlight-docs-theme-select
+	data-accessible-label={labels.accessible}
+	data-auto-label={labels.auto}
+	data-dark-label={labels.dark}
+	data-light-label={labels.light}
+>
+	<button
+		aria-label={labels.accessible}
+		aria-live="polite"
+		class="sl-flex"
+		title={labels.accessible}
+		type="button"
+	>
+		<svg aria-hidden="true" height="16" viewBox="0 0 24 24" width="16">
+			<mask class="moon" id={maskId}>
+				<rect x="0" y="0" width="100%" height="100%" fill="white"></rect>
+				<circle cx="24" cy="10" r="6" fill="black"></circle>
+			</mask>
+			<circle class="sun" cx="12" cy="12" r="6" mask={`url(#${maskId})`}></circle>
+			<g class="sun-beams" stroke="currentColor">
+				<line x1="12" y1="1" x2="12" y2="3"></line>
+				<line x1="12" y1="21" x2="12" y2="23"></line>
+				<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+				<line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+				<line x1="1" y1="12" x2="3" y2="12"></line>
+				<line x1="21" y1="12" x2="23" y2="12"></line>
+				<line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+				<line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+			</g>
+		</svg>
+	</button>
+</starlight-docs-theme-select>
+
+<style>
+	@layer rapide {
+		starlight-docs-theme-select {
+			--sl-rapide-theme-select-animation-duration: 400ms;
+			--sl-rapide-theme-select-ease-elastic: cubic-bezier(0.5, 1.25, 0.75, 1.25);
+
+			align-self: stretch;
+		}
+
+		button {
+			align-items: center;
+			background-color: transparent;
+			border: none;
+			cursor: pointer;
+			height: 100%;
+			margin-inline: 0.5rem 0.5rem;
+			padding-inline: 0.75rem;
+		}
+
+		svg {
+			stroke-linecap: round;
+		}
+
+		svg :is(.moon, .sun, .sun-beams) {
+			transform-origin: center;
+		}
+
+		svg :is(.moon, .sun) {
+			fill: var(--sl-color-gray-2);
+		}
+
+		svg .sun-beams {
+			stroke: var(--sl-color-gray-2);
+			stroke-width: 2px;
+		}
+
+		button:is(:hover, :focus-visible) svg :is(.moon, .sun) {
+			fill: var(--sl-color-accent-high);
+		}
+
+		button:is(:hover, :focus-visible) svg .sun-beams {
+			stroke: var(--sl-color-accent-high);
+		}
+
+		:global([data-theme='dark']) svg .sun {
+			transform: scale(1.75);
+		}
+
+		:global([data-theme='dark']) svg .sun-beams {
+			opacity: 0;
+		}
+
+		:global([data-theme='dark']) svg .moon circle {
+			transform: translateX(-7px);
+		}
+
+		@supports (cx: 1) {
+			:global([data-theme='dark']) svg .moon circle {
+				cx: 17;
+				transform: translateX(0);
+			}
+		}
+
+		@media (prefers-reduced-motion: no-preference) {
+			svg .sun {
+				transition: transform var(--sl-rapide-theme-select-animation-duration)
+					var(--sl-rapide-theme-select-ease-elastic);
+			}
+
+			svg .sun-beams {
+				transition:
+					opacity var(--sl-rapide-theme-select-animation-duration) ease,
+					transform var(--sl-rapide-theme-select-animation-duration) var(--sl-rapide-theme-select-ease-elastic);
+			}
+
+			svg .moon circle {
+				transition: transform calc(var(--sl-rapide-theme-select-animation-duration) / 2) ease-out;
+			}
+
+			@supports (cx: 1) {
+				svg .moon circle {
+					transition: cx calc(var(--sl-rapide-theme-select-animation-duration) / 2) ease-out;
+				}
+			}
+
+			:global([data-theme='dark']) svg .sun {
+				transform: scale(1.75);
+				transition-duration: calc(var(--sl-rapide-theme-select-animation-duration) / 2);
+				transition-timing-function: ease;
+			}
+
+			:global([data-theme='dark']) svg .sun-beams {
+				transform: rotateZ(-25deg);
+				transition-duration: calc(var(--sl-rapide-theme-select-animation-duration) / 4);
+			}
+
+			:global([data-theme='dark']) svg .moon circle {
+				transition-delay: calc(var(--sl-rapide-theme-select-animation-duration) / 4);
+				transition-duration: var(--sl-rapide-theme-select-animation-duration);
+			}
+		}
+	}
+</style>
+
+<script>
+	import {
+		getNextTheme,
+		getPreferenceToStore,
+		parseThemePreference,
+		resolveTheme,
+		type ResolvedTheme,
+		type ThemePreference,
+	} from '../lib/theme.ts';
+
+	const storageKey = 'starlight-theme';
+	const darkModeQuery = matchMedia('(prefers-color-scheme: dark)');
+
+	const getSystemTheme = (): ResolvedTheme => (darkModeQuery.matches ? 'dark' : 'light');
+
+	function readPreference(): ThemePreference {
+		try {
+			return parseThemePreference(localStorage.getItem(storageKey));
+		} catch {
+			return 'auto';
+		}
+	}
+
+	function storePreference(preference: ThemePreference): void {
+		try {
+			if (preference === 'auto') localStorage.removeItem(storageKey);
+			else localStorage.setItem(storageKey, preference);
+		} catch {
+			// Storage can be unavailable (for example in private browsing); keep switching on this page.
+		}
+	}
+
+	function updateLabels(preference: ThemePreference): void {
+		for (const picker of document.querySelectorAll<HTMLElement>('starlight-docs-theme-select')) {
+			const button = picker.querySelector('button');
+			if (!button) continue;
+
+			const preferenceLabel =
+				preference === 'auto'
+					? picker.dataset.autoLabel
+					: preference === 'dark'
+						? picker.dataset.darkLabel
+						: picker.dataset.lightLabel;
+			const label = `${picker.dataset.accessibleLabel}: ${preferenceLabel}`;
+
+			button.setAttribute('aria-label', label);
+			button.setAttribute('title', label);
+		}
+	}
+
+	function applyPreference(preference: ThemePreference): void {
+		const theme = resolveTheme(preference, getSystemTheme());
+
+		document.documentElement.dataset.theme = theme;
+		for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+			meta.content = theme === 'dark' ? '#080808' : '#ffffff';
+		}
+
+		updateLabels(preference);
+	}
+
+	class DocsThemeSelect extends HTMLElement {
+		constructor() {
+			super();
+			applyPreference(readPreference());
+
+			this.querySelector('button')?.addEventListener('click', () => {
+				const systemTheme = getSystemTheme();
+				const selected = getNextTheme(readPreference(), systemTheme);
+				const preference = getPreferenceToStore(selected, systemTheme);
+
+				storePreference(preference);
+				applyPreference(preference);
+			});
+		}
+	}
+
+	customElements.define('starlight-docs-theme-select', DocsThemeSelect);
+
+	// Keep following macOS (and other system) appearance changes in automatic mode.
+	darkModeQuery.addEventListener('change', () => {
+		if (readPreference() === 'auto') applyPreference('auto');
+	});
+
+	// Re-apply when the browser restores the page from the back/forward cache.
+	window.addEventListener('pageshow', () => applyPreference(readPreference()));
+</script>
