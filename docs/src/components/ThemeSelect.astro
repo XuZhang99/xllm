@@ -1,4 +1,5 @@
 ---
+// Copyright 2026 The xLLM Authors. Licensed under the Apache License, Version 2.0.
 import { randomBytes } from 'node:crypto';
 
 const maskId = `theme-moon-${randomBytes(4).toString('hex')}`;
@@ -161,9 +162,16 @@ const labels = {
 	const storageKey = 'starlight-theme';
 	const darkModeQuery = matchMedia('(prefers-color-scheme: dark)');
 
+	/** Last preference applied in this tab, used when localStorage is unavailable. */
+	let memoryPreference: ThemePreference | null = null;
+	/** Whether the in-memory preference is authoritative for this tab. */
+	let hasMemoryPreference = false;
+
 	const getSystemTheme = (): ResolvedTheme => (darkModeQuery.matches ? 'dark' : 'light');
 
 	function readPreference(): ThemePreference {
+		if (hasMemoryPreference) return memoryPreference ?? 'auto';
+
 		try {
 			return parseThemePreference(localStorage.getItem(storageKey));
 		} catch {
@@ -172,11 +180,15 @@ const labels = {
 	}
 
 	function storePreference(preference: ThemePreference): void {
+		memoryPreference = preference === 'auto' ? null : preference;
+		hasMemoryPreference = true;
+
 		try {
 			if (preference === 'auto') localStorage.removeItem(storageKey);
 			else localStorage.setItem(storageKey, preference);
 		} catch {
-			// Storage can be unavailable (for example in private browsing); keep switching on this page.
+			// Storage can be unavailable (for example in private browsing); the
+			// in-memory preference keeps the toggle working on this page.
 		}
 	}
 
@@ -226,6 +238,16 @@ const labels = {
 	}
 
 	customElements.define('starlight-docs-theme-select', DocsThemeSelect);
+
+	// Follow preference changes made in other tabs.
+	window.addEventListener('storage', (event) => {
+		if (event.key !== storageKey && event.key !== null) return;
+
+		// The stored value changed elsewhere, so read it again instead of the in-memory fallback.
+		hasMemoryPreference = false;
+		memoryPreference = null;
+		applyPreference(readPreference());
+	});
 
 	// Keep following macOS (and other system) appearance changes in automatic mode.
 	darkModeQuery.addEventListener('change', () => {
