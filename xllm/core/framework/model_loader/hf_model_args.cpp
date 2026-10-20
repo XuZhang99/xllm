@@ -24,10 +24,10 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/model/model_args.h"
+#include "core/framework/model_loader/hf_model_config.h"
 #include "core/framework/quantization/quant_args.h"
 #include "core/platform/platform.h"
 #include "core/util/json_reader.h"
-#include "core/util/model_config_utils.h"
 #include "core/util/utils.h"
 #include "models/model_registry.h"
 
@@ -428,7 +428,7 @@ bool load_hf_model_args(const std::filesystem::path& model_weights_path,
   normalize_speculators_config(&reader.mutable_data());
 
   const std::string model_type =
-      util::get_model_type(reader, model_weights_path, backend);
+      get_model_type(reader, model_weights_path, backend);
 
   std::string resolved_model_type;
   std::string error_message;
@@ -451,7 +451,7 @@ bool load_hf_model_args(const std::filesystem::path& model_weights_path,
                << resolved_model_type;
     return false;
   }
-  args->enable_mla(util::should_enable_mla(model_weights_path, backend));
+  args->enable_mla(should_enable_mla(model_weights_path, backend));
 
   return true;
 }

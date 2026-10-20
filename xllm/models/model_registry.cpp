@@ -26,11 +26,11 @@ limitations under the License.
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/model/model_args.h"
+#include "core/framework/model_loader/hf_model_config.h"
 #include "core/util/dit_model_discovery.h"
 #include "llm/py_causal_lm.h"
 #include "models.h"
 #include "processors/cacheable_multimodal_processor.h"
-#include "util/model_config_utils.h"
 
 namespace {
 
@@ -230,7 +230,7 @@ void resolve_npu_kernel_backend(Options* options) {
   }
 
   const std::string model_type =
-      util::get_model_type(options->model_path(), options->backend());
+      get_model_type(options->model_path(), options->backend());
   std::string effective_backend;
   std::string resolved_name;
   std::string error_message;

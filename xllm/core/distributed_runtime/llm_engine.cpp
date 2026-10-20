@@ -43,12 +43,12 @@ limitations under the License.
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/eplb/eplb_controller.h"
 #include "core/framework/model_loader/model_loader.h"
+#include "core/framework/speculative/draft_config.h"
 #include "core/kv_cache/block/block_utils.h"
 #include "core/kv_cache/layout/kv_cache_shape.h"
 #include "core/kv_cache/prefix/block_hasher.h"
 #include "core/kv_cache/storage/kv_cache_utils.h"
 #include "core/platform/platform.h"
-#include "core/util/model_config_utils.h"
 #include "framework/block/kv_cache_manager_factory.h"
 #include "framework/model/model_args.h"
 #include "framework/speculative/mtp_utils.h"
@@ -199,7 +199,7 @@ bool LLMEngine::init_model(MasterStatus master_status,
         << "Block-diffusion Target requires a draft checkpoint.";
     // Scheduler warmup must use the same auxiliary-state width as the workers.
     args_.layers_to_capture(
-        util::read_capture_layer_ids(options_.draft_model_path().value()));
+        read_capture_layer_ids(options_.draft_model_path().value()));
   }
 
   // A draft engine is fed token ids and detokenized by the target, so it

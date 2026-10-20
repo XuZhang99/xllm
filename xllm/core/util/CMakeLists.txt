@@ -16,7 +16,6 @@ cc_library(
     http_downloader.h
     json_reader.h
     dit_model_discovery.h
-    model_config_utils.h
     lightweightsemaphore.h
     net.h
     pretty_print.h
@@ -48,7 +47,6 @@ cc_library(
     json_reader.cpp
     dit_model_discovery.cpp
     linalg.cpp
-    model_config_utils.cpp
     net.cpp
     pretty_print.cpp
     suffix_decoding_cache.cpp

@@ -33,10 +33,6 @@ limitations under the License.
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/util/binary_payload.h"
-#include "core/util/dit_model_discovery.h"
-#include "core/util/json_reader.h"
-#include "core/util/model_config_utils.h"
-#include "models/model_registry.h"
 #include "rec.pb.h"
 #include "slice.h"
 #include "tensor.pb.h"
@@ -257,34 +253,6 @@ inline std::string get_model_repository_name(
   return repository_name;
 }
 
-inline std::string get_model_backend(const std::filesystem::path& model_path) {
-  JsonReader reader;
-  std::filesystem::path model_index_json_path = model_path / "model_index.json";
-
-  if (std::filesystem::exists(model_index_json_path)) {
-    reader.parse(model_index_json_path);
-    if (reader.value<std::string>("_diffusers_version").has_value()) {
-      return "dit";
-    }
-    // DiT models that are not diffusers-based (e.g. Cola-DLM) may have
-    // _class_name but no _diffusers_version. Treat them as dit backend.
-    if (reader.value<std::string>("_class_name").has_value()) {
-      return "dit";
-    }
-    LOG(FATAL) << "Please check model_index.json file in model path: "
-               << model_path << ", it should contain _diffusers_version key.";
-  }
-
-  // Component-subdirectory layout (e.g. Cola-DLM with cola_dit/cola_vae).
-  if (auto components = discover_dit_components(model_path)) {
-    if (!components->empty()) {
-      return "dit";
-    }
-  }
-
-  return ModelRegistry::get_model_backend(get_model_type(model_path));
-}
-
 // SFA C8: packed [int8 nope | bf16 rope | fp32 scale] KV cache. Currently only
 // GLM-5.2 (glm_moe_dsa) drives the packed 656B write/read pipeline.
 inline bool supports_mla_kv_cache_quant(std::string_view model_type) {
@@ -321,17 +289,6 @@ inline bool enable_mla_packed_c8(bool enable_kv_cache_quant,
 inline constexpr const char* kNonMluKvCacheQuantRejectMsg =
     "KV cache quantization on non-MLU backends only supports GLM-5.2 "
     "MLA SFA C8 (model_type=glm_moe_dsa).";
-
-inline bool should_enable_mla(
-    const std::filesystem::path& model_path,
-    const std::optional<std::string>& backend = std::nullopt) {
-  const std::string resolved_backend =
-      backend.has_value() ? backend.value() : get_model_backend(model_path);
-  if (resolved_backend == "dit") {
-    return false;
-  }
-  return is_mla_model_type(get_model_type(model_path, backend));
-}
 
 inline int32_t kv_split_size_effective(void) {
   return ParallelConfig::get_instance().kv_split_size_effective();

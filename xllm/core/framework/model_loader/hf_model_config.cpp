@@ -14,29 +14,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/util/model_config_utils.h"
+#include "core/framework/model_loader/hf_model_config.h"
 
 #include <glog/logging.h>
 
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <utility>
 
 #include "core/util/dit_model_discovery.h"
 #include "core/util/json_reader.h"
+#include "core/util/utils.h"
+#include "models/model_registry.h"
 
-namespace xllm::util {
-
-std::vector<int32_t> boundary_to_post_layer_ids(
-    std::vector<int32_t> boundary_ids) {
-  for (int32_t& boundary_id : boundary_ids) {
-    CHECK_GE(boundary_id, 1)
-        << "Embedding capture (eagle_aux_hidden_state_layer_ids boundary "
-           "index 0) is not supported; use a decoder-layer boundary index "
-           "in [1, num_layers]";
-    --boundary_id;
-  }
-  return boundary_ids;
-}
+namespace xllm {
 
 std::string get_model_type(const JsonReader& reader,
                            const std::filesystem::path& model_path,
@@ -94,7 +86,7 @@ std::string get_model_type(const std::filesystem::path& model_path,
 
   const std::filesystem::path config_json_path = model_path / "config.json";
   if (!std::filesystem::exists(config_json_path)) {
-    if (auto layout = discover_dit_model_layout(model_path)) {
+    if (auto layout = util::discover_dit_model_layout(model_path)) {
       return layout->pipeline_type;
     }
     LOG(FATAL) << "Please check config.json or model_index.json file, one of "
@@ -109,41 +101,43 @@ std::string get_model_type(const std::filesystem::path& model_path,
   return get_model_type(reader, model_path, std::move(backend));
 }
 
-std::vector<int32_t> read_capture_layer_ids(
-    const std::string& model_weights_path,
-    bool required) {
+std::string get_model_backend(const std::filesystem::path& model_path) {
   JsonReader reader;
-  const std::string config_path = model_weights_path + "/config.json";
-  if (!reader.parse(config_path)) {
-    CHECK(!required) << "Failed to parse draft config: " << config_path;
-    return {};
+  const std::filesystem::path model_index_json_path =
+      model_path / "model_index.json";
+
+  if (std::filesystem::exists(model_index_json_path)) {
+    reader.parse(model_index_json_path);
+    if (reader.value<std::string>("_diffusers_version").has_value()) {
+      return "dit";
+    }
+    // DiT models that are not diffusers-based (e.g. Cola-DLM) may have
+    // _class_name but no _diffusers_version. Treat them as dit backend.
+    if (reader.value<std::string>("_class_name").has_value()) {
+      return "dit";
+    }
+    LOG(FATAL) << "Please check model_index.json file in model path: "
+               << model_path << ", it should contain _diffusers_version key.";
   }
 
-  // Legacy xLLM/vLLM draft configs already use 0-based post-layer output
-  // indices, which match ModelArgs::layers_to_capture directly.
-  std::vector<int32_t> capture_layer_ids =
-      reader.value_or<std::vector<int32_t>>(
-          std::vector<std::string>{"dspark_target_layer_ids",
-                                   "target_layer_ids",
-                                   "dflash_config.target_layer_ids"},
-          std::vector<int32_t>{});
-  if (!capture_layer_ids.empty()) {
-    return capture_layer_ids;
+  // Component-subdirectory layout (e.g. Cola-DLM with cola_dit/cola_vae).
+  if (auto components = util::discover_dit_components(model_path)) {
+    if (!components->empty()) {
+      return "dit";
+    }
   }
 
-  // Speculators-format keys are hidden-state boundary indices (0=embedding
-  // output, v=output of layer v-1); shift them to the post-layer contract.
-  capture_layer_ids = reader.value_or<std::vector<int32_t>>(
-      std::vector<std::string>{"aux_hidden_state_layer_ids",
-                               "eagle_aux_hidden_state_layer_ids"},
-      std::vector<int32_t>{});
-  capture_layer_ids = boundary_to_post_layer_ids(std::move(capture_layer_ids));
-  CHECK(!required || !capture_layer_ids.empty())
-      << "Block-diffusion draft config requires dspark_target_layer_ids, "
-         "target_layer_ids, dflash_config.target_layer_ids, or "
-         "aux_hidden_state_layer_ids: "
-      << config_path;
-  return capture_layer_ids;
+  return ModelRegistry::get_model_backend(get_model_type(model_path));
 }
 
-}  // namespace xllm::util
+bool should_enable_mla(const std::filesystem::path& model_path,
+                       const std::optional<std::string>& backend) {
+  const std::string resolved_backend =
+      backend.has_value() ? backend.value() : get_model_backend(model_path);
+  if (resolved_backend == "dit") {
+    return false;
+  }
+  return util::is_mla_model_type(get_model_type(model_path, backend));
+}
+
+}  // namespace xllm

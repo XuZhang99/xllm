@@ -36,6 +36,7 @@ limitations under the License.
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/parallel_config_validation.h"
 #include "core/framework/config/speculative_config.h"
+#include "core/framework/model_loader/hf_model_config.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
 #if defined(USE_NPU)
@@ -46,7 +47,6 @@ limitations under the License.
 #include "scheduler/profile/profile_manager.h"
 #include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
-#include "util/model_config_utils.h"
 #include "util/net.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
@@ -56,7 +56,7 @@ namespace xllm {
 
 LLMMaster::LLMMaster(const Options& options)
     : Master(options), master_status_(options.master_status()) {
-  options_.enable_mla(util::should_enable_mla(
+  options_.enable_mla(should_enable_mla(
       std::filesystem::path(options_.model_path()), options_.backend()));
 #if defined(USE_NPU)
   resolve_npu_kernel_backend(&options_);
@@ -68,7 +68,7 @@ LLMMaster::LLMMaster(const Options& options)
   const EngineType engine_type =
       use_ssm_engine ? EngineType::SSM : EngineType::LLM;
   const std::string model_type =
-      util::get_model_type(options_.model_path(), options_.backend());
+      get_model_type(options_.model_path(), options_.backend());
   const std::optional<std::string> cp_error = validate_context_parallel_config(
       options_, engine_type, model_type, options_.nnodes());
   CHECK(!cp_error.has_value()) << cp_error.value();

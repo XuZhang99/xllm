@@ -26,7 +26,6 @@ limitations under the License.
 
 #include "core/runtime/json_object_output_rows.h"
 #include "core/runtime/task_execution_pipeline.h"
-#include "core/util/model_config_utils.h"
 #if defined(USE_NPU)
 #include "acl/acl.h"
 #include "kernels/npu/xllm_ops/xllm_ops_api.h"
@@ -84,6 +83,7 @@ limitations under the License.
 #include "core/framework/allocator/global_virtual_memory_region.h"
 #include "core/framework/allocator/virtual_memory/physical_page_pool.h"
 #include "core/framework/model_loader/model_loader.h"
+#include "core/framework/speculative/draft_config.h"
 #include "core/framework/speculative/mtp_utils.h"
 #include "core/kv_cache/layout/layerwise_split_layout.h"
 #include "core/kv_cache/linear_state_restore.h"
@@ -2482,7 +2482,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
       CHECK(options_.draft_model_path().has_value())
           << "block-diffusion speculative decoding requires --draft_model.";
       args.layers_to_capture(
-          util::read_capture_layer_ids(options_.draft_model_path().value()));
+          read_capture_layer_ids(options_.draft_model_path().value()));
     }
   } else if (options_.enable_speculative_decode() &&
              ::xllm::SpeculativeConfig::get_instance()
@@ -2516,9 +2516,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
         options_.draft_model_path().has_value()) {
       // Eagle3.1 drafts pin their aux capture layers in the draft config;
       // legacy eagle3 configs omit them and fall back to the default below.
-      capture_layer_ids =
-          util::read_capture_layer_ids(*options_.draft_model_path(),
-                                       /*required=*/false);
+      capture_layer_ids = read_capture_layer_ids(*options_.draft_model_path(),
+                                                 /*required=*/false);
     }
     if (capture_layer_ids.empty()) {
       const int32_t num_layers = static_cast<int32_t>(args.n_layers());
@@ -2539,7 +2538,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
       CHECK(options_.draft_model_path().has_value())
           << "block-diffusion speculative decoding requires --draft_model.";
       args.layers_to_capture(
-          util::read_capture_layer_ids(options_.draft_model_path().value()));
+          read_capture_layer_ids(options_.draft_model_path().value()));
     }
     // When running speculative decoding, the draft worker reuses the same
     // checkpoint as the target model. The draft worker needs to instantiate

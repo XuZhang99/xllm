@@ -17,17 +17,14 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
-#include <filesystem>
-#include <optional>
 #include <string>
 #include <vector>
 
 namespace xllm {
 
-class JsonReader;
-
-namespace util {
-
+// Converts Speculators hidden-state boundary indices (0 = embedding output, v =
+// output of layer v-1) into the 0-based post-layer capture indices consumed by
+// ModelArgs::layers_to_capture.
 std::vector<int32_t> boundary_to_post_layer_ids(
     std::vector<int32_t> boundary_ids);
 
@@ -36,12 +33,4 @@ std::vector<int32_t> read_capture_layer_ids(
     const std::string& model_weights_path,
     bool required = true);
 
-std::string get_model_type(const JsonReader& reader,
-                           const std::filesystem::path& model_path,
-                           std::optional<std::string> backend = std::nullopt);
-
-std::string get_model_type(const std::filesystem::path& model_path,
-                           std::optional<std::string> backend = std::nullopt);
-
-}  // namespace util
 }  // namespace xllm

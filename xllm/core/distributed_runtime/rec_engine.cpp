@@ -28,6 +28,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/model_loader/hf_model_config.h"
 #include "core/framework/model_loader/model_loader.h"
 #include "core/kv_cache/layout/kv_cache_shape.h"
 #include "framework/model/model_args.h"
@@ -35,7 +36,6 @@ limitations under the License.
 #include "framework/request/rec_type.h"
 #include "master.h"  // For MasterStatus::WAKEUP constant
 #include "util/env_var.h"
-#include "util/model_config_utils.h"
 #include "util/net.h"
 #include "util/pretty_print.h"
 #include "util/rec_model_utils.h"
@@ -82,7 +82,7 @@ void RecEngine::validate_multi_node_support() const {
   // rank 0 never collects, so fail fast instead of serving from an incomplete
   // cluster.
   const std::string model_type =
-      util::get_model_type(options_.model_path(), options_.backend());
+      get_model_type(options_.model_path(), options_.backend());
   const RecModelKind rec_model_kind = get_rec_model_kind(model_type);
   CHECK(rec_model_kind == RecModelKind::kLlmRec)
       << "Multi-node REC serving is only supported for LlmRec models, "

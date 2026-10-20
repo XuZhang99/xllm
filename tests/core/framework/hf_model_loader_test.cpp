@@ -30,13 +30,14 @@ limitations under the License.
 #include "core/framework/model/generic_rec.h"
 #include "core/framework/model/rec_model.h"
 #include "core/framework/model_loader/hf_model_args.h"
+#include "core/framework/model_loader/hf_model_config.h"
 #include "core/framework/speculative/mtp_utils.h"
 #include "core/kv_cache/layout/kv_cache_estimation.h"
 #include "core/kv_cache/layout/kv_cache_shape.h"
 #include "core/platform/device.h"
 #include "core/platform/platform.h"
 #include "core/runtime/options.h"
-#include "core/util/model_config_utils.h"
+#include "core/util/json_reader.h"
 #include "core/util/utils.h"
 #include "models/model_registry.h"
 
@@ -166,10 +167,9 @@ TEST(HFModelLoaderTest, Qwen35DenseBackendAwareModelTypeSelection) {
   )json"));
 
   const std::filesystem::path fake_model_path("/tmp/Qwen3.5-9B");
-  EXPECT_EQ(util::get_model_type(reader, fake_model_path), "qwen3_5_text");
-  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "llm"),
-            "qwen3_5_text");
-  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "vlm"), "qwen3_5");
+  EXPECT_EQ(get_model_type(reader, fake_model_path), "qwen3_5_text");
+  EXPECT_EQ(get_model_type(reader, fake_model_path, "llm"), "qwen3_5_text");
+  EXPECT_EQ(get_model_type(reader, fake_model_path, "vlm"), "qwen3_5");
   EXPECT_EQ(ModelRegistry::get_model_backend("qwen3_5_text"), "llm");
 }
 
@@ -193,11 +193,9 @@ TEST(HFModelLoaderTest, Qwen35MoeBackendAwareModelTypeSelection) {
   )json"));
 
   const std::filesystem::path fake_model_path("/tmp/Qwen3.5-MoE");
-  EXPECT_EQ(util::get_model_type(reader, fake_model_path), "qwen3_5_moe_text");
-  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "llm"),
-            "qwen3_5_moe_text");
-  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "vlm"),
-            "qwen3_5_moe");
+  EXPECT_EQ(get_model_type(reader, fake_model_path), "qwen3_5_moe_text");
+  EXPECT_EQ(get_model_type(reader, fake_model_path, "llm"), "qwen3_5_moe_text");
+  EXPECT_EQ(get_model_type(reader, fake_model_path, "vlm"), "qwen3_5_moe");
   EXPECT_EQ(ModelRegistry::get_model_backend("qwen3_5_moe_text"), "llm");
 }
 
@@ -1213,21 +1211,6 @@ TEST(HFModelLoaderTest, Qwen3Eagle3LayersToCaptureDefaultsEmpty) {
   EXPECT_TRUE(args.layers_to_capture().empty());
 }
 #endif
-
-TEST(HFModelLoaderTest, BoundaryToPostLayerIdsShiftsAndRejectsEmbedding) {
-  // Speculators boundary indices (0=embedding, v=output of layer v-1) shift
-  // to 0-based post-layer capture indices.
-  EXPECT_EQ(util::boundary_to_post_layer_ids({2, 32, 61}),
-            (std::vector<int32_t>{1, 31, 60}));
-  EXPECT_TRUE(util::boundary_to_post_layer_ids({}).empty());
-
-  // Boundary 0 (the embedding output) is legal in speculators but xLLM only
-  // captures decoder-layer outputs; it must be rejected loudly instead of
-  // shifted to -1, where it would never match and silently feed the draft
-  // uninitialized capture slots.
-  EXPECT_DEATH(util::boundary_to_post_layer_ids({0, 32, 61}),
-               "Embedding capture");
-}
 
 TEST(HFModelLoaderTest, NumAuxLayersFallsBackToThreeWhenListOmitted) {
   ModelArgs args;

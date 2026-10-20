@@ -61,6 +61,7 @@ namespace py = pybind11;
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/service_config.h"
 #include "core/framework/config/speculative_config.h"
+#include "core/framework/model_loader/hf_model_config.h"
 #if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
 #include "core/framework/transfer/mooncake_transfer_engine.h"
 #endif
@@ -398,7 +399,7 @@ int run() {
   }
 
   if (model_config.backend().empty()) {
-    model_config.backend(xllm::util::get_model_backend(model_path));
+    model_config.backend(xllm::get_model_backend(model_path));
   }
 
   const std::string local_ip = net::get_local_ip_addr();
@@ -428,7 +429,7 @@ int run() {
 #endif
   std::string model_type = "";
   if (model_config.backend() != "dit") {
-    model_type = xllm::util::get_model_type(model_path, model_config.backend());
+    model_type = xllm::get_model_type(model_path, model_config.backend());
     model_config.tool_call_parser(
         function_call::FunctionCallParser::get_parser_auto(
             model_config.tool_call_parser(), model_type));

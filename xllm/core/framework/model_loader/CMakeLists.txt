@@ -7,11 +7,13 @@ cc_library(
     model_loader
   HDRS
     hf_model_args.h
+    hf_model_config.h
     hf_model_loader.h
     dit_model_loader.h
     model_loader.h
   SRCS
     hf_model_args.cpp
+    hf_model_config.cpp
     hf_model_loader.cpp
     dit_model_loader.cpp
     model_loader.cpp

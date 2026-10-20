@@ -46,6 +46,7 @@ limitations under the License.
 #include "core/layers/common/expanded_decode_metadata_builder.h"
 #include "core/layers/npu_torch/deepseek_sparse_attention.h"
 #endif
+#include "core/framework/model_loader/hf_model_config.h"
 #include "core/framework/speculative/draft_extend_input.h"
 #include "core/framework/speculative/spec_input_builder.h"
 #include "core/framework/speculative/spec_verify.h"
@@ -53,7 +54,6 @@ limitations under the License.
 #include "core/runtime/task_execution_pipeline.h"
 #include "runtime/llm_worker_impl.h"
 #include "util/json_reader.h"
-#include "util/model_config_utils.h"
 #include "util/tensor_helper.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -349,7 +349,7 @@ DFlashWorkerImpl::DFlashWorkerImpl(const ParallelArgs& parallel_args,
             // DeepSeek-V4 on NPU.
             if (parallel_args.cp_size() > 1) {
               CHECK(Platform::is_npu() &&
-                    util::is_deepseek_v4_model_type(util::get_model_type(
+                    util::is_deepseek_v4_model_type(get_model_type(
                         options.model_path(), options.backend())))
                   << "Block-diffusion speculative decoding does not support "
                      "context parallelism (cp_size > 1).";

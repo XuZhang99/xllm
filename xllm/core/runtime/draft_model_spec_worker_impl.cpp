@@ -37,6 +37,7 @@ limitations under the License.
 #include "core/kv_cache/layout/kv_cache_shape.h"
 #include "core/kv_cache/transfer/hierarchy_kv_cache_transfer.h"
 #include "core/kv_cache/transfer/mooncake_kv_cache_transfer.h"
+#include "models/model_registry.h"
 #include "runtime/llm_worker_impl.h"
 #include "util/hash_util.h"
 #include "util/tensor_helper.h"

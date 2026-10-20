@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "parallel_state.h"
 
+#include <torch/nn/functional/padding.h>
+
 #include "core/util/utils.h"
 #include "runtime/options.h"
 #include "util/net.h"

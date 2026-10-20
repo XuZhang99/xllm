@@ -89,6 +89,8 @@ cc_library(
     :api_service
     :worker_model_codec
     :models
+    :model_loader
+    :speculative
     :parallel_config_validation
     :runtime
     :kv_cache_manager_factory
@@ -164,6 +166,7 @@ cc_library(
     :request
     :runtime
     :model
+    :model_loader
     :models
     :parallel_config_validation
     $<$<BOOL:${USE_NPU}>:npu_layers>

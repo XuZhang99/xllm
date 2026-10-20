@@ -36,6 +36,7 @@ limitations under the License.
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/parallel_config_validation.h"
 #include "core/framework/config/speculative_config.h"
+#include "core/framework/model_loader/hf_model_config.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/model/model_args.h"
@@ -48,7 +49,6 @@ limitations under the License.
 #include "runtime/options.h"
 #include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
-#include "util/model_config_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -133,7 +133,7 @@ std::optional<std::string> join_message_texts(
 }  // namespace
 
 VLMMaster::VLMMaster(const Options& options) : Master(options) {
-  options_.enable_mla(util::should_enable_mla(
+  options_.enable_mla(should_enable_mla(
       std::filesystem::path(options_.model_path()), options_.backend()));
 #if defined(USE_NPU)
   CHECK(!EPLBConfig::get_instance().enable_eplb())
@@ -147,7 +147,7 @@ VLMMaster::VLMMaster(const Options& options) : Master(options) {
   const bool use_speculative_engine =
       should_use_vlm_speculative_engine(options_);
   const std::string model_type =
-      util::get_model_type(options_.model_path(), options_.backend());
+      get_model_type(options_.model_path(), options_.backend());
   const std::optional<std::string> cp_error = validate_context_parallel_config(
       options_,
       use_speculative_engine ? EngineType::VLMSSM : EngineType::VLM,

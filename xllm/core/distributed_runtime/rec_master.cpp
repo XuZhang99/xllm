@@ -28,6 +28,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/framework/config/parallel_config_validation.h"
+#include "core/framework/model_loader/hf_model_config.h"
 #include "core/framework/multimodal/mm_data.h"
 #if defined(USE_NPU)
 #include "models/model_registry.h"
@@ -36,7 +37,6 @@ limitations under the License.
 #include "rec_engine.h"
 #include "runtime/options.h"
 #include "scheduler/scheduler_factory.h"
-#include "util/model_config_utils.h"
 #include "util/rec_model_utils.h"
 #include "util/scope_guard.h"
 #include "util/threadpool.h"
@@ -63,7 +63,7 @@ RecType get_rec_type(const ModelArgs& model_args) {
 }  // namespace
 
 RecMaster::RecMaster(const Options& options) : Master(options) {
-  options_.enable_mla(util::should_enable_mla(
+  options_.enable_mla(should_enable_mla(
       std::filesystem::path(options_.model_path()), options_.backend()));
 #if defined(USE_NPU)
   resolve_npu_kernel_backend(&options_);
@@ -71,7 +71,7 @@ RecMaster::RecMaster(const Options& options) : Master(options) {
   CHECK(!options_.enable_disagg_pd())
       << "Disaggregated PD is not supported by the Rec engine.";
   const std::string model_type =
-      util::get_model_type(options_.model_path(), options_.backend());
+      get_model_type(options_.model_path(), options_.backend());
   const std::optional<std::string> cp_error = validate_context_parallel_config(
       options_, EngineType::REC, model_type, options_.nnodes());
   CHECK(!cp_error.has_value()) << cp_error.value();

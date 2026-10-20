@@ -49,7 +49,6 @@ limitations under the License.
 #include "core/platform/device.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
-#include "core/util/model_config_utils.h"
 #include "core/util/rec_model_utils.h"
 #include "core/util/scope_guard.h"
 #include "core/util/tensor_helper.h"

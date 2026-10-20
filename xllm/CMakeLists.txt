@@ -96,6 +96,7 @@ else()
       :config
       :xllm_server
       :master
+      :model_loader
       :kv_cache_store_config_validation
       :util
       absl::strings

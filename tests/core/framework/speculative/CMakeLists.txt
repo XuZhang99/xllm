@@ -2,6 +2,16 @@ include(cc_test)
 
 cc_test(
   NAME
+    draft_config_test
+  SRCS
+    draft_config_test.cpp
+  DEPS
+    :speculative
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
     spec_metrics_test
   SRCS
     spec_metrics_test.cpp
