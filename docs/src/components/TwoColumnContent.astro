@@ -1,0 +1,18 @@
+---
+// Copyright 2026 The xLLM Authors. Licensed under the Apache License, Version 2.0.
+import DefaultTwoColumnContent from '@astrojs/starlight/components/TwoColumnContent.astro';
+import ReportIssueButton from './ReportIssueButton.astro';
+---
+
+<!--
+	The report issue button is rendered next to the two-column content instead of
+	inside it. Starlight isolates the main column in its own stacking context
+	(`.main-pane { isolation: isolate }`) while the right sidebar is a fixed,
+	full-height overlay, so a floating button inside the main column paints below
+	that overlay and never receives hover or click events.
+-->
+<DefaultTwoColumnContent>
+	<slot name="right-sidebar" slot="right-sidebar" />
+	<slot />
+</DefaultTwoColumnContent>
+<ReportIssueButton />

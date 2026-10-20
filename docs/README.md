@@ -7,8 +7,10 @@ This repository contains the Astro + Starlight documentation site for
 high-performance serving on domestic AI accelerators.
 
 The site is built with Starlight and `starlight-theme-rapide`. It includes a
-custom header, bilingual navigation, and a page-level `Copy page` action for
-copying documentation content as Markdown.
+custom header, bilingual navigation, a page-level `Copy page` action for
+copying documentation content as Markdown, and a floating `Report issue`
+button in the bottom-right corner that opens a prefilled GitHub issue for the
+current page.
 
 ## Documentation Structure
 

@@ -45,6 +45,7 @@ export default defineConfig({
 				MarkdownContent: './src/components/MarkdownContent.astro',
 				PageTitle: './src/components/PageTitle.astro',
 				SiteTitle: './src/components/SiteTitle.astro',
+				TwoColumnContent: './src/components/TwoColumnContent.astro',
 			},
 			title: {
 				en: 'xLLM',

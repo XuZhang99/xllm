@@ -6,7 +6,9 @@
 文档站。xLLM 是面向国产 AI 加速器的高性能大语言模型推理框架。
 
 站点基于 Starlight 和 `starlight-theme-rapide` 构建，包含自定义顶部导航、
-中英文切换，以及用于将文档正文复制为 Markdown 的 `Copy page` 页面操作。
+中英文切换、用于将文档正文复制为 Markdown 的 `Copy page` 页面操作，以及右下角
+浮动的 `Report issue`（中文页面显示为 `反馈文档问题`）按钮：点击后按当前页面的
+地址生成 GitHub issue。
 
 ## 文档结构
 
