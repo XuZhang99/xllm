@@ -25,7 +25,6 @@ _FRACTAL_NZ_FORMAT = 29
 # The installed torch_npu runtime uses 1 for int8. Keep this named instead of
 # using a magic value at the call site.
 _TORCH_INT8_DTYPE = 1
-_MIN_FUSED_MOE_INTERMEDIATE_SIZE = 256
 
 
 def _unpermute_probs(topk_weights: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
@@ -1004,9 +1003,6 @@ def _moe_expert_compute_impl(
         and expert_range[1] == num_experts
         and expert_tokens_num_type == 0
         and group_list_type == 0
-        # Narrow TP shards need the native V2 path. The custom fused path
-        # produces inaccurate GLM-5.3 long-context output at width 128 (TP16).
-        and w13.shape[-1] // 2 >= _MIN_FUSED_MOE_INTERMEDIATE_SIZE
         and supports_fused_moe_gmm1(hidden_states.device)
     )
     if use_fused_gmm1:
