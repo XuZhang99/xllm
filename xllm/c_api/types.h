@@ -28,7 +28,7 @@ extern "C" {
 #define XLLM_META_STRING_FIELD_MAX_LEN 128
 
 // Major version of the public C ABI. A mismatch requires recompilation.
-#define XLLM_C_ABI_VERSION_MAJOR 1
+#define XLLM_C_ABI_VERSION_MAJOR 2
 
 // Export Macro Definition
 #ifndef XLLM_CAPI_EXPORT
@@ -182,6 +182,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   // 1-8
   // meaning ith thread will be attached to first 8 logical processors
   char cpu_affinity[XLLM_META_STRING_FIELD_MAX_LEN];
+
+  /** Named native extension family (empty string = normal selection) */
+  char extension_impl[XLLM_META_STRING_FIELD_MAX_LEN];
 } XLLM_InitLLMOptions;
 
 /**

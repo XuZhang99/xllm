@@ -20,6 +20,12 @@ limitations under the License.
 #include "core/framework/config/speculative_config.h"
 #include "core/platform/platform.h"
 
+DEFINE_string(extension_impl,
+              "",
+              "Native extension implementation family for registered "
+              "components, including models and executors. An empty value "
+              "preserves the normal implementation selection.");
+
 DEFINE_bool(enable_task_pipeline,
             false,
             "Enable the task execution pipeline. Uses two slots with "
@@ -133,6 +139,7 @@ DEFINE_bool(
 namespace xllm {
 
 void ExecutionConfig::from_flags() {
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(extension_impl);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_task_pipeline);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_graph);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_unified_mtp_graph);
@@ -155,6 +162,7 @@ void ExecutionConfig::from_flags() {
 }
 
 void ExecutionConfig::from_json(const JsonReader& json) {
+  XLLM_CONFIG_ASSIGN_FROM_JSON(extension_impl);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_task_pipeline);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_graph);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_unified_mtp_graph);
@@ -179,6 +187,8 @@ void ExecutionConfig::from_json(const JsonReader& json) {
 void ExecutionConfig::append_config_json(
     nlohmann::ordered_json& config_json) const {
   const ExecutionConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, extension_impl);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_task_pipeline);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

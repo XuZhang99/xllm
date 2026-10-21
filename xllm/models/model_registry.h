@@ -22,7 +22,6 @@ limitations under the License.
 #include <string_view>
 #include <unordered_map>
 
-#include "core/common/options.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/causal_rec.h"
 #include "core/framework/model/causal_vlm.h"
@@ -37,6 +36,8 @@ limitations under the License.
 #include "processors/multimodal_processor.h"
 
 namespace xllm {
+
+class Options;
 
 using CausalLMFactory =
     std::function<std::unique_ptr<CausalLM>(const ModelContext& context)>;
@@ -65,6 +66,16 @@ using QuantArgsLoader =
 using TokenizerArgsLoader =
     std::function<bool(const JsonReader& json, TokenizerArgs* args)>;
 
+struct CausalLMRegistration {
+  CausalLMFactory factory;
+  int32_t priority = 0;
+};
+
+struct CausalVLMRegistration {
+  CausalVLMFactory factory;
+  int32_t priority = 0;
+};
+
 // Model-advertised CP mode: NONE or MODEL (shard after embed / merge before
 // LM head). Backend capability queries decide the concrete model data path.
 enum class CpShardingMode : int8_t {
@@ -74,9 +85,9 @@ enum class CpShardingMode : int8_t {
 
 // TODO: add default args loader.
 struct ModelMeta {
-  CausalLMFactory causal_lm_factory;
+  std::unordered_map<std::string, CausalLMRegistration> causal_lm_factories;
   RecModelFactory rec_model_factory;
-  CausalVLMFactory causal_vlm_factory;
+  std::unordered_map<std::string, CausalVLMRegistration> causal_vlm_factories;
   DiTModelFactory dit_model_factory;
   MultimodalProcessorFactory multimodal_processor_factory;
   ModelArgsLoader model_args_loader;
@@ -106,11 +117,29 @@ class ModelRegistry {
   static void register_causallm_factory(const std::string& name,
                                         CausalLMFactory factory);
 
+  static bool register_causallm_factory(std::string name,
+                                        CausalLMFactory factory,
+                                        int32_t priority);
+
+  static bool register_causallm_factory(std::string name,
+                                        std::string implementation,
+                                        CausalLMFactory factory,
+                                        int32_t priority = 0);
+
   static void register_rec_model_factory(const std::string& name,
                                          RecModelFactory factory);
 
   static void register_causalvlm_factory(const std::string& name,
                                          CausalVLMFactory factory);
+
+  static bool register_causalvlm_factory(std::string name,
+                                         CausalVLMFactory factory,
+                                         int32_t priority);
+
+  static bool register_causalvlm_factory(std::string name,
+                                         std::string implementation,
+                                         CausalVLMFactory factory,
+                                         int32_t priority = 0);
 
   static void register_dit_model_factory(const std::string& name,
                                          DiTModelFactory factory);
@@ -148,9 +177,17 @@ class ModelRegistry {
 
   static CausalLMFactory get_causallm_factory(const std::string& name);
 
+  static CausalLMFactory get_causallm_factory(
+      const std::string& name,
+      const std::string& implementation);
+
   static RecModelFactory get_rec_model_factory(const std::string& name);
 
   static CausalVLMFactory get_causalvlm_factory(const std::string& name);
+
+  static CausalVLMFactory get_causalvlm_factory(
+      const std::string& name,
+      const std::string& implementation);
 
   static DiTModelFactory get_dit_model_factory(const std::string& name);
 
@@ -196,11 +233,25 @@ bool resolve_model_registration(const std::string& model_type,
                                 std::string* resolved_name,
                                 std::string* error_message = nullptr);
 
+// Resolve a selected model extension before applying built-in backend rules.
+// model_component is "causal_lm" or "causal_vlm". Registered model extensions
+// use TORCH for AUTO and honor explicit ATB/TORCH/XLITE; XLITE still requires a
+// build with USE_XLITE. Families without that component retain built-in rules.
+bool resolve_model_registration(const std::string& model_type,
+                                const std::string& requested_npu_kernel_backend,
+                                const std::string& extension_impl,
+                                std::string_view model_component,
+                                std::string* effective_npu_kernel_backend,
+                                std::string* resolved_name,
+                                std::string* error_message = nullptr);
+
 #if defined(USE_NPU)
 // Resolve the model-specific NPU kernel backend before constructing a runtime
 // engine. This applies only to the LLM/VLM/Rec model registry; DiT has its own
-// model registry and backend selection.
-void resolve_npu_kernel_backend(Options* options);
+// model registry and backend selection. LLM/VLM pass their model component to
+// apply Options::extension_impl before built-in backend validation.
+void resolve_npu_kernel_backend(Options* options,
+                                std::string_view model_component = "");
 #endif
 
 std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context);
@@ -212,20 +263,49 @@ std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context);
 std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 
 // Macro to register a model with the ModelRegistry
-#define REGISTER_CAUSAL_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
-  const bool VarName##_registered = []() {                                 \
-    ModelRegistry::register_causallm_factory(                              \
-        #ModelType, [](const ModelContext& context) {                      \
-          ModelClass model(context);                                       \
-          model->eval();                                                   \
-          return std::make_unique<xllm::CausalLMImpl<ModelClass>>(         \
-              std::move(model), context.get_tensor_options());             \
-        });                                                                \
-    return true;                                                           \
+#define REGISTER_CAUSAL_MODEL_WITH_VARNAME(                        \
+    VarName, ModelType, ModelClass, ...)                           \
+  const bool VarName##_registered = []() {                         \
+    ::xllm::ModelRegistry::register_causallm_factory(              \
+        #ModelType, [](const ::xllm::ModelContext& context) {      \
+          ModelClass model(context);                               \
+          model->eval();                                           \
+          return std::make_unique<xllm::CausalLMImpl<ModelClass>>( \
+              std::move(model), context.get_tensor_options());     \
+        } __VA_OPT__(, ) __VA_ARGS__);                             \
+    return true;                                                   \
   }()
 
-#define REGISTER_CAUSAL_MODEL(ModelType, ModelClass) \
-  REGISTER_CAUSAL_MODEL_WITH_VARNAME(ModelType, ModelType, ModelClass)
+#define REGISTER_CAUSAL_MODEL(ModelType, ModelClass, ...) \
+  REGISTER_CAUSAL_MODEL_WITH_VARNAME(                     \
+      ModelType, ModelType, ModelClass __VA_OPT__(, ) __VA_ARGS__)
+
+// Register a CausalLM subclass directly. Higher priorities replace lower
+// priorities for the same model and implementation; ties keep the first.
+#define CONCAT_MODEL_REGISTRATION_IMPL(left, right) left##right
+#define CONCAT_MODEL_REGISTRATION(left, right) \
+  CONCAT_MODEL_REGISTRATION_IMPL(left, right)
+
+#define REGISTER_CAUSAL_LM_WITH_VARNAME(                                 \
+    VarName, ModelType, Implementation, ModelClass, ...)                 \
+  namespace {                                                            \
+  const bool CONCAT_MODEL_REGISTRATION(VarName, _causal_lm_registered) = \
+      ::xllm::ModelRegistry::register_causallm_factory(                  \
+          #ModelType,                                                    \
+          Implementation,                                                \
+          [](const ::xllm::ModelContext& context) {                      \
+            auto model = std::make_unique<ModelClass>(context);          \
+            model->eval();                                               \
+            return model;                                                \
+          } __VA_OPT__(, ) __VA_ARGS__);                                 \
+  }
+
+#define REGISTER_CAUSAL_LM(ModelType, Implementation, ModelClass, ...)      \
+  REGISTER_CAUSAL_LM_WITH_VARNAME(                                          \
+      CONCAT_MODEL_REGISTRATION(xllm_causal_lm_registration_, __COUNTER__), \
+      ModelType,                                                            \
+      Implementation,                                                       \
+      ModelClass __VA_OPT__(, ) __VA_ARGS__)
 
 #define REGISTER_CAUSAL_REC_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
   const bool VarName##_causal_rec_registered = []() {                          \
@@ -258,20 +338,43 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 #define REGISTER_GENERIC_REC_MODEL(ModelType, ModelClass) \
   REGISTER_GENERIC_REC_MODEL_WITH_VARNAME(ModelType, ModelType, ModelClass)
 
-#define REGISTER_CAUSAL_VLM_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
-  const bool VarName##_registered = []() {                                     \
-    ModelRegistry::register_causalvlm_factory(                                 \
-        #ModelType, [](const ModelContext& context) {                          \
-          ModelClass model(context);                                           \
-          model->eval();                                                       \
-          return std::make_unique<xllm::CausalVLMImpl<ModelClass>>(            \
-              std::move(model), context.get_tensor_options());                 \
-        });                                                                    \
-    return true;                                                               \
+#define REGISTER_CAUSAL_VLM_MODEL_WITH_VARNAME(                     \
+    VarName, ModelType, ModelClass, ...)                            \
+  const bool VarName##_registered = []() {                          \
+    ::xllm::ModelRegistry::register_causalvlm_factory(              \
+        #ModelType, [](const ::xllm::ModelContext& context) {       \
+          ModelClass model(context);                                \
+          model->eval();                                            \
+          return std::make_unique<xllm::CausalVLMImpl<ModelClass>>( \
+              std::move(model), context.get_tensor_options());      \
+        } __VA_OPT__(, ) __VA_ARGS__);                              \
+    return true;                                                    \
   }()
 
-#define REGISTER_CAUSAL_VLM_MODEL(ModelType, ModelClass) \
-  REGISTER_CAUSAL_VLM_MODEL_WITH_VARNAME(ModelType, ModelType, ModelClass)
+#define REGISTER_CAUSAL_VLM_MODEL(ModelType, ModelClass, ...) \
+  REGISTER_CAUSAL_VLM_MODEL_WITH_VARNAME(                     \
+      ModelType, ModelType, ModelClass __VA_OPT__(, ) __VA_ARGS__)
+
+#define REGISTER_CAUSAL_VLM_WITH_VARNAME(                                 \
+    VarName, ModelType, Implementation, ModelClass, ...)                  \
+  namespace {                                                             \
+  const bool CONCAT_MODEL_REGISTRATION(VarName, _causal_vlm_registered) = \
+      ::xllm::ModelRegistry::register_causalvlm_factory(                  \
+          #ModelType,                                                     \
+          Implementation,                                                 \
+          [](const ::xllm::ModelContext& context) {                       \
+            auto model = std::make_unique<ModelClass>(context);           \
+            model->eval();                                                \
+            return model;                                                 \
+          } __VA_OPT__(, ) __VA_ARGS__);                                  \
+  }
+
+#define REGISTER_CAUSAL_VLM(ModelType, Implementation, ModelClass, ...)      \
+  REGISTER_CAUSAL_VLM_WITH_VARNAME(                                          \
+      CONCAT_MODEL_REGISTRATION(xllm_causal_vlm_registration_, __COUNTER__), \
+      ModelType,                                                             \
+      Implementation,                                                        \
+      ModelClass __VA_OPT__(, ) __VA_ARGS__)
 
 #define REGISTER_DIT_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
   const bool VarName##_registered = []() {                              \

@@ -2638,6 +2638,7 @@ bool WorkerImpl::init_model_impl(const std::string& model_weights_path,
   auto tensor_options = torch::dtype(dtype_).device(device_);
   context_ = ModelContext(parallel_args_, args, quant_args, tensor_options);
   context_.set_model_impl(ModelConfig::get_instance().model_impl());
+  context_.set_extension_impl(options_.extension_impl());
   context_.set_model_id(options_.model_id());
   FlashComm1Options flash_comm1_options;
   flash_comm1_options.enable_flashcomm1 = options_.enable_flashcomm1();

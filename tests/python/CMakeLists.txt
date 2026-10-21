@@ -23,7 +23,8 @@ elseif(USE_CUDA)
   # Register the CUDA model path and its shared loading/backend regressions.
   # The remaining Python suite includes NPU-specific imports and entrypoints.
   set(test_sources)
-  foreach(test_name IN ITEMS phi3 phi3_checkpoint phi3_cuda flashinfer_attention registry decode_cuda_graph model_executor)
+  foreach(test_name IN ITEMS phi3 phi3_checkpoint phi3_cuda flashinfer_attention
+      registry decode_cuda_graph model_executor pybind_native_extension_api)
     list(APPEND test_sources "${CMAKE_CURRENT_SOURCE_DIR}/test_${test_name}.py")
   endforeach()
 endif()

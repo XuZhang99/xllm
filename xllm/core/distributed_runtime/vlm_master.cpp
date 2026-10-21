@@ -139,7 +139,7 @@ VLMMaster::VLMMaster(const Options& options) : Master(options) {
   CHECK(!EPLBConfig::get_instance().enable_eplb())
       << "EPLB does not support VLM engines because VLMEngine has no EPLB "
          "control plane.";
-  resolve_npu_kernel_backend(&options_);
+  resolve_npu_kernel_backend(&options_, /*model_component=*/"causal_vlm");
 #endif
   CHECK(!options_.enable_disagg_pd() ||
         options_.kv_cache_transfer_mode() != "PULL")
@@ -172,6 +172,8 @@ VLMMaster::VLMMaster(const Options& options) : Master(options) {
   runtime::Options engine_options;
   engine_options.model_path(options_.model_path())
       .model_id(options_.model_id())
+      .model_impl(ModelConfig::get_instance().model_impl())
+      .extension_impl(options_.extension_impl())
       .devices(devices_)
       .backend(options_.backend())
       .max_memory_utilization(options_.max_memory_utilization())

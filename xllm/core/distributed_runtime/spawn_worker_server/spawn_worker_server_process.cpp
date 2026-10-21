@@ -21,6 +21,7 @@ limitations under the License.
 #include <optional>
 #include <string>
 
+#include "core/common/native_library.h"
 #include "core/distributed_runtime/spawn_worker_server/spawn_worker_protocol.h"
 #include "core/distributed_runtime/spawn_worker_server/spawn_worker_server.h"
 
@@ -63,6 +64,8 @@ limitations under the License.
 // @text_encoder_tp_size
 // @draft_sampling_mode
 // @kv_split_size
+// @model_impl
+// @extension_impl
 int main(int argc, char* argv[]) {
   const std::optional<std::string> parsed_indexer_cache_dtype =
       xllm::spawn_worker_protocol::parse_indexer_cache_dtype(argc, argv);
@@ -79,6 +82,7 @@ int main(int argc, char* argv[]) {
                  << ".";
   }
 
+  xllm::load_native_libraries();
   std::string master_node_addr = std::string(argv[1]);
   int32_t local_rank = static_cast<int32_t>(atoi(argv[2]));
   int32_t global_rank = static_cast<int32_t>(atoi(argv[3]));
@@ -128,6 +132,10 @@ int main(int argc, char* argv[]) {
   const std::string& indexer_cache_dtype = parsed_indexer_cache_dtype.value();
   const std::string draft_sampling_mode =
       xllm::spawn_worker_protocol::parse_draft_sampling_mode(argc, argv);
+  const std::string model_impl =
+      xllm::spawn_worker_protocol::parse_model_impl(argc, argv);
+  const std::string extension_impl =
+      xllm::spawn_worker_protocol::parse_extension_impl(argc, argv);
   const bool enable_mtp_draft_body_tp1 =
       argc > xllm::spawn_worker_protocol::kEnableMtpDraftBodyTp1ArgumentIndex &&
       static_cast<int32_t>(
@@ -180,7 +188,9 @@ int main(int argc, char* argv[]) {
       << ", indexer_cache_dtype = " << indexer_cache_dtype
       << ", enable_mtp_draft_body_tp1 = " << enable_mtp_draft_body_tp1
       << ", draft_sampling_mode = " << draft_sampling_mode
-      << ", kv_split_size = " << kv_split_size;
+      << ", kv_split_size = " << kv_split_size
+      << ", model_impl = " << model_impl
+      << ", extension_impl = " << extension_impl;
 
   xllm::SpawnWorkerServer worker(master_node_addr,
                                  local_rank,
@@ -219,7 +229,9 @@ int main(int argc, char* argv[]) {
                                  text_encoder_tp_size,
                                  instance_role,
                                  enable_mtp_draft_body_tp1,
-                                 draft_sampling_mode);
+                                 draft_sampling_mode,
+                                 model_impl,
+                                 extension_impl);
 
   worker.run();
 

@@ -2874,6 +2874,7 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
                                        context.get_tensor_options());
     runtime.context->set_model_id(context.get_model_id());
     runtime.context->set_model_impl(context.get_model_impl());
+    runtime.context->set_extension_impl(context.get_extension_impl());
     runtime.context->set_flash_comm1_options(context.get_flash_comm1_options());
 
     runtime.model = create_rec_model(*runtime.context);

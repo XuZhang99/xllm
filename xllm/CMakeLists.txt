@@ -19,6 +19,23 @@ configure_file(
   @ONLY)
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
+if(NOT DEFINED NATIVE_LIBRARY_BUILD_REVISION OR
+   NATIVE_LIBRARY_BUILD_REVISION STREQUAL "")
+  execute_process(
+    COMMAND git rev-parse HEAD
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    OUTPUT_VARIABLE NATIVE_LIBRARY_BUILD_REVISION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+endif()
+if(NOT NATIVE_LIBRARY_BUILD_REVISION MATCHES "^[0-9a-f]+$")
+  set(NATIVE_LIBRARY_BUILD_REVISION "unknown")
+endif()
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/core/common/native_library_build_info.h.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/core/common/native_library_build_info.h"
+  @ONLY)
+
 # Set warning-as-error for xllm code (third-party headers are marked as SYSTEM)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   if(USE_MUSA)
@@ -59,6 +76,7 @@ add_subdirectory(server)
 if(GENERATE_SO)
   message(STATUS "build libxllm.so and install")
   cc_shared_library(
+    EXPORT_DEPS
     NAME
       xllm
     HDRS
@@ -109,6 +127,9 @@ else()
 
 endif()
 
+xllm_export_native_host(xllm)
+xllm_export_native_host(xllm_export)
+
 # link brpc
 target_link_libraries(xllm PRIVATE glog::glog brpc leveldb::leveldb protobuf::libprotobuf ${OpenCV_LIBS} ${FFMPEG_LIBRARIES})
 add_dependencies(xllm brpc-static)
@@ -149,14 +170,26 @@ if (USE_XLITE)
   xllm_link_xlite(xllm)
 endif()
 # install xllm
-install(TARGETS xllm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(GENERATE_SO)
+  install(TARGETS xllm
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+else()
+  install(TARGETS xllm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 
 # Install all dependencies for xllm
 install(CODE [[
+  if("$<TARGET_PROPERTY:xllm,TYPE>" STREQUAL "SHARED_LIBRARY")
+    set(_xllm_artifact_kind LIBRARIES)
+  else()
+    set(_xllm_artifact_kind EXECUTABLES)
+  endif()
   file(GET_RUNTIME_DEPENDENCIES
         RESOLVED_DEPENDENCIES_VAR DEPENDENCIES
         UNRESOLVED_DEPENDENCIES_VAR UNRESOLVED_DEPENDENCIES
-        EXECUTABLES $<TARGET_FILE:xllm>)
+        ${_xllm_artifact_kind}
+        $<TARGET_FILE:xllm>)
 
   file(INSTALL
         DESTINATION "${CMAKE_INSTALL_PREFIX}/lib"

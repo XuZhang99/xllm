@@ -39,6 +39,9 @@ class Options {
 
   PROPERTY(std::string, model_id);
 
+  // Select a named extension family for this instance.
+  PROPERTY(std::string, extension_impl);
+
   PROPERTY(std::optional<std::string>, draft_model_path);
 
   // model backend

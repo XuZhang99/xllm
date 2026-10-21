@@ -59,6 +59,7 @@ class Embedding:
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
         use_cpp_chat_template: bool = True,
+        extension_impl: str = "",
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -75,6 +76,7 @@ class Embedding:
 
         options = Options()
         options.model_path = model
+        options.extension_impl = extension_impl
         options.task_type = "embed"
         options.draft_model_path = None
         options.backend = "llm"

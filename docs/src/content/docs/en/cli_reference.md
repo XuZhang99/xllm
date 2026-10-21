@@ -261,6 +261,7 @@ Current support covers ordinary non-PD text inference with prefix caching enable
 
 | Parameter | Type | Default | Description |
 |:----------|:-----|:--------|:------------|
+| `extension_impl` | `string` | `""` | Native extension implementation family for registered components, including models and executors. An empty value preserves normal selection. The selected family must be registered; components without registrations in that family keep their normal selection. |
 | `enable_graph` | `bool` | `false` | Whether to enable graph execution for the decode phase to reduce kernel-launch overhead and device idle time. Supports CUDA Graph, ACL Graph (NPU), MLU Graph, and DCU Graph. See [Graph Mode](/en/features/graph_mode/). |
 | `enable_unified_mtp_graph` | `bool` | `false` | Route supported NPU speculative decode requests through a unified Python graph. Supports GLM DSA MTP and `DFlash`/`DFlash2`/`DSpark` with a GLM DSA target model. Requires `enable_graph=true`; `DFlash`/`DFlash2`/`DSpark` also require `enable_task_pipeline=true`. Disabling this flag leaves ordinary model graph execution unchanged. |
 | `enable_graph_double_buffer` | `bool` | `true` | Whether to enable double-buffered ACL graph persistent params and graph instances for NPU schedule-overlap decode. |

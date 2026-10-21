@@ -20,6 +20,7 @@ std::string Options::to_string() const {
   std::stringstream ss;
   ss << "Options: [";
   ss << "model_path: " << model_path()
+     << ", extension_impl: " << extension_impl()
      << ", draft_model_path: " << draft_model_path().value_or("null")
      << ", backend: " << backend()
      << ", limit_image_per_prompt: " << limit_image_per_prompt()

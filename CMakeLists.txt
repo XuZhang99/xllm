@@ -929,5 +929,8 @@ file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/mooncake_ha_runtime_libraries.txt"
 if(TARGET brpc-static AND NOT TARGET brpc)
   add_library(brpc ALIAS brpc-static)
 endif()
+# Define the extension SDK before adding sibling directories so the build-tree
+# target is visible to xllm, tests, and downstream extension fixtures.
+include(native_extension)
 add_subdirectory(xllm)
 add_subdirectory(tests)

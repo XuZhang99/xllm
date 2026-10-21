@@ -66,7 +66,8 @@ class ExecutionConfig final {
   [[nodiscard]] static const OptionCategory& option_category() {
     static const OptionCategory kOptionCategory = {
         "EXECUTION OPTIONS",
-        {"enable_task_pipeline",
+        {"extension_impl",
+         "enable_task_pipeline",
          "enable_graph",
          "enable_unified_mtp_graph",
          "disable_graph_warmup",
@@ -87,6 +88,9 @@ class ExecutionConfig final {
          "enable_attn_dp_weight_sharding"}};
     return kOptionCategory;
   }
+
+  // Select a native extension implementation family for registered components.
+  PROPERTY(std::string, extension_impl) = "";
 
   // Enable the task pipeline; scheduler overlap determines the slot count.
   PROPERTY(bool, enable_task_pipeline) = false;

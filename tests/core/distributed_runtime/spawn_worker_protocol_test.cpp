@@ -88,5 +88,88 @@ TEST(SpawnWorkerProtocolTest, PreservesExplicitEmptyDtype) {
   EXPECT_TRUE(indexer_cache_dtype->empty());
 }
 
+TEST(SpawnWorkerProtocolTest, PreservesExplicitModelImplementation) {
+  std::vector<std::string> arguments(kArgumentCount, "unused");
+  arguments[kModelImplArgumentIndex] = "python";
+  std::vector<char*> argv = mutable_argv(&arguments);
+
+  EXPECT_EQ(parse_model_impl(kArgumentCount, argv.data()), "python");
+}
+
+TEST(SpawnWorkerProtocolTest, PreservesExplicitEmptyModelImplementation) {
+  std::vector<std::string> arguments(kArgumentCount, "unused");
+  arguments[kModelImplArgumentIndex] = "";
+  std::vector<char*> argv = mutable_argv(&arguments);
+
+  EXPECT_TRUE(parse_model_impl(kArgumentCount, argv.data()).empty());
+}
+
+TEST(SpawnWorkerProtocolTest, DefaultsModelImplementationForLegacyArguments) {
+  for (int32_t argc = kMinimumArgumentCount; argc <= kModelImplArgumentIndex;
+       ++argc) {
+    std::vector<std::string> arguments(argc, "unused");
+    std::vector<char*> argv = mutable_argv(&arguments);
+
+    EXPECT_TRUE(parse_model_impl(argc, argv.data()).empty());
+  }
+}
+
+TEST(SpawnWorkerProtocolTest,
+     PreservesModelImplementationWithTrailingArguments) {
+  std::vector<std::string> arguments(kArgumentCount + 1, "unused");
+  arguments[kModelImplArgumentIndex] = "python";
+  std::vector<char*> argv = mutable_argv(&arguments);
+
+  EXPECT_EQ(parse_model_impl(kArgumentCount + 1, argv.data()), "python");
+}
+
+TEST(SpawnWorkerProtocolTest, PreservesIndependentExtensionImplementation) {
+  std::vector<std::string> arguments(kArgumentCount, "unused");
+  arguments[kModelImplArgumentIndex] = "python";
+  arguments[kExtensionImplArgumentIndex] = "custom";
+  std::vector<char*> argv = mutable_argv(&arguments);
+
+  EXPECT_EQ(parse_model_impl(kArgumentCount, argv.data()), "python");
+  EXPECT_EQ(parse_extension_impl(kArgumentCount, argv.data()), "custom");
+}
+
+TEST(SpawnWorkerProtocolTest, PreservesExplicitEmptyExtensionImplementation) {
+  std::vector<std::string> arguments(kArgumentCount, "unused");
+  arguments[kExtensionImplArgumentIndex] = "";
+  std::vector<char*> argv = mutable_argv(&arguments);
+
+  EXPECT_TRUE(parse_extension_impl(kArgumentCount, argv.data()).empty());
+}
+
+TEST(SpawnWorkerProtocolTest,
+     DefaultsExtensionImplementationForLegacyArguments) {
+  for (int32_t argc = kMinimumArgumentCount;
+       argc <= kExtensionImplArgumentIndex;
+       ++argc) {
+    std::vector<std::string> arguments(argc, "unused");
+    std::vector<char*> argv = mutable_argv(&arguments);
+
+    EXPECT_TRUE(parse_extension_impl(argc, argv.data()).empty());
+  }
+}
+
+TEST(SpawnWorkerProtocolTest, DefaultsExtensionImplementationForNullArguments) {
+  std::vector<std::string> arguments(kArgumentCount, "unused");
+  std::vector<char*> argv = mutable_argv(&arguments);
+  argv[kExtensionImplArgumentIndex] = nullptr;
+
+  EXPECT_TRUE(parse_extension_impl(kArgumentCount, nullptr).empty());
+  EXPECT_TRUE(parse_extension_impl(kArgumentCount, argv.data()).empty());
+}
+
+TEST(SpawnWorkerProtocolTest,
+     PreservesExtensionImplementationWithTrailingArguments) {
+  std::vector<std::string> arguments(kArgumentCount + 1, "unused");
+  arguments[kExtensionImplArgumentIndex] = "custom";
+  std::vector<char*> argv = mutable_argv(&arguments);
+
+  EXPECT_EQ(parse_extension_impl(kArgumentCount + 1, argv.data()), "custom");
+}
+
 }  // namespace
 }  // namespace xllm::spawn_worker_protocol

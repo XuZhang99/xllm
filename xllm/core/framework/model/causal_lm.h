@@ -65,6 +65,9 @@ class CausalLM : public torch::nn::Module, public Model {
  public:
   ~CausalLM() override = default;
 
+  // An empty key keeps the runtime's default executor selection.
+  virtual std::string executor_type() const { return {}; }
+
   // tokens: [num_tokens]
   // positions: [num_tokens]
   // returns: [num_tokens, hidden_size]

@@ -24,6 +24,7 @@ limitations under the License.
 #include <atomic>
 #include <exception>
 
+#include "core/common/native_library.h"
 #include "core/framework/config/beam_search_config.h"
 #include "internal.h"
 
@@ -70,9 +71,11 @@ bool LLM::Initialize(const std::string& model_path,
   }
 
   try {
+    load_native_libraries();
     Options options;
     options.model_path(model_path)
         .task_type(init_options.task)
+        .extension_impl(init_options.extension_impl)
         .draft_model_path(init_options.draft_model)
         .backend("llm")
         .block_size(init_options.block_size)

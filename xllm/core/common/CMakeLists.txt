@@ -1,6 +1,20 @@
 include(cc_library)
 
 cc_library(
+  NAME extension_registry
+  HDRS extension_registry.h
+  SRCS extension_registry.cpp
+)
+
+cc_library(
+  NAME native_library
+  HDRS native_library.h
+  SRCS native_library.cpp
+  DEPS glog::glog ${CMAKE_DL_LIBS}
+)
+target_include_directories(native_library SYSTEM PUBLIC ${TORCH_INCLUDE_DIRS})
+
+cc_library(
   NAME 
     common
   HDRS
@@ -27,6 +41,8 @@ cc_library(
     device_monitor.cpp
     flash_comm1_context.cpp
   DEPS
+    :native_library
+    :extension_registry
     :config
     util
     parallel_state

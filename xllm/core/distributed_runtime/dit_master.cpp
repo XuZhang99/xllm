@@ -50,6 +50,7 @@ DiTMaster::DiTMaster(const Options& options) : Master(options) {
   runtime::Options engine_options;
   engine_options.model_path(options_.model_path())
       .model_id(options_.model_id())
+      .extension_impl(options_.extension_impl())
       .devices(devices_)
       .backend(options_.backend())
       .max_memory_utilization(options_.max_memory_utilization())

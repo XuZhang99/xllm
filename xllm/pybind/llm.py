@@ -133,6 +133,7 @@ class LLM:
         kv_cache_dtype: str = "auto",
         use_cpp_chat_template: bool = True,
         disable_log_stats: bool = True,
+        extension_impl: str = "",
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -159,6 +160,7 @@ class LLM:
 
         options = Options()
         options.model_path = model
+        options.extension_impl = extension_impl
         options.task_type = task
         options.draft_model_path = draft_model
         options.backend = backend

@@ -25,8 +25,10 @@ limitations under the License.
 #include "core/distributed_runtime/worker_server.h"
 #include "core/framework/config/distributed_config.h"
 #include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/platform/device.h"
@@ -94,7 +96,9 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      int32_t text_encoder_tp_size,
                                      const InstanceRole& instance_role,
                                      bool enable_mtp_draft_body_tp1,
-                                     const std::string& draft_sampling_mode) {
+                                     const std::string& draft_sampling_mode,
+                                     const std::string& model_impl,
+                                     const std::string& extension_impl) {
   // TODO: pass whole xllm::runtime::Options here from main process.
   xllm::runtime::Options runner_options;
   const std::string backend = get_backend_from_worker_type(worker_type);
@@ -107,6 +111,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       is_dit_backend ? text_encoder_tp_size : 1;
   runner_options.block_size(block_size)
       .backend(backend)
+      .model_impl(model_impl)
+      .extension_impl(extension_impl)
       .world_size(world_size)
       .max_tokens_per_batch(max_tokens_per_batch)
       .max_seqs_per_batch(max_seqs_per_batch)
@@ -138,6 +144,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .task_type(task_type)
       .instance_role(instance_role)
       .max_encoder_cache_size(max_encoder_cache_size);
+  ModelConfig::get_instance().model_impl(model_impl);
+  ExecutionConfig::get_instance().extension_impl(extension_impl);
   SchedulerConfig::get_instance()
       .max_tokens_per_batch(max_tokens_per_batch)
       .max_seqs_per_batch(max_seqs_per_batch)

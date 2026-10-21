@@ -33,7 +33,7 @@ TEST(OptionsTest, ContextParallelDefaultsToOneAcrossPublicApis) {
   EXPECT_EQ(options.cp_size(), 1);
   EXPECT_EQ(cc_options.cp_size, 1);
   EXPECT_EQ(XLLM_INIT_LLM_OPTIONS_DEFAULT.cp_size, 1U);
-  EXPECT_EQ(XLLM_C_ABI_VERSION_MAJOR, 1);
+  EXPECT_EQ(XLLM_C_ABI_VERSION_MAJOR, 2);
   static_assert(std::is_same_v<decltype(XLLM_InitOptions::cp_size), uint32_t>);
 }
 

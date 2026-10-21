@@ -13,4 +13,5 @@ cc_binary(
     :distributed_runtime
 )
 
+xllm_export_native_host(spawn_worker)
 add_dependencies(export_module spawn_worker)

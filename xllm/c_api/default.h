@@ -57,7 +57,8 @@ const XLLM_InitOptions XLLM_INIT_LLM_OPTIONS_DEFAULT = {
     .kv_cache_transfer_mode = "PUSH",
     .log_dir = "",
     .draft_model = "",
-    .cpu_affinity = ""};
+    .cpu_affinity = "",
+    .extension_impl = ""};
 
 const XLLM_RequestParams XLLM_LLM_REQUEST_PARAMS_DEFAULT = {
     .echo = false,
@@ -129,7 +130,8 @@ const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .kv_cache_transfer_mode = "PUSH",
     .log_dir = "",
     .draft_model = "",
-    .cpu_affinity = ""};
+    .cpu_affinity = "",
+    .extension_impl = ""};
 
 const XLLM_RequestParams XLLM_REC_REQUEST_PARAMS_DEFAULT = {
     .echo = false,

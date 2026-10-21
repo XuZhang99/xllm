@@ -26,6 +26,7 @@ limitations under the License.
 #include <utility>
 
 #include "common/metrics.h"
+#include "core/common/extension_registry.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
@@ -63,6 +64,10 @@ Worker::Worker(const ParallelArgs& parallel_args,
                const runtime::Options& options,
                WorkerType worker_type)
     : enable_task_pipeline_(options.enable_task_pipeline()) {
+  const std::string& extension_impl = options.extension_impl();
+  CHECK(extension_impl.empty() ||
+        ExtensionRegistry::get_instance().has_implementation(extension_impl))
+      << "Unknown extension implementation: " << extension_impl;
   CHECK(!options.enable_adaptive_spec_prune() ||
         (options.enable_speculative_decode() && enable_task_pipeline_ &&
          SpeculativeConfig::supports_adaptive_speculative_decode(

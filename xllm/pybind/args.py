@@ -33,6 +33,9 @@ class ArgumentParser:
         self.parser = argparse.ArgumentParser()
         self.parser.add_argument("--model", type=str, help='"Name or path of the huggingface model to use."')
         self.parser.add_argument(
+            "--extension_impl", type=str, default="", help="Named native extension family for this instance."
+        )
+        self.parser.add_argument(
             "--task", type=str, default="generate", help="The task to use the model for. generate/embed."
         )
         self.parser.add_argument(

@@ -13,9 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "executor_impl_factory.h"
+#include "core/runtime/executor_impl_factory.h"
 
-#include "platform/device.h"
+#include <glog/logging.h>
+
+#include <stdexcept>
+#include <utility>
+
+#include "core/common/extension_registry.h"
 #include "runtime/base_executor_impl.h"
 #include "runtime/py_executor_impl.h"
 #include "runtime/vlm_executor_impl.h"
@@ -47,18 +52,28 @@ bool ExecutorImplFactory::register_creator(const std::string& executor_type,
 bool ExecutorImplFactory::register_creator(const std::string& executor_type,
                                            Creator creator,
                                            int32_t priority) {
-  auto it = creators_.find(executor_type);
-  if (it == creators_.end()) {
-    creators_.emplace(executor_type,
-                      Registration{priority, std::move(creator)});
-    return true;
-  }
+  return register_creator(executor_type,
+                          /*extension_impl=*/"",
+                          std::move(creator),
+                          priority);
+}
 
-  if (priority <= it->second.priority) {
+bool ExecutorImplFactory::register_creator(std::string executor_type,
+                                           std::string extension_impl,
+                                           Creator creator,
+                                           int32_t priority) {
+  auto& implementations = creators_[std::move(executor_type)];
+  auto it = implementations.find(extension_impl);
+  if (it != implementations.end() && priority <= it->second.priority) {
     return false;
   }
 
-  it->second = Registration{priority, std::move(creator)};
+  if (!extension_impl.empty()) {
+    ExtensionRegistry::get_instance().register_implementation(
+        extension_impl, /*component=*/"executor");
+  }
+  implementations.insert_or_assign(std::move(extension_impl),
+                                   Registration{priority, std::move(creator)});
   return true;
 }
 
@@ -68,12 +83,35 @@ std::unique_ptr<ExecutorImpl> ExecutorImplFactory::create_executor_impl(
     const torch::Device& device,
     const runtime::Options& options,
     const std::string& executor_type) {
-  auto it = creators_.find(executor_type);
-  if (it == creators_.end()) {
+  const std::string& requested_impl = options.extension_impl();
+  const auto& extensions = ExtensionRegistry::get_instance();
+  CHECK(requested_impl.empty() || extensions.has_implementation(requested_impl))
+      << "Unknown extension implementation: " << requested_impl;
+
+  const std::string default_impl;
+  const std::string& extension_impl =
+      extensions.has_implementation(requested_impl, /*component=*/"executor")
+          ? requested_impl
+          : default_impl;
+
+  auto executor_it = creators_.find(executor_type);
+  if (executor_it == creators_.end()) {
+    CHECK(extension_impl.empty())
+        << "No executor registered for extension implementation: "
+        << extension_impl << ", executor type: " << executor_type;
     throw std::runtime_error("No valid executor type found: " + executor_type);
   }
 
-  return it->second.creator(model, args, device, options);
+  auto implementation_it = executor_it->second.find(extension_impl);
+  CHECK(extension_impl.empty() ||
+        implementation_it != executor_it->second.end())
+      << "No executor registered for extension implementation: "
+      << extension_impl << ", executor type: " << executor_type;
+  if (implementation_it == executor_it->second.end()) {
+    throw std::runtime_error("No valid executor type found: " + executor_type);
+  }
+
+  return implementation_it->second.creator(model, args, device, options);
 }
 
 }  // namespace xllm

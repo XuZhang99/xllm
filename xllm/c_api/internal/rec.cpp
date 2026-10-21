@@ -27,6 +27,7 @@ limitations under the License.
 #include <limits>
 #include <stdexcept>
 
+#include "core/common/native_library.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
@@ -70,6 +71,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
   if (!handler || !model_path) return false;
 
   try {
+    xllm::load_native_libraries();
     xllm::CpuAffinity::get_instance().set_cpu_affinity(
         init_options->cpu_affinity);
 
@@ -90,6 +92,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     xllm::Options options;
     options.model_path(model_path)
         .task_type(xllm_init_options.task)
+        .extension_impl(xllm_init_options.extension_impl)
         .draft_model_path(xllm_init_options.draft_model)
         .backend("rec")
         .block_size(xllm_init_options.block_size)

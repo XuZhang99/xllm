@@ -12,6 +12,7 @@ include(CMakeParseArguments)
 # COPTS: List of private compile options
 # DEFINES: List of public defines
 # LINKOPTS: List of link options
+# EXPORT_DEPS: Export linked archive symbols for a native extension host
 #
 # cc_library(
 #   NAME
@@ -33,7 +34,7 @@ include(CMakeParseArguments)
 function(cc_shared_library)
   cmake_parse_arguments(
     CC_LIB # prefix
-    "TESTONLY" # options
+    "TESTONLY;EXPORT_DEPS" # options
     "NAME" # one value args
     "HDRS;SRCS;COPTS;DEFINES;LINKOPTS;DEPS;INCLUDES" # multi value args
     ${ARGN}
@@ -67,10 +68,10 @@ function(cc_shared_library)
       -fvisibility-inlines-hidden 
     )
     
-    target_link_options(${CC_LIB_NAME} PRIVATE 
-      -Wl,--exclude-libs,ALL
-      -Wl,--no-undefined
-    )
+    target_link_options(${CC_LIB_NAME} PRIVATE -Wl,--no-undefined)
+    if(NOT CC_LIB_EXPORT_DEPS)
+      target_link_options(${CC_LIB_NAME} PRIVATE -Wl,--exclude-libs,ALL)
+    endif()
     target_link_options(${CC_LIB_NAME} PRIVATE -Wl,--whole-archive)
     target_link_libraries(${CC_LIB_NAME}
       PUBLIC ${CC_LIB_DEPS}

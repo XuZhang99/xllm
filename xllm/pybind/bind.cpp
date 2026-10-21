@@ -20,6 +20,7 @@ limitations under the License.
 #include <torch/python.h>
 
 #include "api_service/call.h"
+#include "core/common/native_library.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"
@@ -37,10 +38,13 @@ namespace py = pybind11;
 using namespace pybind11::literals;
 
 PYBIND11_MODULE(xllm_export, m) {
+  load_native_libraries();
+
   // 1. export Options
   py::class_<Options>(m, "Options")
       .def(py::init())
       .def_readwrite("model_path", &Options::model_path_)
+      .def_readwrite("extension_impl", &Options::extension_impl_)
       .def_readwrite("draft_model_path", &Options::draft_model_path_)
       .def_readwrite("backend", &Options::backend_)
       .def_readwrite("limit_image_per_prompt",

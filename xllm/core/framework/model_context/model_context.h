@@ -23,6 +23,7 @@ limitations under the License.
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "core/common/flash_comm1_context.h"
 #include "core/framework/model/model_args.h"
@@ -117,6 +118,11 @@ class ModelContext {
     model_impl_ = model_impl;
   }
 
+  const std::string& get_extension_impl() const { return extension_impl_; }
+  void set_extension_impl(std::string extension_impl) {
+    extension_impl_ = std::move(extension_impl);
+  }
+
  private:
   // derive optimization config based on model args, quant args and other
   // factors
@@ -125,6 +131,7 @@ class ModelContext {
   std::string
       model_id_;  // Model identifier for VirtualMemory multi-model support
   std::string model_impl_;
+  std::string extension_impl_;
   ModelArgs model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_;

@@ -4,6 +4,12 @@
 supported text-generation model and the global world size. For disaggregated
 PD, configure `N` on Prefill and `1` on Decode.
 
+`XLLM_InitLLMOptions::extension_impl` selects a registered native extension
+family for that instance, for example `"custom"`. It defaults to an empty
+string, preserving normal component selection. Set `XLLM_NATIVE_LIBRARIES`
+before instance creation so the libraries are loaded. Recompile applications
+against the matching headers and library after updating the options structure.
+
 Run the following command in root directory:
 ```
 python setup.py build --generate-so true

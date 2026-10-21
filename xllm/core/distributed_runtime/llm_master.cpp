@@ -59,7 +59,7 @@ LLMMaster::LLMMaster(const Options& options)
   options_.enable_mla(should_enable_mla(
       std::filesystem::path(options_.model_path()), options_.backend()));
 #if defined(USE_NPU)
-  resolve_npu_kernel_backend(&options_);
+  resolve_npu_kernel_backend(&options_, /*model_component=*/"causal_lm");
 #endif
   const bool use_ssm_engine = SpeculativeConfig::uses_ssm_engine(
       options_.draft_model_path().value_or(""),
@@ -115,6 +115,8 @@ LLMMaster::LLMMaster(const Options& options)
   runtime::Options engine_options;
   engine_options.model_path(options_.model_path())
       .model_id(options_.model_id())
+      .model_impl(ModelConfig::get_instance().model_impl())
+      .extension_impl(options_.extension_impl())
       .devices(devices_)
       .backend(options_.backend())
       .max_memory_utilization(options_.max_memory_utilization())

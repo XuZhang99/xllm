@@ -134,6 +134,9 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
   // Index ID for internal server ID, which must be set different values
   // if the model supports multiple version or there are multiple models.
   int64_t server_idx = 0;
+
+  // Named native extension family. Empty preserves normal selection.
+  std::string extension_impl;
 };
 
 struct XLLM_CAPI_EXPORT XLLM_RequestParams {

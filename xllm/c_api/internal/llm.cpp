@@ -26,6 +26,7 @@ limitations under the License.
 #include <exception>
 #include <stdexcept>
 
+#include "core/common/native_library.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/execution_config.h"
 #include "helper.h"
@@ -63,6 +64,7 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
   if (!handler || !model_path) return false;
 
   try {
+    xllm::load_native_libraries();
     XLLM_InitOptions xllm_init_options;
     xllm::helper::set_init_options(
         xllm::helper::BackendType::LLM, init_options, &xllm_init_options);
@@ -80,6 +82,7 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
     xllm::Options options;
     options.model_path(model_path)
         .task_type(xllm_init_options.task)
+        .extension_impl(xllm_init_options.extension_impl)
         .draft_model_path(xllm_init_options.draft_model)
         .backend("llm")
         .block_size(xllm_init_options.block_size)

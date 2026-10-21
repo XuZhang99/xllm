@@ -34,6 +34,7 @@ namespace py = pybind11;
 #include "core/common/global_flags.h"
 #include "core/common/instance_name.h"
 #include "core/common/metrics.h"
+#include "core/common/native_library.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/distributed_virtual_memory_coordinator.h"
@@ -139,6 +140,7 @@ Options create_options(const std::string& instance_name, bool is_local) {
 #endif
   options.model_path(model_config.model())
       .model_id(model_config.model_id())
+      .extension_impl(execution_config.extension_impl())
       .task_type(model_config.task())
       .draft_model_path(speculative_config.draft_model())
       .backend(model_config.backend())
@@ -550,6 +552,7 @@ int main(int argc, char** argv) {
   google::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging("xllm");
   initialize_configs();
+  xllm::load_native_libraries();
 
   const ServiceConfig& service_config = ServiceConfig::get_instance();
   const DistributedConfig& distributed_config =

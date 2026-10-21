@@ -29,18 +29,20 @@ Executor::Executor(CausalLM* model,
                    const torch::Device& device,
                    const runtime::Options& options) {
   const auto& model_config = ModelConfig::get_instance();
-  std::string backend;
-  if (ModelConfig::is_python_model_impl(model_config.model_impl())) {
-    backend = "python";
-  } else if (options.npu_kernel_backend() == "XLITE") {
-    backend = "xlite";
-  } else if (options.backend() != "vlm" && options.enable_graph()) {
-    backend = Platform::type_str();
-  } else {
-    backend = options.backend();
+  std::string executor_type = model->executor_type();
+  if (executor_type.empty()) {
+    if (ModelConfig::is_python_model_impl(model_config.model_impl())) {
+      executor_type = "python";
+    } else if (options.npu_kernel_backend() == "XLITE") {
+      executor_type = "xlite";
+    } else if (options.backend() != "vlm" && options.enable_graph()) {
+      executor_type = Platform::type_str();
+    } else {
+      executor_type = options.backend();
+    }
   }
   impl_ = ExecutorImplFactory::get_instance().create_executor_impl(
-      model, args, device, options, backend);
+      model, args, device, options, executor_type);
 }
 
 bool Executor::supports_prepared_attention_metadata() const {

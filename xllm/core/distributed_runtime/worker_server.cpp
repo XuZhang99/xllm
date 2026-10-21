@@ -384,6 +384,8 @@ void WorkerServer::create_spawn_server(int32_t local_rank,
                         text_encoder_tp_size_ptr,
                         draft_sampling_mode_ptr,
                         kv_split_size_ptr,
+                        options.model_impl().c_str(),
+                        options.extension_impl().c_str(),
                         nullptr};
   static_assert(std::size(argv) == spawn_worker_protocol::kArgumentCount + 1);
   pid_t pid;

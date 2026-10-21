@@ -33,6 +33,10 @@ struct Options {
 
   PROPERTY(std::string, model_id);
 
+  PROPERTY(std::string, model_impl);
+
+  PROPERTY(std::string, extension_impl);
+
   PROPERTY(std::optional<std::string>, draft_model_path);
 
   // model backend

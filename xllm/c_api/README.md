@@ -1,8 +1,16 @@
 ### How to compile xllm dynamic library
 
-The C ABI is version 1. `XLLM_InitOptions` now exposes `cp_size` with a default
-of `1`. This is an ABI-breaking structure change, so applications must be
-recompiled against the installed version 1 headers and library.
+The C ABI is version 2. `XLLM_InitOptions` exposes `cp_size` with a default
+of `1` and appends `extension_impl`, an empty string by default. This changes
+the initialization structure size, so applications must be recompiled against
+the installed version 2 headers and library. Do not mix earlier headers or
+application binaries with this library.
+
+Set `extension_impl` to a registered native extension family, such as `"custom"`,
+after initializing the options with `xllm_llm_init_options_default` or
+`xllm_rec_init_options_default`. Set `XLLM_NATIVE_LIBRARIES` before creating the
+instance so the libraries are loaded. Selection belongs to each instance; an
+empty selector preserves normal component selection.
 
 MLU Context Parallel is available only for supported text-generation models.
 Set `cp_size` to the global world size. In disaggregated PD deployments, set it
