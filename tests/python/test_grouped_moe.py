@@ -96,6 +96,62 @@ def test_gmm1_routed_inputs_are_released_before_down_projection(
     torch.testing.assert_close(actual_indices, indices)
 
 
+@pytest.mark.parametrize("intermediate_size", [64, 128, 256, 512])
+def test_narrow_expert_shards_keep_routing_and_down_projection_metadata_consistent(
+    monkeypatch: pytest.MonkeyPatch, intermediate_size: int
+) -> None:
+    hidden = torch.ones(3, 8, dtype=torch.bfloat16)
+    expert_ids = torch.tensor([[2], [0], [2]], dtype=torch.int32)
+    quantized = torch.ones(3, 8, dtype=torch.int8)
+    input_scale = torch.tensor([0.25, 0.5, 0.75])
+    cumulative_groups = torch.tensor([1, 1, 3, 3], dtype=torch.int64)
+    compact_groups = torch.tensor([[0, 1], [2, 2], [0, 0], [0, 0]], dtype=torch.int64)
+    expected_indices = torch.tensor([2, 0, 1], dtype=torch.int32)
+    native_routing = MagicMock(return_value=(quantized, -expected_indices, cumulative_groups, input_scale))
+    fused_routing = MagicMock(return_value=(quantized, expected_indices, compact_groups, input_scale))
+    activation = torch.ones(3, intermediate_size, dtype=torch.int8)
+    activation_scale = torch.tensor([0.125, 0.25, 0.5])
+    native_gmm1 = MagicMock(return_value=(activation, activation_scale))
+    fused_gmm1 = MagicMock(return_value=(activation, activation_scale))
+    expected_output = torch.arange(24, dtype=torch.bfloat16).view(3, 8)
+    gmm2 = MagicMock(return_value=expected_output)
+
+    monkeypatch.setattr(moe, "supports_fused_moe_gmm1", lambda device: True)
+    monkeypatch.setattr(moe.torch_npu, "npu_moe_init_routing_v2", native_routing)
+    monkeypatch.setattr(moe, "_moe_init_routing_v3", fused_routing)
+    monkeypatch.setattr(moe, "_grouped_matmul_swiglu_quant_v2", native_gmm1)
+    monkeypatch.setattr(torch.ops.xllm_ops, "moe_grouped_matmul_swiglu_quant", fused_gmm1)
+    monkeypatch.setattr(moe, "_grouped_matmul_gmm2", gmm2)
+    output, indices = moe._moe_expert_compute_impl(
+        hidden,
+        expert_ids,
+        torch.empty(4, 8, 2 * intermediate_size, dtype=torch.int8),
+        torch.empty(4, intermediate_size, 8, dtype=torch.int8),
+        torch.ones(4, 2 * intermediate_size),
+        torch.ones(4, 8, dtype=torch.bfloat16),
+        1,
+    )
+
+    assert output is expected_output
+    torch.testing.assert_close(indices, expected_indices)
+    gmm2.assert_called_once()
+    assert gmm2.call_args.kwargs["act_pertoken_scale"] is activation_scale
+    if intermediate_size < 256:
+        native_routing.assert_called_once()
+        native_gmm1.assert_called_once()
+        fused_routing.assert_not_called()
+        fused_gmm1.assert_not_called()
+        assert gmm2.call_args.kwargs["group_list_type"] == 0
+        torch.testing.assert_close(gmm2.call_args.kwargs["group_list"], cumulative_groups)
+    else:
+        fused_routing.assert_called_once()
+        fused_gmm1.assert_called_once()
+        native_routing.assert_not_called()
+        native_gmm1.assert_not_called()
+        assert gmm2.call_args.kwargs["group_list_type"] == 2
+        torch.testing.assert_close(gmm2.call_args.kwargs["group_list"], compact_groups)
+
+
 @pytest.mark.parametrize("prob_dtype", [torch.float32, torch.bfloat16, torch.float16])
 def test_moe_expert_compute_with_routing_preserves_metadata_without_unpermute(
     monkeypatch: pytest.MonkeyPatch,
