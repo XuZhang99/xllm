@@ -1,0 +1,263 @@
+---
+// Copyright 2026 The xLLM Authors. Licensed under the Apache License, Version 2.0.
+import DefaultHero from '@astrojs/starlight/components/Hero.astro';
+
+const isNotFound = Astro.locals.starlightRoute.entry.id === '404';
+
+const translations = [
+	{
+		locale: 'en',
+		lang: 'en',
+		eyebrow: 'Error 404',
+		title: "We couldn't find that page.",
+		description:
+			'It may have moved, or the link might be incorrect. Head back to the docs or jump straight to the quick start.',
+		home: 'Back to documentation',
+		quickStart: 'Quick start',
+		helpLabel: 'Helpful links',
+		website: 'xLLM homepage',
+		websiteHref: 'https://xllm-ai.com/',
+		reportIssue: 'Report an issue',
+	},
+	{
+		locale: 'zh',
+		lang: 'zh-CN',
+		eyebrow: '错误 404',
+		title: '未找到该页面。',
+		description: '页面可能已被移动，或链接有误。请返回文档首页，或直接查看快速开始。',
+		home: '返回文档首页',
+		quickStart: '快速开始',
+		helpLabel: '相关链接',
+		website: 'xLLM 官网',
+		websiteHref: 'https://xllm-ai.com/zh',
+		reportIssue: '反馈问题',
+	},
+];
+---
+
+{
+	isNotFound ? (
+		<div id="_top">
+			{translations.map((copy) => (
+				<section class="not-found" data-locale={copy.locale} lang={copy.lang}>
+					<div class="backdrop" aria-hidden="true" />
+					<div class="content">
+						<p class="eyebrow">{copy.eyebrow}</p>
+						<p class="code" aria-hidden="true">
+							404
+						</p>
+						<h1>{copy.title}</h1>
+						<p class="description">{copy.description}</p>
+						<div class="actions">
+							<a class="button primary" href={`/${copy.locale}/`}>
+								{copy.home}
+								<svg aria-hidden="true" viewBox="0 0 24 24">
+									<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z" />
+								</svg>
+							</a>
+							<a class="button" href={`/${copy.locale}/getting_started/quick_start/`}>
+								{copy.quickStart}
+								<svg aria-hidden="true" viewBox="0 0 24 24">
+									<path d="M12 5v16m0-16C9 3 5 3 2 4v15c3-1 7-1 10 2 3-3 7-3 10-2V4c-3-1-7-1-10 1Z" />
+								</svg>
+							</a>
+						</div>
+						<nav class="help-links" aria-label={copy.helpLabel}>
+							<a href={copy.websiteHref}>{copy.website}</a>
+							<a href="https://github.com/xLLM-AI/xllm">GitHub</a>
+							<a href="https://github.com/xLLM-AI/xllm/issues/new/choose">{copy.reportIssue}</a>
+						</nav>
+					</div>
+				</section>
+			))}
+		</div>
+	) : (
+		<DefaultHero />
+	)
+}
+
+<style>
+	:global(.content-panel:has(.not-found)) {
+		padding-block-start: 0;
+	}
+
+	.not-found {
+		--not-found-bg: #fff;
+		--not-found-heading: #080808;
+		--not-found-muted: #52525b;
+		--not-found-border: #e4e4e7;
+		--not-found-grid: rgb(8 8 8 / 3%);
+		--not-found-accent: #eb2700;
+	}
+
+	:global([data-theme='dark']) .not-found {
+		--not-found-bg: #080808;
+		--not-found-heading: #f7f7f7;
+		--not-found-muted: #a8a8a8;
+		--not-found-border: #343434;
+		--not-found-grid: rgb(255 255 255 / 4%);
+		--not-found-accent: #ff8a73;
+	}
+
+	:global(html:not([lang='zh-CN'])) [data-locale='zh'],
+	:global(html[lang='zh-CN']) [data-locale='en'] {
+		display: none;
+	}
+
+	* {
+		box-sizing: border-box;
+	}
+
+	p,
+	h1 {
+		margin: 0;
+	}
+
+	a {
+		color: inherit;
+		text-decoration: none;
+	}
+
+	a:focus-visible {
+		outline: 2px solid var(--not-found-accent);
+		outline-offset: 4px;
+	}
+
+	.not-found {
+		overflow: hidden;
+		position: relative;
+	}
+
+	.backdrop {
+		inset: 0;
+		pointer-events: none;
+		position: absolute;
+	}
+
+	.backdrop::after {
+		background-image:
+			linear-gradient(to right, var(--not-found-grid) 1px, transparent 1px),
+			linear-gradient(to bottom, var(--not-found-grid) 1px, transparent 1px);
+		background-size: 56px 56px;
+		content: '';
+		inset: 0;
+		mask-image: radial-gradient(ellipse 60% 70% at 50% 0%, black, transparent 75%);
+		position: absolute;
+	}
+
+	.content {
+		align-items: center;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		margin-inline: auto;
+		max-width: 80rem;
+		min-height: 70vh;
+		padding: 5rem 1.5rem;
+		position: relative;
+		text-align: center;
+	}
+
+	.eyebrow {
+		color: var(--not-found-accent);
+		font-size: 0.75rem;
+		font-weight: 600;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+	}
+
+	.code {
+		background: linear-gradient(to bottom, #eb2700, #ff8a73);
+		background-clip: text;
+		color: transparent;
+		font-size: clamp(7rem, 20vw, 11rem);
+		font-weight: 700;
+		letter-spacing: -0.06em;
+		line-height: 1;
+		margin-top: 1rem;
+	}
+
+	h1 {
+		color: var(--not-found-heading);
+		font-size: clamp(1.875rem, 4vw, 2.25rem);
+		font-weight: 600;
+		letter-spacing: -0.025em;
+		line-height: 1.2;
+		margin-top: 1rem;
+	}
+
+	.description {
+		color: var(--not-found-muted);
+		line-height: 1.65;
+		margin-top: 1rem;
+		max-width: 36rem;
+	}
+
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		justify-content: center;
+		margin-top: 2rem;
+	}
+
+	.button {
+		align-items: center;
+		border: 1px solid var(--not-found-border);
+		border-radius: 0.5rem;
+		color: var(--not-found-heading);
+		display: inline-flex;
+		font-weight: 600;
+		gap: 0.5rem;
+		justify-content: center;
+		padding: 0.875rem 1.5rem;
+	}
+
+	.button:hover {
+		border-color: var(--not-found-accent);
+	}
+
+	.primary {
+		background: #eb2700;
+		border-color: #eb2700;
+		color: #fff;
+	}
+
+	.primary:hover {
+		background: #cc2200;
+		border-color: #cc2200;
+	}
+
+	.button svg {
+		fill: none;
+		height: 1.25rem;
+		stroke: currentColor;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		stroke-width: 1.75;
+		width: 1.25rem;
+	}
+
+	.help-links {
+		color: var(--not-found-muted);
+		display: flex;
+		flex-wrap: wrap;
+		font-size: 0.875rem;
+		font-weight: 500;
+		gap: 0.5rem 1.5rem;
+		justify-content: center;
+		margin-top: 2.5rem;
+	}
+
+	.help-links a:hover {
+		color: var(--not-found-accent);
+	}
+
+	@media (max-width: 39.999rem) {
+		.actions {
+			flex-direction: column;
+			width: 100%;
+			max-width: 20rem;
+		}
+	}
+</style>

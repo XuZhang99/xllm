@@ -11,6 +11,7 @@ type SidebarEntry = StarlightRouteData['sidebar'][number];
 
 const { sidebar } = Astro.locals.starlightRoute;
 const currentLocale = Astro.locals.starlightRoute.locale;
+const isNotFound = Astro.locals.starlightRoute.entry.id === '404';
 const isNetlifyPreview = process.env.CONTEXT === 'deploy-preview';
 const previewLabel = currentLocale?.startsWith('zh') ? 'PR 预览' : 'PR preview';
 
@@ -41,7 +42,12 @@ const isHomeHref = (href: string): boolean => {
 };
 
 const navItems = sidebar
-	.map((entry) => ({ label: entry.label, href: getFirstHref(entry), isCurrent: isCurrentEntry(entry) }))
+	.map((entry, index) => ({
+		label: entry.label,
+		href: getFirstHref(entry),
+		isCurrent: isCurrentEntry(entry),
+		translations: config.sidebar?.[index]?.translations,
+	}))
 	.filter((entry) => entry.href && !isHomeHref(entry.href));
 
 const localeEntries = Object.entries(config.locales ?? {}).map(([code, locale]) => ({
@@ -52,6 +58,8 @@ const localeEntries = Object.entries(config.locales ?? {}).map(([code, locale]) 
 }));
 
 function getLocalizedPathname(locale: string): string {
+	if (isNotFound) return `?lang=${locale}`;
+
 	const url = new URL(Astro.url);
 	const pathSegments = url.pathname.split('/');
 	const currentLocaleIndex = pathSegments.findIndex((segment) => segment in (config.locales ?? {}));
@@ -64,6 +72,27 @@ function getLocalizedPathname(locale: string): string {
 
 	return pathSegments.join('/') + url.search + url.hash;
 }
+
+// One static 404.html handles missing URLs in both languages. Supply the same
+// configured navigation and Starlight translations to its shared header.
+const notFoundLocales = isNotFound ? Object.fromEntries(
+	Object.entries(config.locales ?? {}).map(([locale, options]) => {
+		const lang = options?.lang ?? locale;
+		const t = Astro.locals.t;
+		const ui = Object.fromEntries(Object.entries(t.all())
+			.filter((entry): entry is [string, string] =>
+				typeof entry[1] === 'string' && /^(languageSelect|search|pagefind|themeSelect|skipLink)\./.test(entry[0]))
+			.map(([key, defaultValue]) => [key, t(key, defaultValue, { lng: lang })]));
+		return [locale, {
+			label: options?.label ?? locale,
+			nav: navItems.map((item) => ({
+				label: item.translations?.[lang] ?? item.label,
+				href: item.href?.replace(/^\/(?:en|zh)(?=\/|$)/, `/${locale}`),
+			})),
+			ui,
+		}];
+	}),
+) : undefined;
 ---
 
 <div class="header">
@@ -123,6 +152,52 @@ function getLocalizedPathname(locale: string): string {
 		</div>
 	</div>
 </div>
+
+{isNotFound && (
+	<script is:inline define:vars={{ notFoundLocales }}>
+		const locale = document.documentElement.lang === 'zh-CN' ? 'zh' : 'en';
+		const copy = notFoundLocales[locale];
+		const header = document.querySelector('header.header');
+		header.querySelector('.site-title').href = `/${locale}/`;
+		header.querySelectorAll('.top-tabs a').forEach((link, index) => {
+			link.textContent = copy.nav[index].label;
+			link.href = copy.nav[index].href;
+		});
+		const languageMenu = header.querySelector('.language-menu');
+		languageMenu.querySelector('summary').setAttribute('aria-label', copy.ui['languageSelect.accessibleLabel']);
+		languageMenu.querySelector('summary span').textContent = copy.label;
+		languageMenu.querySelectorAll('a').forEach((link) => {
+			const targetLocale = new URL(link.href).searchParams.get('lang');
+			const localizedUrl = new URL(window.location.href);
+			localizedUrl.searchParams.set('lang', targetLocale);
+			link.href = localizedUrl.href;
+			link.setAttribute('aria-current', String(targetLocale === locale));
+		});
+		const search = header.querySelector('site-search');
+		if (search) {
+			const label = copy.ui['search.label'];
+			const button = search.querySelector('[data-open-modal]');
+			button.setAttribute('aria-label', label);
+			button.querySelector('span').textContent = label;
+			search.querySelector('dialog').setAttribute('aria-label', label);
+			search.querySelector('[data-close-modal]').textContent = copy.ui['search.cancelLabel'];
+			search.dataset.translations = JSON.stringify({
+				placeholder: label,
+				...Object.fromEntries(Object.entries(copy.ui)
+					.filter(([key]) => key.startsWith('pagefind.'))
+					.map(([key, value]) => [key.slice('pagefind.'.length), value])),
+			});
+		}
+		const theme = header.querySelector('starlight-docs-theme-select');
+		theme.dataset.accessibleLabel = copy.ui['themeSelect.accessibleLabel'];
+		theme.dataset.autoLabel = copy.ui['themeSelect.auto'];
+		theme.dataset.darkLabel = copy.ui['themeSelect.dark'];
+		theme.dataset.lightLabel = copy.ui['themeSelect.light'];
+		const previewBadge = header.querySelector('.preview-badge');
+		if (previewBadge) previewBadge.textContent = locale === 'zh' ? 'PR 预览' : 'PR preview';
+		document.querySelector('body > a[href="#_top"]').textContent = copy.ui['skipLink.label'];
+	</script>
+)}
 
 <script>
 	document.addEventListener('click', (event) => {

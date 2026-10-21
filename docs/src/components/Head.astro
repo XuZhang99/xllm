@@ -5,3 +5,19 @@ import Favicons from './Favicons.astro';
 
 <DefaultHead />
 <Favicons />
+
+{
+	Astro.locals.starlightRoute.entry.id === '404' && (
+		<script is:inline>
+			/* Select the language before painting the shared static error page. */
+			const requestedLocale = new URLSearchParams(window.location.search).get('lang');
+			const locale = requestedLocale === 'en' || requestedLocale === 'zh'
+				? requestedLocale
+				: /^\/zh(?:\/|$)/.test(window.location.pathname) ? 'zh' : 'en';
+			document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+			document.title = locale === 'zh'
+				? '页面未找到 | xLLM Docs'
+				: 'Page not found | xLLM Docs';
+		</script>
+	)
+}
