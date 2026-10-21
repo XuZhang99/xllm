@@ -2,7 +2,7 @@
 title: "OpenAI 兼容接口"
 ---
 
-xLLM 为本地模型提供 OpenAI 兼容 HTTP 接口。将 OpenAI Python 客户端的 `base_url` 指向 xLLM 服务后，即可使用 SDK 或 cURL 发送请求。本页介绍文本生成，其他模型任务请参阅[视觉输入](/zh/getting_started/openai_api_vision/)和 [Embedding](/zh/getting_started/openai_api_embeddings/)。
+xLLM 为本地模型提供 OpenAI 兼容 HTTP 接口。将 OpenAI Python 客户端的 `base_url` 指向 xLLM 服务后，即可使用 SDK 或 cURL 发送请求。本页介绍文本生成，其他模型任务请参阅[视觉输入](/zh/basic_usage/openai_api_vision/)和 [Embedding](/zh/basic_usage/openai_api_embeddings/)。
 
 | 接口 | 方法 | 用途 |
 | --- | --- | --- |
@@ -265,7 +265,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-xLLM 的 `beam_width` 扩展请参阅[在线服务](/zh/getting_started/online_service/)。流式示例无需设置 `best_of`；只有 `best_of` 等于 `n` 时，xLLM 才采用流式输出。
+xLLM 的 `beam_width` 扩展请参阅[在线服务](/zh/basic_usage/online_service/)。流式示例无需设置 `best_of`；只有 `best_of` 等于 `n` 时，xLLM 才采用流式输出。
 
 ## 兼容性限制与错误处理
 
@@ -273,6 +273,6 @@ xLLM 的 `beam_width` 扩展请参阅[在线服务](/zh/getting_started/online_s
 - 非空的 `prompt_logprobs`、`logprob_token_ids`、`structured_outputs` 和 `prompt_embeds` 仍不受支持，会返回 HTTP 400。
 - 频率惩罚和存在惩罚仅统计生成 token，重复惩罚同时考虑提示词。`ignore_eos=true` 时显式指定的 `stop_token_ids` 仍然生效。
 - 不支持 `response_format={"type": "json_schema"}`。对话接口的 `json_object` 需要服务端 JSON 输出配置，不能视为支持 JSON Schema。
-- Embedding 请求不支持 `dimensions`，详见 [Embedding 使用说明](/zh/getting_started/openai_api_embeddings/)。
+- Embedding 请求不支持 `dimensions`，详见 [Embedding 使用说明](/zh/basic_usage/openai_api_embeddings/)。
 - HTTP 400 表示参数无效或不受支持，请查看 JSON 中的 `error.message` 和 `error.param`。模型相关的 HTTP 404 表示模型名不匹配，请查询 `/v1/models`。
 - 成功生成时若 `finish_reason="length"`，表示达到输出或上下文长度限制，可按需增加输出预算或缩短输入。

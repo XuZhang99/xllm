@@ -14,7 +14,7 @@ Install the latest stable EvalScope release with the `perf` dependencies by foll
 the [official installation guide](https://evalscope.readthedocs.io/en/latest/get_started/installation.html).
 
 Start xLLM following [Launch xLLM](/en/getting_started/launch_xllm/) and verify a
-text or image request using [Online Service](/en/getting_started/online_service/).
+text or image request using [Online Service](/en/basic_usage/online_service/).
 
 ```bash
 export HOST=127.0.0.1

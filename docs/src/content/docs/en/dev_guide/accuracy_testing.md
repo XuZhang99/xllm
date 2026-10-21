@@ -18,7 +18,7 @@ The first run downloads data from ModelScope, so prepare dataset access and suff
 
 1. Start a supported model following [Launch xLLM](/en/getting_started/launch_xllm/).
 2. Confirm that the corresponding text or image request works using
-   [Online Service](/en/getting_started/online_service/).
+   [Online Service](/en/basic_usage/online_service/).
 3. Set `HOST` and `PORT` to the service address. The scripts use the API root
    `http://${HOST}:${PORT}/v1`. `MODEL` must match a model ID returned by
    `/v1/models`, rather than the client's local weight path.

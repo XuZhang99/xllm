@@ -9,11 +9,11 @@ xLLM supports the Anthropic Messages request format for locally served LLMs. Use
 | `/v1/messages` | POST | Generate messages, optionally with streaming, reasoning, and tool use. |
 | `/v1/messages/count_tokens` | POST | Count input tokens without generating an answer. |
 
-These routes are registered with the LLM service. They use the same loaded model, chat template, and reasoning/tool parsers as the [OpenAI-compatible APIs](/en/getting_started/openai_api/). No separate API-enabling flag is needed.
+These routes are registered with the LLM service. They use the same loaded model, chat template, and reasoning/tool parsers as the [OpenAI-compatible APIs](/en/basic_usage/openai_api/). No separate API-enabling flag is needed.
 
 ## Launch a server
 
-Start an LLM using the [launch guide](/en/getting_started/launch_xllm/). You can reuse the single-NPU Qwen3-8B deployment in the [OpenAI API guide](/en/getting_started/openai_api/#launch-a-server), including `--reasoning_parser=qwen3` and `--tool_call_parser=qwen3`. Select the matching parsers when serving another model.
+Start an LLM using the [launch guide](/en/getting_started/launch_xllm/). You can reuse the single-NPU Qwen3-8B deployment in the [OpenAI API guide](/en/basic_usage/openai_api/#launch-a-server), including `--reasoning_parser=qwen3` and `--tool_call_parser=qwen3`. Select the matching parsers when serving another model.
 
 After model loading, confirm its ID:
 
@@ -252,7 +252,7 @@ claude --model "${MODEL}"
 | `tools`, `tool_choice` | Function definitions and choice (`auto`, `none`, `any`, or `tool` with a name); output quality depends on the model/parser. |
 | `chat_template_kwargs` | xLLM extension for model-specific template options. |
 
-- The Messages API currently serves LLMs. Image inputs and image/tool-reference content in tool results are rejected. For image chat, use the [OpenAI vision API](/en/getting_started/openai_api_vision/).
+- The Messages API currently serves LLMs. Image inputs and image/tool-reference content in tool results are rejected. For image chat, use the [OpenAI vision API](/en/basic_usage/openai_api_vision/).
 - Non-empty `output_config.format.schema` constraints and `kv_transfer_params` are unsupported and return HTTP 400. Accepted tool schemas do not imply constrained JSON generation.
 - `stop_reason="end_turn"` means generation ended normally, `max_tokens` indicates a length limit, and `tool_use` indicates a tool call.
 - For a model-related HTTP 404, check the model ID with `/v1/models`. For HTTP 501, check that this is an LLM deployment. For request failures, inspect `error.message`; malformed requests and unsupported backend options may have different error envelopes.

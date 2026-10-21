@@ -76,25 +76,6 @@ export default defineConfig({
 					items: [
 						'getting_started/quick_start',
 						'getting_started/launch_xllm',
-						'getting_started/multi_machine',
-						'getting_started/online_service',
-						{
-							slug: 'getting_started/openai_api',
-							attrs: { class: 'online-service-child' },
-						},
-						{
-							slug: 'getting_started/openai_api_vision',
-							attrs: { class: 'online-service-child' },
-						},
-						{
-							slug: 'getting_started/openai_api_embeddings',
-							attrs: { class: 'online-service-child' },
-						},
-						{
-							slug: 'getting_started/anthropic_api',
-							attrs: { class: 'online-service-child' },
-						},
-						'getting_started/offline_service',
 						{
 							label: 'Supported Models',
 							translations: { 'zh-CN': '模型支持列表' },
@@ -147,6 +128,31 @@ export default defineConfig({
 					label: 'User Guide',
 					translations: { 'zh-CN': '用户指南' },
 					items: [
+						{
+							label: 'Basic Usage',
+							translations: { 'zh-CN': '基础使用' },
+							items: [
+								'basic_usage/multi_machine',
+								'basic_usage/online_service',
+								{
+									slug: 'basic_usage/openai_api',
+									attrs: { class: 'online-service-child' },
+								},
+								{
+									slug: 'basic_usage/openai_api_vision',
+									attrs: { class: 'online-service-child' },
+								},
+								{
+									slug: 'basic_usage/openai_api_embeddings',
+									attrs: { class: 'online-service-child' },
+								},
+								{
+									slug: 'basic_usage/anthropic_api',
+									attrs: { class: 'online-service-child' },
+								},
+								'basic_usage/offline_service',
+							],
+						},
 						{
 							label: 'Advanced Features',
 							translations: { 'zh-CN': '高级功能' },

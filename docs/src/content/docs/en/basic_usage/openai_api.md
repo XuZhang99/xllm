@@ -2,7 +2,7 @@
 title: "OpenAI-Compatible APIs"
 ---
 
-xLLM exposes OpenAI-compatible HTTP endpoints for local models. You can send requests with cURL or the OpenAI Python client by pointing `base_url` to your xLLM server. This guide covers text generation; see [Vision](/en/getting_started/openai_api_vision/) and [Embeddings](/en/getting_started/openai_api_embeddings/) for other model tasks.
+xLLM exposes OpenAI-compatible HTTP endpoints for local models. You can send requests with cURL or the OpenAI Python client by pointing `base_url` to your xLLM server. This guide covers text generation; see [Vision](/en/basic_usage/openai_api_vision/) and [Embeddings](/en/basic_usage/openai_api_embeddings/) for other model tasks.
 
 | Endpoint | Method | Usage |
 | --- | --- | --- |
@@ -265,7 +265,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-For xLLM's `beam_width` extension, see [Online Service](/en/getting_started/online_service/). Leave `best_of` unset for streaming examples; xLLM streams only when `best_of` equals `n`.
+For xLLM's `beam_width` extension, see [Online Service](/en/basic_usage/online_service/). Leave `best_of` unset for streaming examples; xLLM streams only when `best_of` equals `n`.
 
 ## Compatibility limits and errors
 
@@ -273,6 +273,6 @@ For xLLM's `beam_width` extension, see [Online Service](/en/getting_started/onli
 - Non-null `prompt_logprobs`, `logprob_token_ids`, `structured_outputs`, and `prompt_embeds` remain unsupported and return HTTP 400.
 - Frequency and presence penalties count generated tokens only; repetition penalties include prompt tokens. Explicit `stop_token_ids` remain active when `ignore_eos=true`.
 - `response_format={"type": "json_schema"}` is unsupported. Chat `json_object` requires the server's JSON-output configuration; it is not JSON Schema support.
-- Embedding requests do not support `dimensions`; see the [Embedding guide](/en/getting_started/openai_api_embeddings/).
+- Embedding requests do not support `dimensions`; see the [Embedding guide](/en/basic_usage/openai_api_embeddings/).
 - HTTP 400 indicates an invalid or unsupported request. Inspect the JSON `error.message` and `error.param`. HTTP 404 for a model means its name does not match an available model; query `/v1/models`.
 - A successful generation with `finish_reason="length"` reached the output or context limit. Increase the output budget or shorten the input as appropriate.

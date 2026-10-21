@@ -75,8 +75,8 @@ limitations under the License. -->
 
 * [快速开始](https://docs.xllm-ai.com/zh/getting_started/quick_start/)
 * [启动xLLM](https://docs.xllm-ai.com/zh/getting_started/launch_xllm/)
-* [在线服务](https://docs.xllm-ai.com/zh/getting_started/online_service/)
-* [离线推理](https://docs.xllm-ai.com/zh/getting_started/offline_service/)
+* [在线服务](https://docs.xllm-ai.com/zh/basic_usage/online_service/)
+* [离线推理](https://docs.xllm-ai.com/zh/basic_usage/offline_service/)
 * [模型支持](https://docs.xllm-ai.com/zh/supported_models/)
 
 

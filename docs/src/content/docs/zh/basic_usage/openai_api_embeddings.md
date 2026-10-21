@@ -2,7 +2,7 @@
 title: "OpenAI 接口：Embedding"
 ---
 
-`/v1/embeddings` 接口返回文本的向量表示，使用前需要启动 Embedding 服务。仅改变客户端请求路径，不会把生成服务切换为池化服务。通用客户端约定请参阅 [OpenAI 兼容接口](/zh/getting_started/openai_api/)。
+`/v1/embeddings` 接口返回文本的向量表示，使用前需要启动 Embedding 服务。仅改变客户端请求路径，不会把生成服务切换为池化服务。通用客户端约定请参阅 [OpenAI 兼容接口](/zh/basic_usage/openai_api/)。
 
 ## 启动 Embedding 服务
 

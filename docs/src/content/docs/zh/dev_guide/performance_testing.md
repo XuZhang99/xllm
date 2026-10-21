@@ -12,7 +12,7 @@ LLM 脚本，以及基于真实图文输入的 VLM 脚本。回答正确率评�
 请参考 [EvalScope 官方安装文档](https://evalscope.readthedocs.io/zh-cn/latest/get_started/installation.html)，安装最新正式版及 `perf` 依赖。
 
 按[启动 xLLM](/zh/getting_started/launch_xllm/) 部署服务，并参考
-[在线服务](/zh/getting_started/online_service/) 验证文本或图片请求。
+[在线服务](/zh/basic_usage/online_service/) 验证文本或图片请求。
 
 ```bash
 export HOST=127.0.0.1

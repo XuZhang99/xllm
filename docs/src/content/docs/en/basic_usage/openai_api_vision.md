@@ -2,7 +2,7 @@
 title: "OpenAI APIs - Vision"
 ---
 
-Use `/v1/chat/completions` with a vision-language model to ask questions about images. The request contains text and `image_url` parts in a message's `content` array. For general client setup and streaming, see [OpenAI-Compatible APIs](/en/getting_started/openai_api/).
+Use `/v1/chat/completions` with a vision-language model to ask questions about images. The request contains text and `image_url` parts in a message's `content` array. For general client setup and streaming, see [OpenAI-Compatible APIs](/en/basic_usage/openai_api/).
 
 ## Launch a VLM server
 

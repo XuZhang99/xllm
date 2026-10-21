@@ -74,8 +74,8 @@ limitations under the License. -->
 
 * [Quick Start](https://docs.xllm-ai.com/en/getting_started/quick_start/)
 * [Launch xLLM](https://docs.xllm-ai.com/en/getting_started/launch_xllm/)
-* [Online Service](https://docs.xllm-ai.com/en/getting_started/online_service/)
-* [Offline Inference](https://docs.xllm-ai.com/en/getting_started/offline_service/)
+* [Online Service](https://docs.xllm-ai.com/en/basic_usage/online_service/)
+* [Offline Inference](https://docs.xllm-ai.com/en/basic_usage/offline_service/)
 * [Supported Models](https://docs.xllm-ai.com/en/supported_models/)
 
 ## Community & Support

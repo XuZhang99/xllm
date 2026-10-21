@@ -5,7 +5,7 @@ sidebar:
 ---
 First, start the xllm service according to the [xllm launch documentation](/en/getting_started/launch_xllm/). Below are examples of client calls for LLM and VLM. Please modify the parameters according to your actual situation.
 
-For SDK setup, streaming, tool use, and compatibility details, see the [OpenAI-compatible API guide](/en/getting_started/openai_api/) and [Anthropic-compatible API guide](/en/getting_started/anthropic_api/). Dedicated guides cover [vision inputs](/en/getting_started/openai_api_vision/) and [embeddings](/en/getting_started/openai_api_embeddings/).
+For SDK setup, streaming, tool use, and compatibility details, see the [OpenAI-compatible API guide](/en/basic_usage/openai_api/) and [Anthropic-compatible API guide](/en/basic_usage/anthropic_api/). Dedicated guides cover [vision inputs](/en/basic_usage/openai_api_vision/) and [embeddings](/en/basic_usage/openai_api_embeddings/).
 
 ## LLM Client Calls
 ### HTTP Call

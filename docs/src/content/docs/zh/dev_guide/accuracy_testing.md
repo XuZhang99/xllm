@@ -16,7 +16,7 @@ GSM8K 的纯文本 LLM 脚本，以及基于 AI2D 的图文 VLM 脚本。两者�
 首次运行会从 ModelScope 下载数据，请提前准备数据集访问条件和足够的本地缓存空间。
 
 1. 按[启动 xLLM](/zh/getting_started/launch_xllm/) 部署支持的模型。
-2. 参考[在线服务](/zh/getting_started/online_service/)，确认对应的文本或图片请求可以成功完成。
+2. 参考[在线服务](/zh/basic_usage/online_service/)，确认对应的文本或图片请求可以成功完成。
 3. `HOST` 和 `PORT` 填写服务地址，脚本使用 `http://${HOST}:${PORT}/v1` 作为 API 根地址。
    `MODEL` 必须与 `/v1/models` 返回的模型 ID 一致，不是客户端的本地权重路径。
    示例使用 `18000` 端口，请替换为实际端口。

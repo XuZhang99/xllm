@@ -9,11 +9,11 @@ xLLM 支持通过 Anthropic Messages 请求格式访问本地部署的 LLM，可
 | `/v1/messages` | POST | 生成消息，可使用流式输出、推理输出和工具调用。 |
 | `/v1/messages/count_tokens` | POST | 统计输入 token，不生成回答。 |
 
-这些路由随 LLM 服务注册，与 [OpenAI 兼容接口](/zh/getting_started/openai_api/)共用已加载的模型、聊天模板和推理/工具解析器，无需额外的接口启用开关。
+这些路由随 LLM 服务注册，与 [OpenAI 兼容接口](/zh/basic_usage/openai_api/)共用已加载的模型、聊天模板和推理/工具解析器，无需额外的接口启用开关。
 
 ## 启动服务
 
-按照[启动说明](/zh/getting_started/launch_xllm/)部署 LLM。可以直接复用 [OpenAI 接口文档](/zh/getting_started/openai_api/#启动服务)中的单 NPU Qwen3-8B 服务，其中已配置 `--reasoning_parser=qwen3` 和 `--tool_call_parser=qwen3`；使用其他模型时，请选择匹配的解析器。
+按照[启动说明](/zh/getting_started/launch_xllm/)部署 LLM。可以直接复用 [OpenAI 接口文档](/zh/basic_usage/openai_api/#启动服务)中的单 NPU Qwen3-8B 服务，其中已配置 `--reasoning_parser=qwen3` 和 `--tool_call_parser=qwen3`；使用其他模型时，请选择匹配的解析器。
 
 模型加载完成后，先确认模型 ID：
 
@@ -252,7 +252,7 @@ claude --model "${MODEL}"
 | `tools`、`tool_choice` | 函数定义与选择方式（`auto`、`none`、`any` 或带名称的 `tool`）；输出质量取决于模型及解析器。 |
 | `chat_template_kwargs` | xLLM 扩展参数，传入模型特定的模板选项。 |
 
-- Messages API 当前用于 LLM，不支持图像输入，也不支持工具结果中的图像或工具引用内容。图像对话请使用 [OpenAI 视觉接口](/zh/getting_started/openai_api_vision/)。
+- Messages API 当前用于 LLM，不支持图像输入，也不支持工具结果中的图像或工具引用内容。图像对话请使用 [OpenAI 视觉接口](/zh/basic_usage/openai_api_vision/)。
 - 不支持非空的 `output_config.format.schema` 约束和 `kv_transfer_params`，会返回 HTTP 400。接受工具 schema 不代表具有受约束 JSON 生成能力。
 - `stop_reason="end_turn"` 表示正常结束，`max_tokens` 表示达到长度上限，`tool_use` 表示工具调用。
 - 模型相关的 HTTP 404 请通过 `/v1/models` 检查模型 ID；HTTP 501 请检查是否为 LLM 部署。请求失败时请读取 `error.message`，格式错误和后端不支持选项的错误响应结构可能不同。

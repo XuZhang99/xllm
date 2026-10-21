@@ -2,7 +2,7 @@
 title: "OpenAI 接口：视觉输入"
 ---
 
-使用视觉语言模型（VLM）的 `/v1/chat/completions` 接口可以对图像进行提问。在消息的 `content` 数组中传入文本和 `image_url` 内容块。通用客户端配置及流式输出请参阅 [OpenAI 兼容接口](/zh/getting_started/openai_api/)。
+使用视觉语言模型（VLM）的 `/v1/chat/completions` 接口可以对图像进行提问。在消息的 `content` 数组中传入文本和 `image_url` 内容块。通用客户端配置及流式输出请参阅 [OpenAI 兼容接口](/zh/basic_usage/openai_api/)。
 
 ## 启动 VLM 服务
 

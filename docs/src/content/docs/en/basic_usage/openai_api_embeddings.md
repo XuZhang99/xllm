@@ -2,7 +2,7 @@
 title: "OpenAI APIs - Embeddings"
 ---
 
-The `/v1/embeddings` endpoint returns vectors for text inputs. Start an embedding service before using it. A generation service does not become a pooling service merely because the client calls this endpoint. See [OpenAI-Compatible APIs](/en/getting_started/openai_api/) for the shared client conventions.
+The `/v1/embeddings` endpoint returns vectors for text inputs. Start an embedding service before using it. A generation service does not become a pooling service merely because the client calls this endpoint. See [OpenAI-Compatible APIs](/en/basic_usage/openai_api/) for the shared client conventions.
 
 ## Launch an embedding server
 
