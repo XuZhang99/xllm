@@ -62,7 +62,7 @@ export const hardwareConfigs: readonly HardwareConfig[] = [
 		},
 	},
 	{
-		id: 'cuda', labels: { en: 'NVIDIA GPU', zh: 'NVIDIA GPU' }, guide: 'nvidia_gpu',
+		id: 'cuda', labels: { en: 'NVIDIA GPU', zh: '英伟达 GPU' }, guide: 'nvidia_gpu',
 		docker: {
 			container: 'xllm-cuda',
 			options: ['--gpus all', '--privileged', '--shm-size=128g', '--ipc=host', '--network=host', '--pid=host'],
@@ -83,7 +83,7 @@ export const hardwareConfigs: readonly HardwareConfig[] = [
 		},
 	},
 	{
-		id: 'dcu', labels: { en: 'Hygon DCU', zh: '海光 DCU' }, guide: 'dcu',
+		id: 'dcu', labels: { en: 'Hygon DCU', zh: '海光 DCU' }, guide: 'hygon_dcu',
 		docker: {
 			container: 'xllm-dcu',
 			options: [

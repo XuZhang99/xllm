@@ -6,8 +6,6 @@ sidebar:
 
 xLLM uses gflags to manage service startup parameters. `--model <PATH>` is the only required flag. For native configuration, explicitly supplied command-line flags override JSON configuration values, which override compiled defaults. The tables below are grouped by the Config classes in `/xllm/core/framework/config`, with one Config per section. The `ConfigJsonUtils` section contains the common JSON config-file flags.
 
-> **Device selection**: xLLM no longer provides `--devices` / `--device_id` / `--draft_devices`. The available devices are determined by the visible-device mask environment variables (`ASCEND_RT_VISIBLE_DEVICES` for NPU, `CUDA_VISIBLE_DEVICES` for NVIDIA, `MLU_VISIBLE_DEVICES` for Cambricon, `HIP_VISIBLE_DEVICES` for DCU, `MUSA_VISIBLE_DEVICES` for Moore Threads). Each service process selects one runtime logical device from its visible devices according to its global `node_rank`; visible-device subsetting and reordering are resolved by the hardware runtime. The draft model always shares the selected device with the target model.
-
 ## ConfigJsonUtils
 
 | Parameter | Type | Default | Description |
@@ -173,7 +171,7 @@ Current support covers ordinary non-PD text inference with prefix caching enable
 |:----------|:-----|:--------|:------------|
 | `dp_size` | `int32` | `1` | Data parallel size for MLA attention. |
 | `ep_size` | `int32` | `1` | Expert parallel size for MoE models. |
-| `cp_size` | `int32` | `1` | Context parallel size. Backend and model support is required; `1` disables context parallelism. See [Cambricon MLU](/en/hardware/cambricon_mlu/) for MLU-specific constraints. |
+| `cp_size` | `int32` | `1` | Context parallel size. Backend and model support is required; `1` disables context parallelism. |
 | `kv_split_size` | `int32` | `1` | KV Cache split width. `0` falls back to `cp_size` (legacy). `1` disables KV split: each CP rank stores the full KV and skips the prefix AllGather. Other K values (K divides `cp_size`) shard KV across K ranks while token-CP still uses `cp_size`. |
 | `tp_size` | `int64` | `1` | Tensor parallelism size. Only used for DiT models. |
 | `sp_size` | `int64` | `1` | Sequence parallelism size. Only used for DiT models. |

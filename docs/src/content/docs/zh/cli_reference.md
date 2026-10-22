@@ -6,8 +6,6 @@ sidebar:
 
 xLLM 使用 gflags 管理服务启动参数。`--model <PATH>` 是唯一必填参数。对于原生配置，显式指定的命令行 flag 优先于 JSON 配置值，后者优先于编译时默认值。下表按 `/xllm/core/framework/config` 下的 Config 类分组，一个 Config 对应一节；`ConfigJsonUtils` 一节包含配置文件相关的通用参数。
 
-> **设备选择**：xLLM 不再提供 `--devices` / `--device_id` / `--draft_devices` 参数。可用设备由可见设备掩码环境变量决定（NPU 用 `ASCEND_RT_VISIBLE_DEVICES`，NVIDIA 用 `CUDA_VISIBLE_DEVICES`，寒武纪用 `MLU_VISIBLE_DEVICES`，DCU 用 `HIP_VISIBLE_DEVICES`，摩尔线程用 `MUSA_VISIBLE_DEVICES`）。每个服务进程根据全局 `node_rank` 从其可见设备中选择一个运行时逻辑设备；可见设备的子集化与重排由硬件运行时解析。draft 模型始终与 target 模型共享所选设备。
-
 ## ConfigJsonUtils
 
 | 参数名称 | 类型 | 默认值 | 参数含义 |
@@ -173,7 +171,7 @@ xLLM 使用 gflags 管理服务启动参数。`--model <PATH>` 是唯一必填�
 |:---------|:-----|:-------|:---------|
 | `dp_size` | `int32` | `1` | MLA attention 的 data parallel 规模。 |
 | `ep_size` | `int32` | `1` | MoE 模型的 expert parallel 规模。 |
-| `cp_size` | `int32` | `1` | Context parallel 规模，需要后端和模型支持；设为 `1` 表示禁用 context parallel。MLU 的具体限制见[寒武纪 MLU](/zh/hardware/cambricon_mlu/)。 |
+| `cp_size` | `int32` | `1` | Context parallel 规模，需要后端和模型支持；设为 `1` 表示禁用 context parallel。|
 | `kv_split_size` | `int32` | `1` | KV Cache split 宽度；`0` 表示沿用 `cp_size`（旧行为），`1` 表示不切分 KV（每个 CP rank 存储完整 KV 并跳过 prefix AllGather），其他可整除 `cp_size` 的 K 表示 KV 在 K 个 rank 间分片，而 token-CP 仍使用 `cp_size`。 |
 | `tp_size` | `int64` | `1` | Tensor parallel 规模，仅 DiT 模型使用。 |
 | `sp_size` | `int64` | `1` | Sequence parallel 规模，仅 DiT 模型使用。 |

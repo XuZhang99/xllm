@@ -2,91 +2,112 @@
 title: "Cambricon MLU"
 description: "Run xLLM on Cambricon MLU devices with the MLU backend."
 sidebar:
-  order: 4
+  order: 3
 ---
 
-Use the MLU backend when running xLLM on Cambricon devices.
+Set up an xLLM environment for Cambricon MLU and start a service with the unified `xllm serve` command from [Launch xllm](/en/getting_started/launch_xllm/).
 
-## Image and Container Startup
+## Prerequisites
 
-xLLM does not currently provide a public MLU image in the docs. If you already have the development image, start the container with:
+- Install the Cambricon driver and Docker on the Linux host. Obtain an MLU development image with a compatible Neuware runtime and build dependencies from your vendor; a public MLU image is not listed in Quick Start.
+- Check the [Model Support List](/en/supported_models/) for your backend and prepare the model weights in a directory accessible inside the container.
+- The commands below mount your home directory at the same path. For weights stored elsewhere, add a mount such as `-v /path/to/models:/models:ro` and use the container path in `MODEL_PATH`.
+
+## Start the container
+
+Run the following commands on the host. Replace the image placeholder before running them.
 
 ```bash
-sudo docker run -it \
---privileged \
---shm-size '128gb' \
---ipc=host \
---net=host \
---pid=host \
---name xllm-mlu \
--v $HOME:$HOME \
--w $HOME \
-<docker_image_name> \
-/bin/bash
+XLLM_IMAGE="your-mlu-development-image:tag"
+docker pull "$XLLM_IMAGE"
 ```
 
-## Server Startup Command
+```bash
+docker run -it \
+  --name xllm-mlu \
+  --privileged \
+  --shm-size=128g \
+  --ipc=host \
+  --network=host \
+  --pid=host \
+  -v "$HOME:$HOME" \
+  -w "$HOME" \
+  "$XLLM_IMAGE" \
+  /bin/bash
+```
+
+The container remains after exit. Re-enter it with `docker start -ai xllm-mlu` when stopped, or `docker exec -it xllm-mlu bash` while it is running.
+
+## Install xLLM
+
+Run inside the container. If your image already includes the xLLM wheel and supports `xllm serve`, skip the source installation. Otherwise, clone the repository (or enter your existing checkout), initialize its submodules, and build and install the wheel for this backend:
+
+```bash
+git clone https://github.com/xLLM-AI/xllm.git
+cd xllm
+
+# Install pre-commit on first use
+pip install pre-commit
+pre-commit install
+
+git submodule update --init --recursive
+python setup.py install --device mlu
+```
+
+You can also install directly with `python setup.py install`; the installer automatically detects the backend from the current PyTorch environment when `--device` is omitted.
+
+`python setup.py build` only builds the artifacts; the unified command requires the installed wheel and its packaged server binary. Check the installed command before continuing:
+
+```bash
+command -v xllm
+xllm serve --help
+```
+
+## Launch the service
+
+Run inside the container after replacing `MODEL_PATH` with your weights directory. This example starts one device. Adjust the backend settings using the target model recipe and [CLI Reference](/en/cli_reference/).
 
 ```bash
 #!/bin/bash
 set -e
 
-rm -rf core.*
-
 export MLU_VISIBLE_DEVICES=0
 
 MODEL_PATH="/path/to/model/Qwen3-8B"
+PORT=8010
 MASTER_NODE_ADDR="127.0.0.1:9748"
-START_PORT=18000
-LOG_DIR="log"
 NNODES=1
 
-mkdir -p $LOG_DIR
-
-for (( i=0; i<$NNODES; i++ ))
-do
-  PORT=$((START_PORT + i))
-  LOG_FILE="$LOG_DIR/node_$i.log"
-  xllm \
-    --model $MODEL_PATH \
-    --port $PORT \
-    --nnodes=$NNODES \
-    --master_node_addr=$MASTER_NODE_ADDR \
-    --block_size=16 \
-    --node_rank=$i \ > $LOG_FILE 2>&1 &
-done
+xllm serve \
+  --model="$MODEL_PATH" \
+  --model_id=Qwen3-8B \
+  --port="$PORT" \
+  --nnodes="$NNODES" \
+  --master_node_addr="$MASTER_NODE_ADDR" \
+  --block_size=16
 ```
 
-For a single-device run, `<device-id>` usually starts from `0`. For larger deployments, keep the selected device ids aligned with `--node_rank`, `--nnodes`, and per-worker ports.
+For two devices on one machine, replace the device selection and `NNODES` lines in the script with:
 
-## Context Parallelism
+```bash
+export MLU_VISIBLE_DEVICES=0,1
+NNODES=2
+```
 
-MLU Context Parallel (CP) is configured with `--cp_size`.
+Run `xllm serve` once. The launcher assigns ranks and per-rank ports, writes `log/node_0.log`, `log/node_1.log`, and so on, and stays in the foreground. Do not pass `--node_rank` or wrap the command in a per-device loop.
 
-For MLU, the configured `cp_size` must equal the global world size, calculated
-as `nnodes` multiplied by the number of devices used by each process. Current
-MLU model-side CP has the following constraints:
+## Verify the service
 
-- Supported model types are `deepseek_v32` and `glm_moe_dsa` (the GLM-5
-  family, including GLM-5.2 cross-layer DSA top-k sharing).
-- Only the `generate` task of text-generation models is supported.
-- `dp_size` must be `1`, and `kv_split_size` must be `1`.
-- `ep_size` must be either `1` or the global world size.
-- Only the `DEFAULT` and `PREFILL` instance roles support CP.
-- MTP- and Eagle3-based speculative decoding are not supported with MLU CP.
-  Suffix speculative decoding is supported.
+In another shell, wait for model loading to finish and query the rank-0 service (port `8010` in this example):
 
-In a disaggregated Prefill/Decode deployment, configure `cp_size=N` on the
-Prefill instance and `cp_size=1` on the Decode instance. The Decode instance
-does not participate in MLU model-side CP.
+```bash
+curl http://127.0.0.1:8010/health
+curl http://127.0.0.1:8010/v1/models
+```
 
-Prefill CP uses head-tail token partitioning. Each attention layer temporarily
-all-gathers only that layer's MLA K; Indexer-bearing Full layers also gather
-that layer's Indexer K, while GLM-5.2 Shared layers reuse the sparse block table
-produced by the Full layer on the same CP rank.
+The model list should include `Qwen3-8B`, as set by `--model_id`. Use that ID in requests to the [OpenAI-Compatible APIs](/en/basic_usage/openai_api/). If you change `PORT`, update the request URLs as well.
 
-## Notes
+## Platform notes
 
-- xLLM does not currently provide a public MLU image in the docs. Use an available MLU development image with the container startup command above.
-- The MLU launch example uses `--block_size=16` in the current docs.
-- Check the [Model Support List](/en/supported_models/) before choosing an MLU deployment target.
+- Replace `XLLM_IMAGE` with your available MLU image. Follow the image provider's requirements for driver libraries and device access.
+- The launch example uses `--block_size=16`. Model-specific optimizations, including Context Parallelism below, require their own compatible model and topology.

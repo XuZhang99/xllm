@@ -94,11 +94,6 @@ export default defineConfig({
 							slug: 'hardware/overview',
 						},
 						{
-							label: 'NVIDIA GPU',
-							translations: { 'zh-CN': 'NVIDIA GPU' },
-							slug: 'hardware/nvidia_gpu',
-						},
-						{
 							label: 'Ascend NPU',
 							translations: { 'zh-CN': '昇腾 NPU' },
 							slug: 'hardware/ascend_npu',
@@ -111,7 +106,7 @@ export default defineConfig({
 						{
 							label: 'Hygon DCU',
 							translations: { 'zh-CN': '海光 DCU' },
-							slug: 'hardware/dcu',
+							slug: 'hardware/hygon_dcu',
 						},
 						{
 							label: 'MetaX MACA',
@@ -122,6 +117,11 @@ export default defineConfig({
 							label: 'Mthreads MUSA',
 							translations: { 'zh-CN': '摩尔线程 MUSA' },
 							slug: 'hardware/musa',
+						},
+						{
+							label: 'NVIDIA GPU',
+							translations: { 'zh-CN': '英伟达 GPU' },
+							slug: 'hardware/nvidia_gpu',
 						},
 					],
 				},
