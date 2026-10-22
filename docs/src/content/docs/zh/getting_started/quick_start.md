@@ -17,16 +17,16 @@ sidebar:
 - **Dev** 镜像提供开发环境，需要在容器内从源码编译 xLLM。
 - **CPU 架构**指主机架构（`x86_64` 或 `ARM64`），并非纯 CPU 推理后端。不确定时，可在 Linux 主机上运行 `uname -m` 查看。
 
-请先在主机上安装 Docker 和对应的加速卡驱动。NVIDIA GPU 容器还需要 NVIDIA Container Toolkit。上述命令会挂载主目录并授予容器访问加速卡设备的权限，请仅在合适的开发主机上使用可信镜像。
+请先在主机上安装 Docker 和对应的加速卡驱动。英伟达 GPU 容器还需要 NVIDIA Container Toolkit。上述命令会挂载主目录并授予容器访问加速卡设备的权限，请仅在合适的开发主机上使用可信镜像。
 
 上述命令创建的命名容器在退出后仍会保留。重新进入已停止的容器时，运行 `docker start -ai <container-name>`，将 `<container-name>` 替换为 `--name` 的值（例如 `xllm-npu`）。若要尝试其他镜像或硬件配置，请为新的 `docker run` 命令选择一个未使用的 `--name`。重启已有容器会保留其原始镜像和配置。
 
 可浏览 [昇腾和 NVIDIA 镜像标签](https://quay.io/repository/jd_xllm/xllm-ai?tab=tags)，或查看对应硬件的完整配置指南：
 
 - [昇腾 NPU（A2 / A3）](/zh/hardware/ascend_npu/)
-- [NVIDIA GPU](/zh/hardware/nvidia_gpu/)
+- [英伟达 GPU](/zh/hardware/nvidia_gpu/)
 - [寒武纪 MLU](/zh/hardware/cambricon_mlu/)
-- [海光 DCU](/zh/hardware/dcu/)
+- [海光 DCU](/zh/hardware/hygon_dcu/)
 - [沐曦 MACA](/zh/hardware/metax_maca/)
 - [摩尔线程 MUSA](/zh/hardware/musa/)
 

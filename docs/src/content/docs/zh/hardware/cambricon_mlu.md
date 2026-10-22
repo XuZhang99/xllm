@@ -2,87 +2,112 @@
 title: "寒武纪 MLU"
 description: "使用 MLU 后端在寒武纪设备上运行 xLLM。"
 sidebar:
-  order: 4
+  order: 3
 ---
 
-在寒武纪设备上部署 xLLM 时使用 MLU 后端。
+本页介绍如何配置 寒武纪 MLU 环境、安装 xLLM，并按 [启动 xllm](/zh/getting_started/launch_xllm/) 使用统一的 `xllm serve` 命令启动服务。
 
-## 镜像和容器启动命令
+## 前置准备
 
-当前文档不提供公开 MLU 镜像。如果您已经拥有了相应的开发镜像，可以根据下面的命令启动容器：
+- 在 Linux 宿主机上安装寒武纪驱动和 Docker。向厂商获取包含兼容 Neuware 运行时和编译依赖的 MLU 开发镜像；快速开始中暂未提供公开 MLU 镜像。
+- 在 [模型支持列表](/zh/supported_models/) 中确认后端支持目标模型，并将权重放在容器内可访问的目录。
+- 下方命令将宿主机主目录挂载到容器内同一路径。若权重存放在其他位置，请增加类似 `-v /path/to/models:/models:ro` 的挂载，并在 `MODEL_PATH` 中使用容器内路径。
+
+## 启动容器
+
+以下命令在宿主机执行。执行前请替换镜像占位值。
 
 ```bash
-sudo docker run -it \
---privileged \
---shm-size '128gb' \
---ipc=host \
---net=host \
---pid=host \
---name xllm-mlu \
--v $HOME:$HOME \
--w $HOME \
-<docker_image_name> \
-/bin/bash
+XLLM_IMAGE="your-mlu-development-image:tag"
+docker pull "$XLLM_IMAGE"
 ```
 
-## 服务启动命令
+```bash
+docker run -it \
+  --name xllm-mlu \
+  --privileged \
+  --shm-size=128g \
+  --ipc=host \
+  --network=host \
+  --pid=host \
+  -v "$HOME:$HOME" \
+  -w "$HOME" \
+  "$XLLM_IMAGE" \
+  /bin/bash
+```
+
+退出后容器会保留，使用 `docker start -ai xllm-mlu` 重新进入已停止的容器；若容器仍在运行，使用 `docker exec -it xllm-mlu bash`。
+
+## 安装 xLLM
+
+以下命令在容器内执行。若镜像已安装 xLLM wheel 且支持 `xllm serve`，可跳过源码安装。否则，克隆仓库（或进入已有源码目录）、初始化子模块，并为当前后端构建和安装 wheel：
+
+```bash
+git clone https://github.com/xLLM-AI/xllm.git
+cd xllm
+
+# 第一次需要进行 pre-commit 安装
+pip install pre-commit
+pre-commit install
+
+git submodule update --init --recursive
+python setup.py install --device mlu
+```
+
+也可以直接使用 `python setup.py install` 安装；省略 `--device` 时，安装脚本会根据当前 PyTorch 环境自动识别设备后端。
+
+`python setup.py build` 仅构建产物；统一启动命令需要安装 wheel 及其包含的服务二进制。继续前先检查已安装的命令：
+
+```bash
+command -v xllm
+xllm serve --help
+```
+
+## 启动服务
+
+将 `MODEL_PATH` 替换为权重目录后，在容器内执行。下方示例启动一张卡；请结合目标模型部署配方和 [CLI 参数参考](/zh/cli_reference/) 调整。
 
 ```bash
 #!/bin/bash
 set -e
 
-rm -rf core.*
-
 export MLU_VISIBLE_DEVICES=0
 
 MODEL_PATH="/path/to/model/Qwen3-8B"
+PORT=8010
 MASTER_NODE_ADDR="127.0.0.1:9748"
-START_PORT=18000
-LOG_DIR="log"
 NNODES=1
 
-mkdir -p $LOG_DIR
-
-for (( i=0; i<$NNODES; i++ ))
-do
-  PORT=$((START_PORT + i))
-  LOG_FILE="$LOG_DIR/node_$i.log"
-  xllm \
-    --model $MODEL_PATH \
-    --port $PORT \
-    --nnodes=$NNODES \
-    --master_node_addr=$MASTER_NODE_ADDR \
-    --block_size=16 \
-    --node_rank=$i \ > $LOG_FILE 2>&1 &
-done
+xllm serve \
+  --model="$MODEL_PATH" \
+  --model_id=Qwen3-8B \
+  --port="$PORT" \
+  --nnodes="$NNODES" \
+  --master_node_addr="$MASTER_NODE_ADDR" \
+  --block_size=16
 ```
 
-单卡部署时 `<device-id>` 通常从 `0` 开始。更大规模部署中，需要让设备编号、`--node_rank`、`--nnodes` 和每个 worker 的端口保持一致。
+单机双卡时，将脚本中的设备选择和 `NNODES` 两行替换为：
 
-## Context Parallel
+```bash
+export MLU_VISIBLE_DEVICES=0,1
+NNODES=2
+```
 
-MLU Context Parallel（CP）通过 `--cp_size` 配置。
+只需执行一次 `xllm serve`。启动器自动分配 rank 和各 rank 的端口，将日志写入 `log/node_0.log`、`log/node_1.log` 等文件，并在前台运行。不要传入 `--node_rank` 或再套一层按设备启动的循环。
 
-在 MLU 上，`cp_size` 必须等于全局 world size，即 `nnodes` 乘以每个进程
-使用的设备数量。当前 MLU model-side CP 还有以下限制：
+## 验证服务
 
-- 支持的模型类型为 `deepseek_v32` 和 `glm_moe_dsa`（GLM-5 系列，包含
-  GLM-5.2 的跨层 DSA top-k 共享）。
-- 仅支持文本生成模型的 `generate` 任务。
-- `dp_size` 必须为 `1`，`kv_split_size` 必须为 `1`。
-- `ep_size` 必须为 `1` 或全局 world size。
-- 仅 `DEFAULT` 和 `PREFILL` 实例角色支持 CP。
-- MLU CP 不支持基于 MTP 或 Eagle3 的投机解码，但支持 Suffix 投机解码。
+在另一个 shell 中，等待模型加载完成后查询 rank 0 的服务（本例端口为 `8010`）：
 
-在 Prefill/Decode 分离部署中，Prefill 实例配置 `cp_size=N`，Decode 实例
-配置 `cp_size=1`。Decode 实例不参与 MLU model-side CP。
+```bash
+curl http://127.0.0.1:8010/health
+curl http://127.0.0.1:8010/v1/models
+```
 
-Prefill CP 使用首尾式 token 分区。每个注意力层仅临时 all-gather 当前层
-的 MLA K；带 Indexer 的 Full 层还会 all-gather 当前层 Indexer K，GLM-5.2
-的 Shared 层直接复用同一 CP rank 上 Full 层生成的稀疏 block table。
+模型列表应包含 `--model_id` 指定的 `Qwen3-8B`。调用 [OpenAI 兼容 API](/zh/basic_usage/openai_api/) 时使用该 ID；若修改 `PORT`，请求地址也要同步调整。
 
-## 注意事项
+## 平台说明
 
-- 当前文档不提供公开 MLU 镜像，需要使用已有 MLU 开发镜像，并配合上面的容器启动命令。
-- 当前 MLU 启动示例使用 `--block_size=16`。
-- 选择 MLU 部署目标前，先在 [模型支持列表](/zh/supported_models/) 中确认模型覆盖情况。
+- 将 `XLLM_IMAGE` 替换为可用的 MLU 镜像，并遵循镜像提供方对驱动库和设备访问的要求。
+- 启动示例使用 `--block_size=16`。下方 Context Parallel 等模型专项优化需要匹配的模型和并行拓扑。

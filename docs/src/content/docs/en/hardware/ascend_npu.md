@@ -2,96 +2,142 @@
 title: "Ascend NPU"
 description: "Run xLLM on Ascend NPUs with the NPU backend."
 sidebar:
-  order: 3
+  order: 2
 ---
 
-Use the NPU backend when running xLLM on Ascend hardware.
+Set up an xLLM environment for Ascend NPU and start a service with the unified `xllm serve` command from [Launch xllm](/en/getting_started/launch_xllm/).
 
-## Image and Container Startup
+## Prerequisites
 
-Pull a pre-built Ascend development image:
+- Install the Ascend driver and Docker on the Linux host. Confirm that `npu-smi info` can see the NPUs, and choose an image matching the A2/A3 hardware and host CPU architecture.
+- Check the [Model Support List](/en/supported_models/) for your backend and prepare the model weights in a directory accessible inside the container.
+- The commands below mount your home directory at the same path. For weights stored elsewhere, add a mount such as `-v /path/to/models:/models:ro` and use the container path in `MODEL_PATH`.
+
+## Start the container
+
+Run the following commands on the host. Choose one development image for your hardware:
+
+| Hardware | Host CPU | Development image |
+| --- | --- | --- |
+| Ascend A2 | x86_64 | `quay.io/jd_xllm/xllm-ai:xllm-dev-a2-x86-cann9-20260911` |
+| Ascend A2 | ARM64 | `quay.io/jd_xllm/xllm-ai:xllm-dev-a2-arm-cann9-20260911` |
+| Ascend A3 | ARM64 | `quay.io/jd_xllm/xllm-ai:xllm-dev-a3-arm-cann9-20260911` |
+
+The example below selects A3 ARM64; change `XLLM_IMAGE` for another platform.
 
 ```bash
-# A2 x86
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a2-x86-cann9-20260911
-# A2 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a2-arm-cann9-20260911
-# A3 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a3-arm-cann9-20260911
+XLLM_IMAGE="quay.io/jd_xllm/xllm-ai:xllm-dev-a3-arm-cann9-20260911"
+docker pull "$XLLM_IMAGE"
 ```
-
-Start the container:
 
 ```bash
 docker run -it \
---ipc=host \
--u 0 \
---name xllm-npu \
---privileged \
---network=host \
---device=/dev/davinci0 \
---device=/dev/davinci_manager \
---device=/dev/devmm_svm \
---device=/dev/hisi_hdc \
--v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
--v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ \
--v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
--v /usr/local/sbin/:/usr/local/sbin/ \
--v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf \
--v /var/log/npu/slog/:/var/log/npu/slog \
--v /var/log/npu/profiling/:/var/log/npu/profiling \
--v /var/log/npu/dump/:/var/log/npu/dump \
--v $HOME:$HOME \
--w $HOME \
-<docker_image_name> \
-/bin/bash
+  --name xllm-npu \
+  --ipc=host \
+  -u 0 \
+  --privileged \
+  --network=host \
+  --device=/dev/davinci0 \
+  --device=/dev/davinci_manager \
+  --device=/dev/devmm_svm \
+  --device=/dev/hisi_hdc \
+  -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
+  -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ \
+  -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
+  -v /usr/local/sbin/:/usr/local/sbin/ \
+  -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf \
+  -v /var/log/npu/slog/:/var/log/npu/slog \
+  -v /var/log/npu/profiling/:/var/log/npu/profiling \
+  -v /var/log/npu/dump/:/var/log/npu/dump \
+  -v "$HOME:$HOME" \
+  -w "$HOME" \
+  "$XLLM_IMAGE" \
+  /bin/bash
 ```
 
-## Server Startup Command
+For additional devices, add the corresponding `--device=/dev/davinciN` entries before creating the container.
+
+The container remains after exit. Re-enter it with `docker start -ai xllm-npu` when stopped, or `docker exec -it xllm-npu bash` while it is running.
+
+## Install xLLM
+
+Run inside the container. If your image already includes the xLLM wheel and supports `xllm serve`, skip the source installation. Otherwise, clone the repository (or enter your existing checkout), initialize its submodules, and build and install the wheel for this backend:
+
+```bash
+git clone https://github.com/xLLM-AI/xllm.git
+cd xllm
+
+# Install pre-commit on first use
+pip install pre-commit
+pre-commit install
+
+git submodule update --init --recursive
+python setup.py install --device npu
+```
+
+You can also install directly with `python setup.py install`; the installer automatically detects the backend from the current PyTorch environment when `--device` is omitted.
+
+`python setup.py build` only builds the artifacts; the unified command requires the installed wheel and its packaged server binary. Check the installed command before continuing:
+
+```bash
+command -v xllm
+xllm serve --help
+```
+
+## Launch the service
+
+Run inside the container after replacing `MODEL_PATH` with your weights directory. This example starts one device. Adjust the backend settings using the target model recipe and [CLI Reference](/en/cli_reference/).
 
 ```bash
 #!/bin/bash
 set -e
 
-rm -rf core.*
-
-source /usr/local/Ascend/ascend-toolkit/set_env.sh 
-source /usr/local/Ascend/nnal/atb/set_env.sh
 export ASCEND_RT_VISIBLE_DEVICES=0
-export HCCL_IF_BASE_PORT=43432  # HCCL communication base port
 
-MODEL_PATH="/path/to/model/Qwen3-8B"               # Model path
-MASTER_NODE_ADDR="127.0.0.1:9748"                  # Master node address (must be globally consistent)
-START_PORT=18000                                   # Service starting port
-LOG_DIR="log"                                      # Log directory
-NNODES=1                                           # Number of nodes (current script launches 1 process)
+MODEL_PATH="/path/to/model/Qwen3-8B"
+PORT=8010
+MASTER_NODE_ADDR="127.0.0.1:9748"
+NNODES=1
 
-mkdir -p $LOG_DIR
-
-for (( i=0; i<$NNODES; i++ ))
-do
-  PORT=$((START_PORT + i))
-  LOG_FILE="$LOG_DIR/node_$i.log"
-  xllm \
-    --model $MODEL_PATH \
-    --port $PORT \
-    --master_node_addr=$MASTER_NODE_ADDR \
-    --nnodes=$NNODES \
-    --max_memory_utilization=0.86 \
-    --block_size=128 \
-    --communication_backend="hccl" \
-    --enable_prefix_cache=false \
-    --enable_chunked_prefill=true \
-    --enable_schedule_overlap=true \
-    --enable_shm=true \
-    --node_rank=$i \ > $LOG_FILE 2>&1 &
-done
+xllm serve \
+  --model="$MODEL_PATH" \
+  --model_id=Qwen3-8B \
+  --port="$PORT" \
+  --nnodes="$NNODES" \
+  --master_node_addr="$MASTER_NODE_ADDR" \
+  --block_size=128 \
+  --communication_backend=hccl \
+  --max_memory_utilization=0.86 \
+  --enable_prefix_cache=false \
+  --enable_chunked_prefill=true \
+  --enable_schedule_overlap=true \
+  --enable_shm=true \
+  --enable_graph=true
 ```
 
-For distributed NPU serving, set `--communication_backend="hccl"`, keep `--master_node_addr`, `--node_rank`, and `--nnodes` consistent across all workers, and prepare the rank table when the deployment requires one.
+For two devices on one machine, replace the device selection and `NNODES` lines in the script with:
 
-## Notes
+```bash
+export ASCEND_RT_VISIBLE_DEVICES=0,1
+NNODES=2
+```
 
-- Pre-built A2 and A3 development images are listed in [Quick Start](/en/getting_started/quick_start/).
-- NPU launch examples usually enable HCCL communication and tune `--block_size`, `--max_memory_utilization`, chunked prefill, and schedule overlap for the target workload.
-- Ascend kernel implementation details are documented separately in the TileLang kernel development guide.
+Run `xllm serve` once. The launcher assigns ranks and per-rank ports, writes `log/node_0.log`, `log/node_1.log`, and so on, and stays in the foreground. Do not pass `--node_rank` or wrap the command in a per-device loop.
+
+## Verify the service
+
+In another shell, wait for model loading to finish and query the rank-0 service (port `8010` in this example):
+
+```bash
+curl http://127.0.0.1:8010/health
+curl http://127.0.0.1:8010/v1/models
+```
+
+The model list should include `Qwen3-8B`, as set by `--model_id`. Use that ID in requests to the [OpenAI-Compatible APIs](/en/basic_usage/openai_api/). If you change `PORT`, update the request URLs as well.
+
+## Platform notes
+
+- The example uses HCCL, `--block_size=128`, shared memory, chunked prefill, schedule overlap, and graph execution. Check the model recipe before changing these settings.
+- For multiple independent services, use separate master addresses, service port ranges, log directories, and HCCL base ports.
+- Multi-machine NPU deployments may also require `--rank_tablefile`. See [Multi-Machine Deployment](/en/basic_usage/multi_machine/) for network and rank-table preparation, and use the unified launcher described above.
+- Kernel development is covered in [TileLang Kernel Development on Ascend NPU](/en/dev_guide/tilelang_ascend_kernel_dev/).

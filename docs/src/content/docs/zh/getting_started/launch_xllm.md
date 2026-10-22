@@ -12,16 +12,7 @@ sidebar:
 python setup.py install
 ```
 
-启动 xLLM 前，根据硬件平台设置对应的环境变量，指定使用的设备：
-
-- 昇腾 NPU：`export ASCEND_RT_VISIBLE_DEVICES=0`
-- NVIDIA GPU：`export CUDA_VISIBLE_DEVICES=0`
-- 寒武纪 MLU：`export MLU_VISIBLE_DEVICES=0`
-- 海光 DCU：`export HIP_VISIBLE_DEVICES=0`
-- 沐曦 MACA：`export CUDA_VISIBLE_DEVICES=0`
-- 摩尔线程 MUSA：`export MUSA_VISIBLE_DEVICES=0`
-
-使用逗号分隔设备 ID 来指定多个设备，例如 `export ASCEND_RT_VISIBLE_DEVICES=0,1`。单机部署时，将 `NNODES` 设置为所选设备的数量（一张卡对应一个 node）。以下脚本适用于单机单卡和单机多卡：
+单机部署时，将 `NNODES` 设置为所选设备的数量（一张卡对应一个 node）。以下脚本适用于单机单卡和单机多卡：
 
 ```bash
 #!/bin/bash
@@ -45,3 +36,25 @@ xllm serve --model=$MODEL_PATH \
 ```
 
 多机部署时，需要添加 `--machine_rank` 参数，指定当前机器的编号。
+
+## 验证并发送请求
+
+示例使用 `8010` 端口。模型加载完成后，在另一个 shell 中检查 rank 0 的接口：
+
+```bash
+curl http://127.0.0.1:8010/health
+curl http://127.0.0.1:8010/v1/models
+```
+
+请求的 `model` 使用 `/v1/models` 返回的 ID。以 Qwen3-8B 示例为例：
+
+```bash
+curl http://127.0.0.1:8010/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen3-8B",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 64,
+    "stream": false
+  }'
+```

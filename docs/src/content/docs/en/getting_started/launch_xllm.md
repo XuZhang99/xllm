@@ -12,16 +12,7 @@ Install the xllm wheel package in advance, or use a release image:
 python setup.py install
 ```
 
-Before launching xLLM, select the devices by setting the environment variable for your hardware platform:
-
-- Ascend NPU: `export ASCEND_RT_VISIBLE_DEVICES=0`
-- NVIDIA GPU: `export CUDA_VISIBLE_DEVICES=0`
-- Cambricon MLU: `export MLU_VISIBLE_DEVICES=0`
-- Hygon DCU: `export HIP_VISIBLE_DEVICES=0`
-- MetaX MACA: `export CUDA_VISIBLE_DEVICES=0`
-- Mthreads MUSA: `export MUSA_VISIBLE_DEVICES=0`
-
-Use comma-separated device IDs to select multiple devices, for example, `export ASCEND_RT_VISIBLE_DEVICES=0,1`. For single-machine deployments, set `NNODES` to the number of selected devices (one device per node). The following script supports both single-device and multi-device launches:
+For single-machine deployments, set `NNODES` to the number of selected devices (one device per node). The following script supports both single-device and multi-device launches:
 
 ```bash
 #!/bin/bash
@@ -45,3 +36,25 @@ xllm serve --model=$MODEL_PATH \
 ```
 
 When deploying on multiple machines, you need to add the `--machine_rank` parameter to specify the rank of the current machine.
+
+## Verify and send a request
+
+The example uses port `8010`. After model loading, check the rank-0 endpoints from another shell:
+
+```bash
+curl http://127.0.0.1:8010/health
+curl http://127.0.0.1:8010/v1/models
+```
+
+Use the ID returned by `/v1/models` as the request's `model`. For a Qwen3-8B deployment:
+
+```bash
+curl http://127.0.0.1:8010/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen3-8B",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 64,
+    "stream": false
+  }'
+```

@@ -26,7 +26,7 @@ Browse the [Ascend and NVIDIA image tags](https://quay.io/repository/jd_xllm/xll
 - [Ascend NPU (A2 / A3)](/en/hardware/ascend_npu/)
 - [NVIDIA GPU](/en/hardware/nvidia_gpu/)
 - [Cambricon MLU](/en/hardware/cambricon_mlu/)
-- [Hygon DCU](/en/hardware/dcu/)
+- [Hygon DCU](/en/hardware/hygon_dcu/)
 - [MetaX MACA](/en/hardware/metax_maca/)
 - [Mthreads MUSA](/en/hardware/musa/)
 
