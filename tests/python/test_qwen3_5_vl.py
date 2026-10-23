@@ -22,7 +22,10 @@ import pytest
 import torch
 from torch import nn
 
-from tests.python.qwen3_5_test_utils import StateDict
+from tests.python.qwen3_5_test_utils import ConstantModule, StateDict, gemma_rms_norm, make_config
+from xllm.python import kernels
+from xllm.python.layers.npu.qwen3_5.attention import NpuQwen3_5Attention
+from xllm.python.layers.qwen3_5.attention import Qwen3_5Attention
 from xllm.python.layers.qwen3_5.common import PartialRotaryEmbedding
 from xllm.python.model_loader import ScopedWeightLoader
 from xllm.python.models.qwen3_5 import Qwen3_5ForCausalLM, Qwen3_5Model
@@ -35,6 +38,98 @@ from xllm.python.registry import get_model_class
 class _IdentityNorm(nn.Module):
     def forward(self, hidden: torch.Tensor, residual: torch.Tensor | None) -> tuple[torch.Tensor, None]:
         return hidden, None
+
+
+class _CaptureAttention(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None
+
+    def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+        self.inputs = (query, key, value)
+        return query
+
+
+def _unfused_attention(attention_cls: type[Qwen3_5Attention], interleaved: bool, output_gate: bool) -> Qwen3_5Attention:
+    cfg = make_config(
+        hidden_size=64,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=32,
+        tp_size=1,
+        world_size=1,
+        moe_tp_size=1,
+        attn_output_gate=output_gate,
+        rope_scaling_mrope_section=[2, 1, 1],
+        rope_scaling_mrope_interleaved=interleaved,
+    )
+    rotary = PartialRotaryEmbedding(
+        32,
+        8,
+        32,
+        10000.0,
+        torch.float32,
+        torch.device("cpu"),
+        mrope_section=cfg.rope_scaling_mrope_section,
+        mrope_interleaved=interleaved,
+    )
+    return attention_cls(cfg, 0, torch.float32, torch.device("cpu"), rotary)
+
+
+@pytest.mark.parametrize("attention_cls", [Qwen3_5Attention, NpuQwen3_5Attention])
+@pytest.mark.parametrize("interleaved", [False, True])
+@pytest.mark.parametrize("output_gate", [False, True])
+def test_unfused_attention_accepts_multimodal_positions(
+    monkeypatch: pytest.MonkeyPatch,
+    attention_cls: type[Qwen3_5Attention],
+    interleaved: bool,
+    output_gate: bool,
+) -> None:
+    monkeypatch.setattr(kernels, "gemma_rms_norm", gemma_rms_norm)
+    layer = _unfused_attention(attention_cls, interleaved, output_gate)
+    assert not layer.use_fused_qkv
+    query = torch.arange(128, dtype=torch.float32).reshape(2, 2, 32) / 64 - 0.5
+    key = query[:, :1, :] + 0.25
+    value = key + 1
+    gate = query + 0.5
+    packed_query = torch.cat((query, gate), dim=-1) if output_gate else query
+    layer.qkv_proj = ConstantModule(
+        torch.cat((packed_query.reshape(2, -1), key.reshape(2, -1), value.reshape(2, -1)), dim=-1)
+    )
+    attention = _CaptureAttention()
+    layer.attn = attention
+    layer.o_proj = nn.Identity()
+    positions = torch.tensor([[1, 2], [3, 4], [5, 6]])
+    hidden = torch.zeros(2, 64)
+
+    actual = layer(positions, hidden)
+
+    axes = [0, 1, 2, 0] if interleaved else [0, 0, 1, 2]
+    angles = positions[axes].T * 10000.0 ** (-torch.arange(4, dtype=torch.float32) / 4)
+    cos = angles.cos().repeat(1, 2).unsqueeze(1)
+    sin = angles.sin().repeat(1, 2).unsqueeze(1)
+
+    def _expected_rows(tensor: torch.Tensor) -> torch.Tensor:
+        normalized = tensor * torch.rsqrt(tensor.square().mean(dim=-1, keepdim=True) + layer.cfg.rms_norm_eps)
+        rotated = torch.cat((-normalized[..., 4:8], normalized[..., :4]), dim=-1)
+        return torch.cat((normalized[..., :8] * cos + rotated * sin, normalized[..., 8:]), dim=-1).reshape(2, -1)
+
+    expected_query = _expected_rows(query)
+    assert attention.inputs is not None
+    torch.testing.assert_close(attention.inputs[0], expected_query)
+    torch.testing.assert_close(attention.inputs[1], _expected_rows(key))
+    torch.testing.assert_close(attention.inputs[2], value.reshape(2, -1))
+    expected_output = expected_query * gate.reshape(2, -1).sigmoid() if output_gate else expected_query
+    torch.testing.assert_close(actual, expected_output)
+    text_positions = torch.tensor([7, 8])
+    torch.testing.assert_close(layer(text_positions, hidden), layer(text_positions.expand(3, -1), hidden))
+
+
+@pytest.mark.parametrize("shape", [(), (2, 2), (3, 2, 1)])
+def test_unfused_attention_rejects_invalid_position_layouts(shape: tuple[int, ...]) -> None:
+    layer = _unfused_attention(Qwen3_5Attention, interleaved=True, output_gate=True)
+    with pytest.raises(ValueError, match="positions"):
+        layer(torch.zeros(shape, dtype=torch.long), torch.zeros(2, 64))
 
 
 def _model() -> Qwen3_5ForConditionalGeneration:
