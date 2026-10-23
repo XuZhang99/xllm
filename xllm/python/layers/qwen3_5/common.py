@@ -90,12 +90,21 @@ class PartialRotaryEmbedding(nn.Module):
         rope_theta: float,
         dtype: torch.dtype,
         device: torch.device,
+        *,
+        mrope_section: list[int] | None = None,
+        mrope_interleaved: bool = False,
     ) -> None:
         super().__init__()
         if rotary_dim <= 0 or rotary_dim % 2:
             raise ValueError("partial rotary dimension must be positive and even")
         self.head_dim = head_dim
         self.rotary_dim = rotary_dim
+        self.mrope_section = tuple(mrope_section or ())
+        self.mrope_interleaved = mrope_interleaved
+        if self.mrope_section and (
+            len(self.mrope_section) != 3 or min(self.mrope_section) < 0 or sum(self.mrope_section) != rotary_dim // 2
+        ):
+            raise ValueError("mrope_section must partition the half rotary dimension into three axes")
         inv_freq = 1.0 / (
             rope_theta
             ** (
@@ -140,7 +149,24 @@ class PartialRotaryEmbedding(nn.Module):
         half_rotary_dim = self.rotary_dim // 2
         cos_half = cached[..., :half_rotary_dim]
         sin_half = cached[..., half_rotary_dim:]
+        if positions.dim() == 2:
+            if positions.shape[0] != 3 or not self.mrope_section:
+                raise ValueError("multimodal positions require three axes and mrope_section")
+            cos_half = self._merge_mrope_axes(cos_half)
+            sin_half = self._merge_mrope_axes(sin_half)
         cos = torch.cat((cos_half, cos_half), dim=-1).unsqueeze(1)
         sin = torch.cat((sin_half, sin_half), dim=-1).unsqueeze(1)
         rotary = rotary * cos + self._rotate_half(rotary) * sin
         return torch.cat((rotary, passthrough), dim=-1)
+
+    def _merge_mrope_axes(self, values: torch.Tensor) -> torch.Tensor:
+        if self.mrope_interleaved:
+            merged = values[0].clone()
+            _, height, width = self.mrope_section
+            merged[:, 1 : height * 3 : 3] = values[1, :, 1 : height * 3 : 3]
+            merged[:, 2 : width * 3 : 3] = values[2, :, 2 : width * 3 : 3]
+            return merged
+        return torch.cat(
+            [part[axis] for axis, part in enumerate(values.split(self.mrope_section, dim=-1))],
+            dim=-1,
+        )

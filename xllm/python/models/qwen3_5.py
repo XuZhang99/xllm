@@ -271,6 +271,8 @@ class Qwen3_5Model(nn.Module):
             cfg.rope_theta,
             dtype,
             device,
+            mrope_section=cfg.rope_scaling_mrope_section,
+            mrope_interleaved=cfg.rope_scaling_mrope_interleaved,
         )
         decoder_layer_cls = get_qwen3_5_decoder_layer_class(device)
         self.layers = cast(
@@ -283,9 +285,14 @@ class Qwen3_5Model(nn.Module):
             dtype=dtype,
             device=device,
         )
+        self._inputs_embeds: torch.Tensor | None = None
 
     def forward(self, input_ids: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
-        hidden = self.embed_tokens(input_ids)
+        if self._inputs_embeds is None:
+            hidden = self.embed_tokens(input_ids)
+        else:
+            hidden = self._inputs_embeds
+            self._inputs_embeds = None
         residual: torch.Tensor | None = None
         for layer_id, layer in enumerate(self.layers):
             hidden, residual = layer(hidden, residual, positions)

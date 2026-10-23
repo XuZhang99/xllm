@@ -623,6 +623,49 @@ class Qwen3VLVisionTransformer(nn.Module):
         )  # (total_image_tokens, out_hidden_size * (1 + num_deepstacks))
         return hidden_states
 
+    def load_weights(self, weights: ScopedWeightLoader) -> None:
+        """Load vision tower weights (replicated, no TP sharding)."""
+
+        def _copy(param_name: str, ckpt_name: str | None = None) -> None:
+            weights.load_tensor(self.get_parameter(param_name), ckpt_name or param_name)
+
+        # patch_embed (Conv3d): checkpoint names carry an extra ".proj".
+        _copy("patch_embed.weight", "patch_embed.proj.weight")
+        _copy("patch_embed.bias", "patch_embed.proj.bias")
+        _copy("pos_embed.weight")
+
+        # Every other vision tensor maps 1:1 (same trailing key); load by list.
+        block_ts = (
+            "norm1.weight",
+            "norm1.bias",
+            "norm2.weight",
+            "norm2.bias",
+            "attn.qkv.weight",
+            "attn.qkv.bias",
+            "attn.proj.weight",
+            "attn.proj.bias",
+            "mlp.linear_fc1.weight",
+            "mlp.linear_fc1.bias",
+            "mlp.linear_fc2.weight",
+            "mlp.linear_fc2.bias",
+        )
+        merger_ts = (
+            "norm.weight",
+            "norm.bias",
+            "linear_fc1.weight",
+            "linear_fc1.bias",
+            "linear_fc2.weight",
+            "linear_fc2.bias",
+        )
+        for i in range(len(self.blocks)):
+            for t in block_ts:
+                _copy(f"blocks.{i}.{t}")
+        for t in merger_ts:
+            _copy(f"merger.{t}")
+        for i in range(len(self.deepstack_visual_indexes)):
+            for t in merger_ts:
+                _copy(f"deepstack_merger_list.{i}.{t}")
+
 
 # ---------------------------------------------------------------------------
 # mRoPE cos/sin cache (LLM)
@@ -955,7 +998,7 @@ class Qwen3VLForConditionalGeneration(PyModelBase):
         Key layout: ``model.visual.*`` -> ``vision_model.*``,
         ``model.language_model.*`` -> ``model.*``, ``lm_head.*`` -> ``lm_head.*``.
         """
-        self._load_vision_weights(ScopedWeightLoader(state_dicts, src_prefixes=("model.visual.",)))
+        self.vision_model.load_weights(ScopedWeightLoader(state_dicts, src_prefixes=("model.visual.",)))
         all_weights = ScopedWeightLoader(state_dicts, src_prefixes=("model.language_model.", "model.", ""))
         load_causal_lm_weights(
             self.model,
@@ -964,46 +1007,3 @@ class Qwen3VLForConditionalGeneration(PyModelBase):
             ParallelLoadContext(tp_rank, tp_size),
             tie_word_embeddings=self.text_cfg.tie_word_embeddings,
         )
-
-    def _load_vision_weights(self, weights: ScopedWeightLoader) -> None:
-        """Load vision tower weights (replicated, no TP sharding)."""
-
-        def copy(param_name: str, ckpt_name: str | None = None) -> None:
-            weights.load_tensor(self.vision_model.get_parameter(param_name), ckpt_name or param_name)
-
-        # patch_embed (Conv3d): checkpoint names carry an extra ".proj".
-        copy("patch_embed.weight", "patch_embed.proj.weight")
-        copy("patch_embed.bias", "patch_embed.proj.bias")
-        copy("pos_embed.weight")
-
-        # Every other vision tensor maps 1:1 (same trailing key); load by list.
-        block_ts = (
-            "norm1.weight",
-            "norm1.bias",
-            "norm2.weight",
-            "norm2.bias",
-            "attn.qkv.weight",
-            "attn.qkv.bias",
-            "attn.proj.weight",
-            "attn.proj.bias",
-            "mlp.linear_fc1.weight",
-            "mlp.linear_fc1.bias",
-            "mlp.linear_fc2.weight",
-            "mlp.linear_fc2.bias",
-        )
-        merger_ts = (
-            "norm.weight",
-            "norm.bias",
-            "linear_fc1.weight",
-            "linear_fc1.bias",
-            "linear_fc2.weight",
-            "linear_fc2.bias",
-        )
-        for i in range(self.vision_cfg.depth):
-            for t in block_ts:
-                copy(f"blocks.{i}.{t}")
-        for t in merger_ts:
-            copy(f"merger.{t}")
-        for i in range(len(self.vision_cfg.deepstack_visual_indexes)):
-            for t in merger_ts:
-                copy(f"deepstack_merger_list.{i}.{t}")

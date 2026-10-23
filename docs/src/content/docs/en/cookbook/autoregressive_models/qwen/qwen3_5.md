@@ -152,3 +152,24 @@ do
     >> $LOG_FILE 2>&1 &
 done
 ```
+
+## Python multimodal execution (NPU, TP2)
+
+Qwen3.8-27B uses the Qwen3.5 model architecture. Select `--backend=vlm --model_impl=python` to run its vision tower and hybrid language model with the Python executor. Images, videos, mixed image/video prompts, and chunked prefill use the same C++ preprocessing and multimodal position generation as the native implementation. Qwen3.5-family vision configurations must have an empty `deepstack_visual_indexes` list.
+
+```bash
+export ASCEND_RT_VISIBLE_DEVICES=0,1
+python -m xllm.launch_server serve \
+  --model=/path/to/Qwen3.8-27B --model_id=Qwen3.8-27B \
+  --backend=vlm --model_impl=python \
+  --nnodes=2 --tp_size=2 --dp_size=1 --ep_size=1 \
+  --port=18080 --master_node_addr=127.0.0.1:19668 \
+  --max_body_size=536870912 \
+  --enable_shm=true \
+  --enable_graph=true --enable_chunked_prefill=true \
+  --enable_prefix_cache=false
+```
+
+Send `/v1/chat/completions` messages with array-form `content`, using `text`, `image_url`, and `video_url` items. Text-only messages on the VLM endpoint also use array-form content. For text-only serving without loading the vision tower, use `--backend=llm --model_impl=python`.
+
+Image and video batches can exceed the default 64 MiB internal RPC message limit. The command above allows messages up to 512 MiB.
