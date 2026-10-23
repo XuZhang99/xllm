@@ -69,6 +69,7 @@ if(USE_NPU)
     $<BUILD_INTERFACE:${_xllm_native_atb_parent}>
     $<BUILD_INTERFACE:${XLLM_ATB_LAYERS_SOURCE_DIR}>
     $<BUILD_INTERFACE:${XLLM_ATB_LAYERS_SOURCE_DIR}/core/include>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/spdlog/include>
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/torch_npu_ops>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/xllm/xllm_atb_layers>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/xllm/xllm_atb_layers/core/include>
@@ -116,6 +117,10 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/third_party/xxHash/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/xllm/xxHash
   FILES_MATCHING PATTERN "*.h")
 if(USE_NPU)
+  # Public ATB headers use header-only spdlog, including its bundled fmt headers.
+  install(DIRECTORY ${PROJECT_SOURCE_DIR}/third_party/spdlog/include/spdlog
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/xllm
+    FILES_MATCHING PATTERN "*.h")
   install(DIRECTORY ${XLLM_ATB_LAYERS_SOURCE_DIR}/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/xllm/xllm_atb_layers
     FILES_MATCHING PATTERN "*.h" PATTERN "*.inc")

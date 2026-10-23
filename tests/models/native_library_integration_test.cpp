@@ -35,12 +35,14 @@ TEST(NativeLibraryIntegrationTest, RegistersInTheHostModelRegistry) {
 TEST(NativeLibraryIntegrationTest, CreatesTheRegisteredExecutorSubclass) {
   ASSERT_EQ(setenv("XLLM_NATIVE_LIBRARIES", NATIVE_LIBRARY_FIXTURE, 1), 0);
   load_native_libraries();
+  runtime::Options options;
+  options.extension_impl("custom");
   auto executor = ExecutorImplFactory::get_instance().create_executor_impl(
-      nullptr,
-      ModelArgs{},
-      torch::Device(torch::kCPU),
-      runtime::Options{}.extension_impl("custom"),
-      "native_library_executor");
+      /*model=*/nullptr,
+      /*args=*/ModelArgs{},
+      /*device=*/torch::Device(torch::kCPU),
+      options,
+      /*executor_type=*/"native_library_executor");
   ASSERT_NE(executor, nullptr);
   EXPECT_TRUE(executor->supports_prepared_attention_metadata());
   EXPECT_TRUE(ExtensionRegistry::get_instance().has_implementation("custom",

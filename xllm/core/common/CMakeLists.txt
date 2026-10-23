@@ -12,6 +12,9 @@ cc_library(
   SRCS native_library.cpp
   DEPS glog::glog ${CMAKE_DL_LIBS}
 )
+target_include_directories(native_library PUBLIC
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/xllm>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/xllm>)
 target_include_directories(native_library SYSTEM PUBLIC ${TORCH_INCLUDE_DIRS})
 
 cc_library(
