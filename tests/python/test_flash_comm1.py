@@ -21,6 +21,7 @@ Run device cases with two or four idle NPUs:
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -114,9 +115,107 @@ def test_decode_stays_replicated_and_pure_chunked_prefill_can_shard() -> None:
 def test_configuration_defaults_and_negative_threshold() -> None:
     assert not make_config().enable_flashcomm1
     assert make_config().flashcomm1_min_prefill_tokens == 8192
+    assert not make_config().enable_mmrs_fusion
+    assert make_config().mmrs_comm_mode == "aiv"
     cfg = make_config(enable_flashcomm1=True, flashcomm1_min_prefill_tokens=-1)
     with pytest.raises(ValueError, match="nonnegative"):
         cfg.validate()
+
+
+@pytest.mark.parametrize("mode", ["aiv", "ai_cpu", "none", ""])
+def test_mmrs_options_follow_prefill_admission(mode: str) -> None:
+    cfg = make_config(enable_flashcomm1=True, enable_mmrs_fusion=True, mmrs_comm_mode=mode)
+    cfg.validate()
+    builder = FlashComm1MetadataBuilder(2, 0, 32, enable_mmrs_fusion=True, mmrs_comm_mode=mode)
+    assert builder.build(_metadata(31)) is None
+    assert builder.build(_metadata(32, is_prefill=False)) is None
+    context = builder.build(_metadata(32))
+    assert context is not None and context.enable_mmrs_fusion
+    assert context.mmrs_comm_mode == mode
+
+
+def test_invalid_mmrs_mode_is_rejected_only_when_enabled() -> None:
+    cfg = make_config(enable_flashcomm1=True, enable_mmrs_fusion=True, mmrs_comm_mode="invalid")
+    with pytest.raises(ValueError, match="mmrs_comm_mode"):
+        cfg.validate()
+    cfg.enable_mmrs_fusion = False
+    cfg.validate()
+    cfg.enable_mmrs_fusion = True
+    cfg.enable_flashcomm1 = False
+    cfg.validate()
+
+
+def _reject_unfused_matmul(x: torch.Tensor) -> torch.Tensor:
+    raise AssertionError("MMRS must not execute a separate matmul")
+
+
+@pytest.mark.parametrize("transposed", [False, True])
+def test_mmrs_pads_inputs_reuses_weight_storage_and_adds_bias_once(
+    monkeypatch: pytest.MonkeyPatch, transposed: bool
+) -> None:
+    layer = FlashComm1RowParallelLinear(256, 32, 2, bias=True, dtype=torch.bfloat16, device="cpu")
+    if transposed:
+        layer.weight = torch.nn.Parameter(layer.weight.t().contiguous())
+        layer._weight_is_transposed = True
+    with torch.no_grad():
+        layer.weight.fill_(1)
+        layer.bias.fill_(0.125)
+    monkeypatch.setattr(layer, "_forward_matmul", _reject_unfused_matmul)
+    seen: list[torch.Tensor] = []
+
+    def mmrs(x: torch.Tensor, weight: torch.Tensor, world: int, mode: str) -> torch.Tensor:
+        assert x.shape == (64, 256) and world == 2 and mode == "aiv"
+        assert torch.count_nonzero(x[33:]) == 0
+        assert weight.shape == (256, 32) and weight.data_ptr() == layer.weight.data_ptr()
+        seen.append(weight)
+        return torch.ones(32, 32, dtype=x.dtype)
+
+    monkeypatch.setattr(distributed, "matmul_reduce_scatter", mmrs)
+    plan = FlashComm1Context(33, 32, 2, 0, enable_mmrs_fusion=True)
+    context = ForwardContext(None, torch.device("cpu"), None, [], layer_shared_cache={FlashComm1Context: plan})
+    with forward_context(context), torch.no_grad():
+        actual = layer(torch.ones(33, 256, dtype=torch.bfloat16))
+        layer.weight.fill_(2)
+        layer(torch.ones(33, 256, dtype=torch.bfloat16))
+    torch.testing.assert_close(actual, torch.full_like(actual, 1.125), rtol=0, atol=0)
+    assert len(seen) == 2 and torch.all(seen[0] == 2)
+
+
+def test_mmrs_execution_error_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    layer = FlashComm1RowParallelLinear(256, 32, 2, dtype=torch.bfloat16, device="cpu")
+    monkeypatch.setattr(layer, "_forward_matmul", _reject_unfused_matmul)
+
+    def fail(x: torch.Tensor, weight: torch.Tensor, world: int, mode: str) -> torch.Tensor:
+        raise RuntimeError("MMRS execution failed")
+
+    monkeypatch.setattr(distributed, "matmul_reduce_scatter", fail)
+    plan = FlashComm1Context(32, 16, 2, 0, enable_mmrs_fusion=True)
+    context = ForwardContext(None, torch.device("cpu"), None, [], layer_shared_cache={FlashComm1Context: plan})
+    with forward_context(context), pytest.raises(RuntimeError, match="MMRS execution failed"):
+        layer(torch.ones(32, 256, dtype=torch.bfloat16))
+
+
+@pytest.mark.parametrize("width,dtype", [(128, torch.bfloat16), (256, torch.float32)])
+def test_mmrs_unsupported_geometry_keeps_separate_reduction(
+    monkeypatch: pytest.MonkeyPatch, width: int, dtype: torch.dtype
+) -> None:
+    layer = FlashComm1RowParallelLinear(width, 32, 2, dtype=dtype, device="cpu")
+    with torch.no_grad():
+        layer.weight.fill_(1)
+
+    def reduce(x: torch.Tensor, world: int) -> torch.Tensor:
+        return x.chunk(world)[0] * world
+
+    def reject(x: torch.Tensor, weight: torch.Tensor, world: int, mode: str) -> torch.Tensor:
+        raise AssertionError("unsupported MMRS must be excluded before execution")
+
+    monkeypatch.setattr(distributed, "reduce_scatter", reduce)
+    monkeypatch.setattr(distributed, "matmul_reduce_scatter", reject)
+    plan = FlashComm1Context(32, 16, 2, 0, enable_mmrs_fusion=True)
+    context = ForwardContext(None, torch.device("cpu"), None, [], layer_shared_cache={FlashComm1Context: plan})
+    with forward_context(context), torch.no_grad():
+        actual = layer(torch.ones(32, width, dtype=dtype))
+    torch.testing.assert_close(actual, torch.full((16, 32), 2 * width, dtype=dtype), rtol=0, atol=0)
 
 
 def test_context_is_scoped_to_one_forward() -> None:
@@ -275,3 +374,152 @@ def test_distributed_gdn_preserves_prefill_and_decode_state(
         _assert_sum_roundoff(outputs[1][index], reference, bound, f"{name}/on", rank)
         if world_size == 2:
             torch.testing.assert_close(outputs[1][index], outputs[0][index], rtol=0, atol=0)
+
+
+def _matmul_sum_reference(
+    inputs: torch.Tensor, weight: torch.Tensor, world_size: int, bias: torch.Tensor | None = None
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """FP64 reference including matmul accumulation and low-precision reduction."""
+    all_inputs = distributed.tp_all_gather(inputs.detach(), dim=0, world_size=world_size)
+    all_weights = distributed.tp_all_gather(weight.detach(), dim=0, world_size=world_size)
+    all_inputs = all_inputs.reshape(world_size, *inputs.shape).cpu().double()
+    all_weights = all_weights.reshape(world_size, *weight.shape).cpu().double()
+    partials = torch.bmm(all_inputs, all_weights.transpose(1, 2))
+    reference = partials.sum(0)
+    magnitude = partials.abs().sum(0)
+    product_magnitude = torch.bmm(all_inputs.abs(), all_weights.transpose(1, 2).abs()).sum(0)
+    fp32_roundoff = torch.finfo(torch.float32).eps / 2
+    accumulation_error = inputs.shape[1] * fp32_roundoff / (1 - inputs.shape[1] * fp32_roundoff) * product_magnitude
+    additions = world_size + 1  # Allow partial-result and final-output rounding.
+    if bias is not None:
+        bias = bias.detach().cpu().double()
+        reference += bias
+        magnitude += bias.abs()
+        additions += 1
+    roundoff = torch.finfo(inputs.dtype).eps / 2
+    gamma = additions * roundoff / (1 - additions * roundoff)
+    return reference, gamma * magnitude + (1 + gamma) * accumulation_error
+
+
+@pytest.mark.parametrize(
+    "tokens,transposed,bias",
+    [(1, False, False), (31, False, False), (32, False, True), (33, False, True), (97, True, False)],
+)
+def test_distributed_mmrs_projection_matches_fp64(
+    npu_tp: tuple[torch.device, int, int], monkeypatch: pytest.MonkeyPatch, tokens: int, transposed: bool, bias: bool
+) -> None:
+    device, rank, world_size = npu_tp
+    torch.manual_seed(7213 + rank)
+    layer = FlashComm1RowParallelLinear(256, 128, world_size, bias=bias, dtype=torch.bfloat16, device=device)
+    with torch.no_grad():
+        layer.weight.normal_(std=0.03)
+        if bias:
+            layer.bias.fill_(0.125)
+        if transposed:
+            layer.weight = torch.nn.Parameter(layer.weight.t().contiguous())
+            layer._weight_is_transposed = True
+    inputs = torch.randn(tokens, 256, dtype=torch.bfloat16, device=device) * 0.03
+    plan = FlashComm1MetadataBuilder(world_size, rank, 0).build(_metadata(tokens))
+    assert plan is not None
+    outputs = []
+    for enabled in (False, True):
+        context = ForwardContext(
+            None, device, None, [], layer_shared_cache={FlashComm1Context: replace(plan, enable_mmrs_fusion=enabled)}
+        )
+        with forward_context(context), torch.no_grad(), monkeypatch.context() as guard:
+            if enabled:
+                guard.setattr(layer, "_forward_matmul", _reject_unfused_matmul)
+            outputs.append(plan.gather(layer(inputs)))
+    checkpoint_weight = layer.weight.t() if transposed else layer.weight
+    reference, bound = _matmul_sum_reference(inputs, checkpoint_weight, world_size, layer.bias)
+    _assert_sum_roundoff(outputs[0], reference, bound, "mmrs_projection/separate", rank)
+    _assert_sum_roundoff(outputs[1], reference, bound, "mmrs_projection/fused", rank)
+
+
+def test_distributed_mmrs_gdn_preserves_state_and_decode(
+    npu_tp: tuple[torch.device, int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    device, rank, world_size = npu_tp
+    cfg = make_config(
+        hidden_size=256,
+        num_experts=0,
+        tp_size=world_size,
+        tp_rank=rank,
+        world_size=world_size,
+        moe_tp_size=world_size,
+        linear_num_key_heads=world_size * 2,
+        linear_num_value_heads=world_size * 2,
+        linear_key_head_dim=128,
+        linear_value_head_dim=128,
+        layer_types=["linear_attention"],
+    )
+    torch.manual_seed(1297 + rank)
+    layer = NpuQwen3_5GatedDeltaNet(cfg, 0, torch.bfloat16, device)
+    with torch.no_grad():
+        for parameter in layer.parameters():
+            parameter.normal_(std=0.02)
+        layer.norm_weight.fill_(1)
+    projection_inputs: list[torch.Tensor] = []
+
+    def capture_input(module: torch.nn.Module, args: tuple[torch.Tensor, ...]) -> None:
+        projection_inputs.append(args[0].detach().clone())
+
+    layer.out_proj.register_forward_pre_hook(capture_input)
+    mmrs_calls = []
+    mmrs = distributed.matmul_reduce_scatter
+
+    def record_mmrs(x: torch.Tensor, weight: torch.Tensor, world: int, mode: str) -> torch.Tensor:
+        mmrs_calls.append(x.shape)
+        return mmrs(x, weight, world, mode)
+
+    monkeypatch.setattr(distributed, "matmul_reduce_scatter", record_mmrs)
+    torch.manual_seed(1024)
+    hidden = torch.randn(37, 256, dtype=torch.bfloat16, device=device)
+    decode_hidden = torch.randn(2, 256, dtype=torch.bfloat16, device=device)
+    metadata = _metadata(37)
+    metadata.slot_mapping = metadata.slot_mapping.to(device)
+    metadata.linear_state_indices = torch.tensor([1, 2], dtype=torch.int32, device=device)
+    metadata.has_initial_state = torch.zeros(2, dtype=torch.bool, device=device)
+    metadata.q_seq_lens_host = torch.tensor([17, 20], dtype=torch.int32)
+    metadata.q_cu_seq_lens = torch.tensor([0, 17, 37], dtype=torch.int32, device=device)
+    metadata.q_cu_seq_lens_host_values = [0, 17, 37]
+    plan = FlashComm1MetadataBuilder(world_size, rank, 0).build(metadata)
+    assert plan is not None
+    results = []
+    for enabled in (False, True):
+        cache = LayerCache(
+            key=None,
+            value=None,
+            conv=torch.zeros(3, 3, 768, dtype=torch.bfloat16, device=device),
+            ssm=torch.zeros(3, 2, 128, 128, dtype=torch.float32, device=device),
+        )
+        builder = Qwen3_5GdnMetadataBuilder(cfg)
+        builder.bind_layer_caches([cache])
+        shared = {GdnMetadata: builder.build(metadata), FlashComm1Context: replace(plan, enable_mmrs_fusion=enabled)}
+        with (
+            torch.no_grad(),
+            forward_context(ForwardContext(None, device, metadata, [cache], layer_shared_cache=shared)),
+        ):
+            output = plan.gather(layer(plan.shard(hidden)))
+        prefill_conv, prefill_ssm = cache.conv.clone(), cache.ssm.clone()
+        decode = _metadata(2, is_prefill=False)
+        decode.slot_mapping = decode.slot_mapping.to(device)
+        decode.linear_state_indices = metadata.linear_state_indices
+        with (
+            torch.no_grad(),
+            forward_context(
+                ForwardContext(None, device, decode, [cache], layer_shared_cache={GdnMetadata: builder.build(decode)})
+            ),
+        ):
+            decode_output = layer(decode_hidden)
+        results.append((output, prefill_conv, prefill_ssm, decode_output, cache.conv, cache.ssm))
+    prefill_ref, prefill_bound = _matmul_sum_reference(projection_inputs[0], layer.out_proj.weight, world_size)
+    decode_ref, decode_bound = _matmul_sum_reference(projection_inputs[1], layer.out_proj.weight, world_size)
+    assert len(mmrs_calls) == 1, "only the opted-in prefill output projection should fuse"
+    torch.testing.assert_close(projection_inputs[0], projection_inputs[2], rtol=0, atol=0)
+    torch.testing.assert_close(projection_inputs[1], projection_inputs[3], rtol=0, atol=0)
+    for index in (1, 2, 4, 5):
+        torch.testing.assert_close(results[0][index], results[1][index], rtol=0, atol=0)
+    for result in results:
+        _assert_sum_roundoff(result[0], prefill_ref, prefill_bound, "mmrs_gdn/prefill", rank)
+        _assert_sum_roundoff(result[3], decode_ref, decode_bound, "mmrs_gdn/decode", rank)

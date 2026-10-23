@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import torch
 import torch.distributed as dist
-import torch_npu  # noqa: F401
+import torch_npu
 
 
 def get_hccl_comm(
@@ -77,3 +77,26 @@ def reduce_scatter_on_current_stream(input: torch.Tensor, output: torch.Tensor, 
     ``input.numel()`` must equal ``group.size() * output.numel()``.
     """
     torch.ops.xllm_ops.npu_reduce_scatter(input, output, get_hccl_comm(group, input.device))
+
+
+def matmul_reduce_scatter_on_current_stream(
+    input: torch.Tensor, weight: torch.Tensor, group: dist.ProcessGroup, comm_mode: str
+) -> torch.Tensor:
+    """Fuse matmul with SUM ReduceScatter on the active TP communicator.
+
+    The input is contiguous ND; the weight may be a transposed ND view.
+    Bias is handled by the row-parallel layer after the collective.
+    """
+    device_index = input.device.index if input.device.index is not None else torch.npu.current_device()
+    backend = group._get_backend(input.device)
+    hcom = backend.get_hccl_comm_name(device_index)
+    if not hcom:
+        raise RuntimeError(f"group {group.group_name} has no HCCL communicator name on {input.device}")
+    return torch_npu.npu_mm_reduce_scatter_base(
+        input,
+        weight,
+        hcom,
+        group.size(),
+        reduce_op="sum",
+        comm_mode=None if comm_mode in ("", "none") else comm_mode,
+    )

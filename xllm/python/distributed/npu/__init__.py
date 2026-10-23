@@ -17,11 +17,13 @@
 from xllm.python.distributed.npu.hccl import (
     all_gather_on_current_stream,
     all_reduce_on_current_stream,
+    matmul_reduce_scatter_on_current_stream,
     reduce_scatter_on_current_stream,
 )
 
 __all__ = [
     "all_gather_on_current_stream",
     "all_reduce_on_current_stream",
+    "matmul_reduce_scatter_on_current_stream",
     "reduce_scatter_on_current_stream",
 ]

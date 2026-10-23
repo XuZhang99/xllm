@@ -30,7 +30,23 @@ class FlashComm1RowParallelLinear(RowParallelLinear):
             return super().forward(x)
         if not self.reduce_results or self.tp_size != context.tp_size:
             raise ValueError("FlashComm1 requires a reducing projection on the same TP group")
-        output = context.reduce_scatter(self._forward_matmul(x))
+        use_mmrs = (
+            context.enable_mmrs_fusion
+            and self.tp_size in (2, 4, 8)
+            and x.ndim == 2
+            and 256 <= x.shape[1] < 65535
+            and x.dtype in (torch.float16, torch.bfloat16)
+            and self.weight.dtype == x.dtype
+        )
+        if use_mmrs:
+            # The operator accepts a transposed right operand. Preserve the
+            # checkpoint storage and avoid caching another full weight copy.
+            weight = self.weight if self._weight_is_transposed else self.weight.transpose(0, 1)
+            output = context.matmul_reduce_scatter(x, weight)
+        else:
+            output = context.reduce_scatter(self._forward_matmul(x))
+        # MMRS does not support a nonzero fused bias. Add the replicated bias
+        # once, after the reduction, including on padded rank-local rows.
         return output if self.bias is None else output + self.bias
 
 
