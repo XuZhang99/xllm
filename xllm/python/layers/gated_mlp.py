@@ -28,6 +28,8 @@ from xllm.python.model_loader import (
 
 
 class GatedMLP(nn.Module):
+    row_parallel_cls: type[RowParallelLinear] = RowParallelLinear
+
     def __init__(
         self,
         hidden_size: int,
@@ -48,7 +50,7 @@ class GatedMLP(nn.Module):
             dtype=dtype,
             device=device,
         )
-        self.down_proj = RowParallelLinear(
+        self.down_proj = self.row_parallel_cls(
             local_intermediate_size,
             hidden_size,
             tp_size,

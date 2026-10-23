@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from xllm.python.layers.npu.flash_comm1 import FlashComm1GatedMLP
 from xllm.python.layers.npu.layernorm import NpuGemmaRMSNorm
 from xllm.python.layers.npu.qwen3_5.attention import NpuQwen3_5Attention
 from xllm.python.layers.npu.qwen3_5.gated_delta_net import NpuQwen3_5GatedDeltaNet
@@ -28,6 +29,7 @@ class NpuQwen3_5DecoderLayer(Qwen3_5DecoderLayer):
     gated_delta_net_cls = NpuQwen3_5GatedDeltaNet
     sparse_moe_cls = NpuQwen3_5SparseMoEBlock
     normalization_cls = NpuGemmaRMSNorm
+    dense_mlp_cls = FlashComm1GatedMLP
 
     def _prepare_forward(self) -> None:
         if self.layer_id == 0:

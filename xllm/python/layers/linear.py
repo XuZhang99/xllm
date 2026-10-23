@@ -149,11 +149,13 @@ class RowParallelLinear(nn.Module):
         self.weight.data = prepared
         self._weight_is_transposed = is_transposed
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def _forward_matmul(self, x: torch.Tensor) -> torch.Tensor:
         if self._weight_is_transposed:
-            out = torch.matmul(x, self.weight)
-        else:
-            out = torch.nn.functional.linear(x, self.weight)
+            return torch.matmul(x, self.weight)
+        return torch.nn.functional.linear(x, self.weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self._forward_matmul(x)
         if self.tp_size > 1 and self.reduce_results:
             distributed.tp_all_reduce(out)
         if self.bias is not None:

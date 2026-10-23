@@ -24,6 +24,7 @@ import torch
 import torch.nn as nn
 
 from xllm.python.layers import ColumnParallelLinear, HiddenParallelEmbedding
+from xllm.python.layers.flash_comm1 import FlashComm1MetadataBuilder, get_flash_comm1_context
 from xllm.python.layers.qwen3_5.common import PartialRotaryEmbedding
 from xllm.python.layers.qwen3_5.decoder_layer import Qwen3_5DecoderLayer, get_qwen3_5_decoder_layer_class
 from xllm.python.model_executor.forward_context import ExecutionMetadataBuilder, record_layer_event
@@ -80,6 +81,8 @@ class Qwen3_5Config:
     mega_moe_context: torch.Tensor | None
     mega_moe_ccl_buffer_size: int
     mega_moe_num_max_tokens_per_rank: int
+    enable_flashcomm1: bool = False
+    flashcomm1_min_prefill_tokens: int = 8192
 
     @classmethod
     def from_dict(cls, d: dict) -> Qwen3_5Config:
@@ -167,9 +170,13 @@ class Qwen3_5Config:
             mega_moe_context=pick("mega_moe_context", default=None),
             mega_moe_ccl_buffer_size=int(pick("mega_moe_ccl_buffer_size", default=0)),
             mega_moe_num_max_tokens_per_rank=int(pick("mega_moe_num_max_tokens_per_rank", default=0)),
+            enable_flashcomm1=bool(pick("enable_flashcomm1", default=False)),
+            flashcomm1_min_prefill_tokens=int(pick("flashcomm1_min_prefill_tokens", default=8192)),
         )
 
     def validate(self) -> None:
+        if self.flashcomm1_min_prefill_tokens < 0:
+            raise ValueError("flashcomm1_min_prefill_tokens must be nonnegative")
         if self.hidden_size <= 0 or self.n_heads <= 0 or self.n_kv_heads <= 0 or self.n_layers <= 0:
             raise ValueError("invalid Qwen3.5 model dimensions")
         if min(self.tp_size, self.dp_size, self.moe_tp_size, self.ep_size) <= 0:
@@ -242,6 +249,8 @@ class Qwen3_5Model(nn.Module):
         super().__init__()
         if device.type in ("npu", "privateuseone"):
             builders: list[ExecutionMetadataBuilder] = []
+            if cfg.enable_flashcomm1 and cfg.num_experts == 0 and cfg.tp_size > 1:
+                builders.append(FlashComm1MetadataBuilder(cfg.tp_size, cfg.tp_rank, cfg.flashcomm1_min_prefill_tokens))
             if "linear_attention" in cfg.layer_types:
                 from xllm.python.layers.npu.qwen3_5.gdn_metadata_builder import Qwen3_5GdnMetadataBuilder
 
@@ -293,11 +302,16 @@ class Qwen3_5Model(nn.Module):
         else:
             hidden = self._inputs_embeds
             self._inputs_embeds = None
+        flash_comm1 = get_flash_comm1_context()
+        if flash_comm1 is not None:
+            hidden = flash_comm1.shard(hidden)
         residual: torch.Tensor | None = None
         for layer_id, layer in enumerate(self.layers):
             hidden, residual = layer(hidden, residual, positions)
             record_layer_event(layer_id)
         hidden, _ = self.norm(hidden, residual)
+        if flash_comm1 is not None:
+            hidden = flash_comm1.gather(hidden)
         return hidden
 
 

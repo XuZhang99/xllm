@@ -19,6 +19,8 @@ from __future__ import annotations
 import torch
 
 from xllm.python import kernels
+from xllm.python.layers.flash_comm1 import get_flash_comm1_context
+from xllm.python.layers.npu.flash_comm1 import FlashComm1RowParallelLinear
 from xllm.python.layers.npu.layernorm import NpuGemmaRMSNorm
 from xllm.python.layers.qwen3_5.attention import Qwen3_5Attention
 from xllm.python.layers.qwen3_5.common import (
@@ -33,6 +35,7 @@ class NpuQwen3_5Attention(Qwen3_5Attention):
     """Qwen3.5 attention using the same fused QKV kernel as native C++."""
 
     normalization_cls = NpuGemmaRMSNorm
+    row_parallel_cls = FlashComm1RowParallelLinear
 
     def __init__(
         self,
@@ -99,6 +102,9 @@ class NpuQwen3_5Attention(Qwen3_5Attention):
         positions: torch.Tensor,
         hidden: torch.Tensor,
     ) -> torch.Tensor:
+        flash_comm1 = get_flash_comm1_context()
+        if flash_comm1 is not None:
+            hidden = flash_comm1.gather(hidden)
         if not self.use_fused_qkv:
             return super().forward(positions, hidden)
         if self._mrope_gather_pattern is None:
