@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, cast
 
 import torch
 
+from scripts.logger import logger
 from xllm.python.attention.backend import AttentionMetadata, LayerCache, resolve_linear_state_io_indices
 from xllm.python.layers.npu.qwen3_5.gdn_metadata import (
     GdnDecodeMetadata,
@@ -97,7 +98,7 @@ class Qwen3_5GdnMetadataBuilder:
                 or ssm.shape[1:] != (self._num_value_heads, 128, 128)
             ):
                 raise ValueError(f"GDN SSM cache has invalid geometry for layer {layer_id}")
-            if conv.dtype != torch.bfloat16 or ssm.dtype != torch.float32:
+            if conv.dtype != torch.bfloat16 or ssm.dtype not in (torch.float32, torch.bfloat16):
                 raise ValueError(f"GDN state cache has invalid dtype for layer {layer_id}")
             if conv.device != ssm.device or (device is not None and device != conv.device):
                 raise ValueError("Qwen3.5 GDN state caches must use one device")
@@ -107,6 +108,9 @@ class Qwen3_5GdnMetadataBuilder:
             stride, device = layer_stride, conv.device
             state_caches[layer_id] = cast(GdnStateCache, layer_caches[layer_id])
         self._state_caches, self._checkpoint_stride, self._device = state_caches, stride, device
+        state_bytes = sum(cache.ssm.numel() * cache.ssm.element_size() for cache in state_caches.values())
+        state_dtypes = sorted({str(cache.ssm.dtype) for cache in state_caches.values()})
+        logger.info(f"Qwen3.5 GDN SSM cache: dtypes={state_dtypes}, layers={len(state_caches)}, bytes={state_bytes}")
 
     def build(self, metadata: AttentionMetadata) -> GdnMetadata:
         if self._state_caches is None or self._checkpoint_stride is None:

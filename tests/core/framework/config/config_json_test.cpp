@@ -609,6 +609,30 @@ TEST(KVCacheConfigTest, StartupTimeoutDefaultIsRegisteredForHelp) {
       option_names.end());
 }
 
+TEST(KVCacheConfigTest, SsmPrecisionRoundTripsAndCommandLineWins) {
+  google::FlagSaver flag_saver;
+  KVCacheConfig config;
+  config.from_json(
+      config::parse_json_string(R"json({"ssm_cache_dtype":"bfloat16"})json"));
+  config.validate();
+  nlohmann::ordered_json serialized = nlohmann::ordered_json::object();
+  config.append_config_json(serialized);
+  EXPECT_EQ(serialized.at("ssm_cache_dtype"), "bfloat16");
+
+  google::SetCommandLineOption("ssm_cache_dtype", "float32");
+  KVCacheConfig restored;
+  restored.from_flags();
+  restored.from_json(config::parse_json_string(serialized.dump()));
+  restored.validate();
+  EXPECT_EQ(restored.ssm_cache_dtype(), "float32");
+}
+
+TEST(KVCacheConfigValidationTest, RejectsUnsupportedSsmPrecision) {
+  KVCacheConfig config;
+  config.ssm_cache_dtype("float16");
+  EXPECT_DEATH(config.validate(), "ssm_cache_dtype must be");
+}
+
 TEST(KVCacheConfigTest, StartupTimeoutRoundTripsThroughJson) {
   nlohmann::ordered_json serialized = nlohmann::ordered_json::object();
   {

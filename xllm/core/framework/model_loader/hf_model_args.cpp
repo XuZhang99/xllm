@@ -23,6 +23,8 @@ limitations under the License.
 #include <regex>
 #include <vector>
 
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model_loader/hf_model_config.h"
 #include "core/framework/quantization/quant_args.h"
@@ -37,6 +39,26 @@ namespace {
 
 constexpr int64_t kCompressedBits4 = 4;
 constexpr int64_t kCompressedBits8 = 8;
+
+bool apply_ssm_cache_dtype_override(ModelArgs* args) {
+  const std::string& dtype = KVCacheConfig::get_instance().ssm_cache_dtype();
+  if (dtype == "auto") {
+    return true;
+  }
+#if defined(USE_NPU)
+  if (ModelConfig::is_python_model_impl(
+          ModelConfig::get_instance().model_impl()) &&
+      is_qwen3_5_target_model_type(args->model_type())) {
+    args->mamba_ssm_dtype(dtype);
+    LOG(INFO) << "Using ssm_cache_dtype=" << dtype << " for Python model "
+              << args->model_type();
+    return true;
+  }
+#endif
+  LOG(ERROR) << "ssm_cache_dtype override requires an NPU Python "
+                "Qwen3.5/3.8 target model";
+  return false;
+}
 
 std::optional<int64_t> supported_compressed_bits(const nlohmann::json& bits) {
   const double numeric = bits.get<double>();
@@ -453,7 +475,7 @@ bool load_hf_model_args(const std::filesystem::path& model_weights_path,
   }
   args->enable_mla(should_enable_mla(model_weights_path, backend));
 
-  return true;
+  return apply_ssm_cache_dtype_override(args);
 }
 
 bool load_hf_audio_preprocessor_args(

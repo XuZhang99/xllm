@@ -51,6 +51,7 @@ class KVCacheConfig final {
          "max_cache_size",
          "max_memory_utilization",
          "kv_cache_dtype",
+         "ssm_cache_dtype",
          "indexer_cache_dtype",
          "enable_prefix_cache",
          "kv_events_config",
@@ -80,6 +81,8 @@ class KVCacheConfig final {
   void max_memory_utilization(double value) && = delete;
 
   PROPERTY(std::string, kv_cache_dtype) = "auto";
+
+  PROPERTY(std::string, ssm_cache_dtype) = "auto";
 
   PROPERTY(std::string, indexer_cache_dtype) = "auto";
 

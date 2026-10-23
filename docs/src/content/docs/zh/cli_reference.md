@@ -67,6 +67,7 @@ xLLM 使用 gflags 管理服务启动参数。`--model <PATH>` 是唯一必填�
 | `max_cache_size` | `int64` | `0` | KV Cache 的容量上限，单位 byte；虚拟内存模式下限制 KV 与权重共享池的容量。`0` 表示不设显式字节上限，根据可用显存推导容量。 |
 | `max_memory_utilization` | `double` | `0.8` | 模型推理可使用的设备显存比例，包括模型权重和 KV Cache。原有物理 KV Cache 和固定 VMM 要求取值在 `(0, 1]` 内。弹性 VMM 仅在显式配置时应用该上限；不配置或设为 `0` 时按实时可用显存扩张。 |
 | `kv_cache_dtype` | `string` | `"auto"` | KV Cache 量化数据类型；`auto` 表示与模型 dtype 对齐且不量化，`int8` 表示启用 INT8 量化，仅 MLU 后端支持。 |
+| `ssm_cache_dtype` | `string` | `"auto"` | NPU Python Qwen3.5/3.8（文本与多模态）的 SSM 缓存存储精度。`auto` 保留模型配置；`float32`、`bfloat16` 覆盖该配置。BF16 使用紧凑 FP32 工作区计算并在写回时舍入，需验证业务精度。 |
 | `indexer_cache_dtype` | `string` | `"auto"` | 带 indexer cache 的模型所使用的 indexer cache 数据类型。支持 `auto` 和 `int8`；`auto` 表示与模型 dtype 对齐且不量化，`int8` 表示启用 INT8 indexer cache 量化。 |
 | `enable_prefix_cache` | `bool` | `true` | 是否在 block manager 中启用 prefix cache；详见 [Prefix Cache](/zh/features/prefix_cache/)。 |
 | `kv_events_config` | `string` | `""` | KV 驻留事件发布配置，为 JSON 对象字符串；空字符串禁用上报。JSON 字段和示例见下文。 |

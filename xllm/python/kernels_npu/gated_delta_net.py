@@ -42,7 +42,23 @@ def mega_gdn_prefill(
     num_matrices: int,
 ) -> torch.Tensor:
     """Run the fused Qwen3.5 prefill GDN and update both state caches."""
-    return torch.ops.xllm_ops.mega_gdn_prefill(
+    stored_state = ssm_cache
+    stored_conv = conv_state
+    stored_write_indices = ssm_state_write_indices
+    stored_conv_write_indices = conv_state_write_indices
+    if stored_state.dtype == torch.bfloat16:
+        from .triton.gdn_state import gather_gdn_states, scatter_gdn_states
+
+        # MegaGdn needs FP32 computation state. Stage only active rows and
+        # retain the original Conv/SSM checkpoint geometry in the workspace.
+        checkpoint_stride = stored_state.shape[0] // stored_conv.shape[0]
+        ssm_cache, conv_state, compact_indices = gather_gdn_states(
+            stored_state, stored_conv, ssm_state_read_indices, conv_state_read_indices, checkpoint_stride
+        )
+        conv_state_read_indices, conv_state_write_indices, ssm_state_read_indices, ssm_state_write_indices = (
+            compact_indices.unbind(0)
+        )
+    output = torch.ops.xllm_ops.mega_gdn_prefill(
         mixed_qkv,
         b,
         a,
@@ -60,6 +76,17 @@ def mega_gdn_prefill(
         norm_weight,
         num_matrices,
     )
+    if stored_state.dtype == torch.bfloat16:
+        scatter_gdn_states(
+            stored_state,
+            stored_conv,
+            ssm_cache,
+            conv_state,
+            stored_write_indices,
+            stored_conv_write_indices,
+            checkpoint_stride,
+        )
+    return output
 
 
 def mega_gdn_decode(
@@ -78,7 +105,18 @@ def mega_gdn_decode(
     fla_ssm_state_layout: bool = True,
 ) -> torch.Tensor:
     """Run fused single-token Qwen3.5 decode and update both state caches."""
-    return torch.ops.xllm_ops.mega_gdn_decode(
+    stored_state = ssm_state
+    stored_conv = conv_state
+    stored_write_indices = write_state_indices
+    if stored_state.dtype == torch.bfloat16:
+        from .triton.gdn_state import gather_gdn_states, scatter_gdn_states
+
+        ssm_state, conv_state, compact_indices = gather_gdn_states(
+            stored_state, stored_conv, read_state_indices, read_state_indices, 1
+        )
+        # Decode requires warm, nonnegative slots and shares Conv/SSM indices.
+        read_state_indices, write_state_indices = compact_indices[0], compact_indices[1]
+    output = torch.ops.xllm_ops.mega_gdn_decode(
         qkv,
         z,
         b,
@@ -93,6 +131,11 @@ def mega_gdn_decode(
         norm_weight,
         fla_ssm_state_layout,
     )
+    if stored_state.dtype == torch.bfloat16:
+        scatter_gdn_states(
+            stored_state, stored_conv, ssm_state, conv_state, stored_write_indices, stored_write_indices, 1
+        )
+    return output
 
 
 def fused_gdn_gating(

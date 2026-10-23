@@ -67,6 +67,12 @@ DEFINE_string(indexer_cache_dtype,
               "quantization). \"int8\": Enables INT8 quantization when "
               "supported. Supported on NPU and MLU backends.");
 
+DEFINE_string(ssm_cache_dtype,
+              "auto",
+              "SSM state cache dtype for NPU Python Qwen3.5/3.8 targets: "
+              "auto preserves the model config; float32 and bfloat16 "
+              "override it. BF16 storage keeps FP32 recurrent computation.");
+
 DEFINE_bool(enable_prefix_cache,
             true,
             "Whether to enable the prefix cache for the block manager.");
@@ -105,6 +111,7 @@ void KVCacheConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_cache_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_memory_utilization);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_cache_dtype);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(ssm_cache_dtype);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(indexer_cache_dtype);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_prefix_cache);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_events_config);
@@ -128,6 +135,7 @@ void KVCacheConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_cache_size);
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_memory_utilization);
   XLLM_CONFIG_ASSIGN_FROM_JSON(kv_cache_dtype);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(ssm_cache_dtype);
   XLLM_CONFIG_ASSIGN_FROM_JSON(indexer_cache_dtype);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_prefix_cache);
   XLLM_CONFIG_ASSIGN_FROM_JSON(kv_events_config);
@@ -158,6 +166,8 @@ void KVCacheConfig::append_config_json(
   }
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, kv_cache_dtype);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, ssm_cache_dtype);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, indexer_cache_dtype);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
@@ -196,6 +206,9 @@ void KVCacheConfig::initialize() {
 }
 
 void KVCacheConfig::validate() const {
+  CHECK(ssm_cache_dtype_ == "auto" || ssm_cache_dtype_ == "float32" ||
+        ssm_cache_dtype_ == "bfloat16")
+      << "ssm_cache_dtype must be auto, float32, or bfloat16";
   CHECK_GE(vmm_memory_reserve_bytes_, 0);
   CHECK_GT(vmm_startup_timeout_ms_, 0)
       << "vmm_startup_timeout_ms must be positive";
