@@ -152,24 +152,3 @@ do
     >> $LOG_FILE 2>&1 &
 done
 ```
-
-## Python 多模态执行（NPU，TP2）
-
-Qwen3.8-27B 使用 Qwen3.5 模型架构。通过 `--backend=vlm --model_impl=python` 可使用 Python 执行器运行视觉编码器和混合注意力语言模型。图片、视频、图像与视频混合输入及分块预填充复用 native 实现的 C++ 预处理和多模态位置生成。Qwen3.5 系列视觉配置的 `deepstack_visual_indexes` 必须为空列表。
-
-```bash
-export ASCEND_RT_VISIBLE_DEVICES=0,1
-python -m xllm.launch_server serve \
-  --model=/path/to/Qwen3.8-27B --model_id=Qwen3.8-27B \
-  --backend=vlm --model_impl=python \
-  --nnodes=2 --tp_size=2 --dp_size=1 --ep_size=1 \
-  --port=18080 --master_node_addr=127.0.0.1:19668 \
-  --max_body_size=536870912 \
-  --enable_shm=true \
-  --enable_graph=true --enable_chunked_prefill=true \
-  --enable_prefix_cache=false
-```
-
-向 `/v1/chat/completions` 发送请求时，消息的 `content` 使用数组形式，其中可包含 `text`、`image_url` 和 `video_url`。VLM 接口上的纯文本消息也使用数组形式。若仅需文本服务且不加载视觉编码器，使用 `--backend=llm --model_impl=python`。
-
-图片和视频批次可能超过内部 RPC 默认的 64 MiB 消息上限。上面的命令将该上限设为 512 MiB。
