@@ -46,6 +46,7 @@ if _USE_PYTHON_NPU_GROUPS:
 
     from xllm.python.distributed.npu import all_gather_on_current_stream as _all_gather
     from xllm.python.distributed.npu import all_reduce_on_current_stream as _all_reduce
+    from xllm.python.distributed.npu import matmul_reduce_scatter_on_current_stream as _matmul_reduce_scatter
     from xllm.python.distributed.npu import reduce_scatter_on_current_stream as _reduce_scatter
 
     _cuda_collectives = None
@@ -424,6 +425,43 @@ def _(x: torch.Tensor, world_size: int, group_name: str = "tp") -> torch.Tensor:
     return x.new_empty((x.shape[0] // world_size, *x.shape[1:]))
 
 
+@torch.library.custom_op("xllm_ops::matmul_reduce_scatter", mutates_args=())
+def matmul_reduce_scatter(
+    x: torch.Tensor, weight: torch.Tensor, world_size: int, comm_mode: str = "aiv", group_name: str = "tp"
+) -> torch.Tensor:
+    """Fused NPU matmul and SUM scatter of equal token blocks."""
+    if not _USE_PYTHON_NPU_GROUPS or x.device.type != "npu":
+        raise RuntimeError("fused matmul-reduce-scatter requires an initialized Python NPU group")
+    group = _require_group(x, group_name)
+    if world_size not in (2, 4, 8) or group.size() != world_size:
+        raise ValueError("MMRS requires a matching TP group of size 2, 4, or 8")
+    if x.ndim != 2 or weight.ndim != 2 or x.shape[0] == 0 or x.shape[0] % world_size:
+        raise ValueError("MMRS requires two-dimensional matrices and nonempty divisible token rows")
+    if x.shape[1] != weight.shape[0] or not 256 <= x.shape[1] < 65535 or weight.shape[1] == 0:
+        raise ValueError("MMRS requires matching K in [256, 65535) and a positive output width")
+    if x.dtype not in (torch.float16, torch.bfloat16) or weight.dtype != x.dtype or weight.device != x.device:
+        raise ValueError("MMRS requires matching FP16/BF16 operands on one NPU")
+    if comm_mode not in ("aiv", "ai_cpu", "none", ""):
+        raise ValueError("MMRS communication mode must be aiv, ai_cpu, or none")
+    # Preserve the weight's transpose view; materializing it each step would
+    # add a full weight copy to the prefill path.
+    output = _matmul_reduce_scatter(_contiguous_gather_input(x), weight, group, comm_mode)
+    if (
+        output.shape != (x.shape[0] // world_size, weight.shape[1])
+        or output.dtype != x.dtype
+        or output.device != x.device
+    ):
+        raise RuntimeError("MMRS returned an unexpected output shape, dtype, or device")
+    return output
+
+
+@matmul_reduce_scatter.register_fake
+def _(
+    x: torch.Tensor, weight: torch.Tensor, world_size: int, comm_mode: str = "aiv", group_name: str = "tp"
+) -> torch.Tensor:
+    return x.new_empty((x.shape[0] // world_size, weight.shape[1]))
+
+
 def _contiguous_gather_input(x: torch.Tensor) -> torch.Tensor:
     """Prepare logical tensor values for the ND all-gather transport."""
     contiguous = x.contiguous()
@@ -571,6 +609,8 @@ __all__ = [
     "layerwise_rank",
     "dcp_group",
     "all_reduce_",
+    "reduce_scatter",
+    "matmul_reduce_scatter",
     "broadcast_",
     "all_gather",
     "all_gather_variable",

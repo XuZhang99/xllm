@@ -385,6 +385,8 @@ py::dict PyCausalLM::build_config_dict(const ModelContext& context) const {
   const auto& flash_comm1_options = context.get_flash_comm1_options();
   d["enable_flashcomm1"] = flash_comm1_options.enable_flashcomm1;
   d["flashcomm1_min_prefill_tokens"] = flash_comm1_options.min_prefill_tokens;
+  d["enable_mmrs_fusion"] = flash_comm1_options.enable_mmrs_fusion;
+  d["mmrs_comm_mode"] = flash_comm1_options.mmrs_comm_mode;
   d["enable_fused_mc2"] = KernelConfig::get_instance().enable_fused_mc2() > 0;
   if (mega_moe_comm_resource_ != nullptr) {
     d["enable_mega_moe"] = true;

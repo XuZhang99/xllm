@@ -83,6 +83,8 @@ class Qwen3_5Config:
     mega_moe_num_max_tokens_per_rank: int
     enable_flashcomm1: bool = False
     flashcomm1_min_prefill_tokens: int = 8192
+    enable_mmrs_fusion: bool = False
+    mmrs_comm_mode: str = "aiv"
 
     @classmethod
     def from_dict(cls, d: dict) -> Qwen3_5Config:
@@ -172,11 +174,19 @@ class Qwen3_5Config:
             mega_moe_num_max_tokens_per_rank=int(pick("mega_moe_num_max_tokens_per_rank", default=0)),
             enable_flashcomm1=bool(pick("enable_flashcomm1", default=False)),
             flashcomm1_min_prefill_tokens=int(pick("flashcomm1_min_prefill_tokens", default=8192)),
+            enable_mmrs_fusion=bool(pick("enable_mmrs_fusion", default=False)),
+            mmrs_comm_mode=str(pick("mmrs_comm_mode", default="aiv")),
         )
 
     def validate(self) -> None:
         if self.flashcomm1_min_prefill_tokens < 0:
             raise ValueError("flashcomm1_min_prefill_tokens must be nonnegative")
+        if (
+            self.enable_flashcomm1
+            and self.enable_mmrs_fusion
+            and self.mmrs_comm_mode not in ("aiv", "ai_cpu", "none", "")
+        ):
+            raise ValueError("mmrs_comm_mode must be aiv, ai_cpu, or none")
         if self.hidden_size <= 0 or self.n_heads <= 0 or self.n_kv_heads <= 0 or self.n_layers <= 0:
             raise ValueError("invalid Qwen3.5 model dimensions")
         if min(self.tp_size, self.dp_size, self.moe_tp_size, self.ep_size) <= 0:
@@ -250,7 +260,15 @@ class Qwen3_5Model(nn.Module):
         if device.type in ("npu", "privateuseone"):
             builders: list[ExecutionMetadataBuilder] = []
             if cfg.enable_flashcomm1 and cfg.num_experts == 0 and cfg.tp_size > 1:
-                builders.append(FlashComm1MetadataBuilder(cfg.tp_size, cfg.tp_rank, cfg.flashcomm1_min_prefill_tokens))
+                builders.append(
+                    FlashComm1MetadataBuilder(
+                        cfg.tp_size,
+                        cfg.tp_rank,
+                        cfg.flashcomm1_min_prefill_tokens,
+                        enable_mmrs_fusion=cfg.enable_mmrs_fusion,
+                        mmrs_comm_mode=cfg.mmrs_comm_mode,
+                    )
+                )
             if "linear_attention" in cfg.layer_types:
                 from xllm.python.layers.npu.qwen3_5.gdn_metadata_builder import Qwen3_5GdnMetadataBuilder
 

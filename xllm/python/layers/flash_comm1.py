@@ -33,6 +33,8 @@ class FlashComm1Context:
     local_num_tokens: int
     tp_size: int
     tp_rank: int
+    enable_mmrs_fusion: bool = False
+    mmrs_comm_mode: str = "aiv"
 
     def _pad(self, hidden: torch.Tensor) -> torch.Tensor:
         if hidden.ndim != 2 or hidden.shape[0] != self.num_tokens:
@@ -55,6 +57,9 @@ class FlashComm1Context:
     def reduce_scatter(self, hidden: torch.Tensor) -> torch.Tensor:
         return distributed.reduce_scatter(self._pad(hidden), self.tp_size)
 
+    def matmul_reduce_scatter(self, inputs: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+        return distributed.matmul_reduce_scatter(self._pad(inputs), weight, self.tp_size, self.mmrs_comm_mode)
+
 
 def get_flash_comm1_context() -> FlashComm1Context | None:
     context = get_forward_context_or_none()
@@ -66,7 +71,15 @@ def get_flash_comm1_context() -> FlashComm1Context | None:
 class FlashComm1MetadataBuilder:
     metadata_type = FlashComm1Context
 
-    def __init__(self, tp_size: int, tp_rank: int, min_prefill_tokens: int) -> None:
+    def __init__(
+        self,
+        tp_size: int,
+        tp_rank: int,
+        min_prefill_tokens: int,
+        *,
+        enable_mmrs_fusion: bool = False,
+        mmrs_comm_mode: str = "aiv",
+    ) -> None:
         if tp_size <= 1 or not 0 <= tp_rank < tp_size:
             raise ValueError("FlashComm1 requires a valid rank in a TP group larger than one")
         if min_prefill_tokens < 0:
@@ -74,6 +87,8 @@ class FlashComm1MetadataBuilder:
         self._tp_size = tp_size
         self._tp_rank = tp_rank
         self._min_prefill_tokens = min_prefill_tokens
+        self._enable_mmrs_fusion = enable_mmrs_fusion
+        self._mmrs_comm_mode = mmrs_comm_mode
         self._activation_logged = False
 
     def bind_layer_caches(self, layer_caches: list[LayerCache]) -> None:
@@ -95,11 +110,20 @@ class FlashComm1MetadataBuilder:
         padded_tokens = (num_tokens + alignment - 1) // alignment * alignment
         if not self._activation_logged:
             logger.info(
-                "Qwen Python FlashComm1 prefill activated: tokens=%s, TP=%s, local_rows=%s, threshold=%s",
+                "Qwen Python FlashComm1 prefill activated: tokens=%s, TP=%s, local_rows=%s, threshold=%s, MMRS=%s, comm_mode=%s",
                 num_tokens,
                 self._tp_size,
                 padded_tokens // self._tp_size,
                 self._min_prefill_tokens,
+                self._enable_mmrs_fusion,
+                self._mmrs_comm_mode,
             )
             self._activation_logged = True
-        return FlashComm1Context(num_tokens, padded_tokens // self._tp_size, self._tp_size, self._tp_rank)
+        return FlashComm1Context(
+            num_tokens,
+            padded_tokens // self._tp_size,
+            self._tp_size,
+            self._tp_rank,
+            enable_mmrs_fusion=self._enable_mmrs_fusion,
+            mmrs_comm_mode=self._mmrs_comm_mode,
+        )
