@@ -112,8 +112,8 @@ class Qwen3_5Attention(nn.Module):
         positions: torch.Tensor,
         hidden: torch.Tensor,
     ) -> torch.Tensor:
-        if positions.dim() != 1:
-            raise ValueError("unfused Qwen3.5 attention requires one-dimensional positions")
+        if positions.dim() not in (1, 2) or (positions.dim() == 2 and positions.shape[0] != 3):
+            raise ValueError("unfused Qwen3.5 attention requires [N] or [3, N] positions")
         qkv = self.qkv_proj(hidden)
         if self.attn_output_gate:
             q_gate, k, v = qkv.split(
