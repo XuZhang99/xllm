@@ -46,6 +46,7 @@ if _USE_PYTHON_NPU_GROUPS:
 
     from xllm.python.distributed.npu import all_gather_on_current_stream as _all_gather
     from xllm.python.distributed.npu import all_reduce_on_current_stream as _all_reduce
+    from xllm.python.distributed.npu import reduce_scatter_on_current_stream as _reduce_scatter
 
     _cuda_collectives = None
 elif current_platform.is_cuda() or current_platform.is_dcu() or current_platform.is_ilu():
@@ -401,6 +402,26 @@ def _normalize_gather_dim(x: torch.Tensor, dim: int) -> int:
     if not -x.ndim <= dim < x.ndim:
         raise IndexError(f"all-gather dimension {dim} out of range for {x.ndim}-D input")
     return dim + x.ndim if dim < 0 else dim
+
+
+@torch.library.custom_op("xllm_ops::reduce_scatter", mutates_args=())
+def reduce_scatter(x: torch.Tensor, world_size: int, group_name: str = "tp") -> torch.Tensor:
+    """SUM and scatter equal contiguous token blocks in group-rank order."""
+    group = _require_group(x, group_name)
+    if group.size() != world_size or x.ndim == 0 or x.shape[0] % world_size:
+        raise ValueError("reduce-scatter requires matching group size and divisible token rows")
+    input = _contiguous_gather_input(x)
+    output = input.new_empty((input.shape[0] // world_size, *input.shape[1:]))
+    if _USE_PYTHON_NPU_GROUPS:
+        _reduce_scatter(input, output, group)
+    else:
+        dist.reduce_scatter_tensor(output, input, group=group)
+    return output
+
+
+@reduce_scatter.register_fake
+def _(x: torch.Tensor, world_size: int, group_name: str = "tp") -> torch.Tensor:
+    return x.new_empty((x.shape[0] // world_size, *x.shape[1:]))
 
 
 def _contiguous_gather_input(x: torch.Tensor) -> torch.Tensor:

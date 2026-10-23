@@ -47,6 +47,7 @@ class Qwen3_5DecoderLayer(nn.Module):
     gated_delta_net_cls: type[nn.Module]
     sparse_moe_cls: type[nn.Module]
     normalization_cls: type[nn.Module] = GemmaRMSNorm
+    dense_mlp_cls: type[GatedMLP] = GatedMLP
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -100,7 +101,7 @@ class Qwen3_5DecoderLayer(nn.Module):
         if cfg.is_moe_layer(layer_id):
             self.mlp = self.sparse_moe_cls(cfg, dtype, device)
         else:
-            self.mlp = GatedMLP(
+            self.mlp = self.dense_mlp_cls(
                 cfg.hidden_size,
                 cfg.intermediate_size,
                 cfg.tp_size,

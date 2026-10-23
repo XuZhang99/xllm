@@ -22,7 +22,9 @@ import torch
 import torch.nn as nn
 
 from xllm.python import kernels
-from xllm.python.layers.linear import ColumnParallelLinear, RowParallelLinear
+from xllm.python.layers.flash_comm1 import get_flash_comm1_context
+from xllm.python.layers.linear import ColumnParallelLinear
+from xllm.python.layers.npu.flash_comm1 import FlashComm1RowParallelLinear
 from xllm.python.layers.npu.qwen3_5.gdn_metadata import GdnDecodeMetadata, GdnMetadata, GdnPrefillMetadata
 from xllm.python.layers.qwen3_5.common import Qwen3_5GatedDeltaNetConfig
 from xllm.python.layers.qwen3_5.gated_delta_net import load_gdn_weights
@@ -81,7 +83,7 @@ class NpuQwen3_5GatedDeltaNet(nn.Module):
         # instead of allocating a converted tensor on every forward.
         self.dt_bias = nn.Parameter(torch.empty(self.num_v_heads, dtype=torch.float32, device=device))
         self.norm_weight = nn.Parameter(torch.ones(self.value_head_dim, dtype=dtype, device=device))
-        self.out_proj = RowParallelLinear(
+        self.out_proj = FlashComm1RowParallelLinear(
             self.value_dim,
             cfg.hidden_size,
             cfg.tp_size,
@@ -189,6 +191,9 @@ class NpuQwen3_5GatedDeltaNet(nn.Module):
         return chunk_outputs[0] if len(chunk_outputs) == 1 else torch.cat(chunk_outputs, dim=0)
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
+        flash_comm1 = get_flash_comm1_context()
+        if flash_comm1 is not None:
+            hidden = flash_comm1.gather(hidden)
         metadata = get_execution_context(GdnMetadata)
         if metadata is None:
             raise RuntimeError("Qwen3.5 GDN metadata is unavailable")

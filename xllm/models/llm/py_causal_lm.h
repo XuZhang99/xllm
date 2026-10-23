@@ -150,7 +150,7 @@ class __attribute__((visibility("hidden"))) PyCausalLM : public CausalVLM {
   int64_t kv_split_rank() const { return kv_split_rank_; }
 
  private:
-  pybind11::dict build_config_dict(const ParallelArgs& parallel_args) const;
+  pybind11::dict build_config_dict(const ModelContext& context) const;
   const pybind11::object& get_or_build_python_kv_caches(
       std::vector<KVCache>& kv_caches);
 

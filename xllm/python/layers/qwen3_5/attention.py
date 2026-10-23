@@ -39,6 +39,7 @@ from xllm.python.model_loader import (
 
 class Qwen3_5Attention(nn.Module):
     normalization_cls: type[nn.Module] = GemmaRMSNorm
+    row_parallel_cls: type[RowParallelLinear] = RowParallelLinear
 
     def __init__(
         self,
@@ -65,7 +66,7 @@ class Qwen3_5Attention(nn.Module):
             dtype=dtype,
             device=device,
         )
-        self.o_proj = RowParallelLinear(
+        self.o_proj = self.row_parallel_cls(
             self.q_size,
             cfg.hidden_size,
             cfg.tp_size,

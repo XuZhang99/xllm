@@ -312,7 +312,7 @@ PyCausalLM::PyCausalLM(const ModelContext& context,
           : python_model_name_;
   py::module_ registry = py::module_::import("xllm.python.registry");
   py::object model_cls = registry.attr("get_model_class")(py::str(module_name));
-  config_dict_ = build_config_dict(parallel_args);
+  config_dict_ = build_config_dict(context);
   py_model_ = model_cls(config_dict_);
   py_model_.attr("eval")();
 }
@@ -332,8 +332,8 @@ const py::object& PyCausalLM::get_or_build_python_kv_caches(
   return python_kv_caches_;
 }
 
-py::dict PyCausalLM::build_config_dict(
-    const ParallelArgs& parallel_args) const {
+py::dict PyCausalLM::build_config_dict(const ModelContext& context) const {
+  const auto& parallel_args = context.get_parallel_args();
   py::dict d;
   PyDictVisitor visitor(d);
   visit_properties(model_args_, visitor);
@@ -382,6 +382,9 @@ py::dict PyCausalLM::build_config_dict(
           ? std::string("off")
           : ExecutionConfig::get_instance().python_graph_backend();
 #if defined(USE_NPU)
+  const auto& flash_comm1_options = context.get_flash_comm1_options();
+  d["enable_flashcomm1"] = flash_comm1_options.enable_flashcomm1;
+  d["flashcomm1_min_prefill_tokens"] = flash_comm1_options.min_prefill_tokens;
   d["enable_fused_mc2"] = KernelConfig::get_instance().enable_fused_mc2() > 0;
   if (mega_moe_comm_resource_ != nullptr) {
     d["enable_mega_moe"] = true;
