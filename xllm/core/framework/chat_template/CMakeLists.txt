@@ -1,12 +1,14 @@
 include(cc_binary)
 include(cc_library)
 
-# Base class (header-only, no circular deps)
+# Base class (independent of concrete implementations)
 cc_library (
   NAME
     chat_template_base
   HDRS
     chat_template.h
+  SRCS
+    chat_template_base.cpp
   DEPS
     :tokenizer
     nlohmann_json::nlohmann_json

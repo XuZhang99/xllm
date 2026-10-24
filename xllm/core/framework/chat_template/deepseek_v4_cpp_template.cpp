@@ -484,6 +484,7 @@ nlohmann::ordered_json sort_tool_results_by_call_order(
       }
       if (tool_count > 1 && !last_tc_order.empty()) {
         std::vector<nlohmann::ordered_json> tool_blocks;
+        tool_blocks.reserve(tool_count);
         for (const auto& b : blocks) {
           if (b.value("type", "") == "tool_result") {
             tool_blocks.emplace_back(b);
@@ -521,7 +522,7 @@ nlohmann::ordered_json sort_tool_results_by_call_order(
 
 nlohmann::ordered_json drop_thinking_messages(
     const nlohmann::ordered_json& messages) {
-  int32_t last_user_idx = find_last_user_index(messages);
+  const int32_t last_user_idx = find_last_user_index(messages);
   nlohmann::ordered_json result = nlohmann::json::array();
 
   for (int32_t idx = 0; idx < static_cast<int32_t>(messages.size()); ++idx) {
@@ -589,6 +590,7 @@ nlohmann::ordered_json normalize_messages(
 
 std::string render_message(const nlohmann::ordered_json& messages,
                            int32_t index,
+                           int32_t last_user_idx,
                            const std::string& thinking_mode,
                            bool drop_thinking,
                            const std::string& reasoning_effort) {
@@ -598,7 +600,6 @@ std::string render_message(const nlohmann::ordered_json& messages,
 
   std::string prompt;
   const nlohmann::ordered_json& msg = messages[index];
-  int32_t last_user_idx = find_last_user_index(messages);
   std::string role = msg.value("role", "");
   std::string content = msg.value("content", "");
 
@@ -657,6 +658,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
     prompt += kUserSpToken;
     if (msg.contains("content_blocks") && msg["content_blocks"].is_array()) {
       std::vector<std::string> parts;
+      parts.reserve(msg["content_blocks"].size());
       for (const auto& block : msg["content_blocks"]) {
         std::string btype = block.value("type", "");
         if (btype == "text") {
@@ -691,7 +693,6 @@ std::string render_message(const nlohmann::ordered_json& messages,
       tc_content = render_tool_calls(tcs);
     }
 
-    std::string summary_content = content;
     std::string reasoning = msg.value("reasoning", "");
 
     bool prev_has_task = index - 1 >= 0 && messages[index - 1].contains("task");
@@ -705,9 +706,9 @@ std::string render_message(const nlohmann::ordered_json& messages,
     bool wo_eos = msg.contains("wo_eos") && msg["wo_eos"].is_boolean() &&
                   msg["wo_eos"].get<bool>();
     if (wo_eos) {
-      prompt += thinking_part + summary_content + tc_content;
+      prompt += thinking_part + content + tc_content;
     } else {
-      prompt += thinking_part + summary_content + tc_content + kEosToken;
+      prompt += thinking_part + content + tc_content + kEosToken;
     }
   } else {
     LOG(FATAL) << "Unknown role: " + role;
@@ -760,7 +761,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
 // ============================================================
 
 DeepseekV4CppTemplate::DeepseekV4CppTemplate(const TokenizerArgs& args)
-    : args_(args) {}
+    : bos_token_(args.bos_token().empty() ? kBosToken : args.bos_token()) {}
 
 std::optional<std::string> DeepseekV4CppTemplate::apply(
     const ChatMessages& messages) const {
@@ -805,14 +806,17 @@ std::optional<std::string> DeepseekV4CppTemplate::apply(
       normalized = drop_thinking_messages(normalized);
     }
 
-    std::string prompt;
-    prompt +=
-        args_.bos_token().empty() ? std::string(kBosToken) : args_.bos_token();
+    const int32_t last_user_idx = find_last_user_index(normalized);
+    std::string prompt = bos_token_;
 
     for (int32_t idx = 0; idx < static_cast<int32_t>(normalized.size());
          ++idx) {
-      prompt += render_message(
-          normalized, idx, thinking_mode, drop_thinking, reasoning_effort);
+      prompt += render_message(normalized,
+                               idx,
+                               last_user_idx,
+                               thinking_mode,
+                               drop_thinking,
+                               reasoning_effort);
     }
     return prompt;
   } catch (const std::exception& e) {

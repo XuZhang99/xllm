@@ -58,6 +58,53 @@ Message make_multi_tool_call() {
   return assistant_msg;
 }
 
+TEST(DeepseekV4CppTemplate, PreservesLastUserThinkingAfterDroppingDeveloper) {
+  const TokenizerArgs args;
+  const DeepseekV4CppTemplate encoder(args);
+  ChatMessages messages;
+  messages.emplace_back("developer", "old instruction");
+  messages.emplace_back("user", "hello");
+
+  const nlohmann::ordered_json kwargs = {{"thinking", true},
+                                         {"reasoning_effort", "low"}};
+  const auto prompt = encoder.apply(messages, /*json_tools=*/{}, kwargs);
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_EQ(*prompt,
+            "<｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>");
+}
+
+TEST(DeepseekV4CppTemplate, SnapshotsCustomBosToken) {
+  TokenizerArgs args;
+  args.bos_token("<custom-bos>");
+  const DeepseekV4CppTemplate encoder(args);
+  args.bos_token("<changed-bos>");
+  ChatMessages messages;
+  messages.emplace_back("user", "hello");
+
+  const auto prompt = encoder.apply(
+      messages, /*json_tools=*/{}, nlohmann::ordered_json{{"thinking", false}});
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_EQ(*prompt, "<custom-bos><｜User｜>hello<｜Assistant｜></think>");
+}
+
+TEST(DeepseekV4CppTemplate, RendersHistoryWithoutUserMessages) {
+  const TokenizerArgs args;
+  const DeepseekV4CppTemplate encoder(args);
+  ChatMessages messages;
+  constexpr int32_t kMessageCount = 64;
+  messages.reserve(kMessageCount);
+  std::string expected = "<｜begin▁of▁sentence｜>";
+  for (int32_t idx = 0; idx < kMessageCount; ++idx) {
+    messages.emplace_back("system", "instruction");
+    expected += "instruction";
+  }
+
+  const auto prompt = encoder.apply(
+      messages, /*json_tools=*/{}, nlohmann::ordered_json{{"thinking", false}});
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_EQ(*prompt, expected);
+}
+
 TEST(DeepseekV4CppTemplate, BasicChatModeUserMessage) {
   auto encoder = make_encoder();
 

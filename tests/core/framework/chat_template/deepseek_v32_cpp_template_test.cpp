@@ -19,6 +19,53 @@ limitations under the License.
 
 namespace xllm {
 
+TEST(DeepseekV32CppTemplate, PreservesLastUserThinkingAfterDroppingDeveloper) {
+  const TokenizerArgs args;
+  const DeepseekV32CppTemplate encoder(args);
+  ChatMessages messages;
+  messages.emplace_back("developer", "old instruction");
+  messages.emplace_back("user", "hello");
+
+  const nlohmann::ordered_json kwargs = {{"thinking", true},
+                                         {"reasoning_effort", "low"}};
+  const auto prompt = encoder.apply(messages, /*json_tools=*/{}, kwargs);
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_EQ(*prompt,
+            "<｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>");
+}
+
+TEST(DeepseekV32CppTemplate, SnapshotsCustomBosToken) {
+  TokenizerArgs args;
+  args.bos_token("<custom-bos>");
+  const DeepseekV32CppTemplate encoder(args);
+  args.bos_token("<changed-bos>");
+  ChatMessages messages;
+  messages.emplace_back("user", "hello");
+
+  const auto prompt = encoder.apply(
+      messages, /*json_tools=*/{}, nlohmann::ordered_json{{"thinking", false}});
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_EQ(*prompt, "<custom-bos><｜User｜>hello<｜Assistant｜></think>");
+}
+
+TEST(DeepseekV32CppTemplate, RendersHistoryWithoutUserMessages) {
+  const TokenizerArgs args;
+  const DeepseekV32CppTemplate encoder(args);
+  ChatMessages messages;
+  constexpr int32_t kMessageCount = 64;
+  messages.reserve(kMessageCount);
+  std::string expected = "<｜begin▁of▁sentence｜>";
+  for (int32_t idx = 0; idx < kMessageCount; ++idx) {
+    messages.emplace_back("system", "instruction");
+    expected += "instruction";
+  }
+
+  const auto prompt = encoder.apply(
+      messages, /*json_tools=*/{}, nlohmann::ordered_json{{"thinking", false}});
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_EQ(*prompt, expected);
+}
+
 TEST(DeepseekV32CppTemplate, BasicUserMessage) {
   TokenizerArgs args;
   args.bos_token("<｜begin▁of▁sentence｜>");

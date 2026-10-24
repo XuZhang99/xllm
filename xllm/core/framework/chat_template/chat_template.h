@@ -21,7 +21,6 @@ limitations under the License.
 #include <optional>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include "core/common/message.h"
@@ -57,34 +56,10 @@ class ChatTemplate {
   std::optional<ChatTemplateRenderResult> apply_with_generation_mode(
       const ChatMessages& messages,
       const std::vector<xllm::JsonTool>& json_tools,
-      const nlohmann::ordered_json& chat_template_kwargs) const {
-    std::optional<std::string> prompt =
-        apply(messages, json_tools, chat_template_kwargs);
-    if (!prompt.has_value()) {
-      return std::nullopt;
-    }
-    const ChatTemplateGenerationMode generation_mode =
-        generation_mode_from_prompt(prompt.value());
-    return ChatTemplateRenderResult{std::move(prompt.value()), generation_mode};
-  }
+      const nlohmann::ordered_json& chat_template_kwargs) const;
 
   static ChatTemplateGenerationMode generation_mode_from_prompt(
-      std::string_view prompt) {
-    constexpr std::string_view kJsonWhitespace = " \t\n\r";
-    while (!prompt.empty() &&
-           kJsonWhitespace.find(prompt.back()) != std::string_view::npos) {
-      prompt.remove_suffix(1);
-    }
-    constexpr std::string_view kThinkingMarker = "<think>";
-    constexpr std::string_view kChatMarker = "</think>";
-    if (prompt.ends_with(kThinkingMarker)) {
-      return ChatTemplateGenerationMode::REASONING;
-    }
-    if (prompt.ends_with(kChatMarker)) {
-      return ChatTemplateGenerationMode::CHAT;
-    }
-    return ChatTemplateGenerationMode::UNKNOWN;
-  }
+      std::string_view prompt);
 
   static std::unique_ptr<ChatTemplate> create(
       const TokenizerArgs& tokenizer_args,

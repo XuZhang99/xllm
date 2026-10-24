@@ -13,14 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "jinja_chat_template.h"
+#include "framework/chat_template/jinja_chat_template.h"
 
 #include <gtest/gtest.h>
 
 #include <ctime>
+#include <future>
 #include <minja/chat-template.hpp>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
 namespace xllm {
 
@@ -208,6 +210,53 @@ TEST(JinjaChatTemplate, NativeRenderDefinesMinjaGlobals) {
   EXPECT_EQ(
       result.value(),
       std::string("<s>system: be brief</s>user: hello</s>") + year + "|fast");
+}
+
+TEST(JinjaChatTemplate, ConcurrentRendersKeepRequestContextsIndependent) {
+  TokenizerArgs args;
+  args.chat_template(
+      "{{ strftime_now('%Y') }}|{{ mode }}|"
+      "{% for message in messages %}{{ message['content'] }}{% endfor %}"
+      "|{{ strftime_now('%Y') }}");
+  const TestableJinjaChatTemplate encoder(args);
+  const nlohmann::ordered_json native_messages = {
+      {{"role", "system"}, {"content", "shared"}},
+      {{"role", "user"}, {"content", "request"}}};
+  ASSERT_FALSE(encoder.needs_polyfills(native_messages,
+                                       nlohmann::ordered_json::array()));
+
+  constexpr int32_t kWorkerCount = 8;
+  constexpr int32_t kRenderCount = 32;
+  std::vector<std::future<bool>> renders;
+  renders.reserve(kWorkerCount);
+  for (int32_t worker = 0; worker < kWorkerCount; ++worker) {
+    renders.emplace_back(std::async(std::launch::async, [&encoder, worker] {
+      const std::string request = "request-" + std::to_string(worker);
+      const nlohmann::ordered_json kwargs = {{"mode", request}};
+      ChatMessages messages;
+      messages.emplace_back("system", "shared");
+      messages.emplace_back("user", request);
+      for (int32_t iteration = 0; iteration < kRenderCount; ++iteration) {
+        const auto result = encoder.apply(messages, kwargs);
+        if (!result.has_value()) {
+          return false;
+        }
+        const size_t separator = result->find('|');
+        if (separator == std::string::npos) {
+          return false;
+        }
+        const std::string year = result->substr(0, separator);
+        if (year.empty() || *result != year + "|" + request + "|shared" +
+                                           request + "|" + year) {
+          return false;
+        }
+      }
+      return true;
+    }));
+  }
+  for (auto& render : renders) {
+    EXPECT_TRUE(render.get());
+  }
 }
 
 TEST(JinjaChatTemplate, OpenChatModel) {

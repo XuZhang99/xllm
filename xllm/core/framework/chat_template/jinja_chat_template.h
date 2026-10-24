@@ -20,7 +20,6 @@ limitations under the License.
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
-#include <variant>
 #include <vector>
 
 #include "core/common/message.h"
@@ -74,7 +73,6 @@ class JinjaChatTemplate : public ChatTemplate {
       const nlohmann::ordered_json& tools,
       const nlohmann::ordered_json& chat_template_kwargs) const;
 
-  TokenizerArgs args_;
   std::unique_ptr<minja::chat_template> template_;
   // The parsed template and the builtin globals it renders against; both are
   // read-only after construction and shared by every render.

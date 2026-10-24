@@ -39,7 +39,7 @@ class DeepseekV32CppTemplate final : public ChatTemplate {
       const nlohmann::ordered_json& chat_template_kwargs) const override;
 
  private:
-  TokenizerArgs args_;
+  std::string bos_token_;
 };
 
 }  // namespace xllm

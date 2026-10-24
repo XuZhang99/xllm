@@ -13,10 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "jinja_chat_template.h"
+#include "framework/chat_template/jinja_chat_template.h"
 
 #include <glog/logging.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
@@ -25,7 +24,9 @@ limitations under the License.
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
+#include <variant>
 
 namespace xllm {
 
@@ -39,15 +40,16 @@ minja::Value make_strftime_now() {
       [now](const std::shared_ptr<minja::Context>& /*context*/,
             minja::ArgumentsValue& args) -> minja::Value {
         args.expectArgs("strftime_now", {1, 1}, {0, 0});
-        const auto format = args.args[0].get<std::string>();
+        const std::string format = args.args[0].get<std::string>();
         const std::time_t time = std::chrono::system_clock::to_time_t(now);
-        const std::tm local_time = *std::localtime(&time);
+        std::tm local_time{};
+        CHECK(localtime_r(&time, &local_time) != nullptr);
         std::ostringstream out;
         out << std::put_time(&local_time, format.c_str());
         return minja::Value(out.str());
       });
 }
-const std::unordered_map<std::string, std::string> type_to_modality = {
+const std::unordered_map<std::string, std::string> kTypeToModality = {
     {"video_url", "video"},
     {"image_url", "image"},
     {"audio_url", "audio"},
@@ -122,12 +124,12 @@ std::string normalize_minja_tests(std::string chat_template) {
 }
 }  // namespace
 
-JinjaChatTemplate::JinjaChatTemplate(const TokenizerArgs& args) : args_(args) {
+JinjaChatTemplate::JinjaChatTemplate(const TokenizerArgs& args) {
   try {
     template_ = std::make_unique<minja::chat_template>(
-        normalize_minja_tests(args_.chat_template()),
-        args_.bos_token(),
-        args_.eos_token());
+        normalize_minja_tests(args.chat_template()),
+        args.bos_token(),
+        args.eos_token());
     // Same parse options minja::chat_template uses for its own root.
     template_root_ = minja::Parser::parse(template_->source(),
                                           {/*trim_blocks=*/true,
@@ -139,8 +141,8 @@ JinjaChatTemplate::JinjaChatTemplate(const TokenizerArgs& args) : args_(args) {
     LOG(INFO) << "Jinja chat template init succeed.";
 
   } catch (const std::exception& e) {
-    LOG(FATAL) << "Failed to parse jinja chat template, TokenizerArgs: "
-               << args_ << std::endl
+    LOG(FATAL) << "Failed to parse jinja chat template, TokenizerArgs: " << args
+               << std::endl
                << "Error message: " << e.what();
   }
 }
@@ -174,6 +176,8 @@ std::optional<std::string> JinjaChatTemplate::apply(
     const nlohmann::ordered_json& chat_template_kwargs) const {
   // convert the messages to json object
   nlohmann::ordered_json messages_json = nlohmann::json::array();
+  messages_json.get_ref<nlohmann::ordered_json::array_t&>().reserve(
+      messages.size());
   for (const auto& message : messages) {
     nlohmann::ordered_json message_json;
     message_json["role"] = message.role;
@@ -196,6 +200,8 @@ std::optional<std::string> JinjaChatTemplate::apply(
     if (message.tool_calls.has_value()) {
       nlohmann::ordered_json tool_calls_json = nlohmann::json::array();
       const auto& tool_calls = *message.tool_calls;
+      tool_calls_json.get_ref<nlohmann::ordered_json::array_t&>().reserve(
+          tool_calls.size());
 
       for (const auto& tool_call : tool_calls) {
         tool_calls_json.emplace_back(nlohmann::ordered_json{
@@ -213,6 +219,8 @@ std::optional<std::string> JinjaChatTemplate::apply(
   }
 
   nlohmann::ordered_json tools_json = nlohmann::json::array();
+  tools_json.get_ref<nlohmann::ordered_json::array_t&>().reserve(
+      json_tools.size());
 
   for (const auto& json_tool : json_tools) {
     tools_json.emplace_back(nlohmann::ordered_json{
@@ -317,14 +325,15 @@ std::string JinjaChatTemplate::render_native(
 nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
     const MMContentVec& vec) const {
   nlohmann::ordered_json content_json = nlohmann::json::array();
+  content_json.get_ref<nlohmann::ordered_json::array_t&>().reserve(vec.size());
 
   for (const auto& item : vec) {
     nlohmann::ordered_json item_json;
     item_json["type"] = item.type;
     if (item.type == "text") {
       item_json["text"] = item.text;
-    } else if (auto it = type_to_modality.find(item.type);
-               it != type_to_modality.end()) {
+    } else if (auto it = kTypeToModality.find(item.type);
+               it != kTypeToModality.end()) {
       const std::string& modality = it->second;
       item_json[modality] = "mm place holder";
       item_json[item.type] = "mm place holder";

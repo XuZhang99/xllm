@@ -15,25 +15,20 @@ limitations under the License.
 
 #include "framework/chat_template/deepseek_v32_cpp_template.h"
 
-#include <absl/strings/match.h>
 #include <absl/strings/str_join.h>
 #include <absl/strings/str_replace.h>
 #include <glog/logging.h>
 
-#include <algorithm>
 #include <cstdint>
-#include <regex>
+#include <exception>
 #include <sstream>
-#include <stdexcept>
-#include <tuple>
-#include <unordered_map>
 #include <utility>
+#include <variant>
 
 namespace xllm {
 namespace {
 
 constexpr const char* kBosToken = "<｜begin▁of▁sentence｜>";
-constexpr const char* kEosToken = "<｜end▁of▁sentence｜>";
 constexpr const char* kThinkingStartToken = "<think>";
 constexpr const char* kThinkingEndToken = "</think>";
 constexpr const char* kDsmlToken = "｜DSML｜";
@@ -157,24 +152,10 @@ std::vector<nlohmann::ordered_json> tool_calls_from_openai_format(
     }
     nlohmann::ordered_json item;
     item["name"] = tool_call.function.name;
-    item["arguments"] = args_json;
+    item["arguments"] = std::move(args_json);
     out.emplace_back(std::move(item));
   }
   return out;
-}
-
-std::vector<Message::ToolCall> tool_calls_to_openai_format(
-    const std::vector<nlohmann::ordered_json>& tool_calls) {
-  std::vector<Message::ToolCall> result;
-  result.reserve(tool_calls.size());
-  for (const nlohmann::ordered_json& tool_call : tool_calls) {
-    Message::ToolCall item;
-    item.type = "function";
-    item.function.name = tool_call.value("name", "");
-    item.function.arguments = tool_call.value("arguments", "{}");
-    result.emplace_back(std::move(item));
-  }
-  return result;
 }
 
 std::string encode_arguments_to_dsml(const nlohmann::ordered_json& tool_call) {
@@ -208,28 +189,6 @@ std::string encode_arguments_to_dsml(const nlohmann::ordered_json& tool_call) {
     oss << "</" << kDsmlToken << "parameter>";
   }
   return oss.str();
-}
-
-// Match Python's decode_dsml_to_arguments: manually build JSON
-// string with spaces (e.g. {"key": "value"}) instead of using nlohmann dump.
-std::string decode_dsml_to_arguments(
-    const std::string& tool_name,
-    const std::unordered_map<std::string, std::pair<std::string, std::string>>&
-        tool_args) {
-  std::vector<std::string> parts;
-  parts.reserve(tool_args.size());
-  for (const auto& [key, value_pair] : tool_args) {
-    const std::string& value = value_pair.first;
-    const std::string& is_string = value_pair.second;
-    nlohmann::ordered_json key_json = key;
-    if (is_string == "true") {
-      nlohmann::ordered_json value_json = value;
-      parts.emplace_back(to_json(key_json) + ": " + to_json(value_json));
-    } else {
-      parts.emplace_back(to_json(key_json) + ": " + value);
-    }
-  }
-  return "{" + absl::StrJoin(parts, ", ") + "}";
 }
 
 std::string render_tools(const nlohmann::ordered_json& tools) {
@@ -378,6 +337,7 @@ nlohmann::ordered_json drop_thinking_messages(
 
 std::string render_message(const nlohmann::ordered_json& messages,
                            int32_t index,
+                           int32_t last_user_idx,
                            const std::string& thinking_mode) {
   if (index < 0 || index >= static_cast<int32_t>(messages.size())) {
     LOG(FATAL) << "Message index out of range";
@@ -389,7 +349,6 @@ std::string render_message(const nlohmann::ordered_json& messages,
 
   std::string prompt;
   const nlohmann::ordered_json& msg = messages[index];
-  int32_t last_user_idx = find_last_user_index(messages);
   std::string role = msg.value("role", "");
   std::string content = msg.value("content", "");
 
@@ -502,6 +461,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
     std::string tool_calls_content;
     std::vector<nlohmann::ordered_json> tool_calls;
     if (msg.contains("tool_calls") && msg["tool_calls"].is_array()) {
+      tool_calls.reserve(msg["tool_calls"].size());
       for (const nlohmann::ordered_json& tool_call : msg["tool_calls"]) {
         tool_calls.emplace_back(tool_call);
       }
@@ -509,7 +469,6 @@ std::string render_message(const nlohmann::ordered_json& messages,
     if (!tool_calls.empty()) {
       tool_calls_content = render_assistant_tool_calls(tool_calls);
     }
-    std::string summary_content = content;
     if (thinking_mode == kThinkingModeThinking && index > last_user_idx) {
       std::string reasoning = msg.value("reasoning", "");
       if (reasoning.empty() && tool_calls.empty()) {
@@ -523,10 +482,10 @@ std::string render_message(const nlohmann::ordered_json& messages,
     bool is_prefix = msg.contains("prefix") && msg["prefix"].is_boolean() &&
                      msg["prefix"].get<bool>();
     if (tool_calls.empty() && is_prefix) {
-      prompt += summary_content;
+      prompt += content;
     } else {
-      prompt += render_assistant_block(
-          thinking_part, summary_content, tool_calls_content);
+      prompt +=
+          render_assistant_block(thinking_part, content, tool_calls_content);
     }
     return prompt;
   }
@@ -534,131 +493,10 @@ std::string render_message(const nlohmann::ordered_json& messages,
   LOG(FATAL) << "Unknown role: " + role;
 }
 
-std::tuple<int32_t, std::string, std::optional<std::string>> read_until_stop(
-    int32_t index,
-    const std::string& text,
-    const std::vector<std::string>& stops) {
-  int32_t min_pos = static_cast<int32_t>(text.size());
-  std::optional<std::string> matched_stop = std::nullopt;
-  for (const std::string& stop : stops) {
-    size_t found = text.find(stop, static_cast<size_t>(index));
-    if (found != std::string::npos) {
-      int32_t pos = static_cast<int32_t>(found);
-      if (pos < min_pos) {
-        min_pos = pos;
-        matched_stop = stop;
-      }
-    }
-  }
-  if (matched_stop.has_value()) {
-    int32_t next = min_pos + static_cast<int32_t>(matched_stop->size());
-    return {next,
-            text.substr(static_cast<size_t>(index),
-                        static_cast<size_t>(min_pos - index)),
-            matched_stop};
-  }
-  return {static_cast<int32_t>(text.size()),
-          text.substr(static_cast<size_t>(index)),
-          std::nullopt};
-}
-
-bool parse_dsml_parameter_line(const std::string& param_content,
-                               std::string* param_name,
-                               std::string* is_string,
-                               std::string* param_value) {
-  static const std::regex kParamRegex(
-      R"re(^ name="(.*?)" string="(true|false)">([\s\S]*?)<$)re",
-      std::regex_constants::ECMAScript);
-  std::smatch match;
-  if (!std::regex_match(param_content, match, kParamRegex)) {
-    return false;
-  }
-  *param_name = match[1].str();
-  *is_string = match[2].str();
-  *param_value = match[3].str();
-  return true;
-}
-
-std::tuple<int32_t,
-           std::optional<std::string>,
-           std::vector<nlohmann::ordered_json>>
-parse_tool_calls(int32_t index, const std::string& text) {
-  std::vector<nlohmann::ordered_json> tool_calls;
-  std::optional<std::string> stop_token = std::nullopt;
-  std::string tool_calls_end_token =
-      std::string("</") + kDsmlToken + "function_calls>";
-
-  std::string invoke_token = "<" + std::string(kDsmlToken) + "invoke";
-  std::string invoke_end_token = "</" + std::string(kDsmlToken) + "invoke";
-  std::string param_token = "<" + std::string(kDsmlToken) + "parameter";
-  std::string param_end_token = "/" + std::string(kDsmlToken) + "parameter";
-
-  while (index < static_cast<int32_t>(text.size())) {
-    int32_t new_index = 0;
-    std::string content;
-    std::tie(new_index, content, stop_token) =
-        read_until_stop(index, text, {invoke_token, tool_calls_end_token});
-    index = new_index;
-    if (content != ">\n") {
-      LOG(FATAL) << "Tool call format error";
-    }
-    if (stop_token.has_value() && stop_token.value() == tool_calls_end_token) {
-      break;
-    }
-    if (!stop_token.has_value()) {
-      LOG(FATAL) << "Missing invoke special token";
-    }
-
-    std::string tool_name_content;
-    std::tie(index, tool_name_content, stop_token) =
-        read_until_stop(index, text, {param_token, invoke_end_token});
-    static const std::regex kToolNameRegex(R"re(^\s*name="(.*?)">\n$)re");
-    std::smatch tool_name_match;
-    if (!std::regex_match(tool_name_content, tool_name_match, kToolNameRegex)) {
-      LOG(FATAL) << "Tool name format error";
-    }
-    std::string tool_name = tool_name_match[1].str();
-
-    std::unordered_map<std::string, std::pair<std::string, std::string>>
-        tool_args;
-    while (stop_token.has_value() && stop_token.value() == param_token) {
-      std::string param_content;
-      std::tie(index, param_content, stop_token) =
-          read_until_stop(index, text, {param_end_token});
-
-      std::string param_name;
-      std::string is_string;
-      std::string param_value;
-      if (!parse_dsml_parameter_line(
-              param_content, &param_name, &is_string, &param_value)) {
-        LOG(FATAL) << "Parameter format error";
-      }
-      if (tool_args.contains(param_name)) {
-        LOG(FATAL) << "Duplicate parameter name";
-      }
-      tool_args[param_name] = {param_value, is_string};
-
-      std::string between;
-      std::tie(index, between, stop_token) =
-          read_until_stop(index, text, {param_token, invoke_end_token});
-      if (between != ">\n") {
-        LOG(FATAL) << "Parameter boundary format error";
-      }
-    }
-
-    nlohmann::ordered_json tool_call;
-    tool_call["name"] = tool_name;
-    tool_call["arguments"] = decode_dsml_to_arguments(tool_name, tool_args);
-    tool_calls.emplace_back(std::move(tool_call));
-  }
-
-  return {index, stop_token, tool_calls};
-}
-
 }  // namespace
 
 DeepseekV32CppTemplate::DeepseekV32CppTemplate(const TokenizerArgs& args)
-    : args_(args) {}
+    : bos_token_(args.bos_token().empty() ? kBosToken : args.bos_token()) {}
 
 std::optional<std::string> DeepseekV32CppTemplate::apply(
     const ChatMessages& messages) const {
@@ -675,7 +513,6 @@ std::optional<std::string> DeepseekV32CppTemplate::apply(
     nlohmann::ordered_json normalized =
         normalize_messages(messages, json_tools);
     std::string thinking_mode = get_thinking_mode(chat_template_kwargs);
-    int32_t last_user_idx = find_last_user_index(normalized);
 
     // Only drop thinking when the last message is
     // from user, matching vLLM:
@@ -686,15 +523,15 @@ std::optional<std::string> DeepseekV32CppTemplate::apply(
       drop_thinking = (last_role == kRoleUser);
     }
     if (thinking_mode == kThinkingModeThinking && drop_thinking) {
-      normalized = drop_thinking_messages(normalized, last_user_idx);
+      normalized =
+          drop_thinking_messages(normalized, find_last_user_index(normalized));
     }
 
-    std::string prompt;
-    prompt +=
-        args_.bos_token().empty() ? std::string(kBosToken) : args_.bos_token();
+    const int32_t last_user_idx = find_last_user_index(normalized);
+    std::string prompt = bos_token_;
     for (int32_t idx = 0; idx < static_cast<int32_t>(normalized.size());
          ++idx) {
-      prompt += render_message(normalized, idx, thinking_mode);
+      prompt += render_message(normalized, idx, last_user_idx, thinking_mode);
     }
     return prompt;
   } catch (const std::exception& e) {
