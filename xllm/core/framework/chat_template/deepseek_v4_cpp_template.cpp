@@ -298,11 +298,14 @@ std::string get_thinking_mode(const nlohmann::ordered_json& kwargs) {
                                       : kThinkingModeChat;
 }
 
-std::vector<nlohmann::ordered_json> tool_calls_from_openai_format(
-    const Message::ToolCallVec& tool_calls) {
-  std::vector<nlohmann::ordered_json> out;
-  out.reserve(tool_calls.size());
+nlohmann::ordered_json tool_calls_from_openai_format(
+    const Message::ToolCallVec& tool_calls,
+    size_t& prompt_capacity) {
+  nlohmann::ordered_json out = nlohmann::ordered_json::array();
+  out.get_ref<nlohmann::ordered_json::array_t&>().reserve(tool_calls.size());
   for (const Message::ToolCall& tc : tool_calls) {
+    prompt_capacity +=
+        tc.function.name.size() + tc.function.arguments.size() + 128;
     nlohmann::ordered_json item;
     item["id"] = tc.id;
     item["name"] = tc.function.name;
@@ -313,16 +316,20 @@ std::vector<nlohmann::ordered_json> tool_calls_from_openai_format(
 }
 
 std::string encode_arguments_to_dsml(const nlohmann::ordered_json& tool_call) {
-  std::ostringstream oss;
-  nlohmann::ordered_json arguments = nlohmann::json::object();
-  if (tool_call.contains("arguments")) {
-    arguments = tool_call["arguments"];
-    if (arguments.is_string()) {
-      arguments = parse_json_object_or_empty(arguments.get<std::string>());
-    }
+  const auto arguments_it = tool_call.find("arguments");
+  if (arguments_it == tool_call.end()) {
+    return "";
   }
+  const nlohmann::ordered_json* arguments = &*arguments_it;
+  nlohmann::ordered_json parsed_arguments;
+  if (arguments->is_string()) {
+    parsed_arguments =
+        parse_json_object_or_empty(arguments->get_ref<const std::string&>());
+    arguments = &parsed_arguments;
+  }
+  std::ostringstream oss;
   bool first = true;
-  for (auto it = arguments.begin(); it != arguments.end(); ++it) {
+  for (auto it = arguments->begin(); it != arguments->end(); ++it) {
     if (!first) {
       oss << "\n";
     }
@@ -332,7 +339,7 @@ std::string encode_arguments_to_dsml(const nlohmann::ordered_json& tool_call) {
     oss << "<" << kDsmlToken << "parameter name=\"" << it.key()
         << "\" string=\"" << (is_string ? "true" : "false") << "\">";
     if (is_string) {
-      oss << value.get<std::string>();
+      oss << value.get_ref<const std::string&>();
     } else {
       oss << to_json(value);
     }
@@ -367,7 +374,10 @@ std::string render_tools(const nlohmann::ordered_json& tools) {
   std::vector<std::string> schemas;
   schemas.reserve(tools.size());
   for (const nlohmann::ordered_json& tool : tools) {
-    schemas.emplace_back(to_json(tool));
+    const auto function = tool.find("function");
+    if (function != tool.end()) {
+      schemas.emplace_back(to_json(*function));
+    }
   }
   return absl::StrReplaceAll(std::string(kToolsTemplate),
                              {{"{tool_schemas}", absl::StrJoin(schemas, "\n")},
@@ -376,8 +386,7 @@ std::string render_tools(const nlohmann::ordered_json& tools) {
                               {"{thinking_end_token}", kThinkingEndToken}});
 }
 
-std::string render_tool_calls(
-    const std::vector<nlohmann::ordered_json>& tool_calls) {
+std::string render_tool_calls(const nlohmann::ordered_json& tool_calls) {
   if (tool_calls.empty()) {
     return "";
   }
@@ -401,18 +410,21 @@ std::string render_tool_calls(
 // Preprocessing: merge tool messages
 // ============================================================
 
-nlohmann::ordered_json merge_tool_messages(
-    const nlohmann::ordered_json& messages) {
+nlohmann::ordered_json merge_tool_messages(nlohmann::ordered_json messages) {
   nlohmann::ordered_json merged = nlohmann::json::array();
+  merged.get_ref<nlohmann::ordered_json::array_t&>().reserve(messages.size());
 
-  for (const auto& msg : messages) {
+  for (auto& msg : messages) {
     std::string role = msg.value("role", "");
 
     if (role == kRoleTool) {
       nlohmann::ordered_json tool_block;
       tool_block["type"] = "tool_result";
-      tool_block["tool_use_id"] = msg.value("tool_call_id", "");
-      tool_block["content"] = msg.value("content", "");
+      const auto tool_call_id = msg.find("tool_call_id");
+      tool_block["tool_use_id"] = tool_call_id == msg.end()
+                                      ? nlohmann::ordered_json("")
+                                      : std::move(*tool_call_id);
+      tool_block["content"] = std::move(msg["content"]);
 
       if (!merged.empty() && merged.back().value("role", "") == kRoleUser &&
           merged.back().contains("content_blocks")) {
@@ -420,13 +432,14 @@ nlohmann::ordered_json merge_tool_messages(
       } else {
         nlohmann::ordered_json new_msg;
         new_msg["role"] = kRoleUser;
-        new_msg["content_blocks"] = nlohmann::json::array({tool_block});
+        new_msg["content_blocks"] = nlohmann::ordered_json::array();
+        new_msg["content_blocks"].emplace_back(std::move(tool_block));
         merged.emplace_back(std::move(new_msg));
       }
     } else if (role == kRoleUser) {
       nlohmann::ordered_json text_block;
       text_block["type"] = "text";
-      text_block["text"] = msg.value("content", "");
+      text_block["text"] = std::move(msg["content"]);
 
       if (!merged.empty() && merged.back().value("role", "") == kRoleUser &&
           merged.back().contains("content_blocks") &&
@@ -435,32 +448,33 @@ nlohmann::ordered_json merge_tool_messages(
       } else {
         nlohmann::ordered_json new_msg;
         new_msg["role"] = kRoleUser;
-        new_msg["content"] = msg.value("content", "");
-        new_msg["content_blocks"] = nlohmann::json::array({text_block});
+        new_msg["content"] = text_block["text"];
+        new_msg["content_blocks"] = nlohmann::ordered_json::array();
+        new_msg["content_blocks"].emplace_back(std::move(text_block));
         for (const auto& key : {"task", "wo_eos", "mask"}) {
           if (msg.contains(key)) {
-            new_msg[key] = msg[key];
+            new_msg[key] = std::move(msg[key]);
           }
         }
         merged.emplace_back(std::move(new_msg));
       }
     } else {
-      merged.emplace_back(msg);
+      merged.emplace_back(std::move(msg));
     }
   }
   return merged;
 }
 
 nlohmann::ordered_json sort_tool_results_by_call_order(
-    const nlohmann::ordered_json& messages) {
-  nlohmann::ordered_json result = messages;
+    nlohmann::ordered_json messages) {
   std::unordered_map<std::string, int32_t> last_tc_order;
 
-  for (auto& msg : result) {
+  for (auto& msg : messages) {
     std::string role = msg.value("role", "");
     if (role == kRoleAssistant && msg.contains("tool_calls") &&
         msg["tool_calls"].is_array()) {
       last_tc_order.clear();
+      last_tc_order.reserve(msg["tool_calls"].size());
       int32_t idx = 0;
       for (const auto& tc : msg["tool_calls"]) {
         std::string tc_id;
@@ -470,24 +484,40 @@ nlohmann::ordered_json sort_tool_results_by_call_order(
           tc_id = tc["function"].value("id", "");
         }
         if (!tc_id.empty()) {
-          last_tc_order[tc_id] = idx;
+          last_tc_order[std::move(tc_id)] = idx;
         }
         ++idx;
       }
     } else if (role == kRoleUser && msg.contains("content_blocks")) {
+      if (last_tc_order.empty()) {
+        continue;
+      }
       auto& blocks = msg["content_blocks"];
       int32_t tool_count = 0;
+      int32_t previous_order = -1;
+      bool strictly_ordered = true;
       for (const auto& b : blocks) {
         if (b.value("type", "") == "tool_result") {
           ++tool_count;
+          const auto order_it = last_tc_order.find(b.value("tool_use_id", ""));
+          const int32_t order =
+              order_it != last_tc_order.end() ? order_it->second : 0;
+          strictly_ordered = strictly_ordered && previous_order < order;
+          previous_order = order;
         }
       }
-      if (tool_count > 1 && !last_tc_order.empty()) {
+      // Equal ranks still use the existing sort, whose tie order is
+      // unspecified.
+      if (tool_count > 1 && !strictly_ordered) {
         std::vector<nlohmann::ordered_json> tool_blocks;
         tool_blocks.reserve(tool_count);
-        for (const auto& b : blocks) {
+        std::vector<size_t> tool_positions;
+        tool_positions.reserve(tool_count);
+        for (size_t block_idx = 0; block_idx < blocks.size(); ++block_idx) {
+          auto& b = blocks[block_idx];
           if (b.value("type", "") == "tool_result") {
-            tool_blocks.emplace_back(b);
+            tool_positions.emplace_back(block_idx);
+            tool_blocks.emplace_back(std::move(b));
           }
         }
         std::sort(tool_blocks.begin(),
@@ -500,45 +530,44 @@ nlohmann::ordered_json sort_tool_results_by_call_order(
                     int32_t ob = ib != last_tc_order.end() ? ib->second : 0;
                     return oa < ob;
                   });
-        int32_t si = 0;
-        nlohmann::ordered_json new_blocks = nlohmann::json::array();
-        for (const auto& b : blocks) {
-          if (b.value("type", "") == "tool_result") {
-            new_blocks.emplace_back(tool_blocks[si++]);
-          } else {
-            new_blocks.emplace_back(b);
-          }
+        for (size_t idx = 0; idx < tool_positions.size(); ++idx) {
+          blocks[tool_positions[idx]] = std::move(tool_blocks[idx]);
         }
-        msg["content_blocks"] = std::move(new_blocks);
       }
     }
   }
-  return result;
+  return messages;
 }
 
 // ============================================================
 // Drop Thinking
 // ============================================================
 
-nlohmann::ordered_json drop_thinking_messages(
-    const nlohmann::ordered_json& messages) {
+nlohmann::ordered_json drop_thinking_messages(nlohmann::ordered_json messages) {
   const int32_t last_user_idx = find_last_user_index(messages);
-  nlohmann::ordered_json result = nlohmann::json::array();
+  auto& message_array = messages.get_ref<nlohmann::ordered_json::array_t&>();
+  size_t retained_count = 0;
 
   for (int32_t idx = 0; idx < static_cast<int32_t>(messages.size()); ++idx) {
-    std::string role = messages[idx].value("role", "");
+    auto& message = messages[idx];
+    std::string role = message.value("role", "");
     if (role == kRoleUser || role == kRoleSystem || role == kRoleTool ||
         role == kRoleLatestReminder || role == kRoleDirectSearchResults ||
         idx >= last_user_idx) {
-      result.emplace_back(messages[idx]);
+      // Retain these messages without changing their reasoning fields.
     } else if (role == kRoleAssistant) {
-      nlohmann::ordered_json copied = messages[idx];
-      copied.erase("reasoning");
-      result.emplace_back(std::move(copied));
+      message.erase("reasoning");
+    } else {
+      // developer before last_user_idx is dropped
+      continue;
     }
-    // developer before last_user_idx is dropped
+    if (retained_count != static_cast<size_t>(idx)) {
+      message_array[retained_count] = std::move(message);
+    }
+    ++retained_count;
   }
-  return result;
+  message_array.resize(retained_count);
+  return messages;
 }
 
 // ============================================================
@@ -547,18 +576,25 @@ nlohmann::ordered_json drop_thinking_messages(
 
 nlohmann::ordered_json normalize_messages(
     const ChatMessages& messages,
-    const std::vector<xllm::JsonTool>& tools) {
+    const std::vector<xllm::JsonTool>& tools,
+    size_t& prompt_capacity) {
   nlohmann::ordered_json out = nlohmann::json::array();
+  out.get_ref<nlohmann::ordered_json::array_t&>().reserve(messages.size() +
+                                                          !tools.empty());
+  prompt_capacity = 0;
   for (const Message& message : messages) {
     nlohmann::ordered_json item;
     item["role"] = message.role;
-    item["content"] = get_text_content(message.content);
+    std::string content = get_text_content(message.content);
+    prompt_capacity += content.size() + 64;
+    item["content"] = std::move(content);
     if (message.reasoning_content.has_value()) {
       item["reasoning"] = message.reasoning_content.value();
+      prompt_capacity += message.reasoning_content->size();
     }
     if (message.tool_calls.has_value()) {
-      item["tool_calls"] =
-          tool_calls_from_openai_format(message.tool_calls.value());
+      item["tool_calls"] = tool_calls_from_openai_format(
+          message.tool_calls.value(), prompt_capacity);
     }
     if (message.tool_call_id.has_value()) {
       item["tool_call_id"] = message.tool_call_id.value();
@@ -567,7 +603,11 @@ nlohmann::ordered_json normalize_messages(
   }
   if (!tools.empty()) {
     nlohmann::ordered_json tools_json = nlohmann::json::array();
+    tools_json.get_ref<nlohmann::ordered_json::array_t&>().reserve(
+        tools.size());
     for (const xllm::JsonTool& tool : tools) {
+      prompt_capacity +=
+          tool.function.name.size() + tool.function.description.size() + 256;
       nlohmann::ordered_json openai_tool;
       openai_tool["type"] = "function";
       nlohmann::ordered_json function;
@@ -603,14 +643,12 @@ std::string render_message(const nlohmann::ordered_json& messages,
   std::string role = msg.value("role", "");
   std::string content = msg.value("content", "");
 
-  nlohmann::ordered_json tools = nlohmann::json::array();
-  if (msg.contains("tools")) {
-    tools = msg["tools"];
-  }
-  nlohmann::ordered_json response_format;
-  if (msg.contains("response_format")) {
-    response_format = msg["response_format"];
-  }
+  const auto tools = msg.find("tools");
+  const bool has_tools =
+      tools != msg.end() && tools->is_array() && !tools->empty();
+  const auto response_format = msg.find("response_format");
+  const bool has_response_format =
+      response_format != msg.end() && !response_format->is_null();
 
   // Reasoning effort prefix at index 0. reasoning_effort is already collapsed
   // to a tier by resolve_reasoning_effort(); the "low" tier renders nothing.
@@ -620,38 +658,26 @@ std::string render_message(const nlohmann::ordered_json& messages,
 
   if (role == kRoleSystem) {
     prompt += content.empty() ? "" : content;
-    if (tools.is_array() && !tools.empty()) {
-      nlohmann::ordered_json fn_tools = nlohmann::json::array();
-      for (const auto& t : tools) {
-        if (t.contains("function")) {
-          fn_tools.emplace_back(t["function"]);
-        }
-      }
-      prompt += "\n\n" + render_tools(fn_tools);
+    if (has_tools) {
+      prompt += "\n\n" + render_tools(*tools);
     }
-    if (!response_format.is_null()) {
+    if (has_response_format) {
       prompt += "\n\n" +
                 absl::StrReplaceAll(std::string(kResponseFormatTemplate),
-                                    {{"{schema}", to_json(response_format)}});
+                                    {{"{schema}", to_json(*response_format)}});
     }
   } else if (role == kRoleDeveloper) {
     if (content.empty()) {
       LOG(FATAL) << "Developer message content is empty";
     }
     std::string dev_content = std::string(kUserSpToken) + content;
-    if (tools.is_array() && !tools.empty()) {
-      nlohmann::ordered_json fn_tools = nlohmann::json::array();
-      for (const auto& t : tools) {
-        if (t.contains("function")) {
-          fn_tools.emplace_back(t["function"]);
-        }
-      }
-      dev_content += "\n\n" + render_tools(fn_tools);
+    if (has_tools) {
+      dev_content += "\n\n" + render_tools(*tools);
     }
-    if (!response_format.is_null()) {
+    if (has_response_format) {
       dev_content += "\n\n" + absl::StrReplaceAll(
                                   std::string(kResponseFormatTemplate),
-                                  {{"{schema}", to_json(response_format)}});
+                                  {{"{schema}", to_json(*response_format)}});
     }
     prompt += dev_content;
   } else if (role == kRoleUser) {
@@ -682,15 +708,10 @@ std::string render_message(const nlohmann::ordered_json& messages,
     std::string thinking_part;
     std::string tc_content;
 
-    std::vector<nlohmann::ordered_json> tcs;
-    if (msg.contains("tool_calls") && msg["tool_calls"].is_array()) {
-      tcs.reserve(msg["tool_calls"].size());
-      for (const auto& tc : msg["tool_calls"]) {
-        tcs.emplace_back(tc);
-      }
-    }
-    if (!tcs.empty()) {
-      tc_content = render_tool_calls(tcs);
+    const auto tool_calls = msg.find("tool_calls");
+    if (tool_calls != msg.end() && tool_calls->is_array() &&
+        !tool_calls->empty()) {
+      tc_content = render_tool_calls(*tool_calls);
     }
 
     std::string reasoning = msg.value("reasoning", "");
@@ -775,15 +796,16 @@ std::optional<std::string> DeepseekV4CppTemplate::apply(
     const std::vector<xllm::JsonTool>& json_tools,
     const nlohmann::ordered_json& chat_template_kwargs) const {
   try {
+    size_t prompt_capacity = 0;
     nlohmann::ordered_json normalized =
-        normalize_messages(messages, json_tools);
+        normalize_messages(messages, json_tools, prompt_capacity);
     std::string thinking_mode = get_thinking_mode(chat_template_kwargs);
     std::string reasoning_effort =
         resolve_reasoning_effort(get_reasoning_effort(chat_template_kwargs));
 
     // Preprocess: merge tool + sort
-    normalized = merge_tool_messages(normalized);
-    normalized = sort_tool_results_by_call_order(normalized);
+    normalized = merge_tool_messages(std::move(normalized));
+    normalized = sort_tool_results_by_call_order(std::move(normalized));
 
     // drop_thinking = last msg is user
     bool drop_thinking = false;
@@ -803,11 +825,13 @@ std::optional<std::string> DeepseekV4CppTemplate::apply(
     }
 
     if (thinking_mode == kThinkingModeThinking && drop_thinking) {
-      normalized = drop_thinking_messages(normalized);
+      normalized = drop_thinking_messages(std::move(normalized));
     }
 
     const int32_t last_user_idx = find_last_user_index(normalized);
-    std::string prompt = bos_token_;
+    std::string prompt;
+    prompt.reserve(bos_token_.size() + prompt_capacity);
+    prompt = bos_token_;
 
     for (int32_t idx = 0; idx < static_cast<int32_t>(normalized.size());
          ++idx) {

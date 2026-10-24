@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <utility>
+
 namespace xllm {
 namespace {
 
@@ -351,6 +353,96 @@ TEST(DeepseekV4CppTemplate, ToolResultsAreSortedByToolCallId) {
   ASSERT_NE(first_pos, std::string::npos);
   ASSERT_NE(second_pos, std::string::npos);
   EXPECT_LT(first_pos, second_pos);
+}
+
+TEST(DeepseekV4CppTemplate, OrderedToolResultsKeepTheirOrder) {
+  const DeepseekV4CppTemplate encoder = make_encoder();
+  ChatMessages messages;
+  messages.emplace_back("user", "run tools");
+  messages.emplace_back(make_multi_tool_call());
+  Message first_result("tool", "first result");
+  first_result.tool_call_id = "call_first";
+  messages.emplace_back(std::move(first_result));
+  Message second_result("tool", "second result");
+  second_result.tool_call_id = "call_second";
+  messages.emplace_back(std::move(second_result));
+
+  const auto prompt = encoder.apply(
+      messages, /*json_tools=*/{}, nlohmann::ordered_json{{"thinking", false}});
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_NE(prompt->find("<｜User｜><tool_result>first result</tool_result>"
+                         "\n\n<tool_result>second result</tool_result>"
+                         "<｜Assistant｜></think>"),
+            std::string::npos);
+}
+
+TEST(DeepseekV4CppTemplate, SortingToolResultsPreservesTextBlockPositions) {
+  const DeepseekV4CppTemplate encoder = make_encoder();
+  ChatMessages messages;
+  messages.emplace_back("user", "run tools");
+  messages.emplace_back(make_multi_tool_call());
+  Message second_result("tool", "second result");
+  second_result.tool_call_id = "call_second";
+  messages.emplace_back(std::move(second_result));
+  messages.emplace_back("user", "between results");
+  Message first_result("tool", "first result");
+  first_result.tool_call_id = "call_first";
+  messages.emplace_back(std::move(first_result));
+
+  const auto prompt = encoder.apply(
+      messages, /*json_tools=*/{}, nlohmann::ordered_json{{"thinking", false}});
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_NE(prompt->find("<｜User｜><tool_result>first result</tool_result>"
+                         "\n\nbetween results\n\n"
+                         "<tool_result>second result</tool_result>"
+                         "<｜Assistant｜></think>"),
+            std::string::npos);
+}
+
+TEST(DeepseekV4CppTemplate, UnknownToolResultsPrecedeLastDuplicateCallId) {
+  const DeepseekV4CppTemplate encoder = make_encoder();
+  ChatMessages messages;
+  messages.emplace_back("user", "run tools");
+  Message assistant = make_multi_tool_call();
+  assistant.tool_calls->emplace_back(assistant.tool_calls->front());
+  messages.emplace_back(std::move(assistant));
+  Message first_result("tool", "duplicate result");
+  first_result.tool_call_id = "call_first";
+  messages.emplace_back(std::move(first_result));
+  Message second_result("tool", "second result");
+  second_result.tool_call_id = "call_second";
+  messages.emplace_back(std::move(second_result));
+  Message unknown_result("tool", "unknown result");
+  unknown_result.tool_call_id = "unknown";
+  messages.emplace_back(std::move(unknown_result));
+
+  const auto prompt = encoder.apply(
+      messages, /*json_tools=*/{}, nlohmann::ordered_json{{"thinking", false}});
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_NE(prompt->find("<｜User｜><tool_result>unknown result</tool_result>"
+                         "\n\n<tool_result>second result</tool_result>"
+                         "\n\n<tool_result>duplicate result</tool_result>"
+                         "<｜Assistant｜></think>"),
+            std::string::npos);
+}
+
+TEST(DeepseekV4CppTemplate, ThinkingHistoryDropsReasoningBeforeLastUser) {
+  const DeepseekV4CppTemplate encoder = make_encoder();
+  ChatMessages messages;
+  messages.emplace_back("user", "first question");
+  Message assistant("assistant", "first answer");
+  assistant.reasoning_content = "old reasoning";
+  messages.emplace_back(std::move(assistant));
+  messages.emplace_back("user", "second question");
+
+  const nlohmann::ordered_json kwargs = {{"thinking", true},
+                                         {"reasoning_effort", "low"}};
+  const auto prompt = encoder.apply(messages, /*json_tools=*/{}, kwargs);
+  ASSERT_TRUE(prompt.has_value());
+  EXPECT_EQ(*prompt,
+            "<｜begin▁of▁sentence｜><｜User｜>first question"
+            "<｜Assistant｜></think>first answer<｜end▁of▁sentence｜>"
+            "<｜User｜>second question<｜Assistant｜><think>");
 }
 
 std::optional<std::string> render_with_effort(const std::string& effort) {
