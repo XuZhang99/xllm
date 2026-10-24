@@ -224,9 +224,9 @@ int32_t find_last_user_index(const nlohmann::ordered_json& messages) {
   return -1;
 }
 
-std::string render_system_message(const nlohmann::ordered_json& message) {
+std::string render_system_message(const std::string& content) {
   return absl::StrReplaceAll(std::string(kSystemMessageTemplate),
-                             {{"{content}", message.value("content", "")}});
+                             {{"{content}", content}});
 }
 
 std::string render_user_message(const std::string& content) {
@@ -373,7 +373,11 @@ std::string render_message(const nlohmann::ordered_json& messages,
   if (role != kRoleTool) {
     previous_non_tool_idx = index;
   }
-  std::string content = msg.value("content", "");
+  const std::string empty;
+  const auto content_it = msg.find("content");
+  const std::string& content = content_it == msg.end()
+                                   ? empty
+                                   : content_it->get_ref<const std::string&>();
 
   const auto tools = msg.find("tools");
   const bool has_tools =
@@ -383,7 +387,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
       response_format != msg.end() && !response_format->is_null();
 
   if (role == kRoleSystem) {
-    prompt += render_system_message(msg);
+    prompt += render_system_message(content);
     if (has_tools) {
       prompt += "\n\n" + render_tools(*tools);
     }
@@ -471,7 +475,11 @@ std::string render_message(const nlohmann::ordered_json& messages,
       tool_calls_content = render_assistant_tool_calls(*tool_calls);
     }
     if (thinking_mode == kThinkingModeThinking && index > last_user_idx) {
-      std::string reasoning = msg.value("reasoning", "");
+      const auto reasoning_it = msg.find("reasoning");
+      const std::string& reasoning =
+          reasoning_it == msg.end()
+              ? empty
+              : reasoning_it->get_ref<const std::string&>();
       if (reasoning.empty() && !has_tool_calls) {
         LOG(FATAL) << "Thinking mode assistant message must contain "
                       "reasoning/tool_calls";

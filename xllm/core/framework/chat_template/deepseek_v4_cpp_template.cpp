@@ -641,7 +641,11 @@ std::string render_message(const nlohmann::ordered_json& messages,
   std::string prompt;
   const nlohmann::ordered_json& msg = messages[index];
   std::string role = msg.value("role", "");
-  std::string content = msg.value("content", "");
+  const std::string empty_content;
+  const auto content_it = msg.find("content");
+  const std::string& content = content_it == msg.end()
+                                   ? empty_content
+                                   : content_it->get_ref<const std::string&>();
 
   const auto tools = msg.find("tools");
   const bool has_tools =
@@ -690,7 +694,11 @@ std::string render_message(const nlohmann::ordered_json& messages,
         if (btype == "text") {
           parts.emplace_back(block.value("text", ""));
         } else if (btype == "tool_result") {
-          std::string tc = block.value("content", "");
+          const auto tool_content = block.find("content");
+          const std::string& tc =
+              tool_content == block.end()
+                  ? empty_content
+                  : tool_content->get_ref<const std::string&>();
           parts.emplace_back(absl::StrReplaceAll(
               std::string(kToolOutputTemplate), {{"{content}", tc}}));
         }
@@ -714,12 +722,15 @@ std::string render_message(const nlohmann::ordered_json& messages,
       tc_content = render_tool_calls(*tool_calls);
     }
 
-    std::string reasoning = msg.value("reasoning", "");
-
     bool prev_has_task = index - 1 >= 0 && messages[index - 1].contains("task");
 
     if (thinking_mode == kThinkingModeThinking && !prev_has_task) {
       if (!drop_thinking || index > last_user_idx) {
+        const auto reasoning_it = msg.find("reasoning");
+        const std::string& reasoning =
+            reasoning_it == msg.end()
+                ? empty_content
+                : reasoning_it->get_ref<const std::string&>();
         thinking_part = reasoning + kThinkingEndToken;
       }
     }
