@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "framework/chat_template/deepseek_v32_cpp_template.h"
 
+#include <absl/strings/str_cat.h>
 #include <absl/strings/str_join.h>
 #include <absl/strings/str_replace.h>
 #include <glog/logging.h>
@@ -79,12 +80,8 @@ constexpr const char* kToolsSystemTemplate =
     "{tool_schemas}\n"
     "</functions>\n";
 
-constexpr const char* kSystemMessageTemplate = "{content}";
-constexpr const char* kUserMessageTemplate =
-    "<｜User｜>{content}<｜Assistant｜>";
 constexpr const char* kAssistantMessageTemplate =
     "{reasoning}{content}{tool_calls}<｜end▁of▁sentence｜>";
-constexpr const char* kThinkingTemplate = "{reasoning}";
 constexpr const char* kResponseFormatTemplate =
     "## Response Format:\n\n"
     "You MUST strictly adhere to the following schema to reply:\n"
@@ -93,7 +90,6 @@ constexpr const char* kToolCallTemplate =
     "<{dsml_token}invoke name=\"{name}\">\n{arguments}\n</{dsml_token}invoke>";
 constexpr const char* kToolCallsTemplate =
     "<{dsml_token}function_calls>\n{tool_calls}\n</{dsml_token}function_calls>";
-constexpr const char* kToolOutputTemplate = "\n<result>{content}</result>";
 
 constexpr const char* kRoleSystem = "system";
 constexpr const char* kRoleDeveloper = "developer";
@@ -224,14 +220,8 @@ int32_t find_last_user_index(const nlohmann::ordered_json& messages) {
   return -1;
 }
 
-std::string render_system_message(const std::string& content) {
-  return absl::StrReplaceAll(std::string(kSystemMessageTemplate),
-                             {{"{content}", content}});
-}
-
-std::string render_user_message(const std::string& content) {
-  return absl::StrReplaceAll(std::string(kUserMessageTemplate),
-                             {{"{content}", content}});
+void append_user_message(std::string& prompt, const std::string& content) {
+  absl::StrAppend(&prompt, "<｜User｜>", content, "<｜Assistant｜>");
 }
 
 std::string render_assistant_block(const std::string& reasoning,
@@ -387,7 +377,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
       response_format != msg.end() && !response_format->is_null();
 
   if (role == kRoleSystem) {
-    prompt += render_system_message(content);
+    prompt += content;
     if (has_tools) {
       prompt += "\n\n" + render_tools(*tools);
     }
@@ -409,7 +399,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
       developer_content += "\n\n" + render_response_format(*response_format);
     }
     developer_content += "\n\n# The user's message is: " + content;
-    prompt += render_user_message(developer_content);
+    append_user_message(prompt, developer_content);
     if (index == last_user_idx && thinking_mode == kThinkingModeThinking) {
       prompt += kThinkingStartToken;
     } else {
@@ -419,7 +409,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
   }
 
   if (role == kRoleUser) {
-    prompt += render_user_message(content);
+    append_user_message(prompt, content);
     if (index == last_user_idx && thinking_mode == kThinkingModeThinking) {
       prompt += kThinkingStartToken;
     } else {
@@ -449,9 +439,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
     if (tool_call_order == 1) {
       prompt += "\n\n<function_results>";
     }
-    std::string tool_result = absl::StrReplaceAll(
-        std::string(kToolOutputTemplate), {{"{content}", content}});
-    prompt += tool_result;
+    absl::StrAppend(&prompt, "\n<result>", content, "</result>");
     if (tool_call_order == total_tool_calls) {
       prompt += "\n</function_results>";
       if (index >= last_user_idx && thinking_mode == kThinkingModeThinking) {
@@ -484,9 +472,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
         LOG(FATAL) << "Thinking mode assistant message must contain "
                       "reasoning/tool_calls";
       }
-      std::string thinking_tmpl = absl::StrReplaceAll(
-          std::string(kThinkingTemplate), {{"{reasoning}", reasoning}});
-      thinking_part = thinking_tmpl + kThinkingEndToken;
+      thinking_part = reasoning + kThinkingEndToken;
     }
     bool is_prefix = msg.contains("prefix") && msg["prefix"].is_boolean() &&
                      msg["prefix"].get<bool>();

@@ -122,9 +122,6 @@ constexpr const char* kToolCallTemplate =
     "{arguments}\n"
     "</{dsml_token}invoke>";
 
-constexpr const char* kToolOutputTemplate =
-    "<tool_result>{content}</tool_result>";
-
 // Prompt prefixes for the reasoning effort tiers the encoder understands,
 // mirroring vLLM's REASONING_EFFORT_PROMPTS. The "low" tier renders nothing.
 constexpr const char* kReasoningEffortPromptHigh =
@@ -661,59 +658,70 @@ std::string render_message(const nlohmann::ordered_json& messages,
   }
 
   if (role == kRoleSystem) {
-    prompt += content.empty() ? "" : content;
+    prompt += content;
     if (has_tools) {
-      prompt += "\n\n" + render_tools(*tools);
+      prompt += "\n\n";
+      prompt += render_tools(*tools);
     }
     if (has_response_format) {
-      prompt += "\n\n" +
-                absl::StrReplaceAll(std::string(kResponseFormatTemplate),
+      prompt += "\n\n";
+      prompt += absl::StrReplaceAll(std::string(kResponseFormatTemplate),
                                     {{"{schema}", to_json(*response_format)}});
     }
   } else if (role == kRoleDeveloper) {
     if (content.empty()) {
       LOG(FATAL) << "Developer message content is empty";
     }
-    std::string dev_content = std::string(kUserSpToken) + content;
+    prompt += kUserSpToken;
+    prompt += content;
     if (has_tools) {
-      dev_content += "\n\n" + render_tools(*tools);
+      prompt += "\n\n";
+      prompt += render_tools(*tools);
     }
     if (has_response_format) {
-      dev_content += "\n\n" + absl::StrReplaceAll(
-                                  std::string(kResponseFormatTemplate),
-                                  {{"{schema}", to_json(*response_format)}});
+      prompt += "\n\n";
+      prompt += absl::StrReplaceAll(std::string(kResponseFormatTemplate),
+                                    {{"{schema}", to_json(*response_format)}});
     }
-    prompt += dev_content;
   } else if (role == kRoleUser) {
     prompt += kUserSpToken;
     if (msg.contains("content_blocks") && msg["content_blocks"].is_array()) {
-      std::vector<std::string> parts;
-      parts.reserve(msg["content_blocks"].size());
+      bool first_part = true;
       for (const auto& block : msg["content_blocks"]) {
         std::string btype = block.value("type", "");
+        if (btype != "text" && btype != "tool_result") {
+          continue;
+        }
+        if (!first_part) {
+          prompt += "\n\n";
+        }
+        first_part = false;
         if (btype == "text") {
-          parts.emplace_back(block.value("text", ""));
-        } else if (btype == "tool_result") {
+          const auto text = block.find("text");
+          if (text != block.end()) {
+            prompt += text->get_ref<const std::string&>();
+          }
+        } else {
           const auto tool_content = block.find("content");
           const std::string& tc =
               tool_content == block.end()
                   ? empty_content
                   : tool_content->get_ref<const std::string&>();
-          parts.emplace_back(absl::StrReplaceAll(
-              std::string(kToolOutputTemplate), {{"{content}", tc}}));
+          prompt += "<tool_result>";
+          prompt += tc;
+          prompt += "</tool_result>";
         }
       }
-      prompt += absl::StrJoin(parts, "\n\n");
     } else {
-      prompt += content.empty() ? "" : content;
+      prompt += content;
     }
   } else if (role == kRoleLatestReminder) {
-    prompt += std::string(kLatestReminderSpToken) + content;
+    prompt += kLatestReminderSpToken;
+    prompt += content;
   } else if (role == kRoleTool) {
     LOG(FATAL) << "deepseek_v4 merges tool messages into user; please "
                   "preprocess with merge_tool_messages()";
   } else if (role == kRoleAssistant) {
-    std::string thinking_part;
     std::string tc_content;
 
     const auto tool_calls = msg.find("tool_calls");
@@ -731,16 +739,17 @@ std::string render_message(const nlohmann::ordered_json& messages,
             reasoning_it == msg.end()
                 ? empty_content
                 : reasoning_it->get_ref<const std::string&>();
-        thinking_part = reasoning + kThinkingEndToken;
+        prompt += reasoning;
+        prompt += kThinkingEndToken;
       }
     }
 
     bool wo_eos = msg.contains("wo_eos") && msg["wo_eos"].is_boolean() &&
                   msg["wo_eos"].get<bool>();
-    if (wo_eos) {
-      prompt += thinking_part + content + tc_content;
-    } else {
-      prompt += thinking_part + content + tc_content + kEosToken;
+    prompt += content;
+    prompt += tc_content;
+    if (!wo_eos) {
+      prompt += kEosToken;
     }
   } else {
     LOG(FATAL) << "Unknown role: " + role;

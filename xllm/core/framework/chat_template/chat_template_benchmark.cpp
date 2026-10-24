@@ -46,6 +46,8 @@ limitations under the License.
 //   * BM_ChatTemplate_DeepseekToolResults  - consecutive, ordered or reversed
 //                                            tool results after one assistant
 //   * BM_ChatTemplate_DeepseekToolSchemas  - fixed input with n schemas
+//   * BM_ChatTemplate_DeepseekPayload      - fixed three-message conversation
+//                                            with long content and reasoning
 //
 // Build in Release mode before comparing latency. JinjaRender and Deepseek
 // cases include per-request conversion, preprocessing, rendering,
@@ -311,7 +313,9 @@ template <typename Template>
 void run_deepseek_benchmark(benchmark::State& state,
                             const ChatMessages& messages,
                             const std::vector<JsonTool>& tools,
-                            bool thinking) {
+                            bool thinking,
+                            std::optional<ChatTemplateGenerationMode>
+                                expected_generation_mode = std::nullopt) {
   const TokenizerArgs tokenizer_args;
   const Template chat_template(tokenizer_args);
   const nlohmann::ordered_json kwargs = {{"thinking", thinking},
@@ -321,8 +325,9 @@ void run_deepseek_benchmark(benchmark::State& state,
   const std::optional<ChatTemplateRenderResult> repeated =
       chat_template.apply_with_generation_mode(messages, tools, kwargs);
   const ChatTemplateGenerationMode expected_mode =
-      thinking ? ChatTemplateGenerationMode::REASONING
-               : ChatTemplateGenerationMode::CHAT;
+      expected_generation_mode.value_or(
+          thinking ? ChatTemplateGenerationMode::REASONING
+                   : ChatTemplateGenerationMode::CHAT);
   if (!expected.has_value() || expected->prompt.empty() ||
       !repeated.has_value() || repeated->prompt != expected->prompt ||
       expected->generation_mode != expected_mode ||
@@ -375,6 +380,25 @@ void BM_ChatTemplate_DeepseekToolSchemas(benchmark::State& state) {
   const std::vector<JsonTool> tools =
       make_tools(static_cast<size_t>(state.range(0)));
   run_deepseek_benchmark<Template>(state, messages, tools, state.range(1) != 0);
+}
+
+template <typename Template>
+void BM_ChatTemplate_DeepseekPayload(benchmark::State& state) {
+  const size_t payload_bytes = static_cast<size_t>(state.range(0));
+  ChatMessages messages;
+  messages.reserve(3);
+  messages.emplace_back("system", std::string(payload_bytes, 's'));
+  messages.emplace_back("user", std::string(payload_bytes, 'u'));
+  messages.emplace_back("assistant", std::string(payload_bytes, 'a'));
+  // Ending with assistant retains its reasoning during preprocessing.
+  messages.back().reasoning_content = std::string(payload_bytes, 'r');
+  const std::vector<JsonTool> no_tools;
+  run_deepseek_benchmark<Template>(state,
+                                   messages,
+                                   no_tools,
+                                   state.range(1) != 0,
+                                   ChatTemplateGenerationMode::UNKNOWN);
+  state.counters["payload_bytes"] = static_cast<double>(payload_bytes);
 }
 
 void BM_ChatTemplate_JinjaRender(benchmark::State& state) {
@@ -592,6 +616,14 @@ BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekToolSchemas, DeepseekV32CppTemplate)
 BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekToolSchemas, DeepseekV4CppTemplate)
     ->ArgsProduct({{1, 4, 16, 64}, {0, 1}})
     ->ArgNames({"schemas", "thinking"})
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekPayload, DeepseekV32CppTemplate)
+    ->ArgsProduct({{4096, 65536}, {0, 1}})
+    ->ArgNames({"payload_bytes", "thinking"})
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekPayload, DeepseekV4CppTemplate)
+    ->ArgsProduct({{4096, 65536}, {0, 1}})
+    ->ArgNames({"payload_bytes", "thinking"})
     ->Unit(benchmark::kMicrosecond);
 
 }  // namespace

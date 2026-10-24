@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <string>
 #include <utility>
 
 namespace xllm {
@@ -66,6 +67,41 @@ TEST(DeepseekV32CppTemplate, RendersHistoryWithoutUserMessages) {
       messages, /*json_tools=*/{}, nlohmann::ordered_json{{"thinking", false}});
   ASSERT_TRUE(prompt.has_value());
   EXPECT_EQ(*prompt, expected);
+}
+
+TEST(DeepseekV32CppTemplate, PreservesLongPayloadBytesAndLiteralPlaceholders) {
+  const DeepseekV32CppTemplate encoder{TokenizerArgs()};
+  const std::string literals =
+      "中文🙂{content}{thinking_content}{reasoning}{tool_calls}{dsml_token}";
+  const std::string system_content =
+      std::string(64 * 1024, 's') + '\0' + literals;
+  const std::string user_content =
+      std::string(64 * 1024, 'u') + '\0' + literals;
+  const std::string assistant_content =
+      std::string(64 * 1024, 'a') + '\0' + literals;
+  const std::string reasoning_content =
+      std::string(128 * 1024, 'r') + '\0' + literals;
+  ChatMessages messages;
+  messages.reserve(3);
+  messages.emplace_back("system", system_content);
+  messages.emplace_back("user", user_content);
+  Message assistant("assistant", assistant_content);
+  assistant.reasoning_content = reasoning_content;
+  messages.emplace_back(std::move(assistant));
+
+  for (const bool thinking : {false, true}) {
+    SCOPED_TRACE(thinking);
+    const nlohmann::ordered_json kwargs = {{"thinking", thinking},
+                                           {"reasoning_effort", "low"}};
+    const auto prompt = encoder.apply(messages, /*json_tools=*/{}, kwargs);
+    ASSERT_TRUE(prompt.has_value());
+    const std::string expected =
+        std::string("<｜begin▁of▁sentence｜>") + system_content + "<｜User｜>" +
+        user_content + "<｜Assistant｜>" +
+        (thinking ? "<think>" + reasoning_content + "</think>" : "</think>") +
+        assistant_content + "<｜end▁of▁sentence｜>";
+    EXPECT_EQ(*prompt, expected);
+  }
 }
 
 TEST(DeepseekV32CppTemplate, BasicUserMessage) {
@@ -245,6 +281,40 @@ Message make_tool_assistant(int32_t call_count) {
   }
   assistant.tool_calls = std::move(calls);
   return assistant;
+}
+
+TEST(DeepseekV32CppTemplate, PreservesEmptyAndBinaryToolResults) {
+  const DeepseekV32CppTemplate encoder{TokenizerArgs()};
+  const std::string tool_content =
+      std::string("工具结果🙂") + '\0' +
+      "{content}{thinking_content}{reasoning}{tool_calls}{dsml_token}";
+  ChatMessages messages;
+  messages.reserve(4);
+  messages.emplace_back("user", "run tools");
+  Message assistant = make_tool_assistant(/*call_count=*/2);
+  assistant.reasoning_content = "";
+  messages.emplace_back(std::move(assistant));
+  messages.emplace_back("tool", "");
+  messages.emplace_back("tool", tool_content);
+
+  const auto prompt = encoder.apply(
+      messages, /*json_tools=*/{}, nlohmann::ordered_json{{"thinking", true}});
+  ASSERT_TRUE(prompt.has_value());
+  const std::string expected =
+      std::string(
+          "<｜begin▁of▁sentence｜><｜User｜>run tools"
+          "<｜Assistant｜><think></think>"
+          "\n\n<｜DSML｜function_calls>"
+          "\n<｜DSML｜invoke name=\"lookup\">"
+          "\n<｜DSML｜parameter name=\"query\" string=\"true\">value"
+          "</｜DSML｜parameter>\n</｜DSML｜invoke>"
+          "\n<｜DSML｜invoke name=\"lookup\">"
+          "\n<｜DSML｜parameter name=\"query\" string=\"true\">value"
+          "</｜DSML｜parameter>\n</｜DSML｜invoke>"
+          "\n</｜DSML｜function_calls><｜end▁of▁sentence｜>"
+          "\n\n<function_results>\n<result></result>\n<result>") +
+      tool_content + "</result>\n</function_results>\n\n<think>";
+  EXPECT_EQ(*prompt, expected);
 }
 
 TEST(DeepseekV32CppTemplate, ConsecutiveToolResultsKeepRoundBoundaries) {
