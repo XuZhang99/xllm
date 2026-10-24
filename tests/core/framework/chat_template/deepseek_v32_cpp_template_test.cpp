@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <utility>
+
 namespace xllm {
 
 TEST(DeepseekV32CppTemplate, PreservesLastUserThinkingAfterDroppingDeveloper) {
@@ -225,5 +227,89 @@ TEST(DeepseekV32CppTemplate, DropThinkingOnlyWhenLastMessageIsUser) {
   // so thinking should NOT be dropped.
   EXPECT_NE(prompt->find("thinking about it"), std::string::npos);
 }
+
+namespace {
+
+Message make_tool_assistant(int32_t call_count) {
+  Message assistant("assistant", "");
+  assistant.reasoning_content = "plan";
+  Message::ToolCallVec calls;
+  calls.reserve(call_count);
+  for (int32_t idx = 0; idx < call_count; ++idx) {
+    Message::ToolCall call;
+    call.id = std::to_string(idx);
+    call.type = "function";
+    call.function.name = "lookup";
+    call.function.arguments = R"({"query":"value"})";
+    calls.emplace_back(std::move(call));
+  }
+  assistant.tool_calls = std::move(calls);
+  return assistant;
+}
+
+TEST(DeepseekV32CppTemplate, ConsecutiveToolResultsKeepRoundBoundaries) {
+  const DeepseekV32CppTemplate encoder{TokenizerArgs()};
+  ChatMessages messages;
+  messages.emplace_back("user", "run tools");
+  messages.emplace_back(make_tool_assistant(/*call_count=*/3));
+  messages.emplace_back("tool", "first");
+  messages.emplace_back("tool", "second");
+  messages.emplace_back("tool", "third");
+  messages.emplace_back(make_tool_assistant(/*call_count=*/1));
+  messages.emplace_back("tool", "last");
+
+  for (const bool thinking : {false, true}) {
+    const auto prompt =
+        encoder.apply(messages,
+                      /*json_tools=*/{},
+                      nlohmann::ordered_json{{"thinking", thinking}});
+    ASSERT_TRUE(prompt.has_value());
+    EXPECT_NE(prompt->find("<function_results>\n<result>first</result>"
+                           "\n<result>second</result>\n<result>third</result>"
+                           "\n</function_results>"),
+              std::string::npos);
+    const std::string ending = std::string(
+                                   "<function_results>\n<result>last</"
+                                   "result>\n</function_results>\n\n") +
+                               (thinking ? "<think>" : "</think>");
+    EXPECT_EQ(prompt->substr(prompt->size() - ending.size()), ending);
+  }
+}
+
+TEST(DeepseekV32CppTemplate, PartialToolResultsLeaveResultBlockOpen) {
+  const DeepseekV32CppTemplate encoder{TokenizerArgs()};
+  ChatMessages messages;
+  messages.emplace_back("user", "run tools");
+  messages.emplace_back(make_tool_assistant(/*call_count=*/2));
+  messages.emplace_back("tool", "first");
+  const auto prompt = encoder.apply(messages);
+  ASSERT_TRUE(prompt.has_value());
+  const std::string ending = "<function_results>\n<result>first</result>";
+  EXPECT_EQ(prompt->substr(prompt->size() - ending.size()), ending);
+}
+
+TEST(DeepseekV32CppTemplate, RejectsToolResultAfterInterveningUser) {
+  const DeepseekV32CppTemplate encoder{TokenizerArgs()};
+  ChatMessages messages;
+  messages.emplace_back("user", "run tools");
+  messages.emplace_back(make_tool_assistant(/*call_count=*/1));
+  messages.emplace_back("tool", "first");
+  messages.emplace_back("user", "new request");
+  messages.emplace_back("tool", "orphan");
+  EXPECT_DEATH(encoder.apply(messages),
+               "Tool message does not follow assistant");
+}
+
+TEST(DeepseekV32CppTemplate, RejectsMoreResultsThanAssistantCalls) {
+  const DeepseekV32CppTemplate encoder{TokenizerArgs()};
+  ChatMessages messages;
+  messages.emplace_back("user", "run tools");
+  messages.emplace_back(make_tool_assistant(/*call_count=*/1));
+  messages.emplace_back("tool", "first");
+  messages.emplace_back("tool", "extra");
+  EXPECT_DEATH(encoder.apply(messages), "Invalid tool call order");
+}
+
+}  // namespace
 
 }  // namespace xllm
