@@ -64,6 +64,8 @@ class StaticGraphAttentionMetadata:
     block_table: torch.Tensor | None = None
     kv_seq_lens: torch.Tensor | None = None
     linear_state_indices: torch.Tensor | None = None
+    num_accepted_tokens: torch.Tensor | None = None
+    num_accepted_tokens_host_values: tuple[int, ...] = ()
     has_initial_state: torch.Tensor | None = None
     dp_execution_token_counts: tuple[int, ...] = ()
     dp_global_sequence_nums: tuple[int, ...] = ()

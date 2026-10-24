@@ -289,6 +289,37 @@ torch::Tensor mega_gdn_decode_npu(const torch::Tensor& qkv,
                                              fla_ssm_state_layout));
 }
 
+torch::Tensor mega_gdn_mtp_decode_npu(const torch::Tensor& qkv,
+                                      const torch::Tensor& z,
+                                      const torch::Tensor& b,
+                                      const torch::Tensor& a,
+                                      const torch::Tensor& conv_weight,
+                                      torch::Tensor& conv_state,
+                                      const torch::Tensor& a_log,
+                                      const torch::Tensor& dt_bias,
+                                      torch::Tensor& ssm_state,
+                                      const torch::Tensor& read_state_indices,
+                                      const torch::Tensor& write_state_indices,
+                                      const torch::Tensor& num_accepted_tokens,
+                                      const torch::Tensor& norm_weight,
+                                      bool fla_ssm_state_layout) {
+  return std::get<3>(
+      xllm::kernel::npu::npu_mega_gdn_mtp_decode(qkv,
+                                                 z,
+                                                 b,
+                                                 a,
+                                                 conv_weight,
+                                                 conv_state,
+                                                 a_log,
+                                                 dt_bias,
+                                                 ssm_state,
+                                                 read_state_indices,
+                                                 write_state_indices,
+                                                 num_accepted_tokens,
+                                                 norm_weight,
+                                                 fla_ssm_state_layout));
+}
+
 torch::Tensor fused_sigmoid_gating_delta_rule_decode_npu(
     torch::Tensor a_log,
     torch::Tensor a,
@@ -729,6 +760,12 @@ TORCH_LIBRARY(xllm_ops, m) {
       "write_state_indices, Tensor norm_weight, bool fla_ssm_state_layout) "
       "-> Tensor");
   m.def(
+      "mega_gdn_mtp_decode(Tensor qkv, Tensor z, Tensor b, Tensor a, Tensor "
+      "conv_weight, Tensor(a!) conv_state, Tensor a_log, Tensor dt_bias, "
+      "Tensor(b!) ssm_state, Tensor read_state_indices, Tensor "
+      "write_state_indices, Tensor num_accepted_tokens, Tensor norm_weight, "
+      "bool fla_ssm_state_layout) -> Tensor");
+  m.def(
       "causal_conv1d_prefill(Tensor x, Tensor weight, Tensor(a!) conv_state, "
       "Tensor state_indices, Tensor has_initial_state, "
       "Tensor query_start_loc) -> Tensor");
@@ -984,6 +1021,7 @@ TORCH_LIBRARY_IMPL(xllm_ops, PrivateUse1, m) {
   m.impl("chunk_gated_delta_rule", TORCH_FN(xllm::chunk_gated_delta_rule_npu));
   m.impl("mega_gdn_prefill", TORCH_FN(xllm::mega_gdn_prefill_npu));
   m.impl("mega_gdn_decode", TORCH_FN(xllm::mega_gdn_decode_npu));
+  m.impl("mega_gdn_mtp_decode", TORCH_FN(xllm::mega_gdn_mtp_decode_npu));
   m.impl("causal_conv1d_prefill", TORCH_FN(xllm::causal_conv1d_prefill_npu));
   m.impl("causal_conv1d_qkv_prefill",
          TORCH_FN(xllm::causal_conv1d_qkv_prefill_npu));

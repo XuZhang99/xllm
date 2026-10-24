@@ -22,9 +22,11 @@ import torch
 from xllm.python.attention.backend import AttentionMetadata, LayerCache, resolve_linear_state_io_indices
 from xllm.python.layers.npu.qwen3_5.gdn_metadata import (
     GdnDecodeMetadata,
+    GdnDummyMetadata,
     GdnMetadata,
     GdnPrefillMetadata,
     GdnStateCache,
+    GdnVerifyMetadata,
 )
 
 if TYPE_CHECKING:
@@ -65,6 +67,7 @@ def _compute_mega_prefill_num_matrices(query_lengths: list[int], num_value_heads
 
 class Qwen3_5GdnMetadataBuilder:
     metadata_type: type[object] = GdnMetadata
+    supports_linear_spec_verify_graph = True
 
     def __init__(self, cfg: Qwen3_5Config) -> None:
         if cfg.linear_conv_kernel_dim != 4:
@@ -111,8 +114,8 @@ class Qwen3_5GdnMetadataBuilder:
     def build(self, metadata: AttentionMetadata) -> GdnMetadata:
         if self._state_caches is None or self._checkpoint_stride is None:
             raise RuntimeError("Qwen3.5 GDN state caches must be bound before execution")
-        if getattr(metadata, "is_spec_verify", False):
-            raise NotImplementedError("Qwen3.5 Python MegaGdn does not support speculative verification")
+        if metadata.is_dummy:
+            return GdnDummyMetadata(self._state_caches)
         device = metadata.slot_mapping.device
         if device != self._device:
             raise ValueError("Qwen3.5 GDN input and state caches must use one device")
@@ -123,6 +126,10 @@ class Qwen3_5GdnMetadataBuilder:
             raise ValueError("Qwen3.5 GDN state indices must be one-dimensional and shape-aligned")
         read_indices = read_indices.to(device=device, dtype=torch.int32).contiguous()
         write_indices = write_indices.to(device=device, dtype=torch.int32).contiguous()
+        # Verify is also marked chunked prefill by the speculative worker.
+        # It must restore the last accepted checkpoint before processing rows.
+        if metadata.is_spec_verify:
+            return self._build_verify(metadata, write_indices)
         if not (metadata.is_prefill or metadata.is_chunked_prefill):
             if read_indices.numel() != metadata.slot_mapping.numel() or read_indices.numel() == 0:
                 raise ValueError("Qwen3.5 GDN decode requires one state slot per token")
@@ -169,4 +176,52 @@ class Qwen3_5GdnMetadataBuilder:
             ssm_write,
             cu_seqlens.to(device=device, dtype=torch.int32).contiguous(),
             _compute_mega_prefill_num_matrices(query_lengths, self._num_value_heads),
+        )
+
+    def _build_verify(self, metadata: AttentionMetadata, state_indices: torch.Tensor) -> GdnVerifyMetadata:
+        assert self._state_caches is not None and self._checkpoint_stride is not None
+        width = self._checkpoint_stride
+        if not 2 <= width <= 17:
+            raise ValueError("Qwen3.5 MegaGdnMtpDecode requires 2 to 17 checkpoints per state slot")
+        query_lengths_host = metadata.q_seq_lens_host
+        if (
+            query_lengths_host is None
+            or query_lengths_host.device.type != "cpu"
+            or query_lengths_host.ndim != 1
+            or query_lengths_host.dtype not in (torch.int32, torch.int64)
+        ):
+            raise ValueError("Qwen3.5 MTP requires sequence-scoped CPU query lengths")
+        lengths = query_lengths_host.tolist()
+        if not lengths or any(length <= 0 or length > width for length in lengths):
+            raise ValueError("Qwen3.5 MTP query lengths must be in [1, checkpoint stride]")
+        token_count = sum(lengths)
+        if token_count != metadata.slot_mapping.numel():
+            raise ValueError("Qwen3.5 MTP query lengths must cover every packed token")
+        batch_size = len(lengths)
+        if state_indices.numel() == token_count:
+            # The C++ Python bridge can expand one logical state ID over all
+            # tokens of its request. Graph entries own sequence-scoped storage.
+            starts = torch.tensor(list(accumulate(lengths, initial=0))[:-1], device=state_indices.device)
+            state_indices = state_indices.index_select(0, starts)
+        elif state_indices.numel() != batch_size:
+            raise ValueError("Qwen3.5 MTP requires one state slot per request or packed token")
+        accepted = metadata.num_accepted_tokens
+        accepted_host = metadata.num_accepted_tokens_host_values
+        if accepted is None or accepted.ndim != 1 or accepted.numel() != batch_size:
+            raise ValueError("Qwen3.5 MTP accepted counts must be sequence-scoped")
+        if len(accepted_host) != batch_size or any(count < 1 or count > width for count in accepted_host):
+            raise ValueError("Qwen3.5 MTP accepted counts must be in [1, checkpoint stride]")
+        packed_to_dense = None
+        if any(length != width for length in lengths):
+            packed_to_dense = torch.tensor(
+                [row * width + offset for row, length in enumerate(lengths) for offset in range(length)],
+                dtype=torch.int64,
+                device=state_indices.device,
+            )
+        return GdnVerifyMetadata(
+            self._state_caches,
+            state_indices,
+            accepted.to(device=state_indices.device, dtype=torch.int32).contiguous(),
+            width,
+            packed_to_dense,
         )

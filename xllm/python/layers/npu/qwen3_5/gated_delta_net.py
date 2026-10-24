@@ -25,7 +25,13 @@ from xllm.python import kernels
 from xllm.python.layers.flash_comm1 import get_flash_comm1_context
 from xllm.python.layers.linear import ColumnParallelLinear
 from xllm.python.layers.npu.flash_comm1 import FlashComm1RowParallelLinear
-from xllm.python.layers.npu.qwen3_5.gdn_metadata import GdnDecodeMetadata, GdnMetadata, GdnPrefillMetadata
+from xllm.python.layers.npu.qwen3_5.gdn_metadata import (
+    GdnDecodeMetadata,
+    GdnDummyMetadata,
+    GdnMetadata,
+    GdnPrefillMetadata,
+    GdnVerifyMetadata,
+)
 from xllm.python.layers.qwen3_5.common import Qwen3_5GatedDeltaNetConfig
 from xllm.python.layers.qwen3_5.gated_delta_net import load_gdn_weights
 from xllm.python.model_executor.forward_context import get_execution_context
@@ -190,6 +196,48 @@ class NpuQwen3_5GatedDeltaNet(nn.Module):
             )
         return chunk_outputs[0] if len(chunk_outputs) == 1 else torch.cat(chunk_outputs, dim=0)
 
+    def _verify(self, hidden: torch.Tensor, metadata: GdnVerifyMetadata) -> torch.Tensor:
+        batch_size = metadata.state_indices.numel()
+        width = metadata.query_width
+        state_cache = metadata.state_caches[self.layer_id]
+
+        def _pad(tensor: torch.Tensor) -> torch.Tensor:
+            if metadata.packed_to_dense is not None:
+                dense = tensor.new_zeros((batch_size * width, *tensor.shape[1:]))
+                tensor = dense.index_copy_(0, metadata.packed_to_dense, tensor)
+            return tensor.reshape(batch_size, width, *tensor.shape[1:])
+
+        # Match native project_split_inputs: project packed rows first, then
+        # pad each request independently to the checkpoint stride.
+        mixed_qkv, a, b, z = (_pad(tensor) for tensor in self._project_prefill_inputs(hidden))
+        chunk_outputs = []
+        for start in range(0, batch_size, _MEGA_GDN_MAX_DECODE_BATCH_SIZE):
+            end = min(start + _MEGA_GDN_MAX_DECODE_BATCH_SIZE, batch_size)
+            indices = metadata.state_indices[start:end]
+            chunk_outputs.append(
+                kernels.mega_gdn_mtp_decode(
+                    mixed_qkv[start:end].contiguous(),
+                    z[start:end].contiguous(),
+                    b[start:end].contiguous(),
+                    a[start:end].contiguous(),
+                    self.conv1d_weight,
+                    state_cache.conv,
+                    self.A_log,
+                    self.dt_bias,
+                    state_cache.ssm,
+                    indices,
+                    indices,
+                    metadata.num_accepted_tokens[start:end],
+                    self.norm_weight,
+                    True,
+                )
+            )
+        output = chunk_outputs[0] if len(chunk_outputs) == 1 else torch.cat(chunk_outputs, dim=0)
+        output = output.reshape(batch_size * width, self.value_dim)
+        if metadata.packed_to_dense is not None:
+            output = output.index_select(0, metadata.packed_to_dense)
+        return output
+
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         flash_comm1 = get_flash_comm1_context()
         if flash_comm1 is not None:
@@ -197,8 +245,12 @@ class NpuQwen3_5GatedDeltaNet(nn.Module):
         metadata = get_execution_context(GdnMetadata)
         if metadata is None:
             raise RuntimeError("Qwen3.5 GDN metadata is unavailable")
+        if isinstance(metadata, GdnDummyMetadata):
+            return torch.zeros_like(hidden)
         state_cache = metadata.state_caches[self.layer_id]
-        if isinstance(metadata, GdnPrefillMetadata):
+        if isinstance(metadata, GdnVerifyMetadata):
+            output = self._verify(hidden, metadata)
+        elif isinstance(metadata, GdnPrefillMetadata):
             mixed_qkv, a, b, z = self._project_prefill_inputs(hidden)
             output = kernels.mega_gdn_prefill(
                 mixed_qkv.contiguous(),

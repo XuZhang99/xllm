@@ -95,6 +95,12 @@ def _register_builtin_models() -> None:
         "qwen3_5_moe_text",
     )
     _register_model_path(
+        "xllm.python.models.qwen3_5_mtp",
+        "Qwen3_5MtpForCausalLM",
+        "Qwen3_5MtpForCausalLM",
+        "qwen3_5_mtp",
+    )
+    _register_model_path(
         "xllm.python.models.qwen3_5_vl",
         "Qwen3_5ForConditionalGeneration",
         "Qwen3_5ForConditionalGeneration",

@@ -135,6 +135,9 @@ class DecodeAclGraphRunner(AclGraphRunner):
         self._is_spec_draft = is_spec_draft
         self._has_index_cache = False
         self._has_linear_cache = False
+        self._model_owns_linear_spec_verify = any(
+            getattr(builder, "supports_linear_spec_verify_graph", False) for builder in self.execution_metadata_builders
+        )
         self._uses_compressed_kpool_tail = False
         self._graphs: dict[_GraphKey, AclGraphEntry] = {}
         self._dp_graph_variants: dict[_GraphKey, int] = {}
@@ -184,6 +187,10 @@ class DecodeAclGraphRunner(AclGraphRunner):
         is_expanded_spec_verify = expanded_view is not None
         if (metadata.is_prefill or metadata.is_chunked_prefill) and not is_expanded_spec_verify:
             return None
+        if is_expanded_spec_verify and self._model_owns_linear_spec_verify:
+            query_lens = self._expanded_query_lens(metadata)
+            if _uniform_span_width(query_lens) != self.num_decoding_tokens:
+                return None
 
         # Linear verify requires a backend recurrent-state protocol.
         linear_indices = getattr(metadata, "linear_state_indices", None)
@@ -193,6 +200,7 @@ class DecodeAclGraphRunner(AclGraphRunner):
             and linear_indices is not None
             and linear_indices.numel() > 0
             and not self.attention_backend.supports_linear_spec_verify_graph
+            and not self._model_owns_linear_spec_verify
         ):
             return None
 
@@ -211,12 +219,12 @@ class DecodeAclGraphRunner(AclGraphRunner):
                 return None
             if max(execution_counts) > self.max_batch:
                 return None
-            padded_batch_size = min(_decode_bucket(max(execution_counts)), self.max_batch)
+            padded_batch_size = self._padded_batch_size(batch_size, metadata)
         else:
             execution_counts = ()
             if batch_size > self.max_batch:
                 return None
-            padded_batch_size = min(_decode_bucket(batch_size), self.max_batch)
+            padded_batch_size = self._padded_batch_size(batch_size, metadata)
 
         def reject_layout(reason: str) -> None:
             if self.dp_size > 1:
@@ -347,6 +355,14 @@ class DecodeAclGraphRunner(AclGraphRunner):
             batch_size = max(execution_counts)
         if batch_size > self.max_batch:
             raise ValueError("decode batch exceeds ACL graph capacity")
+        if self._model_owns_linear_spec_verify and metadata.is_spec_verify:
+            # MegaGdnMtpDecode consumes complete requests, including for MTP4
+            # (width 5). Round request counts, never split a request at a token
+            # bucket boundary.
+            width = self.num_decoding_tokens
+            if batch_size % width:
+                raise ValueError("linear verify graph requires complete fixed-width requests")
+            return min(_decode_bucket(batch_size // width), self.max_batch // width) * width
         # Keep a final partial bucket instead of falling back to eager or
         # padding beyond the backend's declared row capacity.
         return min(_decode_bucket(batch_size), self.max_batch)
@@ -814,7 +830,7 @@ class DecodeAclGraphRunner(AclGraphRunner):
 
     def _capture(self, entry: AclGraphEntry, stream: torch.npu.Stream) -> None:
         # Graph warmup and capture execute the model before the first replay.
-        # KDA advances recurrent cache and speculative state on each forward,
+        # Linear attention advances recurrent state on each forward,
         # so restore the touched slots before serving the decode step.
         idx = entry.static_metadata.linear_state_indices
         linear_snapshot = []
@@ -822,7 +838,13 @@ class DecodeAclGraphRunner(AclGraphRunner):
         if idx is not None:
             for cache in self.layer_caches:
                 if (conv := cache.conv) is not None and (ssm := cache.ssm) is not None:
-                    linear_snapshot.append((conv, ssm, conv.index_select(0, idx), ssm.index_select(0, idx)))
+                    # GDN stores S SSM checkpoints for each Conv slot. Save
+                    # every checkpoint, not just the row at the logical ID.
+                    stride = ssm.shape[0] // conv.shape[0]
+                    ssm_idx = (idx[:, None] * stride + torch.arange(stride, device=idx.device)).reshape(-1)
+                    linear_snapshot.append(
+                        (conv, ssm, ssm_idx, conv.index_select(0, idx), ssm.index_select(0, ssm_idx))
+                    )
             backend_snapshot = self.attention_backend.snapshot_linear_state(idx)
 
         try:
@@ -832,9 +854,9 @@ class DecodeAclGraphRunner(AclGraphRunner):
             # for capture writes before restoring on the caller's stream.
             torch.npu.current_stream().wait_stream(stream)
             if idx is not None:
-                for conv, ssm, conv_rows, ssm_rows in linear_snapshot:
+                for conv, ssm, ssm_idx, conv_rows, ssm_rows in linear_snapshot:
                     conv.index_copy_(0, idx, conv_rows)
-                    ssm.index_copy_(0, idx, ssm_rows)
+                    ssm.index_copy_(0, ssm_idx, ssm_rows)
             if backend_snapshot is not None:
                 self.attention_backend.restore_linear_state(backend_snapshot)
 
@@ -1077,9 +1099,16 @@ class DecodeAclGraphRunner(AclGraphRunner):
                 torch.zeros(len(expanded_graph_query_lens), dtype=torch.int32) if expanded_graph_query_lens else None
             ),
             linear_state_indices=torch.zeros(
-                padded_batch_size,
+                len(expanded_graph_query_lens)
+                if is_expanded and self._model_owns_linear_spec_verify
+                else padded_batch_size,
                 dtype=torch.int32,
                 device=device,
+            ),
+            num_accepted_tokens=(
+                torch.ones(len(expanded_graph_query_lens), dtype=torch.int32, device=device)
+                if is_expanded and self._model_owns_linear_spec_verify
+                else None
             ),
             kv_seq_lens_host_values=[1] * padded_batch_size,
             block_table=static_block_table,
@@ -1253,7 +1282,9 @@ class DecodeAclGraphRunner(AclGraphRunner):
             if getattr(self.attention_backend, "is_mla", False)
             else getattr(metadata, "linear_state_indices", None)
         )
-        if linear_state_indices is not None:
+        if static_metadata.num_accepted_tokens is not None:
+            self._fill_linear_verify_state(entry, metadata, expanded_query_lens, linear_state_indices)
+        elif linear_state_indices is not None:
             # MTP metadata carries one state index per sequence while the
             # decode graph input is expanded to one row per speculative token.
             # Repeat each sequence index across its token rows before copying
@@ -1274,7 +1305,7 @@ class DecodeAclGraphRunner(AclGraphRunner):
                     f"values={linear_state_indices.numel()})"
                 )
             static_metadata.linear_state_indices[:batch_size].copy_(linear_state_indices[:batch_size])
-        if padded_batch_size > batch_size:
+        if static_metadata.num_accepted_tokens is None and padded_batch_size > batch_size:
             static_metadata.linear_state_indices[batch_size:].zero_()
         self._fill_host_metadata(entry, kv_seq_lens_host_values, batch_size)
         self._fill_new_cache_slots_host_metadata(entry, metadata, batch_size)
@@ -1337,6 +1368,36 @@ class DecodeAclGraphRunner(AclGraphRunner):
             self._fill_mega_moe_token_mask(
                 entry, (batch_size,) if self.dp_size == 1 else metadata.dp_execution_token_counts
             )
+
+    @staticmethod
+    def _fill_linear_verify_state(
+        entry: AclGraphEntry,
+        metadata: AttentionMetadata,
+        query_lens: tuple[int, ...],
+        state_indices: torch.Tensor | None,
+    ) -> None:
+        width = _uniform_span_width(query_lens)
+        if width is None or width <= 1 or state_indices is None:
+            raise ValueError("linear verify graph requires fixed-width requests and state indices")
+        sequence_count = len(query_lens)
+        if state_indices.numel() == sequence_count * width:
+            state_indices = state_indices[::width]
+        if state_indices.numel() != sequence_count:
+            raise ValueError("linear verify state indices do not match the request count")
+        accepted = metadata.num_accepted_tokens
+        accepted_host = tuple(metadata.num_accepted_tokens_host_values)
+        if accepted is None or accepted.ndim != 1 or accepted.numel() != sequence_count:
+            raise ValueError("linear verify accepted counts must be sequence-scoped")
+        if len(accepted_host) != sequence_count or any(count < 1 or count > width for count in accepted_host):
+            raise ValueError("linear verify accepted counts must be in [1, verify width]")
+        static = entry.static_metadata
+        static.linear_state_indices[:sequence_count].copy_(state_indices)
+        static.linear_state_indices[sequence_count:].zero_()
+        static.num_accepted_tokens[:sequence_count].copy_(accepted)
+        static.num_accepted_tokens[sequence_count:].fill_(1)
+        static.num_accepted_tokens_host_values = accepted_host + (1,) * (
+            static.num_accepted_tokens.numel() - sequence_count
+        )
 
     def _fill_dsa_block_tables(
         self,
