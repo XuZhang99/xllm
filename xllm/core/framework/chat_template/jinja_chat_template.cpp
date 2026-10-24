@@ -32,6 +32,23 @@ namespace xllm {
 
 namespace {
 
+struct MessageFeatures {
+  bool has_tool_calls = false;
+  bool has_tool_responses = false;
+  bool has_string_content = false;
+};
+
+bool requires_polyfills(const minja::chat_template_caps& caps,
+                        const MessageFeatures& features,
+                        bool has_tools) {
+  // Mirrors minja::chat_template::apply with its default options.
+  return !caps.supports_system_role || (has_tools && !caps.supports_tools) ||
+         (features.has_tool_calls && !caps.supports_tool_calls) ||
+         (features.has_tool_responses && !caps.supports_tool_responses) ||
+         (features.has_tool_calls && caps.requires_object_arguments) ||
+         (features.has_string_content && caps.requires_typed_content);
+}
+
 // The `strftime_now(format)` global minja::chat_template::apply defines for
 // every render, bound to the render's wall-clock time.
 minja::Value make_strftime_now() {
@@ -178,12 +195,15 @@ std::optional<std::string> JinjaChatTemplate::apply(
   nlohmann::ordered_json messages_json = nlohmann::json::array();
   messages_json.get_ref<nlohmann::ordered_json::array_t&>().reserve(
       messages.size());
+  MessageFeatures features;
   for (const auto& message : messages) {
     nlohmann::ordered_json message_json;
     message_json["role"] = message.role;
+    features.has_tool_responses |= message.role == "tool";
 
     if (std::holds_alternative<std::string>(message.content)) {
       message_json["content"] = std::get<std::string>(message.content);
+      features.has_string_content = true;
     } else if (std::holds_alternative<MMContentVec>(message.content)) {
       message_json["content"] =
           get_mm_content(std::get<MMContentVec>(message.content));
@@ -198,6 +218,7 @@ std::optional<std::string> JinjaChatTemplate::apply(
     }
 
     if (message.tool_calls.has_value()) {
+      features.has_tool_calls = true;
       nlohmann::ordered_json tool_calls_json = nlohmann::json::array();
       const auto& tool_calls = *message.tool_calls;
       tool_calls_json.get_ref<nlohmann::ordered_json::array_t&>().reserve(
@@ -236,16 +257,34 @@ std::optional<std::string> JinjaChatTemplate::apply(
     }
   }
   // apply the template
-  return apply(
-      std::move(messages_json), std::move(tools_json), chat_template_kwargs);
+  return apply_impl(
+      std::move(messages_json),
+      std::move(tools_json),
+      chat_template_kwargs,
+      requires_polyfills(
+          template_->original_caps(), features, !json_tools.empty()));
 }
 
 std::optional<std::string> JinjaChatTemplate::apply(
     nlohmann::ordered_json messages,
     nlohmann::ordered_json tools,
     const nlohmann::ordered_json& chat_template_kwargs) const {
+  return apply_impl(std::move(messages),
+                    std::move(tools),
+                    chat_template_kwargs,
+                    std::nullopt);
+}
+
+std::optional<std::string> JinjaChatTemplate::apply_impl(
+    nlohmann::ordered_json messages,
+    nlohmann::ordered_json tools,
+    const nlohmann::ordered_json& chat_template_kwargs,
+    std::optional<bool> polyfills_required) const {
   try {
-    if (!needs_polyfills(messages, tools)) {
+    const bool use_polyfills = polyfills_required.has_value()
+                                   ? *polyfills_required
+                                   : needs_polyfills(messages, tools);
+    if (!use_polyfills) {
       return render_native(messages, tools, chat_template_kwargs);
     }
 
@@ -270,32 +309,23 @@ std::optional<std::string> JinjaChatTemplate::apply(
 bool JinjaChatTemplate::needs_polyfills(
     const nlohmann::ordered_json& messages,
     const nlohmann::ordered_json& tools) const {
-  // Mirrors the decision in minja::chat_template::apply with its default
-  // chat_template_options (every polyfill enabled).
-  const minja::chat_template_caps& caps = template_->original_caps();
   const bool has_tools = tools.is_array() && !tools.empty();
-  bool has_tool_calls = false;
-  bool has_tool_responses = false;
-  bool has_string_content = false;
+  MessageFeatures features;
   for (const auto& message : messages) {
     if (const auto it = message.find("tool_calls");
         it != message.end() && !it->is_null()) {
-      has_tool_calls = true;
+      features.has_tool_calls = true;
     }
     if (const auto it = message.find("role");
         it != message.end() && *it == "tool") {
-      has_tool_responses = true;
+      features.has_tool_responses = true;
     }
     if (const auto it = message.find("content");
         it != message.end() && it->is_string()) {
-      has_string_content = true;
+      features.has_string_content = true;
     }
   }
-  return !caps.supports_system_role || (has_tools && !caps.supports_tools) ||
-         (has_tool_calls && !caps.supports_tool_calls) ||
-         (has_tool_responses && !caps.supports_tool_responses) ||
-         (has_tool_calls && caps.requires_object_arguments) ||
-         (has_string_content && caps.requires_typed_content);
+  return requires_polyfills(template_->original_caps(), features, has_tools);
 }
 
 std::string JinjaChatTemplate::render_native(

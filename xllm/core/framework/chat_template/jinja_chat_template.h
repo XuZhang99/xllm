@@ -65,6 +65,14 @@ class JinjaChatTemplate : public ChatTemplate {
                        const nlohmann::ordered_json& tools) const;
 
  private:
+  // Typed inputs provide their conversion-time decision; JSON inputs use
+  // nullopt to request capability scanning inside the render error boundary.
+  std::optional<std::string> apply_impl(
+      nlohmann::ordered_json messages,
+      nlohmann::ordered_json tools,
+      const nlohmann::ordered_json& chat_template_kwargs,
+      std::optional<bool> polyfills_required) const;
+
   // Renders inputs the template supports natively. Builds the same context
   // minja::chat_template::apply does, but on top of the builtin globals
   // constructed once in the constructor instead of on every render.

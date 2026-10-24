@@ -25,6 +25,7 @@ limitations under the License.
 #include <vector>
 
 namespace xllm {
+namespace {
 
 class TestableJinjaChatTemplate : public JinjaChatTemplate {
  public:
@@ -119,6 +120,214 @@ nlohmann::ordered_json make_weather_tools() {
            {{"type", "object"},
             {"properties", {{"city", {{"type", "string"}}}}},
             {"required", {"city"}}}}}}}});
+}
+
+void expect_both_paths_match_minja(const std::string& template_str,
+                                   const ChatMessages& messages,
+                                   const nlohmann::ordered_json& messages_json,
+                                   const std::vector<JsonTool>& tools,
+                                   const nlohmann::ordered_json& tools_json,
+                                   const nlohmann::ordered_json& kwargs,
+                                   bool polyfills) {
+  TokenizerArgs args;
+  args.chat_template(template_str);
+  TestableJinjaChatTemplate chat_template(args);
+  EXPECT_EQ(chat_template.needs_polyfills(messages_json, tools_json),
+            polyfills);
+  const std::string expected =
+      reference_render(template_str, "", messages_json, tools_json, kwargs);
+  const auto typed_result = chat_template.apply(messages, tools, kwargs);
+  ASSERT_TRUE(typed_result.has_value());
+  EXPECT_EQ(*typed_result, expected);
+  const auto json_result =
+      chat_template.apply(messages_json, tools_json, kwargs);
+  ASSERT_TRUE(json_result.has_value());
+  EXPECT_EQ(*json_result, expected);
+}
+
+TEST(JinjaChatTemplate, TypedMessagesMatchMinjaAcrossCapabilities) {
+  const ChatMessages messages = {Message("system", "be brief"),
+                                 Message("user", "hello")};
+  const nlohmann::ordered_json messages_json = {
+      {{"role", "system"}, {"content", "be brief"}},
+      {{"role", "user"}, {"content", "hello"}}};
+  const nlohmann::ordered_json kwargs = {{"mode", "fast"}};
+  const std::vector<JsonTool> no_tools;
+  const nlohmann::ordered_json no_tools_json = nlohmann::ordered_json::array();
+  const std::string native_template =
+      "{% for message in messages %}"
+      "{{ message.role }}:{{ message.content }}|{% endfor %}{{ mode }}";
+  expect_both_paths_match_minja(native_template,
+                                messages,
+                                messages_json,
+                                no_tools,
+                                no_tools_json,
+                                kwargs,
+                                /*polyfills=*/false);
+  const std::string no_system_template =
+      "{% for message in messages %}{% if message.role != 'system' %}"
+      "{{ message.role }}:{{ message.content }}|{% endif %}{% endfor %}"
+      "{{ mode }}";
+  expect_both_paths_match_minja(no_system_template,
+                                messages,
+                                messages_json,
+                                no_tools,
+                                no_tools_json,
+                                kwargs,
+                                /*polyfills=*/true);
+
+  JsonTool weather_tool;
+  weather_tool.function.name = "get_weather";
+  weather_tool.function.description = "Get the weather for a city.";
+  weather_tool.function.parameters = {
+      {"type", "object"},
+      {"properties", {{"city", {{"type", "string"}}}}},
+      {"required", {"city"}}};
+  const std::vector<JsonTool> tools = {weather_tool};
+  for (const std::string& template_str :
+       {native_template, std::string(kQwen25ChatTemplate)}) {
+    expect_both_paths_match_minja(
+        template_str,
+        messages,
+        messages_json,
+        tools,
+        make_weather_tools(),
+        kwargs,
+        /*polyfills=*/template_str == native_template);
+  }
+}
+
+TEST(JinjaChatTemplate, TypedToolCallsAndResponsesMatchMinja) {
+  ChatMessages messages = {Message("user", "weather?"),
+                           Message("assistant", ""),
+                           Message("tool", "18C")};
+  messages[1].tool_calls = Message::ToolCallVec{
+      {"call_1", "function", {"get_weather", R"({"city":"Paris"})"}}};
+  messages[1].reasoning_content = "look up weather";
+  messages[2].tool_call_id = "call_1";
+  const nlohmann::ordered_json messages_json = {
+      {{"role", "user"}, {"content", "weather?"}},
+      {{"role", "assistant"},
+       {"content", ""},
+       {"reasoning_content", "look up weather"},
+       {"tool_calls",
+        {{{"id", "call_1"},
+          {"type", "function"},
+          {"function",
+           {{"name", "get_weather"}, {"arguments", R"({"city":"Paris"})"}}}}}}},
+      {{"role", "tool"}, {"content", "18C"}, {"tool_call_id", "call_1"}}};
+  const std::vector<JsonTool> tools;
+  const nlohmann::ordered_json tools_json = nlohmann::ordered_json::array();
+  const nlohmann::ordered_json kwargs = nlohmann::ordered_json::object();
+  for (const std::string& template_str :
+       {std::string(kQwen25ChatTemplate),
+        std::string("{% for message in messages %}"
+                    "{{ message.role }}:{{ message.content }}|{% endfor %}")}) {
+    expect_both_paths_match_minja(template_str,
+                                  messages,
+                                  messages_json,
+                                  tools,
+                                  tools_json,
+                                  kwargs,
+                                  /*polyfills=*/true);
+  }
+}
+
+TEST(JinjaChatTemplate, EmptyAndNullToolCallsKeepPolyfillSemantics) {
+  const std::string template_str =
+      "{% for message in messages %}{{ message.content }}|{% endfor %}";
+  ChatMessages messages = {Message("assistant", "")};
+  messages[0].tool_calls = Message::ToolCallVec();
+  const nlohmann::ordered_json messages_json = {
+      {{"role", "assistant"},
+       {"content", ""},
+       {"tool_calls", nlohmann::ordered_json::array()}}};
+  const std::vector<JsonTool> tools;
+  const nlohmann::ordered_json tools_json = nlohmann::ordered_json::array();
+  const nlohmann::ordered_json kwargs;
+  expect_both_paths_match_minja(template_str,
+                                messages,
+                                messages_json,
+                                tools,
+                                tools_json,
+                                kwargs,
+                                /*polyfills=*/true);
+
+  TokenizerArgs args;
+  args.chat_template(template_str);
+  TestableJinjaChatTemplate chat_template(args);
+  const nlohmann::ordered_json null_calls = {
+      {{"role", "assistant"}, {"content", ""}, {"tool_calls", nullptr}}};
+  EXPECT_FALSE(chat_template.needs_polyfills(null_calls, tools_json));
+  const auto result = chat_template.apply(null_calls, tools_json, kwargs);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result,
+            reference_render(template_str, "", null_calls, tools_json, kwargs));
+  EXPECT_EQ(*result, "|");
+}
+
+TEST(JinjaChatTemplate, TypedContentAndMultimodalArraysMatchMinja) {
+  const std::string template_str =
+      "{% for message in messages %}{% for part in message.content %}"
+      "{% if part.type == 'text' %}{{ part.text }}"
+      "{% else %}{{ part.image }}:{{ part.image_url }}{% endif %}"
+      "{% endfor %}|{% endfor %}";
+  const std::vector<JsonTool> tools;
+  const nlohmann::ordered_json tools_json = nlohmann::ordered_json::array();
+  const nlohmann::ordered_json kwargs = nlohmann::ordered_json::object();
+  const ChatMessages string_messages = {Message("system", "be brief"),
+                                        Message("user", "hello")};
+  const nlohmann::ordered_json string_messages_json = {
+      {{"role", "system"}, {"content", "be brief"}},
+      {{"role", "user"}, {"content", "hello"}}};
+  expect_both_paths_match_minja(template_str,
+                                string_messages,
+                                string_messages_json,
+                                tools,
+                                tools_json,
+                                kwargs,
+                                /*polyfills=*/true);
+
+  const ChatMessages typed_messages = {
+      Message("system", MMContentVec{MMContent("text", std::string("brief"))}),
+      Message("user",
+              MMContentVec{MMContent("text", std::string("hello")),
+                           MMContent("image_url", ImageURL{"unused", {}})}),
+      Message("assistant", MMContentVec{})};
+  const nlohmann::ordered_json typed_messages_json = {
+      {{"role", "system"},
+       {"content", {{{"type", "text"}, {"text", "brief"}}}}},
+      {{"role", "user"},
+       {"content",
+        {{{"type", "text"}, {"text", "hello"}},
+         {{"type", "image_url"},
+          {"image", "mm place holder"},
+          {"image_url", "mm place holder"}}}}},
+      {{"role", "assistant"}, {"content", nlohmann::ordered_json::array()}}};
+  expect_both_paths_match_minja(template_str,
+                                typed_messages,
+                                typed_messages_json,
+                                tools,
+                                tools_json,
+                                kwargs,
+                                /*polyfills=*/false);
+}
+
+TEST(JinjaChatTemplate, RenderErrorsReturnNulloptForBothInputPaths) {
+  TokenizerArgs args;
+  args.chat_template(
+      "{% for message in messages %}{{ message.content }}{% endfor %}"
+      "{% if fail %}{{ raise_exception('request rejected') }}{% endif %}");
+  TestableJinjaChatTemplate chat_template(args);
+  const ChatMessages messages = {Message("user", "hello")};
+  const nlohmann::ordered_json messages_json = {
+      {{"role", "user"}, {"content", "hello"}}};
+  const nlohmann::ordered_json kwargs = {{"fail", true}};
+  const std::vector<JsonTool> tools;
+  const nlohmann::ordered_json tools_json = nlohmann::ordered_json::array();
+  EXPECT_FALSE(chat_template.apply(messages, tools, kwargs).has_value());
+  EXPECT_FALSE(
+      chat_template.apply(messages_json, tools_json, kwargs).has_value());
 }
 
 TEST(JinjaChatTemplate, NativeRenderMatchesMinja) {
@@ -453,4 +662,5 @@ TEST(JinjaChatTemplate, PreservesDeferredToolMetadata) {
   EXPECT_NE(prompt->find("\"defer_loading\": true"), std::string::npos);
 }
 
+}  // namespace
 }  // namespace xllm
