@@ -22,7 +22,7 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
-#include "api_service/utils.h"
+#include "api_service/response_usage.h"
 #include "completion.pb.h"
 #include "core/framework/request/request_output.h"
 

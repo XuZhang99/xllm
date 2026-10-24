@@ -29,7 +29,7 @@ limitations under the License.
 
 #include "api_service/completion_response_builder.h"
 #include "api_service/openai_batch.h"
-#include "api_service/utils.h"
+#include "api_service/response_usage.h"
 #include "common/instance_name.h"
 #include "completion.pb.h"
 #include "core/distributed_runtime/llm_master.h"

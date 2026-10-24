@@ -27,7 +27,7 @@ limitations under the License.
 #include "api_service/anthropic_request_utils.h"
 #include "api_service/anthropic_stream_utils.h"
 #include "api_service/stream_output_parser.h"
-#include "api_service/utils.h"
+#include "api_service/tool_call_response.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/master_manager.h"

@@ -24,10 +24,12 @@ limitations under the License.
 #include <vector>
 
 #include "api_service/openai_json.h"
+#include "api_service/response_usage.h"
 #include "api_service/stream_output_parser.h"
-#include "api_service/utils.h"
+#include "api_service/tool_call_response.h"
 #include "chat.pb.h"
 #include "core/framework/request/request_output.h"
+#include "function_call/utils.h"
 
 namespace xllm::api_service {
 

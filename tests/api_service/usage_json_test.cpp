@@ -18,21 +18,13 @@ limitations under the License.
 
 #include <nlohmann/json.hpp>
 #include <string>
-#include <vector>
 
+#include "api_service/response_usage.h"
 #include "api_service/stream_call.h"
-#include "api_service/utils.h"
 #include "chat.pb.h"
 
 namespace xllm {
 namespace {
-
-std::vector<JsonTool> make_test_tools() {
-  return {JsonTool("function",
-                   JsonFunction("get_weather",
-                                "Get the weather",
-                                nlohmann::json{{"type", "object"}}))};
-}
 
 TEST(UsageJsonTest, ChatUsageSerializesOpenAICachedTokensField) {
   Usage usage;
@@ -98,48 +90,6 @@ TEST(UsageJsonTest, ChatUsagePrintsZeroCachedTokens) {
   EXPECT_EQ(json["usage"]["completion_tokens_details"]["reasoning_tokens"], 0);
   EXPECT_EQ(json["usage"]["completion_tokens_details"]["audio_tokens"], 0);
   EXPECT_EQ(json["usage"]["completion_tokens_details"].size(), 2);
-}
-
-TEST(ToolCallResultTest, KeepsNormalTextWhenNoToolCallMarkerExists) {
-  const std::string text = "The weather is sunny.";
-
-  const auto result =
-      api_service::process_tool_calls(text, make_test_tools(), "glm45", "stop");
-
-  EXPECT_FALSE(result.tool_calls.has_value());
-  EXPECT_EQ(result.text, text);
-  EXPECT_EQ(result.finish_reason, "stop");
-}
-
-TEST(ToolCallResultTest, KeepsNormalTextWhenMarkerDoesNotParse) {
-  const std::string text =
-      "The weather is sunny. <tool_call>unknown_tool\n"
-      "<arg_key>location</arg_key>\n"
-      "<arg_value>Beijing</arg_value>\n"
-      "</tool_call>";
-
-  const auto result =
-      api_service::process_tool_calls(text, make_test_tools(), "glm45", "stop");
-
-  EXPECT_FALSE(result.tool_calls.has_value());
-  EXPECT_EQ(result.text, text);
-  EXPECT_EQ(result.finish_reason, "stop");
-}
-
-TEST(ToolCallResultTest, PreservesParsedToolCall) {
-  const auto result = api_service::process_tool_calls(
-      "I will check. <tool_call>get_weather\n"
-      "<arg_key>location</arg_key>\n"
-      "<arg_value>Beijing</arg_value>\n"
-      "</tool_call>",
-      make_test_tools(),
-      "glm45",
-      "stop");
-
-  ASSERT_TRUE(result.tool_calls.has_value());
-  ASSERT_EQ(result.tool_calls->size(), 1);
-  EXPECT_EQ(result.tool_calls->at(0).function().name(), "get_weather");
-  EXPECT_EQ(result.finish_reason, "tool_calls");
 }
 
 TEST(ChatResponseJsonTest, OmitsEmptyToolCallsForNormalText) {

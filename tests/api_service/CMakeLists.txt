@@ -151,6 +151,17 @@ cc_test(
 
 cc_test(
   NAME
+    tool_call_response_test
+  NO_NPU_RUNTIME
+  SRCS
+    tool_call_response_test.cpp
+  DEPS
+    api_response
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
     usage_json_test
   SRCS
     usage_json_test.cpp

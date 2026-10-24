@@ -11,10 +11,12 @@ cc_library(
     completion_response_builder.h
     openai_json.h
     stream_output_parser.h
-    utils.h
+    response_usage.h
+    tool_call_response.h
   SRCS
     openai_json.cpp
     stream_output_parser.cpp
+    tool_call_response.cpp
   DEPS
     :common
     :function_call

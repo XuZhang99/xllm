@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors.
+/* Copyright 2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,49 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
+#include "api_service/tool_call_response.h"
 
 #include <glog/logging.h>
-#include <google/protobuf/util/json_util.h>
 
-#include <functional>
-#include <memory>
-#include <nlohmann/json.hpp>
-#include <string>
-#include <tuple>
-#include <vector>
+#include <exception>
+#include <utility>
 
 #include "api_service/stream_output_parser.h"
-#include "chat.pb.h"
-#include "common.pb.h"
-#include "core/common/types.h"
-#include "core/framework/request/usage.h"
-#include "function_call/function_call.h"
+#include "function_call/function_call_parser.h"
+#include "function_call/utils.h"
 
-namespace xllm {
-namespace api_service {
+namespace xllm::api_service {
 
-// Check for unstreamed tool arguments and send them using the provided sender
-// This is shared between Chat API and Anthropic API implementations
-using SendFunc = std::function<bool(const std::string&, int)>;
-
-inline void set_proto_usage(proto::Usage* proto_usage,
-                            const xllm::Usage& usage) {
-  CHECK(proto_usage != nullptr);
-  proto_usage->set_prompt_tokens(usage.num_prompt_tokens);
-  proto_usage->set_completion_tokens(usage.num_generated_tokens);
-  proto_usage->set_total_tokens(usage.num_total_tokens);
-  auto* prompt_tokens_details = proto_usage->mutable_prompt_tokens_details();
-  prompt_tokens_details->set_cached_tokens(usage.num_cached_tokens);
-  prompt_tokens_details->set_audio_tokens(0);
-
-  auto* completion_tokens_details =
-      proto_usage->mutable_completion_tokens_details();
-  completion_tokens_details->set_reasoning_tokens(0);
-  completion_tokens_details->set_audio_tokens(0);
-}
-
-inline bool check_for_unstreamed_tool_args(
+bool check_for_unstreamed_tool_args(
     std::shared_ptr<StreamOutputParser> stream_parser,
     size_t index,
     SendFunc send_func) {
@@ -85,7 +56,7 @@ inline bool check_for_unstreamed_tool_args(
               expected_call.substr(actual_args.length());
 
           if (!remaining_call.empty()) {
-            return send_func(remaining_call, static_cast<int>(tool_index));
+            return send_func(remaining_call, static_cast<int32_t>(tool_index));
           }
         }
       }
@@ -95,18 +66,11 @@ inline bool check_for_unstreamed_tool_args(
   return true;
 }
 
-struct ToolCallResult {
-  std::optional<google::protobuf::RepeatedPtrField<proto::ToolCall>> tool_calls;
-  std::string text;
-  std::string finish_reason;
-};
-
-inline ToolCallResult process_tool_calls(
-    std::string text,
-    const std::vector<xllm::JsonTool>& tools,
-    const std::string& parser_format,
-    std::string finish_reason,
-    google::protobuf::Arena* arena = nullptr) {
+ToolCallResult process_tool_calls(std::string text,
+                                  const std::vector<xllm::JsonTool>& tools,
+                                  const std::string& parser_format,
+                                  std::string finish_reason,
+                                  google::protobuf::Arena* arena) {
   ToolCallResult result;
 
   function_call::FunctionCallParser parser(tools, parser_format);
@@ -159,23 +123,4 @@ inline ToolCallResult process_tool_calls(
   return result;
 }
 
-// Convert google::protobuf::Struct to nlohmann::json
-inline nlohmann::json struct_to_json(
-    const google::protobuf::Struct& pb_struct) {
-  std::string json_str;
-  google::protobuf::util::JsonPrintOptions options;
-  options.preserve_proto_field_names = true;
-  auto status = google::protobuf::util::MessageToJsonString(
-      pb_struct, &json_str, options);
-  if (status.ok()) {
-    try {
-      return nlohmann::json::parse(json_str);
-    } catch (...) {
-      return nlohmann::json::object();
-    }
-  }
-  return nlohmann::json::object();
-}
-
-}  // namespace api_service
-}  // namespace xllm
+}  // namespace xllm::api_service

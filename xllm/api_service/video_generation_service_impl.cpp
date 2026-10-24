@@ -18,7 +18,6 @@ limitations under the License.
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "api_service/mm_service_utils.h"
-#include "api_service/utils.h"
 #include "core/framework/request/dit_request_params.h"
 #include "core/util/binary_payload.h"
 #include "distributed_runtime/dit_master.h"

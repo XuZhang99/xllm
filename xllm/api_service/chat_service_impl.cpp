@@ -31,8 +31,8 @@ limitations under the License.
 
 #include "api_service/chat_response_builder.h"
 #include "api_service/openai_http.h"
+#include "api_service/response_usage.h"
 #include "api_service/stream_output_parser.h"
-#include "api_service/utils.h"
 #include "core/common/instance_name.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"

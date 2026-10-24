@@ -30,6 +30,7 @@ limitations under the License.
 #include "api_service/chat_response_builder.h"
 #include "api_service/completion_response_builder.h"
 #include "api_service/openai_json.h"
+#include "api_service/response_usage.h"
 #include "chat.pb.h"
 #include "completion.pb.h"
 #include "core/framework/request/request_output.h"
