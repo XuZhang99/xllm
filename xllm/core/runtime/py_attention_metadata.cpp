@@ -124,6 +124,11 @@ void register_attention_metadata_views(py::module_& module) {
           &PyAttentionMetadataView::linear_state_write_indices)
       .def_property_readonly("kpool_query_lens",
                              &PyAttentionMetadataView::kpool_query_lens)
+      .def_property_readonly("num_accepted_tokens",
+                             &PyAttentionMetadataView::num_accepted_tokens)
+      .def_property_readonly(
+          "num_accepted_tokens_host_values",
+          &PyAttentionMetadataView::num_accepted_tokens_host_values)
       .def_property_readonly("has_initial_state",
                              &PyAttentionMetadataView::has_initial_state)
       .def_property_readonly(
@@ -239,6 +244,8 @@ PyAttentionMetadataView::PyAttentionMetadataView(
   }
   multi_block_tables_ = params.multi_block_tables;
   linear_state_indices_ = params.embedding.linear_state_indices;
+  num_accepted_tokens_ = params.num_accepted_tokens;
+  num_accepted_tokens_host_values_ = params.num_accepted_tokens_host;
   const auto& cache_ops = params.linear_state_cache_ops;
   const bool has_direct_read = std::any_of(
       cache_ops.begin(), cache_ops.end(), [](const LinearStateCacheOp& op) {
@@ -532,6 +539,15 @@ bool PyAttentionMetadataView::is_chunked_prefill() const {
 }
 
 bool PyAttentionMetadataView::is_mixed() const { return metadata_->is_mixed; }
+
+py::object PyAttentionMetadataView::num_accepted_tokens() const {
+  return optional_tensor(num_accepted_tokens_);
+}
+
+const std::vector<int64_t>&
+PyAttentionMetadataView::num_accepted_tokens_host_values() const {
+  return num_accepted_tokens_host_values_;
+}
 
 bool PyAttentionMetadataView::is_spec_verify() const {
   return metadata_->is_spec_verify;

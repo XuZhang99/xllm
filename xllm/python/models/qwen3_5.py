@@ -334,6 +334,7 @@ class Qwen3_5Model(nn.Module):
 
 
 class Qwen3_5ForCausalLM(PyModelBase):
+    model_cls: type[Qwen3_5Model] = Qwen3_5Model
     model: Qwen3_5Model
     lm_head: ColumnParallelLinear
 
@@ -345,7 +346,7 @@ class Qwen3_5ForCausalLM(PyModelBase):
         device = torch.device(config.get("device", "cuda"))
         self.dtype = dtype
         self.device = device
-        self.model = Qwen3_5Model(self.cfg, dtype, device)  # pyright: ignore[reportIncompatibleVariableOverride]
+        self.model = self.model_cls(self.cfg, dtype, device)  # pyright: ignore[reportIncompatibleVariableOverride]
         self.lm_head = ColumnParallelLinear(  # pyright: ignore[reportIncompatibleVariableOverride]
             self.cfg.hidden_size,
             self.cfg.vocab_size // self.cfg.tp_size,

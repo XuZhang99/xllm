@@ -49,3 +49,18 @@ class GdnPrefillMetadata(GdnMetadata):
 class GdnDecodeMetadata(GdnMetadata):
     read_state_indices: torch.Tensor
     write_state_indices: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class GdnVerifyMetadata(GdnMetadata):
+    state_indices: torch.Tensor
+    num_accepted_tokens: torch.Tensor
+    query_width: int
+    # Packed token -> dense [request, verify position] row. None for uniform
+    # batches, which can be reshaped without padding or copying.
+    packed_to_dense: torch.Tensor | None
+
+
+@dataclass(frozen=True, slots=True)
+class GdnDummyMetadata(GdnMetadata):
+    pass

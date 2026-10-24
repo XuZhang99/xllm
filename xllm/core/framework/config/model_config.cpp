@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_utils.h"
+#include "core/framework/config/speculative_config.h"
 
 DEFINE_string(model_id, "", "hf model name.");
 
@@ -164,14 +165,21 @@ std::optional<std::string> ModelConfig::validate_python_speculative_decode(
     std::string_view model_impl,
     std::string_view model_type,
     int32_t num_speculative_tokens,
-    std::string_view /*speculative_algorithm*/) {
+    std::string_view speculative_algorithm) {
   if (!is_python_model_impl(model_impl) || num_speculative_tokens <= 0) {
     return std::nullopt;
   }
   if (is_qwen3_5_model_type(model_type)) {
-    return "Qwen3.5 Python model executor does not support speculative "
-           "decoding; "
-           "set num_speculative_tokens=0 or use the native model executor";
+#if defined(USE_NPU)
+    if ((model_type == "qwen3_5" || model_type == "qwen3_5_text" ||
+         model_type == "qwen3_5_mtp") &&
+        SpeculativeConfig::is_mtp_algorithm(speculative_algorithm) &&
+        num_speculative_tokens <= 16) {
+      return std::nullopt;
+    }
+#endif
+    return "Qwen3.5 Python speculative decoding supports dense NPU MTP with "
+           "1 to 16 speculative tokens only";
   }
   return std::nullopt;
 }
