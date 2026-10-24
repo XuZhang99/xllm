@@ -37,9 +37,9 @@ limitations under the License.
 //                                            render
 //   * BM_ChatTemplate_MessagesToJson       - the ChatMessages -> ordered_json
 //                                            conversion alone
-//   * BM_ChatTemplate_MinjaRenderCachedBuiltins - the render alone on a
-//                                            pre-built document and cached
-//                                            builtins (render_native's core)
+//   * BM_ChatTemplate_MinjaRenderCachedBuiltins - JSON -> minja::Value,
+//                                            context setup and render with
+//                                            cached builtins
 //   * BM_ChatTemplate_AllocatorControl     - eight small malloc/free pairs, the
 //                                            allocator floor under all of it
 //   * BM_ChatTemplate_DeepseekConversation - V3.2/V4 ordinary conversations
@@ -47,10 +47,10 @@ limitations under the License.
 //                                            tool results after one assistant
 //   * BM_ChatTemplate_DeepseekToolSchemas  - fixed input with n schemas
 //
-// Build in Release mode before comparing latency. These benchmarks include
-// per-request conversion, preprocessing, rendering, classification and result
-// destruction, but exclude template construction and request setup.
-// Run (example, using a Release build):
+// Build in Release mode before comparing latency. JinjaRender and Deepseek
+// cases include per-request conversion, preprocessing, rendering,
+// classification and result destruction, but exclude template construction and
+// request setup. Run (example, using a Release build):
 //   python setup.py test --test-name chat_template_benchmark
 //   ./chat_template_benchmark --benchmark_min_time=0.2s
 
@@ -457,14 +457,14 @@ void BM_ChatTemplate_MinjaBuiltins(benchmark::State& state) {
 // --------------------------------------------------------------------------
 // Attribution of JinjaRender against MinjaApply
 //
-// JinjaRender = ChatMessages -> ordered_json conversion + needs_polyfills scan
-//             + render on the cached builtins + generation-mode classification.
+// JinjaRender = ChatMessages -> ordered_json conversion with polyfill flags
+//             + native context setup/render + generation-mode classification.
 // The two below measure message conversion and native context setup/rendering
 // separately; they do not isolate every term in the end-to-end comparison.
 // --------------------------------------------------------------------------
 
-// The per-message ChatMessages -> ordered_json conversion, as
-// JinjaChatTemplate::apply performs it for text-only messages.
+// The text-only ChatMessages -> ordered_json conversion. This isolates JSON
+// construction and excludes conversion-time polyfill feature tracking.
 void BM_ChatTemplate_MessagesToJson(benchmark::State& state) {
   const ChatMessages messages =
       make_messages(static_cast<size_t>(state.range(0)));
@@ -485,10 +485,10 @@ void BM_ChatTemplate_MessagesToJson(benchmark::State& state) {
                           static_cast<int64_t>(content_bytes(messages)));
 }
 
-// The render alone on a pre-built messages document: parsed root plus cached
-// builtins, i.e. what JinjaChatTemplate::render_native does after the
-// conversion. MinjaApply also uses pre-built JSON, but additionally copies it
-// into its inputs and performs minja's input adaptation/capability checks.
+// Native rendering from pre-built JSON includes its recursive conversion to
+// minja::Value, context setup, rendering and destruction, using a parsed root
+// and cached builtins. MinjaApply additionally copies the JSON into its inputs
+// and performs minja's input adaptation/capability checks.
 void BM_ChatTemplate_MinjaRenderCachedBuiltins(benchmark::State& state) {
   const std::shared_ptr<minja::TemplateNode> root =
       minja::Parser::parse(kQwen25ChatTemplate,
