@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors.
+/* Copyright 2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,35 +15,41 @@ limitations under the License.
 
 #include "framework/chat_template/chat_template.h"
 
-#include <glog/logging.h>
-
-#include "core/framework/config/model_config.h"
-#include "framework/chat_template/deepseek_v32_cpp_template.h"
-#include "framework/chat_template/deepseek_v4_cpp_template.h"
-#include "framework/chat_template/jinja_chat_template.h"
+#include <utility>
 
 namespace xllm {
 
-std::unique_ptr<ChatTemplate> ChatTemplate::create(
-    const TokenizerArgs& tokenizer_args,
-    const std::string& model_type) {
-  if (::xllm::ModelConfig::get_instance().use_cpp_chat_template()) {
-    if (model_type == "deepseek_v32") {
-      LOG(INFO) << "Using native C++ chat template for "
-                << "model_type: " << model_type;
-      return std::make_unique<DeepseekV32CppTemplate>(tokenizer_args);
-    } else if (model_type == "deepseek_v4") {
-      LOG(INFO) << "Using native C++ chat template for "
-                << "model_type: " << model_type;
-      return std::make_unique<DeepseekV4CppTemplate>(tokenizer_args);
-    } else {
-      LOG(FATAL) << "cpp_chat_template only support deepseekv32 and deepseekv4 "
-                    "models currently.";
-    }
+std::optional<ChatTemplateRenderResult>
+ChatTemplate::apply_with_generation_mode(
+    const ChatMessages& messages,
+    const std::vector<xllm::JsonTool>& json_tools,
+    const nlohmann::ordered_json& chat_template_kwargs) const {
+  std::optional<std::string> prompt =
+      apply(messages, json_tools, chat_template_kwargs);
+  if (!prompt.has_value()) {
+    return std::nullopt;
   }
-  LOG(INFO) << "Using Jinja chat template for "
-            << "model_type: " << model_type;
-  return std::make_unique<JinjaChatTemplate>(tokenizer_args);
+  const ChatTemplateGenerationMode generation_mode =
+      generation_mode_from_prompt(prompt.value());
+  return ChatTemplateRenderResult{std::move(prompt.value()), generation_mode};
+}
+
+ChatTemplateGenerationMode ChatTemplate::generation_mode_from_prompt(
+    std::string_view prompt) {
+  constexpr std::string_view kJsonWhitespace = " \t\n\r";
+  while (!prompt.empty() &&
+         kJsonWhitespace.find(prompt.back()) != std::string_view::npos) {
+    prompt.remove_suffix(1);
+  }
+  constexpr std::string_view kThinkingMarker = "<think>";
+  constexpr std::string_view kChatMarker = "</think>";
+  if (prompt.ends_with(kThinkingMarker)) {
+    return ChatTemplateGenerationMode::REASONING;
+  }
+  if (prompt.ends_with(kChatMarker)) {
+    return ChatTemplateGenerationMode::CHAT;
+  }
+  return ChatTemplateGenerationMode::UNKNOWN;
 }
 
 }  // namespace xllm

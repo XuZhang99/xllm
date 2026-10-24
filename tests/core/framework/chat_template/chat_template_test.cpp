@@ -18,6 +18,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include "core/framework/config/model_config.h"
+#include "framework/chat_template/chat_template_factory.h"
 #include "framework/chat_template/deepseek_v32_cpp_template.h"
 #include "framework/chat_template/deepseek_v4_cpp_template.h"
 #include "framework/chat_template/jinja_chat_template.h"
@@ -45,7 +46,7 @@ TEST(ChatTemplateFactory, DeepseekV32FallsBackToJinjaWhenFlagDisabled) {
   TokenizerArgs args;
 
   std::unique_ptr<ChatTemplate> impl =
-      ChatTemplate::create(args, /*model_type=*/"deepseek_v32");
+      ChatTemplateFactory::create(args, /*model_type=*/"deepseek_v32");
 
   ASSERT_TRUE(impl != nullptr);
   EXPECT_NE(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);
@@ -58,7 +59,7 @@ TEST(ChatTemplateFactory, DeepseekV4FallsBackToJinjaWhenFlagDisabled) {
   TokenizerArgs args;
 
   std::unique_ptr<ChatTemplate> impl =
-      ChatTemplate::create(args, /*model_type=*/"deepseek_v4");
+      ChatTemplateFactory::create(args, /*model_type=*/"deepseek_v4");
 
   ASSERT_TRUE(impl != nullptr);
   EXPECT_NE(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);
@@ -71,7 +72,7 @@ TEST(ChatTemplateFactory, DeepseekV4UsesCppTemplateWhenFlagEnabled) {
   TokenizerArgs args;
 
   std::unique_ptr<ChatTemplate> impl =
-      ChatTemplate::create(args, /*model_type=*/"deepseek_v4");
+      ChatTemplateFactory::create(args, /*model_type=*/"deepseek_v4");
 
   ASSERT_TRUE(impl != nullptr);
   EXPECT_EQ(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);
@@ -85,7 +86,7 @@ TEST(ChatTemplateFactory, NonDeepseekModelUsesJinjaWhenFlagEnabled) {
 
   ModelConfig::get_instance().use_cpp_chat_template(false);
   std::unique_ptr<ChatTemplate> impl =
-      ChatTemplate::create(args, /*model_type=*/"qwen3");
+      ChatTemplateFactory::create(args, /*model_type=*/"qwen3");
 
   ASSERT_TRUE(impl != nullptr);
   EXPECT_NE(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);

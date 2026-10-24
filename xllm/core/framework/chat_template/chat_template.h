@@ -16,7 +16,6 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
-#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -25,7 +24,6 @@ limitations under the License.
 
 #include "core/common/message.h"
 #include "core/common/types.h"
-#include "framework/tokenizer/tokenizer_args.h"
 
 namespace xllm {
 
@@ -60,10 +58,6 @@ class ChatTemplate {
 
   static ChatTemplateGenerationMode generation_mode_from_prompt(
       std::string_view prompt);
-
-  static std::unique_ptr<ChatTemplate> create(
-      const TokenizerArgs& tokenizer_args,
-      const std::string& model_type);
 };
 
 }  // namespace xllm

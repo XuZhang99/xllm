@@ -88,6 +88,8 @@ cc_library(
   DEPS
     :api_response
     :worker_model_codec
+    :chat_template_factory
+    :jinja_chat_template
     :models
     :model_loader
     :speculative
@@ -172,7 +174,8 @@ cc_library(
     :models
     :parallel_config_validation
     $<$<BOOL:${USE_NPU}>:npu_layers>
-    :chat_template
+    :chat_template_factory
+    :jinja_chat_template
     glog::glog
     $<$<BOOL:${USE_MLU}>:torch_mlu>
 )

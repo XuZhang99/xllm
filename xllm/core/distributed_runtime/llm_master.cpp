@@ -37,6 +37,7 @@ limitations under the License.
 #include "core/framework/config/parallel_config_validation.h"
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/model_loader/hf_model_config.h"
+#include "framework/chat_template/chat_template_factory.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
 #if defined(USE_NPU)
@@ -366,8 +367,8 @@ LLMMaster::LLMMaster(const Options& options)
   }
 
   auto initialize_tokenizer = [this](auto* engine) {
-    chat_template_ = ChatTemplate::create(engine->tokenizer_args(),
-                                          model_args_.model_type());
+    chat_template_ = ChatTemplateFactory::create(engine->tokenizer_args(),
+                                                 model_args_.model_type());
     tokenizer_ = engine->tokenizer()->clone();
   };
   dispatch_engine(initialize_tokenizer,

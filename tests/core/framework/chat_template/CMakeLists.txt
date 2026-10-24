@@ -7,7 +7,7 @@ cc_test (
     chat_template_test.cpp
   DEPS
     :config
-    :chat_template
+    :chat_template_factory
     :jinja_chat_template
     :deepseek_v32_cpp_template
     :deepseek_v4_cpp_template
@@ -20,7 +20,7 @@ cc_test(
   SRCS
     jinja_chat_template_test.cpp
   DEPS
-    :chat_template
+    :jinja_chat_template
     GTest::gtest_main
 )
 

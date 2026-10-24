@@ -4,13 +4,13 @@ include(cc_library)
 # Base class (independent of concrete implementations)
 cc_library (
   NAME
-    chat_template_base
+    chat_template
   HDRS
     chat_template.h
   SRCS
-    chat_template_base.cpp
+    chat_template.cpp
   DEPS
-    :tokenizer
+    :common
     nlohmann_json::nlohmann_json
 )
 
@@ -22,7 +22,7 @@ cc_library (
   SRCS
     jinja_chat_template.cpp
   DEPS
-    :chat_template_base
+    :chat_template
     :minja
     :tokenizer
     nlohmann_json::nlohmann_json
@@ -37,7 +37,7 @@ cc_library (
   SRCS
     deepseek_v32_cpp_template.cpp
   DEPS
-    :chat_template_base
+    :chat_template
     :tokenizer
     nlohmann_json::nlohmann_json
     glog::glog
@@ -52,7 +52,7 @@ cc_library (
   SRCS
     deepseek_v4_cpp_template.cpp
   DEPS
-    :chat_template_base
+    :chat_template
     :tokenizer
     nlohmann_json::nlohmann_json
     glog::glog
@@ -62,17 +62,19 @@ cc_library (
 # Factory (depends on all implementations)
 cc_library (
   NAME
-    chat_template
+    chat_template_factory
+  HDRS
+    chat_template_factory.h
   SRCS
-    chat_template.cpp
+    chat_template_factory.cpp
   DEPS
-    :chat_template_base
+    :chat_template
+    :config
     :jinja_chat_template
     :deepseek_v32_cpp_template
     :deepseek_v4_cpp_template
     nlohmann_json::nlohmann_json
     glog::glog
-    gflags
 )
 
 # Request-path hop 2: the chat-template render LLMRequestFactory performs on a
@@ -83,7 +85,7 @@ cc_binary(
   SRCS
     chat_template_benchmark.cpp
   DEPS
-    :chat_template
+    :jinja_chat_template
     nlohmann_json::nlohmann_json
     benchmark::benchmark
     benchmark::benchmark_main
