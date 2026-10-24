@@ -42,8 +42,15 @@ limitations under the License.
 //                                            builtins (render_native's core)
 //   * BM_ChatTemplate_AllocatorControl     - eight small malloc/free pairs, the
 //                                            allocator floor under all of it
+//   * BM_ChatTemplate_DeepseekConversation - V3.2/V4 ordinary conversations
+//   * BM_ChatTemplate_DeepseekToolResults  - consecutive, ordered or reversed
+//                                            tool results after one assistant
+//   * BM_ChatTemplate_DeepseekToolSchemas  - fixed input with n schemas
 //
-// Build & run (example):
+// Build in Release mode before comparing latency. These benchmarks include
+// per-request conversion, preprocessing, rendering, classification and result
+// destruction, but exclude template construction and request setup.
+// Run (example, using a Release build):
 //   python setup.py test --test-name chat_template_benchmark
 //   ./chat_template_benchmark --benchmark_min_time=0.2s
 
@@ -70,6 +77,8 @@ limitations under the License.
 #include "core/common/message.h"
 #include "core/common/types.h"
 #include "core/framework/chat_template/chat_template.h"
+#include "core/framework/chat_template/deepseek_v32_cpp_template.h"
+#include "core/framework/chat_template/deepseek_v4_cpp_template.h"
 #include "core/framework/chat_template/jinja_chat_template.h"
 #include "core/framework/tokenizer/tokenizer_args.h"
 
@@ -234,6 +243,138 @@ size_t content_bytes(const ChatMessages& messages) {
     }
   }
   return bytes;
+}
+
+// The range is the exact message count, including the system message when
+// present. Every conversation ends with a user requesting a new response.
+ChatMessages make_deepseek_messages(size_t num_messages) {
+  ChatMessages messages;
+  messages.reserve(num_messages);
+  if (num_messages == 1) {
+    messages.emplace_back("user", std::string(kTurnChars, 'u'));
+    return messages;
+  }
+  messages.emplace_back("system", "You are a helpful assistant.");
+  for (size_t i = 1; i < num_messages; ++i) {
+    messages.emplace_back(i % 2 == 1 ? "user" : "assistant",
+                          std::string(kTurnChars, 'y'));
+    if (i % 2 == 0) {
+      messages.back().reasoning_content = std::string(kTurnChars, 'r');
+    }
+  }
+  return messages;
+}
+
+// All calls use the same function so this case scales tool-call/result
+// processing independently of schema serialization. Reverse arrival exercises
+// V4's sorting path; ordered arrival exercises its no-reordering path.
+ChatMessages make_deepseek_tool_messages(size_t num_results,
+                                         bool reverse_results) {
+  ChatMessages messages;
+  messages.reserve(num_results + 3);
+  messages.emplace_back("system", "You are a helpful assistant.");
+  messages.emplace_back("user", "Look up the weather for these cities.");
+  messages.emplace_back("assistant", "");
+  messages.back().reasoning_content = std::string(kTurnChars, 'r');
+  Message::ToolCallVec calls;
+  calls.reserve(num_results);
+  for (size_t i = 0; i < num_results; ++i) {
+    Message::ToolCall call;
+    call.id = "call_" + std::to_string(i);
+    call.type = "function";
+    call.function.name = "get_weather_0";
+    call.function.arguments = R"({"city":"Paris"})";
+    calls.emplace_back(std::move(call));
+  }
+  messages.back().tool_calls = std::move(calls);
+  for (size_t i = 0; i < num_results; ++i) {
+    const size_t call_index = reverse_results ? num_results - i - 1 : i;
+    messages.emplace_back(
+        "tool",
+        std::to_string(call_index) + ":" + std::string(kTurnChars, 't'));
+    messages.back().tool_call_id = "call_" + std::to_string(call_index);
+  }
+  return messages;
+}
+
+uint32_t prompt_fingerprint(const std::string& prompt) {
+  // A stable, exactly representable benchmark counter makes accidental output
+  // changes visible when comparing runs. Unit tests remain the semantic oracle.
+  uint32_t fingerprint = 2166136261U;
+  for (const unsigned char byte : prompt) {
+    fingerprint = (fingerprint ^ byte) * 16777619U;
+  }
+  return fingerprint;
+}
+
+template <typename Template>
+void run_deepseek_benchmark(benchmark::State& state,
+                            const ChatMessages& messages,
+                            const std::vector<JsonTool>& tools,
+                            bool thinking) {
+  const TokenizerArgs tokenizer_args;
+  const Template chat_template(tokenizer_args);
+  const nlohmann::ordered_json kwargs = {{"thinking", thinking},
+                                         {"reasoning_effort", "low"}};
+  const std::optional<ChatTemplateRenderResult> expected =
+      chat_template.apply_with_generation_mode(messages, tools, kwargs);
+  const std::optional<ChatTemplateRenderResult> repeated =
+      chat_template.apply_with_generation_mode(messages, tools, kwargs);
+  const ChatTemplateGenerationMode expected_mode =
+      thinking ? ChatTemplateGenerationMode::REASONING
+               : ChatTemplateGenerationMode::CHAT;
+  if (!expected.has_value() || expected->prompt.empty() ||
+      !repeated.has_value() || repeated->prompt != expected->prompt ||
+      expected->generation_mode != expected_mode ||
+      repeated->generation_mode != expected_mode) {
+    state.SkipWithError(
+        "DeepSeek render failed or produced inconsistent output");
+    return;
+  }
+
+  for (auto _ : state) {
+    std::optional<ChatTemplateRenderResult> rendered =
+        chat_template.apply_with_generation_mode(messages, tools, kwargs);
+    if (!rendered.has_value()) {
+      state.SkipWithError("DeepSeek render failed");
+      break;
+    }
+    benchmark::DoNotOptimize(*rendered);
+  }
+  state.SetItemsProcessed(state.iterations());  // One item is one request.
+  state.SetBytesProcessed(state.iterations() *
+                          static_cast<int64_t>(expected->prompt.size()));
+  state.counters["messages"] = static_cast<double>(messages.size());
+  state.counters["schemas"] = static_cast<double>(tools.size());
+  state.counters["prompt_bytes"] = static_cast<double>(expected->prompt.size());
+  state.counters["prompt_fingerprint"] =
+      static_cast<double>(prompt_fingerprint(expected->prompt));
+}
+
+template <typename Template>
+void BM_ChatTemplate_DeepseekConversation(benchmark::State& state) {
+  const ChatMessages messages =
+      make_deepseek_messages(static_cast<size_t>(state.range(0)));
+  const std::vector<JsonTool> no_tools;
+  run_deepseek_benchmark<Template>(
+      state, messages, no_tools, state.range(1) != 0);
+}
+
+template <typename Template>
+void BM_ChatTemplate_DeepseekToolResults(benchmark::State& state) {
+  const ChatMessages messages = make_deepseek_tool_messages(
+      static_cast<size_t>(state.range(0)), state.range(2) != 0);
+  const std::vector<JsonTool> tools = make_tools(/*num_tools=*/1);
+  run_deepseek_benchmark<Template>(state, messages, tools, state.range(1) != 0);
+  state.counters["tool_results"] = static_cast<double>(state.range(0));
+}
+
+template <typename Template>
+void BM_ChatTemplate_DeepseekToolSchemas(benchmark::State& state) {
+  const ChatMessages messages = make_tool_messages();
+  const std::vector<JsonTool> tools =
+      make_tools(static_cast<size_t>(state.range(0)));
+  run_deepseek_benchmark<Template>(state, messages, tools, state.range(1) != 0);
 }
 
 void BM_ChatTemplate_JinjaRender(benchmark::State& state) {
@@ -424,6 +565,34 @@ BENCHMARK(BM_ChatTemplate_MinjaRenderCachedBuiltins)
     ->Range(1, 64)
     ->Unit(benchmark::kMicrosecond);
 BENCHMARK(BM_ChatTemplate_AllocatorControl)->Unit(benchmark::kNanosecond);
+
+// DeepSeek ranges: exact input messages, consecutive tool results, or schemas;
+// thinking is explicit to avoid V3.2/V4's different default modes. All measured
+// calls include the full output and generation-mode classification.
+BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekConversation, DeepseekV32CppTemplate)
+    ->ArgsProduct({{1, 4, 16, 64}, {0, 1}})
+    ->ArgNames({"messages", "thinking"})
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekConversation, DeepseekV4CppTemplate)
+    ->ArgsProduct({{1, 4, 16, 64}, {0, 1}})
+    ->ArgNames({"messages", "thinking"})
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekToolResults, DeepseekV32CppTemplate)
+    ->ArgsProduct({{1, 4, 16, 64}, {0, 1}, {0, 1}})
+    ->ArgNames({"results", "thinking", "reversed"})
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekToolResults, DeepseekV4CppTemplate)
+    ->ArgsProduct({{1, 4, 16, 64}, {0, 1}, {0, 1}})
+    ->ArgNames({"results", "thinking", "reversed"})
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekToolSchemas, DeepseekV32CppTemplate)
+    ->ArgsProduct({{1, 4, 16, 64}, {0, 1}})
+    ->ArgNames({"schemas", "thinking"})
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_ChatTemplate_DeepseekToolSchemas, DeepseekV4CppTemplate)
+    ->ArgsProduct({{1, 4, 16, 64}, {0, 1}})
+    ->ArgNames({"schemas", "thinking"})
+    ->Unit(benchmark::kMicrosecond);
 
 }  // namespace
 }  // namespace xllm
