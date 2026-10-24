@@ -355,7 +355,7 @@ nlohmann::ordered_json drop_thinking_messages(nlohmann::ordered_json messages,
 std::string render_message(const nlohmann::ordered_json& messages,
                            int32_t index,
                            int32_t last_user_idx,
-                           int32_t previous_non_tool_idx,
+                           int32_t& previous_non_tool_idx,
                            const std::string& thinking_mode) {
   if (index < 0 || index >= static_cast<int32_t>(messages.size())) {
     LOG(FATAL) << "Message index out of range";
@@ -368,6 +368,11 @@ std::string render_message(const nlohmann::ordered_json& messages,
   std::string prompt;
   const nlohmann::ordered_json& msg = messages[index];
   std::string role = msg.value("role", "");
+  // Consecutive results share the preceding non-tool message. Reuse the role
+  // already read for rendering instead of looking it up again in apply().
+  if (role != kRoleTool) {
+    previous_non_tool_idx = index;
+  }
   std::string content = msg.value("content", "");
 
   const auto tools = msg.find("tools");
@@ -533,11 +538,6 @@ std::optional<std::string> DeepseekV32CppTemplate::apply(
          ++idx) {
       prompt += render_message(
           normalized, idx, last_user_idx, previous_non_tool_idx, thinking_mode);
-      // Consecutive results share the preceding non-tool message. Keep its
-      // index instead of walking the same tool prefix for every result.
-      if (normalized[idx]["role"] != kRoleTool) {
-        previous_non_tool_idx = idx;
-      }
     }
     return prompt;
   } catch (const std::exception& e) {
