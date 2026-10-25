@@ -25,6 +25,8 @@ void tokenizers_encode(TokenizerHandle handle,
                        int add_special_token,
                        TokenizerEncodeResult* result);
 
+int32_t tokenizers_parallel_batch_encode_enabled(void);
+
 void tokenizers_encode_batch(TokenizerHandle handle,
                              const char* const* data,
                              const size_t* lengths,

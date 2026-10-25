@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
+#include <array>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
@@ -573,6 +574,144 @@ std::shared_ptr<Request> LLMRequestFactory::create(
                 call,
                 std::move(callback),
                 render_result->generation_mode);
+}
+
+std::vector<std::shared_ptr<Request>> LLMRequestFactory::create_batch(
+    std::vector<std::string> prompts,
+    const std::vector<RequestParams>& params,
+    const BatchOutputCallback& callback) {
+  return create_batch(prompts.size(), params, callback, [&prompts](size_t i) {
+    return BatchPrompt{std::move(prompts[i]), std::nullopt};
+  });
+}
+
+std::vector<std::shared_ptr<Request>> LLMRequestFactory::create_batch(
+    const std::vector<std::vector<Message>>& conversations,
+    const std::vector<RequestParams>& params,
+    const BatchOutputCallback& callback) {
+  return create_batch(
+      conversations.size(),
+      params,
+      callback,
+      [this, &conversations, &params](size_t i) -> std::optional<BatchPrompt> {
+        const RequestParams& sp = params[params.size() == 1 ? 0 : i];
+        Timer timer;
+        auto rendered = chat_template_->apply_with_generation_mode(
+            conversations[i], sp.tools, sp.chat_template_kwargs);
+        if (!rendered.has_value()) {
+          return std::nullopt;
+        }
+        COUNTER_ADD(chat_template_latency_seconds, timer.elapsed_seconds());
+        return BatchPrompt{std::move(rendered->prompt),
+                           rendered->generation_mode};
+      });
+}
+
+std::vector<std::shared_ptr<Request>> LLMRequestFactory::create_batch(
+    size_t num_requests,
+    const std::vector<RequestParams>& params,
+    const BatchOutputCallback& batch_callback,
+    const std::function<std::optional<BatchPrompt>(size_t)>& prepare_prompt) {
+  CHECK(params.size() == num_requests || params.size() == 1);
+  std::vector<std::shared_ptr<Request>> requests(num_requests);
+  std::vector<OutputCallback> callbacks;
+  callbacks.reserve(num_requests);
+  std::vector<std::optional<ChatTemplateGenerationMode>> modes(num_requests);
+  std::array<std::vector<std::string>, 2> prompts;
+  std::array<std::vector<size_t>, 2> indices;
+  for (size_t group = 0; group < prompts.size(); ++group) {
+    prompts[group].reserve(num_requests);
+    indices[group].reserve(num_requests);
+  }
+
+  for (size_t i = 0; i < num_requests; ++i) {
+    callbacks.emplace_back([i, batch_callback](const RequestOutput& output) {
+      output.log_request_status();
+      return batch_callback(i, output);
+    });
+    const OutputCallback& callback = callbacks.back();
+    const RequestParams& sp = params[params.size() == 1 ? 0 : i];
+    xllm::ScopeGuard rate_limit_guard(
+        [this] { rate_limiter_->decrease_one_request(); });
+    if (!sp.verify_params(callback)) {
+      continue;
+    }
+    auto prompt = prepare_prompt(i);
+    if (!prompt.has_value()) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "Failed to construct prompt from messages",
+                          sp.service_request_id,
+                          sp.source_xservice_addr);
+      continue;
+    }
+    // Let create preserve the single-request error priority before encoding.
+    if ((options_->enable_disagg_pd() && sp.beam_width > 1) ||
+        prompt->text.empty()) {
+      rate_limit_guard.dismiss();
+      requests[i] = create(std::move(prompt->text),
+                           std::nullopt,
+                           sp,
+                           std::nullopt,
+                           callback,
+                           prompt->generation_mode);
+      continue;
+    }
+    modes[i] = prompt->generation_mode;
+    const size_t group = sp.add_special_tokens ? 1 : 0;
+    prompts[group].emplace_back(std::move(prompt->text));
+    indices[group].emplace_back(i);
+    rate_limit_guard.dismiss();
+  }
+
+  for (size_t group = 0; group < prompts.size(); ++group) {
+    std::vector<std::string>& texts = prompts[group];
+    size_t offset = 0;
+    while (!texts.empty()) {
+      const size_t first = indices[group][offset];
+      if (texts.size() == 1) {
+        requests[first] = create(std::move(texts.front()),
+                                 std::nullopt,
+                                 params[params.size() == 1 ? 0 : first],
+                                 std::nullopt,
+                                 callbacks[first],
+                                 modes[first]);
+        break;
+      }
+      Timer timer;
+      std::vector<std::vector<int32_t>> token_ids;
+      const bool encoded = tokenizer_->batch_encode(
+          texts, &token_ids, /*add_special_tokens=*/group == 1);
+      COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
+      CHECK_LE(token_ids.size(), texts.size());
+      CHECK(encoded ? token_ids.size() == texts.size()
+                    : token_ids.size() < texts.size());
+      for (size_t j = 0; j < token_ids.size(); ++j) {
+        const size_t i = indices[group][offset + j];
+        requests[i] = create(std::move(texts[j]),
+                             std::move(token_ids[j]),
+                             params[params.size() == 1 ? 0 : i],
+                             std::nullopt,
+                             callbacks[i],
+                             modes[i]);
+      }
+      if (encoded) {
+        break;
+      }
+      const size_t failed = indices[group][offset + token_ids.size()];
+      const RequestParams& sp = params[params.size() == 1 ? 0 : failed];
+      callbacks[failed](
+          {Status{StatusCode::INVALID_ARGUMENT, "Failed to encode prompt"},
+           sp.service_request_id,
+           sp.source_xservice_addr});
+      rate_limiter_->decrease_one_request();
+      // Only process inputs after the failure; the tokenizer's successful
+      // prefix and failed input are never attempted again.
+      const size_t consumed = token_ids.size() + 1;
+      texts.erase(texts.begin(), texts.begin() + consumed);
+      offset += consumed;
+    }
+  }
+  return requests;
 }
 
 }  // namespace xllm

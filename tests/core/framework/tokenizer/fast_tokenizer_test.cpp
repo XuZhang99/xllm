@@ -32,6 +32,50 @@ limitations under the License.
 #include "framework/tokenizer/tokenizer_proxy.h"
 
 namespace xllm {
+namespace {
+
+struct BatchCapabilityState {
+  bool enabled = false;
+  size_t clones = 0;
+};
+
+class ConfigurableBatchTokenizer final : public Tokenizer {
+ public:
+  explicit ConfigurableBatchTokenizer(
+      std::shared_ptr<BatchCapabilityState> state)
+      : state_(std::move(state)) {}
+
+  bool parallel_batch_encode_enabled() const override {
+    return state_->enabled;
+  }
+
+  std::unique_ptr<Tokenizer> clone() const override {
+    ++state_->clones;
+    return std::make_unique<ConfigurableBatchTokenizer>(state_);
+  }
+
+ private:
+  std::shared_ptr<BatchCapabilityState> state_;
+};
+
+}  // namespace
+
+TEST(TokenizerTest, ParallelBatchEncodingDisabledByDefault) {
+  Tokenizer tokenizer;
+  EXPECT_FALSE(tokenizer.parallel_batch_encode_enabled());
+}
+
+TEST(TokenizerProxyTest, BatchCapabilityTracksBackendWithoutThreadLocalClone) {
+  auto state = std::make_shared<BatchCapabilityState>();
+  TokenizerProxy proxy(std::make_unique<ConfigurableBatchTokenizer>(state));
+
+  EXPECT_FALSE(proxy.parallel_batch_encode_enabled());
+  state->enabled = true;
+  EXPECT_TRUE(proxy.parallel_batch_encode_enabled());
+  state->enabled = false;
+  EXPECT_FALSE(proxy.parallel_batch_encode_enabled());
+  EXPECT_EQ(state->clones, 0U);
+}
 
 std::string CreateTestTokenizerJson(const std::string& filepath,
                                     const std::string& truncation_json,

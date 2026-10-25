@@ -119,6 +119,14 @@ extern "C" fn tokenizers_encode(
 }
 
 #[no_mangle]
+extern "C" fn tokenizers_parallel_batch_encode_enabled() -> i32 {
+    i32::from(
+        tokenizers::utils::parallelism::get_parallelism()
+            && tokenizers::utils::parallelism::current_num_threads() > 1,
+    )
+}
+
+#[no_mangle]
 extern "C" fn tokenizers_encode_batch(
     handle: *mut TokenizerWrapper,
     input_cstr: *const *const u8,
@@ -230,5 +238,24 @@ extern "C" fn tokenizers_token_to_id(
             Some(id) => id as i32,
             None => -1,
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tokenizers_parallel_batch_encode_enabled;
+    use tokenizers::utils::parallelism::{current_num_threads, get_parallelism, set_parallelism};
+
+    #[test]
+    fn parallel_batch_encoding_follows_runtime_override() {
+        let previous = get_parallelism();
+        set_parallelism(false);
+        assert_eq!(tokenizers_parallel_batch_encode_enabled(), 0);
+        set_parallelism(true);
+        assert_eq!(
+            tokenizers_parallel_batch_encode_enabled(),
+            i32::from(current_num_threads() > 1),
+        );
+        set_parallelism(previous);
     }
 }

@@ -35,6 +35,10 @@ class Tokenizer {
     return false;
   }
 
+  // On success, ids contains one result per input. On failure, ids contains
+  // the successful prefix; texts[ids->size()] failed and later inputs have
+  // not been encoded. Callers can continue the unattempted suffix without
+  // retrying the failed input or discarding successful results.
   virtual bool batch_encode(const std::vector<std::string>& texts,
                             std::vector<std::vector<int32_t>>* ids,
                             bool add_special_tokens = true) const {
@@ -86,6 +90,10 @@ class Tokenizer {
   virtual void warmup() const {}
 
   virtual std::unique_ptr<Tokenizer> clone() const { return nullptr; }
+
+  // Whether batch encoding can use multiple workers in the current backend.
+  // Query before dispatch so sequential backends can use request workers.
+  virtual bool parallel_batch_encode_enabled() const { return false; }
 };
 
 }  // namespace xllm

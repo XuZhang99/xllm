@@ -84,7 +84,31 @@ class LLMRequestFactory final {
                                   std::optional<Call*> call,
                                   OutputCallback callback);
 
+  // Verify and build an explicit batch on a request worker. Results retain
+  // input order, with nullptr for requests rejected through callback. Each
+  // input owns one rate-limit slot, as with the master's single-request path.
+  std::vector<std::shared_ptr<Request>> create_batch(
+      std::vector<std::string> prompts,
+      const std::vector<RequestParams>& params,
+      const BatchOutputCallback& callback);
+
+  std::vector<std::shared_ptr<Request>> create_batch(
+      const std::vector<std::vector<Message>>& conversations,
+      const std::vector<RequestParams>& params,
+      const BatchOutputCallback& callback);
+
  private:
+  struct BatchPrompt {
+    std::string text;
+    std::optional<ChatTemplateGenerationMode> generation_mode;
+  };
+
+  std::vector<std::shared_ptr<Request>> create_batch(
+      size_t num_requests,
+      const std::vector<RequestParams>& params,
+      const BatchOutputCallback& callback,
+      const std::function<std::optional<BatchPrompt>(size_t)>& prepare_prompt);
+
   // Encodes the prompt (or accepts pre-tokenized input) and validates it
   // against the vocabulary range and the context-length limit. Returns the
   // token ids, or std::nullopt after firing an error callback.

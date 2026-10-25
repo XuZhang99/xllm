@@ -31,6 +31,8 @@ class TokenizerProxy : public Tokenizer {
               std::vector<int32_t>* ids,
               bool add_special_tokens = true) const override;
 
+  bool parallel_batch_encode_enabled() const override;
+
   bool batch_encode(const std::vector<std::string>& texts,
                     std::vector<std::vector<int32_t>>* ids,
                     bool add_special_tokens = true) const override;

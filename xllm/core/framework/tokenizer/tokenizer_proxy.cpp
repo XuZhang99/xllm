@@ -38,6 +38,10 @@ bool TokenizerProxy::encode(const std::string_view& text,
   return get_tls_tokenizer()->encode(text, ids, add_special_tokens);
 }
 
+bool TokenizerProxy::parallel_batch_encode_enabled() const {
+  return tokenizer_->parallel_batch_encode_enabled();
+}
+
 bool TokenizerProxy::batch_encode(const std::vector<std::string>& texts,
                                   std::vector<std::vector<int32_t>>* ids,
                                   bool add_special_tokens) const {

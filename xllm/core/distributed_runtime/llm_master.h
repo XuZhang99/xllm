@@ -129,6 +129,11 @@ class LLMMaster : public Master {
   bool stop_profile();
 
  private:
+  template <typename Input>
+  void schedule_batch_request(std::vector<Input> inputs,
+                              std::vector<RequestParams> params,
+                              BatchOutputCallback callback);
+
   std::shared_ptr<KVCacheTransferCoordinator> kv_transfer_coordinator_;
 
   MasterStatus master_status_;

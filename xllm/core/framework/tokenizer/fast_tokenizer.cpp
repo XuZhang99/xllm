@@ -258,6 +258,10 @@ bool FastTokenizer::encode(const std::string_view& text,
   return true;
 }
 
+bool FastTokenizer::parallel_batch_encode_enabled() const {
+  return tokenizers_parallel_batch_encode_enabled() != 0;
+}
+
 bool FastTokenizer::batch_encode(const std::vector<std::string>& texts,
                                  std::vector<std::vector<int32_t>>* ids,
                                  bool add_special_tokens) const {

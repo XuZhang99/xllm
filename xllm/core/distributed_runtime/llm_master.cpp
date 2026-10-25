@@ -17,10 +17,12 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <memory>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -446,45 +448,80 @@ void LLMMaster::count_chat_tokens(
   });
 }
 
+template <typename Input>
+void LLMMaster::schedule_batch_request(std::vector<Input> inputs,
+                                       std::vector<RequestParams> params,
+                                       BatchOutputCallback callback) {
+  CHECK(inputs.size() == params.size() || params.size() == 1)
+      << "Number of inputs and sampling parameters should be the same";
+  const size_t num_requests = inputs.size();
+  if (num_requests == 0) {
+    return;
+  }
+  CHECK_GT(threadpool_->size(), 0)
+      << "Request handling requires at least one worker";
+  if (num_requests == 1 || !tokenizer_->parallel_batch_encode_enabled()) {
+    for (size_t i = 0; i < num_requests; ++i) {
+      handle_request(std::move(inputs[i]),
+                     std::nullopt,
+                     params.size() == 1 ? params[0] : std::move(params[i]),
+                     std::nullopt,
+                     [i, callback](RequestOutput output) {
+                       output.log_request_status();
+                       return callback(i, std::move(output));
+                     });
+    }
+    return;
+  }
+
+  scheduler_->incr_pending_requests(num_requests);
+  threadpool_->schedule([this,
+                         inputs = std::move(inputs),
+                         params = std::move(params),
+                         callback = std::move(callback),
+                         num_requests]() mutable {
+    AutoCounter handling_latency(
+        std::is_same_v<Input, std::string>
+            ? COUNTER_request_handling_latency_seconds_completion
+            : COUNTER_request_handling_latency_seconds_chat);
+    SCOPE_GUARD([this, num_requests] {
+      for (size_t i = 0; i < num_requests; ++i) {
+        scheduler_->decr_pending_requests();
+      }
+    });
+    auto requests =
+        request_factory_->create_batch(std::move(inputs), params, callback);
+    for (size_t i = 0; i < requests.size(); ++i) {
+      if (requests[i] == nullptr) {
+        continue;
+      }
+      if (!scheduler_->add_request(requests[i])) {
+        const RequestParams& sp = params[params.size() == 1 ? 0 : i];
+        RequestOutput output{
+            Status{StatusCode::RESOURCE_EXHAUSTED,
+                   "No available resources to schedule request"},
+            sp.service_request_id,
+            sp.source_xservice_addr};
+        output.log_request_status();
+        callback(i, output);
+      }
+    }
+  });
+}
+
 void LLMMaster::handle_batch_request(std::vector<std::string> prompts,
                                      std::vector<RequestParams> sps,
                                      BatchOutputCallback callback) {
-  CHECK(prompts.size() == sps.size() || sps.size() == 1)
-      << "Number of prompts and sampling parameters should be the same";
-
-  const size_t num_requests = prompts.size();
-  for (size_t i = 0; i < num_requests; ++i) {
-    handle_request(std::move(prompts[i]),
-                   std::nullopt,
-                   // the sampling parameter may be shared
-                   sps.size() == 1 ? sps[0] : std::move(sps[i]),
-                   std::nullopt,
-                   [i, callback](const RequestOutput& output) {
-                     output.log_request_status();
-                     return callback(i, output);
-                   });
-  }
+  schedule_batch_request(
+      std::move(prompts), std::move(sps), std::move(callback));
 }
 
 void LLMMaster::handle_batch_request(
     std::vector<std::vector<Message>> conversations,
     std::vector<RequestParams> sps,
     BatchOutputCallback callback) {
-  CHECK(conversations.size() == sps.size() || sps.size() == 1)
-      << "Number of conversations and sampling parameters should be the same";
-
-  const size_t num_requests = conversations.size();
-  for (size_t i = 0; i < num_requests; ++i) {
-    handle_request(std::move(conversations[i]),
-                   std::nullopt,
-                   // the sampling parameter may be shared
-                   sps.size() == 1 ? sps[0] : std::move(sps[i]),
-                   std::nullopt,
-                   [i, callback](const RequestOutput& output) {
-                     output.log_request_status();
-                     return callback(i, output);
-                   });
-  }
+  schedule_batch_request(
+      std::move(conversations), std::move(sps), std::move(callback));
 }
 
 void LLMMaster::handle_request(std::string prompt,

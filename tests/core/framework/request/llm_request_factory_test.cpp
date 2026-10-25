@@ -21,7 +21,9 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "common/options.h"
@@ -49,6 +51,45 @@ constexpr int32_t kStopWithCrlfToken = 625;
 constexpr int32_t kStopWithSpaceToken = 626;
 constexpr int32_t kNonStopToken = 627;
 
+struct EncodeCall {
+  std::string text;
+  bool add_special_tokens;
+};
+
+struct BatchEncodeCall {
+  std::vector<std::string> texts;
+  bool add_special_tokens;
+};
+
+struct ChatTemplateCall {
+  std::vector<JsonTool> tools;
+  nlohmann::ordered_json kwargs;
+};
+
+class BatchCallbackCapture final {
+ public:
+  explicit BatchCallbackCapture(size_t size)
+      : outputs_(size), call_counts_(size, 0) {}
+
+  BatchOutputCallback callback() {
+    return [this](size_t index, RequestOutput output) {
+      ++call_counts_.at(index);
+      outputs_.at(index) = std::move(output);
+      return false;
+    };
+  }
+
+  int32_t call_count(size_t index) const { return call_counts_.at(index); }
+
+  const std::optional<RequestOutput>& output(size_t index) const {
+    return outputs_.at(index);
+  }
+
+ private:
+  std::vector<std::optional<RequestOutput>> outputs_;
+  std::vector<int32_t> call_counts_;
+};
+
 // Deterministic tokenizer used for factory tests. It encodes each character to
 // a token id inside the vocabulary range, except for the stop strings used by
 // the factory tests. Those strings model a byte-level tokenizer where the
@@ -59,25 +100,40 @@ class StopSequenceTokenizer final : public Tokenizer {
 
   bool encode(const std::string_view& text,
               std::vector<int32_t>* ids,
-              bool /*add_special_tokens*/ = true) const override {
-    if (text == ".") {
-      *ids = {kBareStopToken};
-      return true;
-    }
-    if (text == ".\n") {
-      *ids = {kStopWithLfToken};
-      return true;
-    }
-    if (text == ".\r\n") {
-      *ids = {kStopWithCrlfToken};
-      return true;
-    }
-    if (text == ". ") {
-      *ids = {kStopWithSpaceToken};
-      return true;
-    }
-    return fallback_.encode(text, ids);
+              bool add_special_tokens = true) const override {
+    encode_calls_.emplace_back(
+        EncodeCall{std::string(text), add_special_tokens});
+    return encode_internal(text, ids, add_special_tokens);
   }
+
+  bool batch_encode(const std::vector<std::string>& texts,
+                    std::vector<std::vector<int32_t>>* ids,
+                    bool add_special_tokens = true) const override {
+    batch_encode_calls_.emplace_back(
+        BatchEncodeCall{texts, add_special_tokens});
+    ids->clear();
+    ids->reserve(texts.size());
+    for (const std::string& text : texts) {
+      ids->emplace_back();
+      if (!encode_internal(text, &ids->back(), add_special_tokens)) {
+        ids->pop_back();
+        return false;
+      }
+    }
+    return true;
+  }
+
+  const std::vector<EncodeCall>& encode_calls() const { return encode_calls_; }
+
+  const std::vector<BatchEncodeCall>& batch_encode_calls() const {
+    return batch_encode_calls_;
+  }
+
+  const std::vector<std::string>& attempted_texts() const {
+    return attempted_texts_;
+  }
+
+  void set_special_token_id(int32_t token_id) { special_token_id_ = token_id; }
 
   size_t vocab_size() const override { return fallback_.vocab_size(); }
 
@@ -102,7 +158,40 @@ class StopSequenceTokenizer final : public Tokenizer {
   }
 
  private:
+  bool encode_internal(const std::string_view& text,
+                       std::vector<int32_t>* ids,
+                       bool add_special_tokens) const {
+    attempted_texts_.emplace_back(text);
+    if (text == ".") {
+      *ids = {kBareStopToken};
+      return true;
+    }
+    if (text == ".\n") {
+      *ids = {kStopWithLfToken};
+      return true;
+    }
+    if (text == ".\r\n") {
+      *ids = {kStopWithCrlfToken};
+      return true;
+    }
+    if (text == ". ") {
+      *ids = {kStopWithSpaceToken};
+      return true;
+    }
+    if (!fallback_.encode(text, ids)) {
+      return false;
+    }
+    if (add_special_tokens && special_token_id_.has_value()) {
+      ids->insert(ids->begin(), *special_token_id_);
+    }
+    return true;
+  }
+
   test::FakeTokenizer fallback_;
+  std::optional<int32_t> special_token_id_;
+  mutable std::vector<EncodeCall> encode_calls_;
+  mutable std::vector<BatchEncodeCall> batch_encode_calls_;
+  mutable std::vector<std::string> attempted_texts_;
 };
 
 // Chat template that renders to a fixed prompt, or reports failure when
@@ -116,11 +205,20 @@ class FakeChatTemplate final : public ChatTemplate {
   }
 
   std::optional<std::string> apply(
-      const ChatMessages& /*messages*/,
-      const std::vector<xllm::JsonTool>& /*json_tools*/,
-      const nlohmann::ordered_json& /*chat_template_kwargs*/) const override {
+      const ChatMessages& messages,
+      const std::vector<xllm::JsonTool>& json_tools,
+      const nlohmann::ordered_json& chat_template_kwargs) const override {
+    calls_.emplace_back(ChatTemplateCall{json_tools, chat_template_kwargs});
     if (!succeed_) {
       return std::nullopt;
+    }
+    if (!messages.empty() &&
+        std::holds_alternative<std::string>(messages.front().content)) {
+      const auto it = rendered_prompts_.find(
+          std::get<std::string>(messages.front().content));
+      if (it != rendered_prompts_.end()) {
+        return it->second;
+      }
     }
     return rendered_prompt_;
   }
@@ -130,9 +228,18 @@ class FakeChatTemplate final : public ChatTemplate {
     rendered_prompt_ = std::move(prompt);
   }
 
+  void set_rendered_prompt_for_message(std::string message,
+                                       std::optional<std::string> prompt) {
+    rendered_prompts_[std::move(message)] = std::move(prompt);
+  }
+
+  const std::vector<ChatTemplateCall>& calls() const { return calls_; }
+
  private:
   bool succeed_ = true;
   std::string rendered_prompt_ = "rendered prompt";
+  std::unordered_map<std::string, std::optional<std::string>> rendered_prompts_;
+  mutable std::vector<ChatTemplateCall> calls_;
 };
 
 class LLMRequestFactoryTest : public ::testing::Test {
@@ -175,6 +282,12 @@ class LLMRequestFactoryTest : public ::testing::Test {
         &rate_limiter_,
         std::move(task),
         [](const std::vector<RequestOutput>&) { return std::vector<bool>{}; });
+  }
+
+  void acquire_batch_slots(size_t num_requests) {
+    for (size_t i = 1; i < num_requests; ++i) {
+      ASSERT_TRUE(rate_limiter_.acquire().ok());
+    }
   }
 
   std::unique_ptr<StopSequenceTokenizer> tokenizer_;
@@ -731,6 +844,368 @@ TEST_F(LLMRequestFactoryTest, MessageOverloadCreatesRequestOnSuccess) {
   ASSERT_NE(request, nullptr);
   EXPECT_FALSE(capture.called);
   EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 1);
+}
+
+TEST_F(LLMRequestFactoryTest, BatchGroupsPromptsBySpecialTokenPolicy) {
+  auto factory = make_factory();
+  constexpr int32_t kSpecialToken = 999;
+  tokenizer_->set_special_token_id(kSpecialToken);
+  const std::vector<std::string> prompts = {"a", "b", "c", "d"};
+  acquire_batch_slots(prompts.size());
+  std::vector<RequestParams> params(prompts.size());
+  params[0].add_special_tokens = false;
+  params[1].add_special_tokens = true;
+  params[2].add_special_tokens = false;
+  params[3].add_special_tokens = true;
+  BatchCallbackCapture capture(prompts.size());
+
+  auto requests = factory->create_batch(prompts, params, capture.callback());
+
+  ASSERT_EQ(requests.size(), prompts.size());
+  const std::vector<std::vector<int32_t>> expected_tokens = {
+      {97}, {kSpecialToken, 98}, {99}, {kSpecialToken, 100}};
+  for (size_t i = 0; i < requests.size(); ++i) {
+    ASSERT_NE(requests[i], nullptr);
+    EXPECT_EQ(requests[i]->state().prompt, prompts[i]);
+    EXPECT_EQ(requests[i]->state().prompt_tokens, expected_tokens[i]);
+    EXPECT_EQ(capture.call_count(i), 0);
+    EXPECT_FALSE(requests[i]->state().output_func(RequestOutput{}));
+    EXPECT_EQ(capture.call_count(i), 1);
+  }
+  EXPECT_TRUE(tokenizer_->encode_calls().empty());
+  ASSERT_EQ(tokenizer_->batch_encode_calls().size(), 2U);
+  EXPECT_EQ(tokenizer_->batch_encode_calls()[0].texts,
+            std::vector<std::string>({"a", "c"}));
+  EXPECT_FALSE(tokenizer_->batch_encode_calls()[0].add_special_tokens);
+  EXPECT_EQ(tokenizer_->batch_encode_calls()[1].texts,
+            std::vector<std::string>({"b", "d"}));
+  EXPECT_TRUE(tokenizer_->batch_encode_calls()[1].add_special_tokens);
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 4);
+  auto response_owner = requests[1];
+  requests.clear();
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 1);
+  response_owner.reset();
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 0);
+}
+
+TEST_F(LLMRequestFactoryTest, SingletonBatchUsesSingleEncodeWithSharedParams) {
+  auto factory = make_factory();
+  tokenizer_->set_special_token_id(/*token_id=*/999);
+  RequestParams params;
+  params.add_special_tokens = false;
+  params.temperature = 0.5;
+  BatchCallbackCapture capture(/*size=*/1);
+
+  auto requests = factory->create_batch(
+      std::vector<std::string>{"a"}, {params}, capture.callback());
+
+  ASSERT_EQ(requests.size(), 1U);
+  ASSERT_NE(requests.front(), nullptr);
+  EXPECT_EQ(requests.front()->state().prompt_tokens,
+            std::vector<int32_t>({97}));
+  EXPECT_EQ(requests.front()->state().sampling_param.temperature, 0.5);
+  EXPECT_EQ(capture.call_count(/*index=*/0), 0);
+  EXPECT_TRUE(tokenizer_->batch_encode_calls().empty());
+  ASSERT_EQ(tokenizer_->encode_calls().size(), 1U);
+  EXPECT_EQ(tokenizer_->encode_calls().front().text, "a");
+  EXPECT_FALSE(tokenizer_->encode_calls().front().add_special_tokens);
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 1);
+  requests.clear();
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 0);
+}
+
+TEST_F(LLMRequestFactoryTest, BatchAppliesSharedParamsToEveryPrompt) {
+  auto factory = make_factory();
+  const std::vector<std::string> prompts = {"a", "b", "c"};
+  acquire_batch_slots(prompts.size());
+  RequestParams params;
+  params.max_tokens = 7;
+  params.temperature = 0.5;
+  params.add_special_tokens = false;
+  BatchCallbackCapture capture(prompts.size());
+
+  auto requests = factory->create_batch(prompts, {params}, capture.callback());
+
+  ASSERT_EQ(requests.size(), prompts.size());
+  for (size_t i = 0; i < requests.size(); ++i) {
+    ASSERT_NE(requests[i], nullptr);
+    EXPECT_EQ(requests[i]->state().prompt, prompts[i]);
+    EXPECT_EQ(requests[i]->state().sampling_param.temperature, 0.5);
+    EXPECT_EQ(capture.call_count(i), 0);
+  }
+  ASSERT_EQ(tokenizer_->batch_encode_calls().size(), 1U);
+  EXPECT_EQ(tokenizer_->batch_encode_calls().front().texts, prompts);
+  EXPECT_FALSE(tokenizer_->batch_encode_calls().front().add_special_tokens);
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 3);
+  requests.clear();
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 0);
+}
+
+TEST_F(LLMRequestFactoryTest,
+       BatchEncodingRetainsPrefixAndContinuesAfterEachFailedInput) {
+  auto factory = make_factory();
+  const std::vector<std::string> prompts = {
+      "a", "FAIL-first", "b", "c", "FAIL-second", "d"};
+  acquire_batch_slots(prompts.size());
+  std::vector<RequestParams> params(prompts.size());
+  for (size_t i = 0; i < params.size(); ++i) {
+    params[i].service_request_id = "attempt-" + std::to_string(i);
+    params[i].source_xservice_addr = "worker:1234";
+  }
+  BatchCallbackCapture capture(prompts.size());
+
+  auto requests = factory->create_batch(prompts, params, capture.callback());
+
+  ASSERT_EQ(requests.size(), prompts.size());
+  for (const size_t i : {0U, 2U, 3U, 5U}) {
+    ASSERT_NE(requests[i], nullptr);
+    EXPECT_EQ(requests[i]->state().prompt, prompts[i]);
+    EXPECT_EQ(requests[i]->state().prompt_tokens,
+              std::vector<int32_t>({static_cast<int32_t>(prompts[i].front())}));
+    EXPECT_EQ(capture.call_count(i), 0);
+  }
+  for (const size_t i : {1U, 4U}) {
+    EXPECT_EQ(requests[i], nullptr);
+    EXPECT_EQ(capture.call_count(i), 1);
+    ASSERT_TRUE(capture.output(i).has_value());
+    ASSERT_TRUE(capture.output(i)->status.has_value());
+    EXPECT_EQ(capture.output(i)->status->code(), StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(capture.output(i)->status->message(), "Failed to encode prompt");
+    EXPECT_EQ(capture.output(i)->service_request_id,
+              params[i].service_request_id);
+    EXPECT_EQ(capture.output(i)->target_xservice_addr,
+              params[i].source_xservice_addr);
+  }
+  // The successful prefix, failed inputs, and later inputs are each attempted
+  // exactly once, even when more than one batch operation reports failure.
+  EXPECT_EQ(tokenizer_->attempted_texts(), prompts);
+  ASSERT_EQ(tokenizer_->batch_encode_calls().size(), 2U);
+  EXPECT_EQ(tokenizer_->batch_encode_calls()[0].texts, prompts);
+  EXPECT_EQ(tokenizer_->batch_encode_calls()[1].texts,
+            std::vector<std::string>({"b", "c", "FAIL-second", "d"}));
+  ASSERT_EQ(tokenizer_->encode_calls().size(), 1U);
+  EXPECT_EQ(tokenizer_->encode_calls().front().text, "d");
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 4);
+  requests.clear();
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 0);
+}
+
+TEST_F(LLMRequestFactoryTest,
+       BatchEncodingHandlesFirstConsecutiveAndLastFailuresWithoutRetry) {
+  auto factory = make_factory();
+  const std::vector<std::string> prompts = {
+      "FAIL-first", "FAIL-consecutive", "ok", "FAIL-last"};
+  acquire_batch_slots(prompts.size());
+  BatchCallbackCapture capture(prompts.size());
+
+  auto requests =
+      factory->create_batch(prompts, {RequestParams{}}, capture.callback());
+
+  ASSERT_EQ(requests.size(), prompts.size());
+  ASSERT_NE(requests[2], nullptr);
+  EXPECT_EQ(requests[2]->state().prompt, "ok");
+  EXPECT_EQ(requests[2]->state().prompt_tokens,
+            std::vector<int32_t>({111, 107}));
+  EXPECT_EQ(capture.call_count(/*index=*/2), 0);
+  for (const size_t i : {0U, 1U, 3U}) {
+    EXPECT_EQ(requests[i], nullptr);
+    EXPECT_EQ(capture.call_count(i), 1);
+    ASSERT_TRUE(capture.output(i).has_value());
+    ASSERT_TRUE(capture.output(i)->status.has_value());
+    EXPECT_EQ(capture.output(i)->status->code(), StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(capture.output(i)->status->message(), "Failed to encode prompt");
+  }
+  EXPECT_EQ(tokenizer_->attempted_texts(), prompts);
+  EXPECT_EQ(tokenizer_->batch_encode_calls().size(), 3U);
+  EXPECT_TRUE(tokenizer_->encode_calls().empty());
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 1);
+  requests.clear();
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 0);
+}
+
+TEST_F(LLMRequestFactoryTest, BatchPreservesValidationErrorPrecedence) {
+  options_.enable_disagg_pd(true);
+  auto factory = make_factory(/*vocab_size=*/1000, /*max_position=*/8);
+  const std::vector<std::string> prompts = {
+      "", "", "12345678", "", "FAIL", "ok"};
+  acquire_batch_slots(prompts.size());
+  std::vector<RequestParams> params(prompts.size());
+  params[0].temperature = -1;
+  params[0].beam_width = 2;
+  params[3].beam_width = 2;
+  params[4].beam_width = 2;
+  BatchCallbackCapture capture(prompts.size());
+
+  auto requests = factory->create_batch(prompts, params, capture.callback());
+
+  ASSERT_EQ(requests.size(), prompts.size());
+  const std::vector<std::string> expected_errors = {
+      "temperature must be finite and non-negative",
+      "Prompt is empty",
+      "Prompt is too long",
+      "beam_width > 1 is not supported in disaggregated PD mode",
+      "beam_width > 1 is not supported in disaggregated PD mode"};
+  for (size_t i = 0; i < expected_errors.size(); ++i) {
+    EXPECT_EQ(requests[i], nullptr);
+    EXPECT_EQ(capture.call_count(i), 1);
+    ASSERT_TRUE(capture.output(i).has_value());
+    ASSERT_TRUE(capture.output(i)->status.has_value());
+    EXPECT_EQ(capture.output(i)->status->code(), StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(capture.output(i)->status->message(), expected_errors[i]);
+  }
+  ASSERT_NE(requests.back(), nullptr);
+  EXPECT_EQ(capture.call_count(/*index=*/5), 0);
+  EXPECT_EQ(tokenizer_->attempted_texts(),
+            std::vector<std::string>({"12345678", "ok"}));
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 1);
+  requests.clear();
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 0);
+}
+
+TEST_F(LLMRequestFactoryTest, ChatBatchRejectsRenderingFailureIndependently) {
+  auto factory = make_factory();
+  const std::vector<std::vector<Message>> conversations = {
+      {Message("user", std::string("left"))},
+      {Message("user", std::string("reject"))},
+      {Message("user", std::string("right"))},
+      {Message("user", std::string("reject"))}};
+  chat_template_->set_rendered_prompt_for_message("left", "left prompt");
+  chat_template_->set_rendered_prompt_for_message("reject", std::nullopt);
+  chat_template_->set_rendered_prompt_for_message("right", "right prompt");
+  acquire_batch_slots(conversations.size());
+  std::vector<RequestParams> params(conversations.size());
+  JsonTool left_tool;
+  left_tool.function.name = "left_tool";
+  left_tool.function.parameters = {{"type", "object"}};
+  params[0].tools = {left_tool};
+  params[0].chat_template_kwargs = {{"enable_thinking", false},
+                                    {"marker", "left"}};
+  JsonTool right_tool;
+  right_tool.function.name = "right_tool";
+  right_tool.function.parameters = {{"type", "object"},
+                                    {"required", {"value"}}};
+  params[2].tools = {right_tool};
+  params[2].chat_template_kwargs = {{"enable_thinking", true},
+                                    {"marker", "right"}};
+  params[3].temperature = -1;
+  BatchCallbackCapture capture(conversations.size());
+
+  auto requests =
+      factory->create_batch(conversations, params, capture.callback());
+
+  ASSERT_EQ(requests.size(), conversations.size());
+  ASSERT_NE(requests[0], nullptr);
+  EXPECT_EQ(requests[0]->state().prompt, "left prompt");
+  EXPECT_EQ(capture.call_count(/*index=*/0), 0);
+  ASSERT_NE(requests[2], nullptr);
+  EXPECT_EQ(requests[2]->state().prompt, "right prompt");
+  EXPECT_EQ(capture.call_count(/*index=*/2), 0);
+  for (const size_t i : {1U, 3U}) {
+    EXPECT_EQ(requests[i], nullptr);
+    EXPECT_EQ(capture.call_count(i), 1);
+    ASSERT_TRUE(capture.output(i).has_value());
+    ASSERT_TRUE(capture.output(i)->status.has_value());
+    EXPECT_EQ(capture.output(i)->status->code(), StatusCode::INVALID_ARGUMENT);
+  }
+  EXPECT_EQ(capture.output(/*index=*/1)->status->message(),
+            "Failed to construct prompt from messages");
+  EXPECT_EQ(capture.output(/*index=*/3)->status->message(),
+            "temperature must be finite and non-negative");
+  ASSERT_EQ(chat_template_->calls().size(), 3U);
+  for (const size_t i : {0U, 2U}) {
+    const ChatTemplateCall& call = chat_template_->calls()[i];
+    ASSERT_EQ(call.tools.size(), 1U);
+    EXPECT_EQ(call.tools.front().function.name,
+              params[i].tools.front().function.name);
+    EXPECT_EQ(call.tools.front().function.parameters,
+              params[i].tools.front().function.parameters);
+    EXPECT_EQ(call.kwargs,
+              nlohmann::ordered_json(params[i].chat_template_kwargs));
+  }
+  ASSERT_EQ(tokenizer_->batch_encode_calls().size(), 1U);
+  EXPECT_EQ(tokenizer_->batch_encode_calls().front().texts,
+            std::vector<std::string>({"left prompt", "right prompt"}));
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 2);
+  requests.clear();
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 0);
+}
+
+TEST_F(LLMRequestFactoryTest,
+       ChatBatchRetainsGenerationModesForJsonConstraints) {
+  options_.enable_task_pipeline(false);
+  auto factory = make_factory();
+  const std::vector<std::vector<Message>> conversations = {
+      {Message("user", std::string("thinking"))},
+      {Message("user", std::string("chat"))},
+      {Message("user", std::string("unknown"))}};
+  chat_template_->set_rendered_prompt_for_message("thinking",
+                                                  "prompt <think>\n");
+  chat_template_->set_rendered_prompt_for_message("chat", "prompt </think>\n");
+  chat_template_->set_rendered_prompt_for_message("unknown", "plain prompt");
+  acquire_batch_slots(conversations.size());
+  std::vector<RequestParams> params(conversations.size());
+  for (RequestParams& param : params) {
+    param.response_format = ResponseFormatType::JSON_OBJECT;
+  }
+  // The mode inferred from the rendered prompt overrides template kwargs.
+  params[0].chat_template_kwargs = {{"enable_thinking", false}};
+  params[1].chat_template_kwargs = {{"enable_thinking", true}};
+  BatchCallbackCapture capture(conversations.size());
+
+  auto requests =
+      factory->create_batch(conversations, params, capture.callback());
+
+  ASSERT_EQ(requests.size(), conversations.size());
+  ASSERT_NE(requests[0], nullptr);
+  EXPECT_NE(requests[0]->state().json_object_grammar, nullptr);
+  EXPECT_TRUE(requests[0]->state().json_reasoning_enabled);
+  EXPECT_TRUE(requests[0]->state().sampling_param.json_object);
+  EXPECT_EQ(capture.call_count(/*index=*/0), 0);
+  ASSERT_NE(requests[1], nullptr);
+  EXPECT_NE(requests[1]->state().json_object_grammar, nullptr);
+  EXPECT_FALSE(requests[1]->state().json_reasoning_enabled);
+  EXPECT_TRUE(requests[1]->state().sampling_param.json_object);
+  EXPECT_EQ(capture.call_count(/*index=*/1), 0);
+  EXPECT_EQ(requests[2], nullptr);
+  EXPECT_EQ(capture.call_count(/*index=*/2), 1);
+  ASSERT_TRUE(capture.output(/*index=*/2).has_value());
+  ASSERT_TRUE(capture.output(/*index=*/2)->status.has_value());
+  EXPECT_EQ(capture.output(/*index=*/2)->status->code(),
+            StatusCode::INVALID_ARGUMENT);
+  EXPECT_EQ(
+      capture.output(/*index=*/2)->status->message(),
+      "JSON object constraint requires a recognizable chat generation mode");
+  ASSERT_EQ(tokenizer_->batch_encode_calls().size(), 1U);
+  EXPECT_EQ(tokenizer_->batch_encode_calls().front().texts,
+            std::vector<std::string>(
+                {"prompt <think>\n", "prompt </think>\n", "plain prompt"}));
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 2);
+  requests.clear();
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 0);
+}
+
+TEST_F(LLMRequestFactoryTest, EmptyBatchesDoNotEncodeOrChangeRateLimitSlots) {
+  auto factory = make_factory();
+  rate_limiter_.decrease_one_request();
+  bool callback_called = false;
+  const auto callback = [&callback_called](size_t /*index*/,
+                                           RequestOutput /*output*/) {
+    callback_called = true;
+    return false;
+  };
+
+  EXPECT_TRUE(
+      factory->create_batch(std::vector<std::string>{}, {}, callback).empty());
+  EXPECT_TRUE(factory
+                  ->create_batch(std::vector<std::vector<Message>>{},
+                                 {RequestParams{}},
+                                 callback)
+                  .empty());
+
+  EXPECT_FALSE(callback_called);
+  EXPECT_TRUE(tokenizer_->encode_calls().empty());
+  EXPECT_TRUE(tokenizer_->batch_encode_calls().empty());
+  EXPECT_EQ(rate_limiter_.get_num_concurrent_requests(), 0);
 }
 
 }  // namespace
