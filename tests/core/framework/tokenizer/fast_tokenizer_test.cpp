@@ -343,6 +343,32 @@ TEST_F(FastTokenizerTest, CallLevelFalseSuppressesConfiguredSpecialTokens) {
   EXPECT_EQ(ids_with_special_tokens.back(), 1);
 }
 
+TEST_F(FastTokenizerTest, BatchEncodeMatchesSingleEncode) {
+  TokenizerArgs args;
+  args.tokenizer_type() = "fast";
+  args.vocab_file() = tokenizer_json_path_.string();
+  args.add_bos_token() = true;
+  args.bos_token() = "<|bos|>";
+  args.add_eos_token() = true;
+  args.eos_token() = "<|eos|>";
+
+  FastTokenizer tokenizer(args);
+  const std::vector<std::string> texts = {"hello", "world", "hello world"};
+
+  for (bool add_special_tokens : {false, true}) {
+    std::vector<std::vector<int32_t>> batch_ids = {{-1}};
+    ASSERT_TRUE(tokenizer.batch_encode(texts, &batch_ids, add_special_tokens));
+    ASSERT_EQ(batch_ids.size(), texts.size());
+
+    for (size_t index = 0; index < texts.size(); ++index) {
+      std::vector<int32_t> single_ids;
+      ASSERT_TRUE(
+          tokenizer.encode(texts[index], &single_ids, add_special_tokens));
+      EXPECT_EQ(batch_ids[index], single_ids);
+    }
+  }
+}
+
 TEST_F(FastTokenizerTest, DecodeTokenPreservesByteLevelPieces) {
   const std::filesystem::path byte_level_path =
       test_dir_ / "byte_level_tokenizer.json";
@@ -392,6 +418,29 @@ TEST_F(FastTokenizerTest, ProxyForwardsDecodeToken) {
 
   EXPECT_EQ(proxy.decode_token(3), " ");
   EXPECT_EQ(proxy.decode_token(4), "\xE4\xB8\x80");
+}
+
+TEST_F(FastTokenizerTest, ProxyInstancesKeepThreadLocalTokenizersSeparate) {
+  const std::filesystem::path non_byte_level_path =
+      test_dir_ / "non_byte_level_proxy_tokenizer.json";
+  CreateNonByteLevelTokenizerJson(non_byte_level_path.string());
+
+  TokenizerArgs byte_args;
+  byte_args.tokenizer_type() = "fast";
+  byte_args.vocab_file() =
+      (test_dir_ / "byte_level_proxy_tokenizer.json").string();
+  CreateByteLevelTokenizerJson(byte_args.vocab_file());
+
+  TokenizerArgs non_byte_args;
+  non_byte_args.tokenizer_type() = "fast";
+  non_byte_args.vocab_file() = non_byte_level_path.string();
+
+  TokenizerProxy byte_proxy(std::make_unique<FastTokenizer>(byte_args));
+  TokenizerProxy non_byte_proxy(std::make_unique<FastTokenizer>(non_byte_args));
+
+  EXPECT_EQ(byte_proxy.decode_token(4), "\xE4\xB8\x80");
+  EXPECT_EQ(non_byte_proxy.decode_token(15), "\xC2\xA1");
+  EXPECT_EQ(byte_proxy.decode_token(4), "\xE4\xB8\x80");
 }
 
 // Test that BOS token is not added when bos_token is empty

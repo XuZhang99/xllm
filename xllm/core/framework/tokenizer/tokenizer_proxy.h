@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <memory>
+
 #include "tokenizer.h"
 #include "tokenizer_args.h"
 
@@ -28,6 +30,10 @@ class TokenizerProxy : public Tokenizer {
   bool encode(const std::string_view& text,
               std::vector<int32_t>* ids,
               bool add_special_tokens = true) const override;
+
+  bool batch_encode(const std::vector<std::string>& texts,
+                    std::vector<std::vector<int32_t>>* ids,
+                    bool add_special_tokens = true) const override;
 
   bool encode(int64_t item_id, std::vector<int32_t>* token_ids) const override;
 
@@ -52,8 +58,11 @@ class TokenizerProxy : public Tokenizer {
   std::unique_ptr<Tokenizer> clone() const override;
 
  private:
+  class ThreadLocalIdentity final {};
+
   Tokenizer* get_tls_tokenizer() const;
 
   std::unique_ptr<Tokenizer> tokenizer_;
+  std::shared_ptr<const ThreadLocalIdentity> tls_identity_;
 };
 }  // namespace xllm

@@ -148,9 +148,19 @@ extern "C" fn tokenizers_encode_batch(
 #[no_mangle]
 extern "C" fn tokenizers_free_encode_results(results: *mut TokenizerEncodeResult, num_seqs: usize) {
     unsafe {
+        if results.is_null() || num_seqs == 0 {
+            return;
+        }
         let slice = std::slice::from_raw_parts_mut(results, num_seqs);
         for result in &mut *slice {
-            drop(Box::from_raw(std::slice::from_raw_parts_mut(result.token_ids, result.len)));
+            if !result.token_ids.is_null() {
+                drop(Box::from_raw(std::slice::from_raw_parts_mut(
+                    result.token_ids,
+                    result.len,
+                )));
+                result.token_ids = std::ptr::null_mut();
+            }
+            result.len = 0;
         }
     }
 }

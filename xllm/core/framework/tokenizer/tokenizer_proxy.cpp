@@ -15,7 +15,8 @@ limitations under the License.
 
 #include "tokenizer_proxy.h"
 
-#include <filesystem>
+#include <unordered_map>
+#include <utility>
 
 #include "fast_tokenizer.h"
 #include "sentencepiece_tokenizer.h"
@@ -24,7 +25,8 @@ limitations under the License.
 namespace xllm {
 
 TokenizerProxy::TokenizerProxy(std::unique_ptr<Tokenizer> tokenizer)
-    : tokenizer_(std::move(tokenizer)) {}
+    : tokenizer_(std::move(tokenizer)),
+      tls_identity_(std::make_shared<ThreadLocalIdentity>()) {}
 
 std::unique_ptr<Tokenizer> TokenizerProxy::clone() const {
   return std::make_unique<TokenizerProxy>(tokenizer_->clone());
@@ -34,6 +36,12 @@ bool TokenizerProxy::encode(const std::string_view& text,
                             std::vector<int32_t>* ids,
                             bool add_special_tokens) const {
   return get_tls_tokenizer()->encode(text, ids, add_special_tokens);
+}
+
+bool TokenizerProxy::batch_encode(const std::vector<std::string>& texts,
+                                  std::vector<std::vector<int32_t>>* ids,
+                                  bool add_special_tokens) const {
+  return get_tls_tokenizer()->batch_encode(texts, ids, add_special_tokens);
 }
 
 bool TokenizerProxy::encode(int64_t item_id,
@@ -69,10 +77,33 @@ size_t TokenizerProxy::vocab_size() const {
   return get_tls_tokenizer()->vocab_size();
 }
 
-void TokenizerProxy::warmup() const { (void)get_tls_tokenizer(); }
+void TokenizerProxy::warmup() const { get_tls_tokenizer()->warmup(); }
 
 Tokenizer* TokenizerProxy::get_tls_tokenizer() const {
-  thread_local std::unique_ptr<Tokenizer> tls_tokenizer(tokenizer_->clone());
-  return tls_tokenizer.get();
+  using ThreadLocalTokenizer =
+      std::pair<std::weak_ptr<const ThreadLocalIdentity>,
+                std::unique_ptr<Tokenizer>>;
+  thread_local std::unordered_map<const ThreadLocalIdentity*,
+                                  ThreadLocalTokenizer>
+      tls_tokenizers;
+
+  const ThreadLocalIdentity* tls_identity = tls_identity_.get();
+  auto entry = tls_tokenizers.find(tls_identity);
+  if (entry != tls_tokenizers.end()) {
+    // A proxy identity remains alive while its methods are called. If this
+    // address was reused after a previous proxy was destroyed, discard the
+    // stale tokenizer before creating the replacement.
+    if (!entry->second.first.expired()) {
+      return entry->second.second.get();
+    }
+    tls_tokenizers.erase(entry);
+  }
+
+  auto new_entry =
+      tls_tokenizers
+          .emplace(tls_identity,
+                   ThreadLocalTokenizer{tls_identity_, tokenizer_->clone()})
+          .first;
+  return new_entry->second.second.get();
 }
 }  // namespace xllm

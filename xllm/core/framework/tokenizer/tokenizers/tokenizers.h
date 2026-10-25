@@ -13,7 +13,7 @@ extern "C" {
 typedef void* TokenizerHandle;
 
 typedef struct {
-  int* token_ids;
+  uint32_t* token_ids;
   size_t len;
 } TokenizerEncodeResult;
 
@@ -24,6 +24,13 @@ void tokenizers_encode(TokenizerHandle handle,
                        size_t len,
                        int add_special_token,
                        TokenizerEncodeResult* result);
+
+void tokenizers_encode_batch(TokenizerHandle handle,
+                             const char* const* data,
+                             const size_t* lengths,
+                             size_t num_seqs,
+                             int add_special_tokens,
+                             TokenizerEncodeResult* results);
 
 void tokenizers_decode(TokenizerHandle handle,
                        const uint32_t* data,

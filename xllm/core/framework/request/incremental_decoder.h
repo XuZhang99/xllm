@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
@@ -44,7 +45,12 @@ class IncrementalDecoder final {
   size_t prefix_offset() const { return prefix_offset_; }
 
   // Enable checking whether to skip the prefill token
-  void enable_checking_prefill_token() { checking_prefill_token_ = true; }
+  void enable_checking_prefill_token() {
+    checking_prefill_token_ = true;
+    // The prefill check can change the decode boundary without changing the
+    // token window.  Do not reuse a result from before that boundary change.
+    last_decode_valid_ = false;
+  }
 
  private:
   // the original prompt string, used to skip the prompt decoding when streaming
@@ -65,6 +71,15 @@ class IncrementalDecoder final {
 
   // whether to check skipping prefill token in decode instance.
   bool checking_prefill_token_ = false;
+
+  // A sequence can invoke decode repeatedly with the same token window while
+  // waiting for a delayed callback or an incomplete byte-fallback sequence.
+  // Keep an exact copy of the relevant suffix so that this no-op case avoids
+  // invoking the tokenizer again.  The tokenizer identity is part of the key
+  // because decode implementations may have different vocabularies.
+  const Tokenizer* last_tokenizer_ = nullptr;
+  std::vector<int32_t> last_token_ids_;
+  bool last_decode_valid_ = false;
 };
 
 }  // namespace xllm

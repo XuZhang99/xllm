@@ -161,6 +161,13 @@ FastTokenizer::FastTokenizer(const TokenizerArgs& tokenizer_args)
   handle_ = tokenizers_new_from_path(tokenizer_args.vocab_file().c_str());
   CHECK(handle_ != nullptr)
       << "Failed to load tokenizer from file: " << tokenizer_args.vocab_file();
+
+  if (tokenizer_args_.add_bos_token() && !tokenizer_args_.bos_token().empty()) {
+    bos_token_id_ = token_to_id(tokenizer_args_.bos_token());
+  }
+  if (tokenizer_args_.add_eos_token() && !tokenizer_args_.eos_token().empty()) {
+    eos_token_id_ = token_to_id(tokenizer_args_.eos_token());
+  }
 }
 
 std::unique_ptr<Tokenizer> FastTokenizer::clone() const {
@@ -203,42 +210,105 @@ bool add_special_token_id(const std::string& token,
   }
   return true;
 }
+
+void copy_token_ids(const TokenizerEncodeResult& result,
+                    std::vector<int32_t>* ids,
+                    size_t extra_capacity = 0) {
+  ids->clear();
+  ids->reserve(result.len + extra_capacity);
+  for (size_t index = 0; index < result.len; ++index) {
+    ids->push_back(static_cast<int32_t>(result.token_ids[index]));
+  }
+}
 }  // namespace
 
 bool FastTokenizer::encode(const std::string_view& text,
                            std::vector<int32_t>* ids,
                            bool add_special_tokens) const {
-  TokenizerEncodeResult result;
+  TokenizerEncodeResult result{};
   tokenizers_encode(
       handle_, text.data(), text.size(), add_special_tokens, &result);
 
-  std::vector<int32_t> ret(result.token_ids, result.token_ids + result.len);
-  *ids = std::move(ret);
+  copy_token_ids(result, ids, /*extra_capacity=*/2);
 
   // Free the memory allocated by Rust tokenizer
   // The token_ids pointer is allocated by Rust's Box::into_raw and must be
   // freed
-  if (result.token_ids != nullptr && result.len > 0) {
+  if (result.token_ids != nullptr) {
     tokenizers_free_encode_results(&result, 1);
   }
 
   // Respect the call-level contract: false means text-only token IDs.
   if (add_special_tokens && tokenizer_args_.add_bos_token() &&
       !tokenizer_args_.bos_token().empty()) {
-    const auto bos_id = token_to_id(tokenizer_args_.bos_token());
     add_special_token_id(tokenizer_args_.bos_token(),
-                         bos_id,
+                         bos_token_id_,
                          ids,
                          /*prepend=*/true);
   }
 
   if (add_special_tokens && tokenizer_args_.add_eos_token() &&
       !tokenizer_args_.eos_token().empty()) {
-    const auto eos_id = token_to_id(tokenizer_args_.eos_token());
     add_special_token_id(tokenizer_args_.eos_token(),
-                         eos_id,
+                         eos_token_id_,
                          ids,
                          /*prepend=*/false);
+  }
+
+  return true;
+}
+
+bool FastTokenizer::batch_encode(const std::vector<std::string>& texts,
+                                 std::vector<std::vector<int32_t>>* ids,
+                                 bool add_special_tokens) const {
+  ids->clear();
+  ids->reserve(texts.size());
+  if (texts.empty()) {
+    return true;
+  }
+
+  std::vector<const char*> input_data;
+  input_data.reserve(texts.size());
+  std::vector<size_t> input_lengths;
+  input_lengths.reserve(texts.size());
+  for (const std::string& text : texts) {
+    input_data.push_back(text.data());
+    input_lengths.push_back(text.size());
+  }
+
+  std::vector<TokenizerEncodeResult> results(texts.size());
+  tokenizers_encode_batch(handle_,
+                          input_data.data(),
+                          input_lengths.data(),
+                          texts.size(),
+                          add_special_tokens,
+                          results.data());
+
+  for (const TokenizerEncodeResult& result : results) {
+    ids->emplace_back();
+    copy_token_ids(result, &ids->back(), /*extra_capacity=*/2);
+  }
+
+  tokenizers_free_encode_results(results.data(), results.size());
+
+  if (add_special_tokens && tokenizer_args_.add_bos_token() &&
+      !tokenizer_args_.bos_token().empty()) {
+    for (std::vector<int32_t>& sequence : *ids) {
+      add_special_token_id(tokenizer_args_.bos_token(),
+                           bos_token_id_,
+                           &sequence,
+                           /*prepend=*/true);
+    }
+  }
+
+  if (add_special_tokens && tokenizer_args_.add_eos_token() &&
+      !tokenizer_args_.eos_token().empty()) {
+    for (std::vector<int32_t>& sequence : *ids) {
+      add_special_token_id(tokenizer_args_.eos_token(),
+                           eos_token_id_,
+                           &sequence,
+                           /*prepend=*/false);
+    }
   }
 
   return true;

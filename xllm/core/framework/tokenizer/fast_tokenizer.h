@@ -16,6 +16,8 @@ limitations under the License.
 
 #pragma once
 
+#include <optional>
+
 #include "tokenizer.h"
 #include "tokenizer_args.h"
 #include "tokenizers/tokenizers.h"
@@ -31,6 +33,10 @@ class FastTokenizer : public Tokenizer {
   bool encode(const std::string_view& text,
               std::vector<int32_t>* ids,
               bool add_special_tokens = true) const override;
+
+  bool batch_encode(const std::vector<std::string>& texts,
+                    std::vector<std::vector<int32_t>>* ids,
+                    bool add_special_tokens = true) const override;
 
   std::string decode(const Slice<int32_t>& ids,
                      bool skip_special_tokens) const override;
@@ -50,6 +56,8 @@ class FastTokenizer : public Tokenizer {
   TokenizerArgs tokenizer_args_;
   bool byte_level_decoder_ = false;
   TokenizerHandle handle_ = nullptr;
+  std::optional<int32_t> bos_token_id_;
+  std::optional<int32_t> eos_token_id_;
 };
 
 }  // namespace xllm

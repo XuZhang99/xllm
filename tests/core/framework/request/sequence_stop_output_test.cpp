@@ -15,6 +15,7 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -64,6 +65,24 @@ class ByteFallbackTokenizer final : public Tokenizer {
 
   static constexpr int32_t kFirstByteTokenId = 1001;
   static constexpr int32_t kLastByteTokenId = 1002;
+};
+
+class CountingTokenizer final : public Tokenizer {
+ public:
+  std::string decode(const Slice<int32_t>& ids,
+                     bool /*skip_special_tokens*/) const override {
+    ++decode_calls_;
+    std::string text;
+    for (const int32_t token_id : ids) {
+      text.push_back(static_cast<char>(token_id));
+    }
+    return text;
+  }
+
+  size_t decode_calls() const { return decode_calls_; }
+
+ private:
+  mutable size_t decode_calls_ = 0;
 };
 
 class SequenceStopOutputTest : public ::testing::Test {
@@ -127,6 +146,22 @@ class SequenceStopOutputTest : public ::testing::Test {
   std::unique_ptr<Sequence> sequence_;
   StopAwareTokenizer tokenizer_;
 };
+
+TEST(IncrementalDecoderTest, ReusesRepeatedTokenWindow) {
+  IncrementalDecoder decoder(/*prompt=*/"",
+                             /*num_prompt_tokens=*/0,
+                             /*echo=*/false,
+                             /*skip_special_tokens=*/false);
+  CountingTokenizer tokenizer;
+  const std::vector<int32_t> token_ids = {'A'};
+
+  EXPECT_EQ(decoder.decode(token_ids, tokenizer), "A");
+  const size_t decode_calls = tokenizer.decode_calls();
+  EXPECT_GT(decode_calls, 0);
+
+  EXPECT_TRUE(decoder.decode(token_ids, tokenizer).empty());
+  EXPECT_EQ(tokenizer.decode_calls(), decode_calls);
+}
 
 TEST_F(SequenceStopOutputTest, DecodeStreamDoesNotRepeatPrefillTokenMetadata) {
   initialize(/*max_generated_tokens=*/8,

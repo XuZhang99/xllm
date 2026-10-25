@@ -36,13 +36,16 @@ class Tokenizer {
   }
 
   virtual bool batch_encode(const std::vector<std::string>& texts,
-                            std::vector<std::vector<int32_t>>* ids) const {
+                            std::vector<std::vector<int32_t>>* ids,
+                            bool add_special_tokens = true) const {
+    ids->clear();
+    ids->reserve(texts.size());
     for (const auto& text : texts) {
-      std::vector<int32_t> single_ids;
-      if (!encode(text, &single_ids)) {
+      ids->emplace_back();
+      if (!encode(text, &ids->back(), add_special_tokens)) {
+        ids->pop_back();
         return false;
       }
-      ids->push_back(single_ids);
     }
     return true;
   }
