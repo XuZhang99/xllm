@@ -27,8 +27,10 @@ limitations under the License.
 #include <list>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "core/common/macros.h"
 #include "core/common/types.h"
@@ -150,7 +152,8 @@ class ContinuousSchedulerBase : public Scheduler {
   }
 
   // process the batch output
-  void process_batch_output(bool enable_schedule_overlap);
+  void process_batch_output(
+      const std::vector<std::shared_ptr<Request>>& requests);
 
   const Options options_;
 
@@ -257,11 +260,16 @@ class ContinuousSchedulerBase : public Scheduler {
   XServiceClient::HeartbeatCallbackRegistration
       heartbeat_callback_registration_ = 0;
 
-  // params for enable_schedule_overlap case
-  BatchGroup last_batch_;
-  std::vector<std::shared_ptr<Request>> last_running_requests_;
-  std::vector<Sequence*> last_running_sequences_;
-  bool is_first_step_ = true;
+  struct PendingStep {
+    // Keep requests alive until their non-owning Batch views are destroyed.
+    std::vector<std::shared_ptr<Request>> requests;
+    BatchGroup batches;
+  };
+
+  std::optional<PendingStep> pending_step_;
+
+  // Refreshed at output consumption because beam search can replace sequences.
+  std::vector<Sequence*> output_sequences_;
 
   // Construct a SchedulerState snapshot for the policy.
   SchedulerState make_state();
@@ -277,6 +285,8 @@ class ContinuousSchedulerBase : public Scheduler {
   BatchGroup schedule_request(const absl::Duration& timeout);
 
   void step_with_schedule_overlap(const absl::Duration& timeout);
+
+  void complete_pending_step(bool outputs_collected);
 
   void refresh_sequences_from_requests(
       const std::vector<std::shared_ptr<Request>>& requests,
@@ -300,14 +310,17 @@ class ContinuousScheduler : public ContinuousSchedulerBase {
           nullptr)
     requires requires(EngineType* typed_engine, BatchGroup& batch) {
       { typed_engine->step(batch) } -> std::same_as<ForwardOutput>;
-      { typed_engine->update_last_step_result(batch) } -> std::same_as<void>;
+      {
+        typed_engine->collect_step_outputs(batch)
+      } -> std::same_as<std::vector<RawForwardOutput>>;
     }
       : ContinuousSchedulerBase(
             engine,
             options,
             [engine](BatchGroup& batch) { return engine->step(batch); },
             [engine](BatchGroup& batch) {
-              engine->update_last_step_result(batch);
+              batch.apply_outputs(engine->collect_step_outputs(batch),
+                                  BatchOutputPhase::COMMIT_PENDING);
             },
             std::move(model_residency_coordinator),
             std::move(distributed_worker_manager)),
@@ -319,8 +332,8 @@ class ContinuousScheduler : public ContinuousSchedulerBase {
                    static_cast<Engine*>(typed_engine);
                    { typed_engine->step(batch) } -> std::same_as<ForwardOutput>;
                    {
-                     typed_engine->update_last_step_result(batch)
-                   } -> std::same_as<void>;
+                     typed_engine->collect_step_outputs(batch)
+                   } -> std::same_as<std::vector<RawForwardOutput>>;
                  }
   ContinuousScheduler(
       TargetEngine* engine,
@@ -334,7 +347,8 @@ class ContinuousScheduler : public ContinuousSchedulerBase {
             options,
             [engine](BatchGroup& batch) { return engine->step(batch); },
             [engine](BatchGroup& batch) {
-              engine->update_last_step_result(batch);
+              batch.apply_outputs(engine->collect_step_outputs(batch),
+                                  BatchOutputPhase::COMMIT_PENDING);
             },
             std::move(model_residency_coordinator),
             std::move(distributed_worker_manager)),

@@ -383,45 +383,46 @@ ForwardOutput VLMEngine::step(BatchGroup& batch) {
   auto results = folly::collectAll(futures).get();
 
   assert(dp_size_ == worker_clients_num_ / dp_local_tp_size_);
+  for (int32_t worker_rank = 0; worker_rank < worker_clients_num_;
+       worker_rank += dp_local_tp_size_) {
+    CHECK(results[worker_rank].hasValue())
+        << "Failed to execute model, worker RPC failed";
+  }
+  std::vector<RawForwardOutput> outputs;
+  outputs.reserve(dp_size_);
   size_t dp_rank = 0;
   for (int32_t worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_tp_size_) {
-    auto result = results[worker_rank].value();
     const bool empty_shard = batch[dp_rank].size() == 0 &&
                              (!forward_inputs[dp_rank].token_ids.defined() ||
                               forward_inputs[dp_rank].token_ids.numel() == 0);
     if (empty_shard) {
+      outputs.emplace_back();
       ++dp_rank;
       continue;
     }
-    if (result.has_value()) {
-      // if src_seq_idxes is not empty, skip sample output processing and
-      // process beam search output instead
-      if (result.value().src_seq_idxes.size() == 0) {
-        attach_embedding_output_metadata(
-            args_, batch[dp_rank].get_sequences(), result.value());
-        // set second input param enable_schedule_overlap to false,
-        // if it's not enabled, process_sample_output will append the real
-        // token, if it's enabled, this false here will append the fake token in
-        // process_sample_output
-        batch[dp_rank].process_sample_output(result.value(),
-                                             /*replace_fake_token=*/false);
-      } else {
-        batch[dp_rank].process_beam_search_output(result.value(), false);
-      }
-      // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
-      batch[dp_rank].refresh_sequences_from_groups();
-    } else {
-      LOG(FATAL) << "Failed to execute model, result has no value";
+    CHECK(results[worker_rank].value().has_value())
+        << "Failed to execute model, result has no value";
+    auto& result = results[worker_rank].value();
+    if (result.value().src_seq_idxes.empty()) {
+      attach_embedding_output_metadata(
+          args_, batch[dp_rank].get_sequences(), result.value());
     }
+    outputs.emplace_back(std::move(result.value()));
     ++dp_rank;
   }
+  batch.apply_outputs(outputs,
+                      options_.enable_schedule_overlap()
+                          ? BatchOutputPhase::RESERVE_PENDING
+                          : BatchOutputPhase::IMMEDIATE);
 
   COUNTER_ADD(engine_latency_seconds, timer.elapsed_seconds());
   return {};
 }
 
-void VLMEngine::update_last_step_result(BatchGroup& last_batch) {
+std::vector<RawForwardOutput> VLMEngine::collect_step_outputs(
+    const BatchGroup& batch) {
+  CHECK_EQ(batch.size(), dp_size_);
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
   std::vector<RawForwardOutput> raw_forward_outputs;
@@ -441,24 +442,22 @@ void VLMEngine::update_last_step_result(BatchGroup& last_batch) {
   // wait for the all future to complete
   auto last_step_results = folly::collectAll(futures).get();
 
-  for (int32_t worker_rank = 0; worker_rank < worker_clients_num_;
-       worker_rank += dp_local_tp_size_) {
-    auto result = last_step_results[worker_rank / stride].value();
-    if (result.has_value()) {
-      raw_forward_outputs.emplace_back(std::move(result.value()));
-    } else {
-      throw std::runtime_error("Failed to get last step results.");
-    }
+  for (const auto& result : last_step_results) {
+    CHECK(result.hasValue() && result.value().has_value())
+        << "Failed to get last step results, result has no value";
   }
 
-  for (size_t i = 0; i < last_batch.size(); ++i) {
-    attach_embedding_output_metadata(
-        args_, last_batch[i].get_sequences(), raw_forward_outputs[i]);
-    last_batch[i].process_sample_output(raw_forward_outputs[i],
-                                        options_.enable_schedule_overlap());
-    // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
-    last_batch[i].refresh_sequences_from_groups();
+  for (int32_t worker_rank = 0; worker_rank < worker_clients_num_;
+       worker_rank += dp_local_tp_size_) {
+    auto& result = last_step_results[worker_rank / stride].value();
+    raw_forward_outputs.emplace_back(std::move(result.value()));
   }
+
+  for (size_t dp_rank = 0; dp_rank < batch.size(); ++dp_rank) {
+    attach_embedding_output_metadata(
+        args_, batch[dp_rank].get_sequences(), raw_forward_outputs[dp_rank]);
+  }
+  return raw_forward_outputs;
 }
 
 void VLMEngine::setup_workers(const runtime::Options& options) {

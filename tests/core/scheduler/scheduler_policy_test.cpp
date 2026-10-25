@@ -85,7 +85,8 @@ class FakeEngine : public Engine {
         fake_block_manager_(std::move(block_manager)) {}
 
   virtual ForwardOutput step(BatchGroup& /*batch*/) { return {}; }
-  virtual void update_last_step_result(BatchGroup& /*batch*/) {
+  virtual std::vector<RawForwardOutput> collect_step_outputs(
+      const BatchGroup& /*batch*/) {
     NOT_IMPLEMENTED();
   }
   const Tokenizer* tokenizer() const { return fake_tokenizer_.get(); }

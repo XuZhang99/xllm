@@ -322,9 +322,10 @@ int64_t SpeculativeEngineBase<TargetEngine>::calculate_kv_cache(
 }
 
 template <typename TargetEngine>
-void SpeculativeEngineBase<TargetEngine>::update_last_step_result(
-    BatchGroup& batch) {
-  engine_->update_last_step_result(batch);
+std::vector<RawForwardOutput>
+SpeculativeEngineBase<TargetEngine>::collect_step_outputs(
+    const BatchGroup& batch) {
+  return engine_->collect_step_outputs(batch);
 }
 
 template class SpeculativeEngineBase<LLMEngine>;

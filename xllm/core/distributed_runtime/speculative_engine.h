@@ -75,7 +75,7 @@ class SpeculativeEngineBase : public Engine {
     return engine_->draft_step_controller();
   }
 
-  void update_last_step_result(BatchGroup& batch);
+  std::vector<RawForwardOutput> collect_step_outputs(const BatchGroup& batch);
 
  protected:
   SpeculativeEngineBase(const runtime::Options& options, bool use_draft_engine);

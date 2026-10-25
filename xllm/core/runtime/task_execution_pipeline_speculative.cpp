@@ -1111,7 +1111,7 @@ Status TaskExecutionPipeline::plan_adaptive_verify(
   const uint64_t eligible_generation = generation > 2 ? generation - 2 : 0;
   // Engine coordinated submission retires n-2 on every sampling rank before
   // Step(n) admission (ContinuousScheduler::step_with_schedule_overlap and
-  // LLMEngine::update_last_step_result). Never use opportunistic n-1 feedback:
+  // LLMEngine::collect_step_outputs). Never use opportunistic n-1 feedback:
   // its availability can differ between rank-local state executors.
   if (adaptive_verify_->retired_generation < eligible_generation) {
     return invalid(

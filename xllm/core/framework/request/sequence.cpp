@@ -390,7 +390,7 @@ void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
     // Skip MTP token processing if sequence has no KV cache blocks.
     // This happens when the sequence was preempted during schedule_request(),
     // causing its KV cache to be deallocated (reset), but it's still in
-    // last_batch_ being processed by update_last_step_result().
+    // the pending batch receiving its collected step outputs.
     // Composite KV managers can have capacity without exposing local blocks.
     if (kv_state_.current_max_tokens_capacity() == 0) {
       return;

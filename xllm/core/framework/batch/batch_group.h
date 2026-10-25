@@ -22,6 +22,12 @@ limitations under the License.
 
 namespace xllm {
 
+enum class BatchOutputPhase {
+  IMMEDIATE,        // Apply real outputs from a synchronous step.
+  RESERVE_PENDING,  // Apply worker placeholders; do not create them here.
+  COMMIT_PENDING,   // Replace retained output targets with real outputs.
+};
+
 // A DP batch aggregate. Each element is the rank-local Batch for the same
 // scheduler step, and its index is the corresponding DP rank.
 class BatchGroup final {
@@ -57,6 +63,11 @@ class BatchGroup final {
   const_iterator end() const { return batches_.end(); }
   const_iterator cbegin() const { return batches_.cbegin(); }
   const_iterator cend() const { return batches_.cend(); }
+
+  // Immediate and reserve both append through Batch's existing output path;
+  // the worker output and sequence configuration determine the token contents.
+  void apply_outputs(const std::vector<RawForwardOutput>& outputs,
+                     BatchOutputPhase phase);
 
  private:
   Container batches_;

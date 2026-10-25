@@ -102,7 +102,9 @@ class ProfileManager {
     requires requires(TargetEngine* engine, BatchGroup& batch) {
       static_cast<Engine*>(engine);
       { engine->step(batch) } -> std::same_as<ForwardOutput>;
-      { engine->update_last_step_result(batch) } -> std::same_as<void>;
+      {
+        engine->collect_step_outputs(batch)
+      } -> std::same_as<std::vector<RawForwardOutput>>;
     }
   ProfileManager(TargetEngine* engine,
                  const Options& options,
@@ -113,7 +115,8 @@ class ProfileManager {
             options,
             [engine](BatchGroup& batch) { return engine->step(batch); },
             [engine](BatchGroup& batch) {
-              engine->update_last_step_result(batch);
+              batch.apply_outputs(engine->collect_step_outputs(batch),
+                                  BatchOutputPhase::COMMIT_PENDING);
             },
             std::move(distributed_worker_manager)) {}
 

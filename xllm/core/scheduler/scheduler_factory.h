@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/disagg_pd_scheduler.h"
@@ -42,7 +43,9 @@ template <typename TargetEngine>
   requires requires(TargetEngine* engine, BatchGroup& batch) {
     static_cast<Engine*>(engine);
     { engine->step(batch) } -> std::same_as<ForwardOutput>;
-    { engine->update_last_step_result(batch) } -> std::same_as<void>;
+    {
+      engine->collect_step_outputs(batch)
+    } -> std::same_as<std::vector<RawForwardOutput>>;
   }
 std::unique_ptr<Scheduler> create_continuous_scheduler(
     TargetEngine* engine,

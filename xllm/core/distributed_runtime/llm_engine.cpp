@@ -682,35 +682,29 @@ ForwardOutput LLMEngine::step(BatchGroup& batch) {
     eplb_controller_->on_step_completed(results, is_graph_warmup);
   }
 
-  size_t dp_rank = 0;
-  for (auto worker_rank = 0; worker_rank < worker_clients_num_;
+  std::vector<RawForwardOutput> outputs;
+  outputs.reserve(dp_size_);
+  for (uint32_t worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_size_) {
-    auto result = results[worker_rank].value();
+    auto& result = results[worker_rank].value();
     if (!options_.enable_schedule_overlap() && !is_graph_warmup) {
       observe_draft_step_acceptance(*result);
     }
-    // if src_seq_idxes is not empty, skip sample output processing and
-    // process beam search output instead
-    if (result.value().src_seq_idxes.size() == 0) {
-      // set second input param enable_schedule_overlap to false,
-      // if it's not enabled, process_sample_output will append the real
-      // token, if it's enabled, this false here will append the fake token in
-      // process_sample_output
-      batch[dp_rank].process_sample_output(result.value(), false);
-    } else {
-      batch[dp_rank].process_beam_search_output(result.value(), false);
-    }
-    // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
-    batch[dp_rank].refresh_sequences_from_groups();
-    ++dp_rank;
+    outputs.emplace_back(std::move(result.value()));
   }
+  batch.apply_outputs(outputs,
+                      options_.enable_schedule_overlap()
+                          ? BatchOutputPhase::RESERVE_PENDING
+                          : BatchOutputPhase::IMMEDIATE);
 
   COUNTER_ADD(engine_latency_seconds, timer.elapsed_seconds());
   return {};
 }
 
-void LLMEngine::update_last_step_result(BatchGroup& last_batch) {
-  const bool is_graph_warmup = contains_graph_warmup(last_batch);
+std::vector<RawForwardOutput> LLMEngine::collect_step_outputs(
+    const BatchGroup& batch) {
+  CHECK_EQ(batch.size(), dp_size_);
+  const bool is_graph_warmup = contains_graph_warmup(batch);
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
   std::vector<RawForwardOutput> raw_forward_outputs;
@@ -773,12 +767,7 @@ void LLMEngine::update_last_step_result(BatchGroup& last_batch) {
         << "Invalid adaptive DSpark DP result or retirement order.";
   }
 
-  for (auto i = 0; i < last_batch.size(); i++) {
-    last_batch[i].process_sample_output(raw_forward_outputs[i],
-                                        options_.enable_schedule_overlap());
-    // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
-    last_batch[i].refresh_sequences_from_groups();
-  }
+  return raw_forward_outputs;
 }
 
 void LLMEngine::setup_workers(const runtime::Options& options) {

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <limits>
 #include <memory>
@@ -200,7 +201,8 @@ class FakeEngine : public Engine {
         std::make_unique<ControllablePrefetchBlockManagerPool>(opt);
   }
   virtual ForwardOutput step(BatchGroup& /*batch*/) { return {}; }
-  virtual void update_last_step_result(BatchGroup& /*batch*/) {
+  virtual std::vector<RawForwardOutput> collect_step_outputs(
+      const BatchGroup& /*batch*/) {
     NOT_IMPLEMENTED();
   }
   const Tokenizer* tokenizer() const { return fake_tokenizer_.get(); }
@@ -237,12 +239,20 @@ class PipelinePhaseEngine final : public FakeEngine {
     step_observed_consumed = consumed;
     return {};
   }
-  void update_last_step_result(BatchGroup& /*batch*/) override {
+  std::vector<RawForwardOutput> collect_step_outputs(
+      const BatchGroup& batch) override {
     calls.emplace_back("consume");
     consumed = true;
+    collected_sequences.emplace_back(batch.front().get_sequences());
+    if (on_collect) {
+      on_collect(batch);
+    }
+    return std::vector<RawForwardOutput>(batch.size());
   }
 
   std::vector<std::string> calls;
+  std::vector<std::vector<Sequence*>> collected_sequences;
+  std::function<void(const BatchGroup&)> on_collect;
   bool consumed = false;
   bool step_observed_consumed = false;
 };
@@ -279,9 +289,7 @@ class TestableContinuousScheduler final : public ContinuousScheduler<> {
     prepared_notification_ = &notification;
   }
 
-  void process_batch_output_test(bool enable_schedule_overlap) {
-    process_batch_output(enable_schedule_overlap);
-  }
+  void process_batch_output_test() { process_batch_output(running_requests_); }
 
   std::vector<std::shared_ptr<Request>> get_running_requests() {
     return running_requests_;
@@ -305,14 +313,27 @@ class TestableContinuousScheduler final : public ContinuousScheduler<> {
   size_t scheduler_queue_size() { return request_queue_.size(); }
 
   void wait_for_responses() { output_dispatcher_->wait_completion(); }
-  void seed_pending_batch(Sequence* sequence) {
-    last_batch_ = BatchGroup(/*dp_size=*/1);
-    last_batch_.front().add(sequence);
-    is_first_step_ = false;
+  void seed_pending_batch(const std::shared_ptr<Request>& request) {
+    pending_step_.emplace();
+    pending_step_->requests.emplace_back(request);
+    pending_step_->batches = BatchGroup(/*dp_size=*/1);
+    pending_step_->batches.front().add(request->sequences().front().get());
+  }
+
+  void schedule_batch_for_test(std::vector<std::shared_ptr<Request>> requests) {
+    scripted_scheduling_ = true;
+    scripted_requests_ = std::move(requests);
   }
 
  protected:
   BatchGroup prepare_batch() override {
+    if (scripted_scheduling_) {
+      running_requests_ = std::move(scripted_requests_);
+      refresh_sequences_from_requests(running_requests_, running_sequences_);
+      BatchGroup batch(/*dp_size=*/1);
+      batch.front().add(running_sequences_);
+      return batch;
+    }
     BatchGroup batch = ContinuousSchedulerBase::prepare_batch();
     std::promise<void>* notification =
         std::exchange(prepared_notification_, nullptr);
@@ -323,6 +344,8 @@ class TestableContinuousScheduler final : public ContinuousScheduler<> {
   }
 
  private:
+  bool scripted_scheduling_ = false;
+  std::vector<std::shared_ptr<Request>> scripted_requests_;
   std::promise<void>* prepared_notification_ = nullptr;
 };
 
@@ -701,6 +724,76 @@ TEST(ContinuousSchedulerTest,
 }
 
 TEST(ContinuousSchedulerTest,
+     OverlapConsumesSubmittedStepsInOrderAndDrainsOnlyOnce) {
+  SchedulerOptions options = create_scheduler_options(64, 4, 0, 64, 1);
+  options.enable_schedule_overlap(true).disable_log_stats(true);
+  PipelinePhaseEngine engine;
+  TestableContinuousScheduler scheduler(&engine, options);
+  auto first = generate_request_with_prompt_tokens({1, 2}, 16, 256);
+  auto second = generate_request_with_prompt_tokens({3, 4}, 16, 256);
+
+  scheduler.schedule_batch_for_test({first});
+  scheduler.step(absl::ZeroDuration());
+  EXPECT_EQ(engine.calls, (std::vector<std::string>{"step"}));
+  EXPECT_TRUE(engine.collected_sequences.empty());
+
+  scheduler.schedule_batch_for_test({second});
+  scheduler.step(absl::ZeroDuration());
+  EXPECT_EQ(engine.calls,
+            (std::vector<std::string>{"step", "step", "consume"}));
+  ASSERT_EQ(engine.collected_sequences.size(), 1u);
+  EXPECT_EQ(engine.collected_sequences[0],
+            (std::vector<Sequence*>{first->sequences().front().get()}));
+
+  scheduler.step(absl::ZeroDuration());
+  EXPECT_EQ(engine.calls,
+            (std::vector<std::string>{"step", "step", "consume", "consume"}));
+  ASSERT_EQ(engine.collected_sequences.size(), 2u);
+  EXPECT_EQ(engine.collected_sequences[1],
+            (std::vector<Sequence*>{second->sequences().front().get()}));
+  scheduler.step(absl::ZeroDuration());
+  EXPECT_EQ(engine.calls.size(), 4u);
+
+  // Work arriving after a drain starts a fresh first step.
+  scheduler.schedule_batch_for_test({first});
+  scheduler.step(absl::ZeroDuration());
+  EXPECT_EQ(engine.calls.back(), "step");
+  EXPECT_EQ(engine.calls.size(), 5u);
+  EXPECT_EQ(engine.collected_sequences.size(), 2u);
+  scheduler.step(absl::ZeroDuration());
+  EXPECT_EQ(engine.collected_sequences.size(), 3u);
+}
+
+TEST(ContinuousSchedulerTest, OverlapRetainsRequestsUntilPendingStepCompletes) {
+  SchedulerOptions options = create_scheduler_options(64, 4, 0, 64, 1);
+  options.enable_schedule_overlap(true).disable_log_stats(true);
+  PipelinePhaseEngine engine;
+  TestableContinuousScheduler scheduler(&engine, options);
+  auto request = generate_request_with_prompt_tokens({1, 2}, 16, 256);
+  const std::weak_ptr<Request> weak_request = request;
+  Sequence* sequence = request->sequences().front().get();
+  bool alive_at_collection = false;
+  engine.on_collect = [&](const BatchGroup& batches) {
+    const auto retained_request = weak_request.lock();
+    alive_at_collection = retained_request != nullptr;
+    ASSERT_NE(retained_request, nullptr);
+    EXPECT_EQ(batches.front()[0], sequence);
+    EXPECT_EQ(retained_request->sequences().front().get(), sequence);
+  };
+
+  scheduler.schedule_batch_for_test({request});
+  scheduler.step(absl::ZeroDuration());
+  request.reset();
+  EXPECT_FALSE(weak_request.expired());
+
+  // Preparing the empty batch releases the running set before collection.
+  scheduler.step(absl::ZeroDuration());
+  EXPECT_TRUE(alive_at_collection);
+  EXPECT_TRUE(weak_request.expired());
+  EXPECT_EQ(engine.calls, (std::vector<std::string>{"step", "consume"}));
+}
+
+TEST(ContinuousSchedulerTest,
      SpeculativePipelineConsumesBeforePrefillTransitionOnly) {
   for (bool stateful_pipeline : {false, true}) {
     for (bool decode : {false, true}) {
@@ -714,7 +807,7 @@ TEST(ContinuousSchedulerTest,
       if (decode) {
         make_request_decode_ready(request);
       }
-      scheduler.seed_pending_batch(pending->sequences()[0].get());
+      scheduler.seed_pending_batch(pending);
       ASSERT_TRUE(scheduler.add_request(request));
       scheduler.step(absl::ZeroDuration());
       const std::vector<std::string> expected =
@@ -766,10 +859,10 @@ TEST(ContinuousSchedulerTest, EmptyOverlapOutputPreservesLatencyClock) {
     const int64_t itl_ms_count =
         HISTOGRAM_inter_token_latency_milliseconds.count();
 
-    // The existing hook selects the current running set; its sequences have
-    // the same shared state seen while consuming a delayed overlap output.
-    scheduler.process_batch_output_test(/*enable_schedule_overlap=*/false);
-    scheduler.process_batch_output_test(/*enable_schedule_overlap=*/false);
+    // Process the running requests against the same shared state seen while
+    // consuming a delayed overlap output.
+    scheduler.process_batch_output_test();
+    scheduler.process_batch_output_test();
     EXPECT_EQ(HISTOGRAM_time_to_first_token_latency_milliseconds.count(),
               ttft_count);
     EXPECT_EQ(HISTOGRAM_inter_token_latency_microseconds.count(), itl_count);
@@ -780,25 +873,25 @@ TEST(ContinuousSchedulerTest, EmptyOverlapOutputPreservesLatencyClock) {
     sequence->update_last_step_token(Token(10), /*token_offset=*/0);
     ASSERT_TRUE(sequence->is_first_token());
     ASSERT_EQ(sequence->generated_tokens_since_latency(), 1u);
-    scheduler.process_batch_output_test(/*enable_schedule_overlap=*/false);
+    scheduler.process_batch_output_test();
     EXPECT_EQ(HISTOGRAM_time_to_first_token_latency_milliseconds.count(),
               ttft_count + 1);
     EXPECT_EQ(HISTOGRAM_inter_token_latency_microseconds.count(), itl_count);
     EXPECT_GE(sequence->time_to_first_token_latency_seconds(), 3.0);
     EXPECT_EQ(sequence->generated_tokens_since_latency(), 0u);
-    scheduler.process_batch_output_test(/*enable_schedule_overlap=*/false);
+    scheduler.process_batch_output_test();
     EXPECT_EQ(HISTOGRAM_time_to_first_token_latency_milliseconds.count(),
               ttft_count + 1);
 
     sequence->append_token(Token(-1));
     sequence->update_last_step_token(Token(11), /*token_offset=*/0);
     ASSERT_FALSE(sequence->is_first_token());
-    scheduler.process_batch_output_test(/*enable_schedule_overlap=*/false);
+    scheduler.process_batch_output_test();
     EXPECT_EQ(HISTOGRAM_inter_token_latency_microseconds.count(),
               itl_count + 1);
     EXPECT_EQ(HISTOGRAM_inter_token_latency_milliseconds.count(),
               itl_ms_count + 1);
-    scheduler.process_batch_output_test(/*enable_schedule_overlap=*/false);
+    scheduler.process_batch_output_test();
     EXPECT_EQ(HISTOGRAM_inter_token_latency_microseconds.count(),
               itl_count + 1);
     EXPECT_EQ(HISTOGRAM_inter_token_latency_milliseconds.count(),
@@ -1470,7 +1563,7 @@ TEST(ContinuousSchedulerTest, FailedStreamReturnsStatusExactlyOnce) {
 
   request->sequences()[0]->fail(
       Status(StatusCode::UNKNOWN, "json_object row mismatch"));
-  scheduler->process_batch_output_test(/*enable_schedule_overlap=*/false);
+  scheduler->process_batch_output_test();
   scheduler->wait_for_responses();
   EXPECT_EQ(callback_count, 0);
 

@@ -95,8 +95,6 @@ ContinuousSchedulerBase::ContinuousSchedulerBase(
   enable_in_batch_prefix_cache_ =
       ::xllm::KVCacheConfig::get_instance().enable_in_batch_prefix_cache();
 
-  last_batch_ = BatchGroup(static_cast<size_t>(options_.dp_size()));
-
   ProfileManager::Options profile_manager_options;
   profile_manager_options.dp_size(options.dp_size())
       .decode_graph_warmup_config(options.decode_graph_warmup_config())
@@ -569,7 +567,7 @@ void ContinuousSchedulerBase::step(const absl::Duration& timeout) {
     step_callback_(batch);
 
     // process request output in batch
-    process_batch_output(false);
+    process_batch_output(running_requests_);
   } else {
     step_with_schedule_overlap(timeout);
   }
@@ -583,15 +581,10 @@ void ContinuousSchedulerBase::step_with_schedule_overlap(
       std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
         return one_batch.empty();
       });
-  bool last_batch_all_empty = std::all_of(
-      last_batch_.begin(), last_batch_.end(), [](const Batch& one_batch) {
-        return one_batch.empty();
-      });
-  if (cur_batch_all_empty && last_batch_all_empty) {
+  if (cur_batch_all_empty && !pending_step_.has_value()) {
     return;
   }
 
-  const bool previous_pending = !is_first_step_ && !last_batch_all_empty;
   bool needs_prefill_state = false;
   if (options_.enable_task_pipeline() &&
       options_.num_speculative_tokens() > 0) {
@@ -607,25 +600,39 @@ void ContinuousSchedulerBase::step_with_schedule_overlap(
       }
     }
   }
-  const bool consumed_before_step = previous_pending && needs_prefill_state;
+  const bool consumed_before_step =
+      pending_step_.has_value() && needs_prefill_state;
   if (consumed_before_step) {
-    result_callback_(last_batch_);
+    result_callback_(pending_step_->batches);
   }
   if (!cur_batch_all_empty) {
     step_callback_(batch);
   }
 
   // producer-consumer mode, make sure only one step is scheduled in advance
-  if (previous_pending) {
-    if (!consumed_before_step) {
-      result_callback_(last_batch_);
-    }
-    process_batch_output(true);
+  if (pending_step_.has_value()) {
+    complete_pending_step(consumed_before_step);
   }
-  last_batch_ = std::move(batch);
-  last_running_sequences_ = running_sequences_;
-  last_running_requests_ = running_requests_;
-  is_first_step_ = false;
+  if (cur_batch_all_empty) {
+    // An empty current batch drains the previous step without submitting work.
+    pending_step_.reset();
+    return;
+  }
+
+  if (!pending_step_.has_value()) {
+    pending_step_.emplace();
+  }
+  // Reuse the retired request vector's capacity across steady-state steps.
+  pending_step_->batches = std::move(batch);
+  pending_step_->requests = running_requests_;
+}
+
+void ContinuousSchedulerBase::complete_pending_step(bool outputs_collected) {
+  CHECK(pending_step_.has_value());
+  if (!outputs_collected) {
+    result_callback_(pending_step_->batches);
+  }
+  process_batch_output(pending_step_->requests);
 }
 
 void ContinuousSchedulerBase::generate() {
@@ -648,7 +655,7 @@ void ContinuousSchedulerBase::generate() {
     step_callback_(batch);
 
     // process request output in batch
-    process_batch_output(false);
+    process_batch_output(running_requests_);
   }
 
   // wait for all responses done
@@ -656,21 +663,16 @@ void ContinuousSchedulerBase::generate() {
 }
 
 void ContinuousSchedulerBase::process_batch_output(
-    bool enable_schedule_overlap) {
-  std::vector<Sequence*>& to_be_processed_sequences =
-      enable_schedule_overlap ? last_running_sequences_ : running_sequences_;
-  std::vector<std::shared_ptr<Request>>& to_be_processed_requests =
-      enable_schedule_overlap ? last_running_requests_ : running_requests_;
+    const std::vector<std::shared_ptr<Request>>& requests) {
   // Beam search may replace Sequence objects inside SequencesGroup.
   // Always refresh the sequence pointers from requests before dereferencing.
-  refresh_sequences_from_requests(to_be_processed_requests,
-                                  to_be_processed_sequences);
-  scheduler_metrics_->update(to_be_processed_sequences);
+  refresh_sequences_from_requests(requests, output_sequences_);
+  scheduler_metrics_->update(output_sequences_);
 
   std::vector<std::shared_ptr<Request>> stream_requests;
-  stream_requests.reserve(to_be_processed_requests.size());
+  stream_requests.reserve(requests.size());
   // process request output in batch
-  for (const auto& request : to_be_processed_requests) {
+  for (const auto& request : requests) {
     // ignore cancelled/finished requests when enable_schedule_overlap.
     if (options_.enable_schedule_overlap()) {
       if (request->state().stream) {
@@ -706,6 +708,13 @@ void ContinuousSchedulerBase::refresh_sequences_from_requests(
     const std::vector<std::shared_ptr<Request>>& requests,
     std::vector<Sequence*>& sequences) const {
   sequences.clear();
+  size_t num_sequences = 0;
+  for (const auto& request : requests) {
+    if (request != nullptr) {
+      num_sequences += request->sequences().size();
+    }
+  }
+  sequences.reserve(num_sequences);
   for (const auto& request : requests) {
     if (request == nullptr) {
       continue;

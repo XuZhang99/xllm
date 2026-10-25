@@ -107,7 +107,9 @@ class FakeEngine final : public Engine {
   }
 
   virtual ForwardOutput step(BatchGroup& /*batch*/) { return {}; }
-  virtual void update_last_step_result(BatchGroup& /*batch*/) {}
+  std::vector<RawForwardOutput> collect_step_outputs(const BatchGroup& batch) {
+    return std::vector<RawForwardOutput>(batch.size());
+  }
   const Tokenizer* tokenizer() const override { return &fake_tokenizer_; }
   BlockManagerPool* block_manager_pool() const override {
     return block_manager_pool_.get();
@@ -133,9 +135,7 @@ class BenchContinuousScheduler final : public ContinuousScheduler<> {
 
   BatchGroup prepare_batch_test() { return prepare_batch(); }
 
-  void process_batch_output_test(bool enable_schedule_overlap) {
-    process_batch_output(enable_schedule_overlap);
-  }
+  void process_batch_output_test() { process_batch_output(running_requests_); }
 
   void wait_for_responses() { output_dispatcher_->wait_completion(); }
 };
@@ -353,7 +353,7 @@ void BM_Scheduler_ProcessBatchOutput(benchmark::State& state) {
 
     // Stream requests are dispatched to the response thread pool here; the
     // dispatch is timed, the asynchronous decode + callback is not.
-    scheduler.process_batch_output_test(/*enable_schedule_overlap=*/false);
+    scheduler.process_batch_output_test();
 
     state.PauseTiming();
     scheduler.wait_for_responses();

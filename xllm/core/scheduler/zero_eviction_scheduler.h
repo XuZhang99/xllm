@@ -104,7 +104,9 @@ class ZeroEvictionScheduler final : public ContinuousScheduler<> {
     requires requires(TargetEngine* engine, BatchGroup& batch) {
       static_cast<Engine*>(engine);
       { engine->step(batch) } -> std::same_as<ForwardOutput>;
-      { engine->update_last_step_result(batch) } -> std::same_as<void>;
+      {
+        engine->collect_step_outputs(batch)
+      } -> std::same_as<std::vector<RawForwardOutput>>;
     }
   ZeroEvictionScheduler(
       TargetEngine* engine,

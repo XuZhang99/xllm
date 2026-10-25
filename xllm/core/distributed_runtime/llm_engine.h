@@ -74,7 +74,7 @@ class LLMEngine : public Engine {
             std::shared_ptr<KVCacheTransferCoordinatorBase>
                 transfer_coordinator = nullptr);
 
-  void update_last_step_result(BatchGroup& batch);
+  std::vector<RawForwardOutput> collect_step_outputs(const BatchGroup& batch);
 
   std::shared_ptr<DistributedWorkerManager> get_distributed_worker_manager()
       const {

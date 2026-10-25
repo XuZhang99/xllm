@@ -35,6 +35,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/distributed_runtime/worker_model_codec.h"
+#include "core/framework/batch/batch_group.h"
 #include "core/framework/batch/forward_input_builder.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/scheduler_config.h"
@@ -265,6 +266,21 @@ class ScopedPrefillChunkStride final {
 
  private:
   int32_t previous_;
+};
+
+class ScopedScheduleOverlap final {
+ public:
+  explicit ScopedScheduleOverlap(bool enabled)
+      : previous_(SchedulerConfig::get_instance().enable_schedule_overlap()) {
+    SchedulerConfig::get_instance().enable_schedule_overlap(enabled);
+  }
+
+  ~ScopedScheduleOverlap() {
+    SchedulerConfig::get_instance().enable_schedule_overlap(previous_);
+  }
+
+ private:
+  bool previous_;
 };
 
 class BatchSpeculativeStatsTest : public ::testing::Test {
@@ -3875,6 +3891,131 @@ TEST(BatchTest, SampleRequestFallsBackToEmptyPlaceholderOnPartialRawOutputs) {
   const auto& logprobs = seq.logprob_state()->get_logprobs();
   ASSERT_TRUE(logprobs[prompt_tokens].has_value());
   EXPECT_FALSE(logprobs[prompt_tokens + 1].has_value());
+}
+
+TEST(BatchGroupTest, ApplyOutputsPreservesEmptyDpRank) {
+  const ScopedScheduleOverlap overlap(/*enabled=*/false);
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  Sequence first = make_basic_sequence({1, 10, 11});
+  Sequence second = make_basic_sequence({1, 20, 21});
+  first.add_blocks(BlockType::KV, manager.allocate(1));
+  second.add_blocks(BlockType::KV, manager.allocate(1));
+  first.kv_state().incr_kv_cache_tokens_num(first.num_prompt_tokens() - 1);
+  second.kv_state().incr_kv_cache_tokens_num(second.num_prompt_tokens() - 1);
+
+  BatchGroup batch(/*dp_size=*/3);
+  batch[0] = Batch({&first});
+  batch[2] = Batch({&second});
+  for (Batch& rank_batch : batch) {
+    rank_batch.prepare_forward_input(
+        /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+  }
+
+  std::vector<RawForwardOutput> outputs(batch.size());
+  outputs[0].outputs.emplace_back(make_raw_sample_output(101, -0.1f));
+  outputs[2].outputs.emplace_back(make_raw_sample_output(202, -0.2f));
+  batch.apply_outputs(outputs, BatchOutputPhase::IMMEDIATE);
+
+  EXPECT_EQ(first.num_generated_tokens(), 1);
+  EXPECT_EQ(first.tokens()[first.num_prompt_tokens()], 101);
+  EXPECT_EQ(batch[1].size(), 0);
+  EXPECT_EQ(second.num_generated_tokens(), 1);
+  EXPECT_EQ(second.tokens()[second.num_prompt_tokens()], 202);
+}
+
+TEST(BatchGroupTest, CommitPendingKeepsReservedOutputTargets) {
+  const ScopedScheduleOverlap overlap(/*enabled=*/true);
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+  Sequence sequence = make_overlap_sequence({1, 10, 11},
+                                            /*seq_capacity=*/32,
+                                            &sampling_param,
+                                            &stopping_checker);
+  sequence.add_blocks(BlockType::KV, manager.allocate(1));
+  sequence.kv_state().incr_kv_cache_tokens_num(sequence.num_prompt_tokens() -
+                                               1);
+
+  BatchGroup batch(/*dp_size=*/2);
+  batch[1] = Batch({&sequence});
+  batch[1].prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+
+  std::vector<RawForwardOutput> pending_outputs(batch.size());
+  pending_outputs[1].outputs.emplace_back(
+      make_raw_sample_output(-1, std::nullopt));
+  batch.apply_outputs(pending_outputs, BatchOutputPhase::RESERVE_PENDING);
+  EXPECT_EQ(sequence.num_generated_tokens(), 1);
+  EXPECT_EQ(sequence.tokens()[sequence.num_prompt_tokens()], -1);
+  EXPECT_FALSE(sequence.finished());
+
+  std::vector<RawForwardOutput> completed_outputs(batch.size());
+  completed_outputs[1].outputs.emplace_back(make_raw_sample_output(101, -0.1f));
+  batch.apply_outputs(completed_outputs, BatchOutputPhase::COMMIT_PENDING);
+
+  EXPECT_EQ(batch[0].size(), 0);
+  EXPECT_EQ(sequence.num_generated_tokens(), 1);
+  EXPECT_EQ(sequence.tokens()[sequence.num_prompt_tokens()], 101);
+  EXPECT_TRUE(sequence.finished());
+}
+
+TEST(BatchGroupTest, ApplyOutputsRejectsMissingDpRank) {
+  BatchGroup batch(/*dp_size=*/2);
+  const std::vector<RawForwardOutput> outputs(/*count=*/1);
+
+  EXPECT_DEATH(batch.apply_outputs(outputs, BatchOutputPhase::IMMEDIATE),
+               "Each DP rank must have exactly one output");
+}
+
+TEST(BatchGroupTest, ConsecutivePendingBatchesKeepIndependentOutputTargets) {
+  const ScopedScheduleOverlap overlap(/*enabled=*/true);
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(4);
+  Sequence sequence = make_overlap_sequence({1, 10, 11},
+                                            /*seq_capacity=*/32,
+                                            &sampling_param,
+                                            &stopping_checker);
+  sequence.add_blocks(BlockType::KV, manager.allocate(2));
+  sequence.kv_state().incr_kv_cache_tokens_num(sequence.num_prompt_tokens() -
+                                               1);
+
+  BatchGroup first(/*dp_size=*/1);
+  first[0] = Batch({&sequence});
+  first[0].prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+  std::vector<RawForwardOutput> pending_outputs(first.size());
+  pending_outputs[0].outputs.emplace_back(
+      make_raw_sample_output(-1, std::nullopt));
+  first.apply_outputs(pending_outputs, BatchOutputPhase::RESERVE_PENDING);
+
+  BatchGroup second(/*dp_size=*/1);
+  second[0] = Batch({&sequence});
+  second[0].prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+  second.apply_outputs(pending_outputs, BatchOutputPhase::RESERVE_PENDING);
+  ASSERT_EQ(sequence.num_generated_tokens(), 2);
+
+  std::vector<RawForwardOutput> first_outputs(first.size());
+  first_outputs[0].outputs.emplace_back(make_raw_sample_output(101, -0.1f));
+  first.apply_outputs(first_outputs, BatchOutputPhase::COMMIT_PENDING);
+  EXPECT_EQ(sequence.tokens()[sequence.num_prompt_tokens()], 101);
+  EXPECT_EQ(sequence.tokens()[sequence.num_prompt_tokens() + 1], -1);
+
+  std::vector<RawForwardOutput> second_outputs(second.size());
+  second_outputs[0].outputs.emplace_back(make_raw_sample_output(202, -0.2f));
+  second.apply_outputs(second_outputs, BatchOutputPhase::COMMIT_PENDING);
+  EXPECT_EQ(sequence.num_generated_tokens(), 2);
+  EXPECT_EQ(sequence.tokens()[sequence.num_prompt_tokens()], 101);
+  EXPECT_EQ(sequence.tokens()[sequence.num_prompt_tokens() + 1], 202);
 }
 
 TEST(BatchTest, KeepTargetsForOverlapReplacement) {

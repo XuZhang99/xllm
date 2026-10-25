@@ -19,6 +19,7 @@ limitations under the License.
 #include <gflags/gflags.h>
 
 #include <memory>
+#include <vector>
 
 #include "common/macros.h"
 #include "core/distributed_runtime/distributed_worker_manager.h"
@@ -52,7 +53,7 @@ class VLMEngine : public Engine {
 
   bool init(MasterStatus master_status) override;
 
-  void update_last_step_result(BatchGroup& batch);
+  std::vector<RawForwardOutput> collect_step_outputs(const BatchGroup& batch);
 
  private:
   template <typename TargetEngine>

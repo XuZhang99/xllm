@@ -183,7 +183,10 @@ class FakeEngine final : public Engine {
     NOT_IMPLEMENTED();
   }
 
-  void update_last_step_result(BatchGroup& /*batch*/) { NOT_IMPLEMENTED(); }
+  std::vector<RawForwardOutput> collect_step_outputs(
+      const BatchGroup& /*batch*/) {
+    NOT_IMPLEMENTED();
+  }
 
   const Tokenizer* tokenizer() const override { return tokenizer_.get(); }
 

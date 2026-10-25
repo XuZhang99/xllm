@@ -285,7 +285,8 @@ class RecordingProfileEngine final : public Engine {
     return ForwardOutput();
   }
 
-  void update_last_step_result(BatchGroup& batches) {
+  std::vector<RawForwardOutput> collect_step_outputs(
+      const BatchGroup& batches) {
     EXPECT_EQ(pending_steps_, 1);
     const std::vector<size_t> used_blocks = block_manager_->num_used_blocks();
     for (const Batch& batch : batches) {
@@ -294,6 +295,7 @@ class RecordingProfileEngine final : public Engine {
       }
     }
     --pending_steps_;
+    return std::vector<RawForwardOutput>(batches.size());
   }
 
   BlockManagerPool* block_manager_pool() const override {
