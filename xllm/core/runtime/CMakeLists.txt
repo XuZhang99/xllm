@@ -14,6 +14,7 @@ cc_library(
     task_execution_pipeline.h
     slot_buffer.h
     task_execution_pipeline_speculative.h
+    schedule_overlap_state.h
     executor_impl.h
     executor_impl_factory.h
     vlm_executor_impl.h
@@ -67,6 +68,7 @@ cc_library(
     task_execution_pipeline.cpp
     slot_buffer.cpp
     task_execution_pipeline_speculative.cpp
+    schedule_overlap_state.cpp
     executor_impl_factory.cpp
     base_executor_impl.cpp
     rec_executor.cpp

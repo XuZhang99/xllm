@@ -205,15 +205,19 @@ SpeculativeWorkerImpl<TargetInput>::update_input_by_last_step_output(
 
   Slice<int32_t> token_ids = tensor_slice(inputs.token_ids_host);
   const torch::Tensor last_token_ids =
-      to_cpu_contiguous(last_step_output_.sample_output.next_tokens.flatten());
+      to_cpu_contiguous(schedule_overlap_state_.prior_output()
+                            .sample_output.next_tokens.flatten());
   const Slice<int64_t> last_tokens_ids_slice =
       tensor_slice<int64_t>(last_token_ids);
 
   // Determine how many tokens were decoded in the last step
   // If the output is 2D, it means multiple tokens were generated per sequence
   int32_t last_step_decode_num = 1;
-  if (last_step_output_.sample_output.next_tokens.dim() == 2) {
-    last_step_decode_num = last_step_output_.sample_output.next_tokens.size(1);
+  if (schedule_overlap_state_.prior_output().sample_output.next_tokens.dim() ==
+      2) {
+    last_step_decode_num =
+        schedule_overlap_state_.prior_output().sample_output.next_tokens.size(
+            1);
   }
 
   specBuilder::DecodeBuildBuffers buf;

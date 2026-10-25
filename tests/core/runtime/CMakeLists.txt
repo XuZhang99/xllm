@@ -308,6 +308,16 @@ cc_test(
     GTest::gtest_main
 )
 
+cc_test(
+  NAME
+    schedule_overlap_state_test
+  SRCS
+    schedule_overlap_state_test.cpp
+  DEPS
+    :runtime
+    GTest::gtest_main
+)
+
 if(USE_NPU OR USE_MLU)
   cc_test(
     NAME

@@ -245,7 +245,8 @@ LlmForwardInput
 LLMWorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
     LlmForwardInput& input) {
   c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
-  CHECK(compute_stream_->wait_event(last_step_output_.ready_event))
+  CHECK(compute_stream_->wait_event(
+      schedule_overlap_state_.prior_output().ready_event))
       << "failed to wait last step output ready event";
   wait_input_ready_events(input, *compute_stream_);
   return WorkerImpl::update_input_by_last_step_output_for_schedule_overlap(

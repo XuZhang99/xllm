@@ -718,7 +718,7 @@ std::vector<RawForwardOutput> LLMEngine::collect_step_outputs(
   // (dp_driver_: rank % (tp_size*cp_size) == 0), spaced dp_local_size_
   // (= tp_size*cp_size) apart. dp_local_tp_size_ divides by cp_size, so
   // under cp_size>1 it lands on cp_rank=1 non-driver workers whose
-  // get_last_step_result() blocks forever on cv_.wait(is_recorded_).
+  // get_last_step_result() waits indefinitely for a result they never publish.
   uint32_t stride = dp_local_size_;
   // If EPLB is enabled, we need to get results from all workers,
   // because the experts on each worker are different,

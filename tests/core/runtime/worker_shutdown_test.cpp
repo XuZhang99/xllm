@@ -20,7 +20,6 @@ limitations under the License.
 #include <chrono>
 #include <functional>
 #include <future>
-#include <mutex>
 
 #include "core/kv_cache/transfer/kv_cache_transfer.h"
 #include "core/runtime/worker_impl.h"
@@ -63,11 +62,7 @@ class ShutdownTestWorker final : public WorkerImpl {
   }
 
   // Keep a failing wakeup assertion from leaving the test's future blocked.
-  void release_result_waiter() {
-    std::lock_guard<std::mutex> lock(mtx_);
-    is_recorded_ = true;
-    cv_.notify_all();
-  }
+  void release_result_waiter() { begin_shutdown(); }
 
  protected:
   std::optional<ForwardOutput> step_for_schedule_overlap(

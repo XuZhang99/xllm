@@ -496,13 +496,7 @@ WorkerImpl::~WorkerImpl() {
   }
 }
 
-void WorkerImpl::begin_shutdown() {
-  {
-    std::lock_guard<std::mutex> lock(mtx_);
-    shutting_down_ = true;
-  }
-  cv_.notify_all();
-}
+void WorkerImpl::begin_shutdown() { schedule_overlap_state_.shutdown(); }
 
 void WorkerImpl::drain_pending_execution() {
   if (worker_execution_drained_) {
@@ -920,63 +914,47 @@ WorkerImpl::estimate_kv_cache_capacity_async() {
   return future;
 }
 
-void WorkerImpl::update_last_step_output(
-    const std::optional<ForwardOutput>& output,
-    const std::vector<std::string>& request_ids,
-    const std::vector<std::string>& sample_sequence_ids) {
-  const bool has_tokens = output.value().sample_output.next_tokens.defined();
-  last_step_output_ = output.value();
-  last_step_request_ids_ = request_ids;
-  last_step_sample_sequence_ids_ = sample_sequence_ids;
-  if (has_tokens) {
-    last_step_output_valid_ = true;
-  } else {
-    if (!::xllm::EPLBConfig::get_instance().enable_eplb() &&
-        last_step_output_.json_object_errors.empty()) {
-      last_step_request_ids_.clear();
-      last_step_sample_sequence_ids_.clear();
-    }
-    last_step_output_valid_ = false;
-  }
-}
-
 template <typename Input>
 bool WorkerImpl::can_use_last_step_output_for_schedule_overlap_impl(
     const Input& input) const {
-  if (!last_step_output_valid_) {
+  if (!schedule_overlap_state_.has_tokens()) {
     return false;
   }
   if (input.json_object_states.empty()) {
     return true;
   }
   const auto& request_ids = input.input_params.embedding.request_ids;
-  return detail::has_request_id_overlap(request_ids, last_step_request_ids_);
+  return schedule_overlap_state_.has_request_overlap(request_ids);
 }
 
 template <typename Input>
 Input WorkerImpl::update_input_by_last_step_output_impl(Input& inputs) {
 #if defined(USE_NPU)
+  auto next_tokens =
+      schedule_overlap_state_.prior_output().sample_output.next_tokens;
   if (can_prepare_npu_graph_decode_input(inputs.input_params)) {
-    xllm::kernel::npu::replace_token(
-        inputs.token_ids,
-        last_step_output_.sample_output.next_tokens,
-        /*synchronize_stream=*/false);
+    xllm::kernel::npu::replace_token(inputs.token_ids,
+                                     next_tokens,
+                                     /*synchronize_stream=*/false);
     inputs.input_params.graph.input_tokens_override = inputs.token_ids;
     return inputs.clone();
   }
   xllm::kernel::npu::replace_token(inputs.token_ids,
-                                   last_step_output_.sample_output.next_tokens,
+                                   next_tokens,
                                    /*synchronize_stream=*/true);
 #elif defined(USE_MUSA)
+  auto next_tokens =
+      schedule_overlap_state_.prior_output().sample_output.next_tokens;
   xllm::kernel::musa::replace_token(inputs.token_ids,
-                                    last_step_output_.sample_output.next_tokens,
+                                    next_tokens,
                                     /*synchronize_stream=*/false);
 #else
   auto& flatten_tokens = inputs.token_ids;
   auto neg_mask = (flatten_tokens < 0);
   auto clamped_neg_indices = torch::clamp(-flatten_tokens, 0);
-  auto replacement = last_step_output_.sample_output.next_tokens.index(
-      {clamped_neg_indices - 1});
+  auto replacement =
+      schedule_overlap_state_.prior_output().sample_output.next_tokens.index(
+          {clamped_neg_indices - 1});
   inputs.token_ids = torch::where(neg_mask, replacement, flatten_tokens);
 #endif
   return inputs.clone();
@@ -1100,8 +1078,10 @@ void WorkerImpl::update_json_object_states_by_last_step_output_impl(
   const ForwardOutput empty_output;
   update_json_object_states_by_output_impl(
       input,
-      last_step_output_valid_ ? last_step_output_ : empty_output,
-      last_step_sample_sequence_ids_);
+      schedule_overlap_state_.has_tokens()
+          ? schedule_overlap_state_.prior_output()
+          : empty_output,
+      schedule_overlap_state_.sample_sequence_ids());
 }
 
 void WorkerImpl::update_json_object_states_by_output(
@@ -1951,19 +1931,16 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async_impl(
                                           input.json_object_errors.begin(),
                                           input.json_object_errors.end());
         if (is_driver() || ::xllm::EPLBConfig::get_instance().enable_eplb()) {
-          std::unique_lock<std::mutex> lock(mtx_);
-          cv_.wait(lock, [this] { return !is_recorded_ || shutting_down_; });
-          if (shutting_down_) {
-            lock.unlock();
+          const bool published = schedule_overlap_state_.publish(
+              output,
+              input.input_params.embedding.request_ids,
+              input.sample_sequence_ids,
+              ::xllm::EPLBConfig::get_instance().enable_eplb());
+          if (!published) {
             CHECK_EQ(compute_stream_->synchronize(), 0);
             promise.setValue(std::move(output));
             return;
           }
-          update_last_step_output(output,
-                                  input.input_params.embedding.request_ids,
-                                  input.sample_sequence_ids);
-          is_recorded_ = true;
-          cv_.notify_one();
         } else {
 #if defined(USE_NPU)
           // Driver outputs are copied by GetLastStepResult, which waits for the
@@ -1975,43 +1952,44 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async_impl(
           // limit still execute eagerly. Retire the retained inputs only after
           // their compute event completes, preserving one-step overlap.
           const bool wait_for_dp_spec_input_lifetime =
-              last_step_output_valid_ && options_.enable_speculative_decode() &&
+              schedule_overlap_state_.has_tokens() &&
+              options_.enable_speculative_decode() &&
               parallel_args_.dp_size() > 1 &&
-              !last_step_output_.retained_inputs.empty() &&
-              last_step_output_.ready_event != nullptr;
+              !schedule_overlap_state_.prior_output().retained_inputs.empty() &&
+              schedule_overlap_state_.prior_output().ready_event != nullptr;
           if (wait_for_dp_spec_input_lifetime) {
-            CHECK(last_step_output_.ready_event->synchronize())
+            CHECK(schedule_overlap_state_.prior_output()
+                      .ready_event->synchronize())
                 << "failed to retire previous DP speculative input";
           }
 #endif
-          update_last_step_output(output,
-                                  input.input_params.embedding.request_ids,
-                                  input.sample_sequence_ids);
+          schedule_overlap_state_.update(
+              output,
+              input.input_params.embedding.request_ids,
+              input.sample_sequence_ids,
+              ::xllm::EPLBConfig::get_instance().enable_eplb());
         }
       } else {
         if (is_driver() || ::xllm::EPLBConfig::get_instance().enable_eplb()) {
-          std::unique_lock<std::mutex> lock(mtx_);
-          cv_.wait(lock, [this] { return !is_recorded_ || shutting_down_; });
-          if (shutting_down_) {
-            lock.unlock();
+          const bool published = schedule_overlap_state_.publish(
+              std::nullopt,
+              input.input_params.embedding.request_ids,
+              input.sample_sequence_ids,
+              ::xllm::EPLBConfig::get_instance().enable_eplb());
+          if (!published) {
             CHECK_EQ(compute_stream_->synchronize(), 0);
-            promise.setValue(std::move(output));
+            promise.setValue(std::nullopt);
             return;
           }
-          last_step_output_valid_ = false;
-          last_step_output_ = ForwardOutput();
-          last_step_request_ids_.clear();
-          last_step_sample_sequence_ids_.clear();
-          is_recorded_ = true;
-          cv_.notify_one();
         } else {
-          last_step_output_valid_ = false;
-          last_step_output_ = ForwardOutput();
-          last_step_request_ids_.clear();
-          last_step_sample_sequence_ids_.clear();
+          schedule_overlap_state_.update(
+              std::nullopt,
+              input.input_params.embedding.request_ids,
+              input.sample_sequence_ids,
+              ::xllm::EPLBConfig::get_instance().enable_eplb());
         }
       }
-      promise.setValue(output);
+      promise.setValue(std::move(output));
     }
   });
   return future;
@@ -2028,17 +2006,8 @@ std::optional<ForwardOutput> WorkerImpl::execute_task_pipeline(
 }
 
 ForwardOutput WorkerImpl::get_last_step_result() {
-  ForwardOutput output;
-  std::unique_lock<std::mutex> lock(mtx_);
-  cv_.wait(lock, [this] { return is_recorded_ || shutting_down_; });
-  if (is_recorded_ && (last_step_output_valid_ ||
-                       ::xllm::EPLBConfig::get_instance().enable_eplb() ||
-                       !last_step_output_.json_object_errors.empty())) {
-    output = last_step_output_;
-  }
-  is_recorded_ = false;
-  cv_.notify_one();
-  return output;
+  return schedule_overlap_state_.consume(
+      ::xllm::EPLBConfig::get_instance().enable_eplb());
 }
 
 folly::SemiFuture<folly::Unit> WorkerImpl::process_group_test_async() {
