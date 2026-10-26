@@ -50,8 +50,17 @@ git submodule update --init --recursive
 
 In a new image, the first compilation of xllm takes a long time because all dependencies in vcpkg need to be compiled, but subsequent compilations will be much faster.
 ```bash
-# Compile cpp binary
+# Build the C++ binaries and Python extension (without unit-test targets)
 python setup.py build
+
+# Build unit-test targets without running them
+python setup.py build_tests
+
+# Build and run unit tests
+python setup.py test
+
+# Build and run one unit-test target
+python setup.py test --test-name common_test
 
 # Compile python wheel
 python setup.py bdist_wheel
@@ -59,6 +68,14 @@ python setup.py bdist_wheel
 # Compile python wheel and install
 python setup.py install
 ```
+
+`build` configures CMake with `BUILD_TESTING=OFF`; `build_tests` and `test`
+enable it and reuse the same build directory. Pass `--device npu` (or another
+supported backend) to select the target device. Wheel builds still build and
+run unit tests unless `SKIP_TEST=1` is set; `SKIP_EXPORT=1` separately disables
+the Python extension in the normal build. Set `MAX_JOBS` to control native
+compilation parallelism. NPU test runs should use `CTEST_PARALLEL=1` to avoid
+exceeding the device's process limit.
 
 ## Launch xllm
 Please refer to [How to Launch xllm](/en/getting_started/launch_xllm/).
