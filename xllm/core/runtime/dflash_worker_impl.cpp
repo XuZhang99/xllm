@@ -48,6 +48,7 @@ limitations under the License.
 #include "core/framework/speculative/spec_input_builder.h"
 #include "core/framework/speculative/spec_verify.h"
 #include "core/platform/platform.h"
+#include "core/runtime/json_object_continuation.h"
 #include "core/runtime/task_execution_pipeline.h"
 #include "runtime/llm_worker_impl.h"
 #include "util/json_reader.h"
@@ -1232,9 +1233,11 @@ std::optional<ForwardOutput> DFlashWorkerImpl::execute_task_pipeline(
   CHECK(compute_stream_->wait_event(input.runtime.metadata_ready_event));
   if (input.token_ids.numel() > 0 &&
       input.input_params.meta.batch_forward_type.has_decode()) {
-    update_json_object_states_by_output(
-        input, task_json_output_, task_json_sample_sequence_ids_);
-    sanitize_json_object_error_inputs(input);
+    JsonObjectContinuation::prepare(input,
+                                    task_json_output_,
+                                    task_json_sample_sequence_ids_,
+                                    device_,
+                                    *compute_stream_);
   }
   auto output = step(input);
   task_json_output_ = ForwardOutput();

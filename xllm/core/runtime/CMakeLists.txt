@@ -14,6 +14,7 @@ cc_library(
     task_execution_pipeline.h
     slot_buffer.h
     task_execution_pipeline_speculative.h
+    json_object_continuation.h
     schedule_overlap.h
     schedule_overlap_state.h
     executor_impl.h
@@ -69,6 +70,7 @@ cc_library(
     task_execution_pipeline.cpp
     slot_buffer.cpp
     task_execution_pipeline_speculative.cpp
+    json_object_continuation.cpp
     schedule_overlap.cpp
     schedule_overlap_state.cpp
     executor_impl_factory.cpp

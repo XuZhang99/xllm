@@ -206,22 +206,12 @@ class WorkerImpl {
 
   virtual void process_group_test();
 
-  void update_json_object_states_by_output(
-      LlmForwardInput& input,
-      const ForwardOutput& prior_output,
-      const std::vector<std::string>& prior_sample_sequence_ids);
   virtual void prepare_task_pipeline_input(const LlmForwardInput& input,
                                            LlmForwardInput& prepared);
   virtual std::optional<ForwardOutput> execute_task_pipeline(
       const LlmForwardInput& prepared);
   // Warmup waits for execution allocations; serving keeps stream overlap.
   void observe_execution_memory(bool is_warmup);
-  void sanitize_json_object_error_inputs(LlmForwardInput& inputs);
-  void update_json_object_states_by_output(
-      VlmForwardInput& input,
-      const ForwardOutput& prior_output,
-      const std::vector<std::string>& prior_sample_sequence_ids);
-  void sanitize_json_object_error_inputs(VlmForwardInput& inputs);
 
   // initialize model, cache manager. async call
   virtual folly::SemiFuture<bool> init_model_async(
@@ -502,13 +492,6 @@ class WorkerImpl {
   template <typename Input>
   std::optional<ForwardOutput> step_for_schedule_overlap_impl(
       const Input& input);
-  template <typename Input>
-  void update_json_object_states_by_output_impl(
-      Input& input,
-      const ForwardOutput& prior_output,
-      const std::vector<std::string>& prior_sample_sequence_ids);
-  template <typename Input>
-  void sanitize_json_object_error_inputs_impl(Input& input);
   template <typename Input>
   void restore_json_object_states_impl(Input& input);
   template <typename Input>

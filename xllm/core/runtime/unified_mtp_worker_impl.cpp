@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/speculative/draft_proposal.h"
 #include "core/framework/speculative/verify_layout.h"
+#include "core/runtime/json_object_continuation.h"
 #include "core/runtime/llm_worker_impl.h"
 #include "core/runtime/mtp_runtime_helpers.h"
 #include "core/runtime/py_executor_impl.h"
@@ -175,9 +176,11 @@ std::optional<ForwardOutput> UnifiedMtpWorkerImpl::execute_task_pipeline(
   CHECK(compute_stream_->wait_event(input.runtime.metadata_ready_event));
   if (input.token_ids.numel() > 0 &&
       input.input_params.meta.batch_forward_type.has_decode()) {
-    update_json_object_states_by_output(
-        input, task_json_output_, task_json_sample_sequence_ids_);
-    sanitize_json_object_error_inputs(input);
+    JsonObjectContinuation::prepare(input,
+                                    task_json_output_,
+                                    task_json_sample_sequence_ids_,
+                                    device_,
+                                    *compute_stream_);
   }
   auto output = step(input);
   task_json_output_ = ForwardOutput();
