@@ -39,18 +39,19 @@ bool ScheduleOverlapState::publish(std::optional<ForwardOutput> output,
   return true;
 }
 
-void ScheduleOverlapState::update(std::optional<ForwardOutput> output,
+bool ScheduleOverlapState::update(std::optional<ForwardOutput> output,
                                   std::vector<std::string> request_ids,
                                   std::vector<std::string> sample_sequence_ids,
                                   bool retain_tokenless_output) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (shutting_down_) {
-    return;
+    return false;
   }
   update_prior_output(std::move(output),
                       std::move(request_ids),
                       std::move(sample_sequence_ids),
                       retain_tokenless_output);
+  return true;
 }
 
 ForwardOutput ScheduleOverlapState::consume(bool retain_tokenless_output) {

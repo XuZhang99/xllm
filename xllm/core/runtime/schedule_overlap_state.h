@@ -45,8 +45,9 @@ class ScheduleOverlapState final {
                bool retain_tokenless_output);
 
   // Updates only the device continuation cache. This path is used by ranks
-  // whose output is not read by the host controller.
-  void update(std::optional<ForwardOutput> output,
+  // whose output is not read by the host controller. Returns false after
+  // shutdown; the caller must drain device work before releasing the output.
+  bool update(std::optional<ForwardOutput> output,
               std::vector<std::string> request_ids,
               std::vector<std::string> sample_sequence_ids,
               bool retain_tokenless_output);

@@ -13,10 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <acl/acl.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
+#include <future>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -78,6 +83,9 @@ class OverlapTestWorker final : public WorkerImpl {
   }
   bool executed_grammar_initialized() const {
     return executed_grammar_initialized_;
+  }
+  void set_output_hook(std::function<void(ForwardOutput&, Stream&)> hook) {
+    output_hook_ = std::move(hook);
   }
   const torch::Tensor& executed_filter_bitmask() const {
     return executed_filter_bitmask_;
@@ -151,7 +159,11 @@ class OverlapTestWorker final : public WorkerImpl {
           input.json_object_states.front().snapshot().token_ids;
     }
     CHECK_LT(step_index_, outputs_.size());
-    return std::move(outputs_[step_index_++]);
+    auto output = std::move(outputs_[step_index_++]);
+    if (output.has_value() && output_hook_) {
+      output_hook_(*output, *compute_stream_);
+    }
+    return output;
   }
 
   std::vector<std::optional<ForwardOutput>> outputs_;
@@ -163,6 +175,7 @@ class OverlapTestWorker final : public WorkerImpl {
   torch::Tensor executed_filter_mask_;
   std::vector<int32_t> executed_grammar_tokens_;
   bool executed_grammar_initialized_ = false;
+  std::function<void(ForwardOutput&, Stream&)> output_hook_;
 };
 
 template <typename Input>
@@ -491,6 +504,80 @@ TYPED_TEST(ScheduleOverlapTest, NonDriverContinuesWithoutHostConsumption) {
   ASSERT_TRUE(std::move(second).get().has_value());
   EXPECT_EQ(worker.continuation_count(), 1);
   EXPECT_EQ(worker.executed_tokens().template item<int32_t>(), 17);
+}
+
+TYPED_TEST(ScheduleOverlapTest,
+           NonDriverShutdownWaitsBeforeReturningRetainedInputs) {
+  std::promise<void> callback_entered;
+  auto entered = callback_entered.get_future();
+  std::promise<void> release_callback;
+  auto callback_release = release_callback.get_future().share();
+  std::atomic<bool> device_finished{false};
+  std::atomic<bool> returned_after_device_completion{false};
+  std::atomic<bool> owner_released{false};
+  std::atomic<bool> owner_released_early{false};
+  std::function<void()> callback = [&]() {
+    callback_entered.set_value();
+    callback_release.wait_for(10s);
+    device_finished.store(true);
+  };
+  std::promise<void> forward_entered;
+  auto executing = forward_entered.get_future();
+  std::promise<void> release_forward;
+  auto forward_release = release_forward.get_future().share();
+  std::promise<void> forward_exiting;
+  auto exiting = forward_exiting.get_future();
+  OverlapTestWorker worker({token_output(17)}, /*driver=*/false);
+  worker.set_output_hook([&](ForwardOutput& output, Stream& stream) {
+    auto guard = stream.set_stream_guard();
+    CHECK_EQ(
+        aclrtLaunchHostFunc(
+            stream.get_stream()->stream(),
+            [](void* data) { (*static_cast<std::function<void()>*>(data))(); },
+            &callback),
+        ACL_SUCCESS);
+    output.ready_event = stream.record_event();
+    CHECK(output.ready_event != nullptr);
+    output.retained_inputs.emplace_back(
+        std::shared_ptr<int32_t>(new int32_t(42), [&](int32_t* value) {
+          owner_released_early.store(!device_finished.load());
+          owner_released.store(true);
+          delete value;
+        }));
+    forward_entered.set_value();
+    forward_release.wait_for(10s);
+    forward_exiting.set_value();
+  });
+  auto step =
+      worker.step_async(step_input<TypeParam>(/*decode=*/false))
+          .toUnsafeFuture()
+          .thenValue([&](std::optional<ForwardOutput> output) {
+            returned_after_device_completion.store(device_finished.load());
+            const bool has_output = output.has_value();
+            output.reset();
+            return has_output;
+          });
+  const std::future_status executing_status = executing.wait_for(2s);
+  const std::future_status callback_status = entered.wait_for(2s);
+  worker.begin_shutdown();
+  release_forward.set_value();
+  const std::future_status exiting_status = exiting.wait_for(2s);
+  step.wait(50ms);
+  const bool returned_early = step.isReady();
+
+  // Release both gates before assertions so a failure can still drain safely.
+  release_callback.set_value();
+  step.wait(2s);
+  const bool step_ready = step.isReady();
+  EXPECT_EQ(executing_status, std::future_status::ready);
+  EXPECT_EQ(callback_status, std::future_status::ready);
+  EXPECT_EQ(exiting_status, std::future_status::ready);
+  EXPECT_FALSE(returned_early);
+  ASSERT_TRUE(step_ready);
+  EXPECT_TRUE(std::move(step).get());
+  EXPECT_TRUE(returned_after_device_completion.load());
+  EXPECT_TRUE(owner_released.load());
+  EXPECT_FALSE(owner_released_early.load());
 }
 
 }  // namespace

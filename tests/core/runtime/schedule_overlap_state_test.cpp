@@ -55,10 +55,10 @@ TEST(ScheduleOverlapStateTest, ConsumedOutputRemainsAvailableForContinuation) {
 TEST(ScheduleOverlapStateTest, EmptyPublicationClearsPriorContinuation) {
   for (const bool retain_tokenless_output : {false, true}) {
     ScheduleOverlapState state;
-    state.update(token_output(7),
-                 {"prior_request"},
-                 {"prior_sequence"},
-                 retain_tokenless_output);
+    ASSERT_TRUE(state.update(token_output(7),
+                             {"prior_request"},
+                             {"prior_sequence"},
+                             retain_tokenless_output));
     ASSERT_TRUE(state.has_tokens());
     ASSERT_TRUE(state.publish(
         std::nullopt, {"request"}, {"sequence"}, retain_tokenless_output));
@@ -160,6 +160,38 @@ TEST(ScheduleOverlapStateTest, ShutdownUnblocksPublicationBackpressure) {
   state.shutdown();
   ASSERT_EQ(second_publish.wait_for(1s), std::future_status::ready);
   EXPECT_FALSE(second_publish.get());
+}
+
+TEST(ScheduleOverlapStateTest,
+     ShutdownRejectsDeviceUpdatesWithoutReplacingPriorOutput) {
+  std::weak_ptr<int32_t> weak_owner;
+  {
+    ScheduleOverlapState state;
+    auto owner = std::make_shared<int32_t>(42);
+    weak_owner = owner;
+    ForwardOutput output = token_output(7);
+    output.retained_inputs.emplace_back(owner);
+    ASSERT_TRUE(state.update(std::move(output),
+                             {"prior_request"},
+                             {"prior_sequence"},
+                             /*retain_tokenless_output=*/false));
+    owner.reset();
+    state.shutdown();
+
+    EXPECT_FALSE(state.update(token_output(9),
+                              {"new_request"},
+                              {"new_sequence"},
+                              /*retain_tokenless_output=*/false));
+
+    EXPECT_TRUE(state.has_tokens());
+    EXPECT_EQ(state.prior_output().sample_output.next_tokens.item<int64_t>(),
+              7);
+    EXPECT_EQ(state.request_ids(), (std::vector<std::string>{"prior_request"}));
+    EXPECT_EQ(state.sample_sequence_ids(),
+              (std::vector<std::string>{"prior_sequence"}));
+    EXPECT_FALSE(weak_owner.expired());
+  }
+  EXPECT_TRUE(weak_owner.expired());
 }
 
 TEST(ScheduleOverlapStateTest, RetainedInputsOutliveConsumedCopy) {

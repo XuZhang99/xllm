@@ -131,8 +131,12 @@ void ScheduleOverlap::record_output(
   if (output.has_value()) {
     retire_prior_inputs(worker);
   }
-  state_.update(
-      output, request_ids, sample_sequence_ids, retain_tokenless_output);
+  if (!state_.update(
+          output, request_ids, sample_sequence_ids, retain_tokenless_output)) {
+    // Non-driver futures may be discarded. Finish queued device work before
+    // the caller releases the output and its retained inputs after shutdown.
+    CHECK_EQ(worker.compute_stream_->synchronize(), 0);
+  }
 }
 
 std::optional<ForwardOutput> ScheduleOverlap::execute(WorkerImpl& worker,
