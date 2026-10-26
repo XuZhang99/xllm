@@ -985,6 +985,48 @@ ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }
 
+void AclGraphExecutorImpl::release_graphs_for_larger_prefill(
+    int64_t num_tokens,
+    int32_t q_max_seq_len) {
+  std::vector<std::shared_ptr<AclGraph>> retired_graphs;
+  {
+    std::lock_guard<std::mutex> lock(graph_slots_mutex_);
+    const bool larger_query = q_max_seq_len > last_prefill_query_tokens_;
+    last_prefill_query_tokens_ = q_max_seq_len;
+    if (!larger_query) {
+      return;
+    }
+
+    size_t graph_count = 0;
+    for (const GraphSlot& slot : graph_slots_) {
+      graph_count += slot.graphs.size();
+    }
+    retired_graphs.reserve(graph_count);
+    for (GraphSlot& slot : graph_slots_) {
+      for (auto& entry : slot.graphs) {
+        retired_graphs.emplace_back(std::move(entry.second));
+      }
+      slot.graphs.clear();
+      slot.spec_verify_graph_keys.clear();
+      slot.is_prepared = false;
+    }
+  }
+  if (retired_graphs.empty()) {
+    return;
+  }
+
+  // A larger eager prefill needs its activation/workspace peak before any new
+  // graph can be captured. Retire the old private capture pools first; waiting
+  // for capture-time LRU eviction is too late. Destruction synchronizes each
+  // graph stream, and concurrent readers retain their own shared ownership.
+  const size_t graph_count = retired_graphs.size();
+  retired_graphs.clear();
+  Device::empty_cache(device_.index());
+  LOG(INFO) << "Released " << graph_count
+            << " ACL graphs before larger prefill: num_tokens=" << num_tokens
+            << ", q_max_seq_len=" << q_max_seq_len;
+}
+
 // Main execution method with graph optimization for decode phase
 // tokens: [num_decode_tokens]
 // positions: [num_decode_tokens] token pos in the sequence
@@ -1007,6 +1049,12 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
            << " q_max_seq_len: " << params_single.meta.q_max_seq_len
            << " n_layers: " << args_.n_layers();
   if ((!in_decoding_phase && !in_spec_verify_phase) || args_.n_layers() == 1) {
+    if (!in_decoding_phase && !in_spec_verify_phase &&
+        model_->is_hybrid_linear_attention() &&
+        options_.num_decoding_tokens() > 1) {
+      release_graphs_for_larger_prefill(tokens_tensor.size(0),
+                                        params_single.meta.q_max_seq_len);
+    }
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in eager mode";
     COUNTER_INC(num_model_execution_total_eager);

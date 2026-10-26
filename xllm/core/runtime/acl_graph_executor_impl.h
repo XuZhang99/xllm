@@ -238,6 +238,10 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   int32_t graph_slot_count_ = 2;
   int32_t next_replay_slot_ = 0;
   int32_t last_started_replay_slot_ = -1;
+  int32_t last_prefill_query_tokens_ = 0;
+
+  void release_graphs_for_larger_prefill(int64_t num_tokens,
+                                         int32_t q_max_seq_len);
 
   // Get bucket num_tokens for given num_tokens
   // For num_tokens <= 8: use 1, 2, 4, 8
