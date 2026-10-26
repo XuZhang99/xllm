@@ -53,81 +53,102 @@ inline constexpr bool is_block_draft_model_type(std::string_view model_type) {
          is_dspark_draft_model_type(model_type);
 }
 
-struct ModelArgs {
-  // Expose every plain-data field to the generic property reflection layer so
-  // the embedded Python model executor can receive the full, already-parsed
-  // config without a hand-maintained field whitelist (see property_reflect.h).
-  REFLECT_PROPERTIES(ModelArgs);
-
-  PROPERTY(std::string, model_type);
-
-  PROPERTY(std::string, dtype);
-
-  PROPERTY(int64_t, hidden_size) = 0;
-
-  PROPERTY(std::string, hidden_act);
-
-  // intermediate size
-  PROPERTY(int64_t, intermediate_size) = 0;
-
-  PROPERTY(int64_t, n_layers) = 0;
-  PROPERTY(int64_t, n_encoder_layers) = 0;
-
-  // attn head dim
-  PROPERTY(int64_t, head_dim) = 0;
-  // Storage elements per full-attention K/V head, including backend padding.
-  // Zero reuses the logical head_dim.
-  PROPERTY(int64_t, kv_cache_storage_head_dim) = 0;
-  PROPERTY(int64_t, decoder_head_dim) = 0;
-
-  // attn head num
-  PROPERTY(int64_t, n_heads) = 0;
-  PROPERTY(int64_t, decoder_n_heads) = 0;
-
-  PROPERTY(int64_t, actual_n_heads) = 0;
-
-  // attn head num for key/value
-  PROPERTY(std::optional<int64_t>, n_kv_heads);
-  PROPERTY(std::optional<int64_t>, decoder_n_kv_heads);
+struct TokenEmbeddingArgs final {
+  REFLECT_PROPERTIES(TokenEmbeddingArgs);
 
   PROPERTY(int64_t, vocab_size) = -1;
-  PROPERTY(int64_t, draft_vocab_size) = 0;
+  PROPERTY(bool, tie_word_embeddings) = false;
+};
 
-  // DSpark: low-rank dim of the Markov head. 0 = disabled (plain DFlash /
-  // non-DSpark models).
-  PROPERTY(int64_t, markov_rank) = 0;
-  PROPERTY(int32_t, dspark_num_layers) = 0;
-  PROPERTY(int32_t, dspark_block_size) = 0;
-  // True only when SparseAttnSharedkv accepts explicit DSpark SWA indices.
-  // False selects the CANN 9.0-compatible q_len=1 row fallback.
-  PROPERTY(bool, dspark_use_native_sas) = false;
+// Model-defined sequence boundary, padding, and default decoding stop tokens.
+struct SpecialTokenArgs final {
+  REFLECT_PROPERTIES(SpecialTokenArgs);
 
-  // DSpark ConfidenceHead switches. When enabled, DSpark's ForCausalLM
-  // registers a `confidence_head.proj` layer used for adaptive-speculative
-  // pruning acceptance-probability estimation. `with_markov` toggles whether
-  // the head is applied on `concat(hidden, markov_embedding[prev])` (True in
-  // released dspark_qwen3_*b_block* checkpoints) or on `hidden` alone.
-  PROPERTY(bool, enable_confidence_head) = false;
-  PROPERTY(bool, confidence_head_with_markov) = false;
+  PROPERTY(int32_t, bos_token_id) = 0;
+  PROPERTY(int32_t, eos_token_id) = -1;
+  PROPERTY(std::vector<int32_t>, eos_token_id_vec);
+  PROPERTY(int32_t, pad_token_id) = 0;
+  PROPERTY(std::unordered_set<int32_t>, stop_token_ids);
+};
 
-  // DFlash2 local-convolution and candidate-selector geometry.
-  PROPERTY(int32_t, dflash2_block_size) = 0;
-  PROPERTY(int32_t, dflash2_conv_group_size) = 0;
-  PROPERTY(int32_t, dflash2_conv_kernel_size) = 0;
-  PROPERTY(int32_t, dflash2_selector_rank) = 0;
-  PROPERTY(int32_t, dflash2_selector_top_k) = 0;
+// Shared expert geometry and token-routing configuration.
+struct MoEArgs final {
+  REFLECT_PROPERTIES(MoEArgs);
 
-  PROPERTY(bool, use_qk_norm) = false;
-  PROPERTY(float, rms_norm_eps) = 0.0f;
+  PROPERTY(std::string, topk_method);
+  PROPERTY(int32_t, n_routed_experts) = 0;
+  PROPERTY(int32_t, n_shared_experts) = 0;
+  PROPERTY(int32_t, num_experts_per_tok) = 0;
+  PROPERTY(int32_t, moe_intermediate_size) = 0;
+  PROPERTY(float, routed_scaling_factor) = 0.0f;
+  PROPERTY(bool, norm_topk_prob) = false;
+  PROPERTY(int32_t, n_group) = 0;
+  PROPERTY(int32_t, topk_group) = 0;
+  PROPERTY(std::string, scoring_func);
+};
 
-  PROPERTY(float, layer_norm_eps) = 0.0f;
+// Multi-token prediction layer structure and checkpoint addressing.
+struct MtpArgs final {
+  REFLECT_PROPERTIES(MtpArgs);
+
+  PROPERTY(int32_t, num_nextn_predict_layers) = 0;
+  PROPERTY(int64_t, mtp_start_layer_idx) = -1;
+  PROPERTY(std::string, mtp_mlp_type) = "moe";
+};
+
+// Attention head geometry, excluding backend-specific cache storage padding.
+struct AttentionHeadArgs final {
+  REFLECT_PROPERTIES(AttentionHeadArgs);
+
+  PROPERTY(int64_t, head_dim) = 0;
+  PROPERTY(int64_t, decoder_head_dim) = 0;
+  PROPERTY(int64_t, n_heads) = 0;
+  PROPERTY(int64_t, decoder_n_heads) = 0;
+  PROPERTY(int64_t, actual_n_heads) = 0;
+  PROPERTY(std::optional<int64_t>, n_kv_heads);
+  PROPERTY(std::optional<int64_t>, decoder_n_kv_heads);
+};
+
+// Low-rank attention projection ranks and query/key/value head geometry.
+struct MlaArgs final {
+  REFLECT_PROPERTIES(MlaArgs);
+
+  PROPERTY(int32_t, qk_nope_head_dim) = 0;
+  PROPERTY(int32_t, qk_rope_head_dim) = 0;
+  PROPERTY(int32_t, v_head_dim) = 0;
+  PROPERTY(int32_t, q_lora_rank) = 0;
+  PROPERTY(int32_t, kv_lora_rank) = 0;
+};
+
+// Linear and recurrent attention geometry and checkpoint-defined state dtype.
+struct LinearAttentionArgs final {
+  REFLECT_PROPERTIES(LinearAttentionArgs);
+
+  PROPERTY(int32_t, linear_conv_kernel_dim) = 0;
+  PROPERTY(int32_t, linear_key_head_dim) = 0;
+  PROPERTY(int32_t, linear_value_head_dim) = 0;
+  PROPERTY(int64_t, linear_num_key_heads) = 0;
+  PROPERTY(int32_t, linear_num_value_heads) = 0;
+  PROPERTY(float, linear_lower_bound) = -5.0f;
+  PROPERTY(std::string, mamba_ssm_dtype);
+};
+
+// Checkpoint-defined placement of full and linear attention layers.
+struct HybridAttentionArgs final {
+  REFLECT_PROPERTIES(HybridAttentionArgs);
+
+  PROPERTY(int32_t, full_attention_interval) = 0;
+  PROPERTY(std::vector<int32_t>, full_attn_layers) = {};
+  PROPERTY(std::vector<std::string>, layer_types) = {};
+};
+
+// Rotary position embedding geometry and checkpoint-defined scaling.
+struct RopeArgs final {
+  REFLECT_PROPERTIES(RopeArgs);
 
   PROPERTY(int64_t, rotary_dim) = 0;
-
-  // the base period of the rotary position embeddings.
+  // The base period of the rotary position embeddings.
   PROPERTY(float, rope_theta) = 10000.0f;
-
-  // rope_scaling related args
   PROPERTY(std::string, rope_scaling_rope_type);
   PROPERTY(float, rope_scaling_factor) = 0.0f;
   PROPERTY(float, rope_scaling_low_freq_factor) = 0.0f;
@@ -141,22 +162,182 @@ struct ModelArgs {
   PROPERTY(float, rope_scaling_mscale_all_dim) = 0.0f;
   PROPERTY(std::vector<int64_t>, rope_scaling_mrope_section);
   PROPERTY(bool, rope_scaling_mrope_interleaved) = false;
+  PROPERTY(int32_t, rope_scaling) = -1;
+  PROPERTY(float, partial_rotary_factor) = 0.0f;
+};
+
+// Token IDs used to delimit multimodal content in model inputs.
+struct MultimodalTokenArgs final {
+  REFLECT_PROPERTIES(MultimodalTokenArgs);
+
+  PROPERTY(int32_t, vision_start_token_id) = 0;
+  PROPERTY(int32_t, vision_end_token_id) = 0;
+  PROPERTY(int32_t, vision_token_id) = 0;
+  PROPERTY(int32_t, image_token_id) = 0;
+  PROPERTY(int32_t, video_token_id) = 0;
+  PROPERTY(int32_t, audio_token_id) = 0;
+  PROPERTY(int32_t, image_start_token_id) = 0;
+  PROPERTY(int32_t, image_end_token_id) = 0;
+  PROPERTY(int32_t, video_start_token_id) = 0;
+  PROPERTY(int32_t, video_end_token_id) = 0;
+};
+
+// Image processor settings for cropping, resizing, rescaling, and
+// normalization.
+struct ImagePreprocessArgs final {
+  REFLECT_PROPERTIES(ImagePreprocessArgs);
+
+  PROPERTY(bool, mm_image_do_center_crop) = false;
+  PROPERTY(int32_t, mm_image_crop_height_size) = 336;
+  PROPERTY(int32_t, mm_image_crop_width_size) = 336;
+  PROPERTY(bool, mm_image_do_resize) = false;
+  PROPERTY(int32_t, mm_image_resize_shortest_edge) = 336;
+  PROPERTY(int32_t, mm_image_resample) = 0;
+  PROPERTY(bool, mm_image_do_rescale) = false;
+  PROPERTY(double, mm_image_rescale_factor) = 0;
+  PROPERTY(bool, mm_image_do_normalize) = false;
+  PROPERTY(std::vector<double>, mm_image_normalize_mean) = {};
+  PROPERTY(std::vector<double>, mm_image_normalize_std) = {};
+};
+
+// Model-defined sliding-window attention behavior and layer coverage.
+struct SlidingWindowArgs final {
+  REFLECT_PROPERTIES(SlidingWindowArgs);
+
+  PROPERTY(bool, use_sliding_window) = false;
+  PROPERTY(int32_t, sliding_window) = -1;
+  PROPERTY(int32_t, max_window_layers) = 0;
+};
+
+// DSpark's checkpoint-defined confidence head and optional Markov input.
+struct ConfidenceHeadArgs final {
+  REFLECT_PROPERTIES(ConfidenceHeadArgs);
+
+  // Registers confidence_head.proj for acceptance-probability estimation.
+  PROPERTY(bool, enable_confidence_head) = false;
+  // Applies the head to concat(hidden, markov_embedding[prev]) rather than
+  // hidden alone, as configured in released DSpark checkpoints.
+  PROPERTY(bool, confidence_head_with_markov) = false;
+};
+
+// Checkpoint-defined local-convolution and selector geometry for DFlash2.
+struct DFlash2Args final {
+  REFLECT_PROPERTIES(DFlash2Args);
+
+  PROPERTY(int32_t, dflash2_block_size) = 0;
+  PROPERTY(int32_t, dflash2_conv_group_size) = 0;
+  PROPERTY(int32_t, dflash2_conv_kernel_size) = 0;
+  PROPERTY(int32_t, dflash2_selector_rank) = 0;
+  PROPERTY(int32_t, dflash2_selector_top_k) = 0;
+};
+
+struct ModelArgs {
+  // Expose every plain-data field to the generic property reflection layer so
+  // the embedded Python model executor can receive the full, already-parsed
+  // config without a hand-maintained field whitelist (see property_reflect.h).
+  REFLECT_PROPERTIES(ModelArgs);
+
+  PROPERTY(std::string, model_type);
+
+  PROPERTY(std::string, dtype);
+
+  PROPERTY(TokenEmbeddingArgs, token_embedding_args);
+
+  // Keep the established accessors while token embedding fields move into
+  // their functional parameter group.
+  FORWARD_PROPERTY(int64_t, vocab_size, token_embedding_args);
+  FORWARD_PROPERTY(bool, tie_word_embeddings, token_embedding_args);
+
+  PROPERTY(int64_t, hidden_size) = 0;
+
+  PROPERTY(std::string, hidden_act);
+
+  // intermediate size
+  PROPERTY(int64_t, intermediate_size) = 0;
+
+  PROPERTY(int64_t, n_layers) = 0;
+  PROPERTY(int64_t, n_encoder_layers) = 0;
+
+  PROPERTY(AttentionHeadArgs, attention_head_args);
+
+  FORWARD_PROPERTY(int64_t, head_dim, attention_head_args);
+  FORWARD_PROPERTY(int64_t, decoder_head_dim, attention_head_args);
+  FORWARD_PROPERTY(int64_t, n_heads, attention_head_args);
+  FORWARD_PROPERTY(int64_t, decoder_n_heads, attention_head_args);
+  FORWARD_PROPERTY(int64_t, actual_n_heads, attention_head_args);
+  FORWARD_PROPERTY(std::optional<int64_t>, n_kv_heads, attention_head_args);
+  FORWARD_PROPERTY(std::optional<int64_t>,
+                   decoder_n_kv_heads,
+                   attention_head_args);
+
+  // Storage elements per full-attention K/V head, including backend padding.
+  // Zero reuses the logical head_dim.
+  PROPERTY(int64_t, kv_cache_storage_head_dim) = 0;
+
+  PROPERTY(int64_t, draft_vocab_size) = 0;
+
+  // DSpark: low-rank dim of the Markov head. 0 = disabled (plain DFlash /
+  // non-DSpark models).
+  PROPERTY(int64_t, markov_rank) = 0;
+  PROPERTY(int32_t, dspark_num_layers) = 0;
+  PROPERTY(int32_t, dspark_block_size) = 0;
+  // True only when SparseAttnSharedkv accepts explicit DSpark SWA indices.
+  // False selects the CANN 9.0-compatible q_len=1 row fallback.
+  PROPERTY(bool, dspark_use_native_sas) = false;
+
+  PROPERTY(ConfidenceHeadArgs, confidence_head_args);
+
+  FORWARD_PROPERTY(bool, enable_confidence_head, confidence_head_args);
+  FORWARD_PROPERTY(bool, confidence_head_with_markov, confidence_head_args);
+
+  PROPERTY(DFlash2Args, dflash2_args);
+
+  FORWARD_PROPERTY(int32_t, dflash2_block_size, dflash2_args);
+  FORWARD_PROPERTY(int32_t, dflash2_conv_group_size, dflash2_args);
+  FORWARD_PROPERTY(int32_t, dflash2_conv_kernel_size, dflash2_args);
+  FORWARD_PROPERTY(int32_t, dflash2_selector_rank, dflash2_args);
+  FORWARD_PROPERTY(int32_t, dflash2_selector_top_k, dflash2_args);
+
+  PROPERTY(bool, use_qk_norm) = false;
+  PROPERTY(float, rms_norm_eps) = 0.0f;
+
+  PROPERTY(float, layer_norm_eps) = 0.0f;
+
+  PROPERTY(RopeArgs, rope_args);
+
+  FORWARD_PROPERTY(int64_t, rotary_dim, rope_args);
+  FORWARD_PROPERTY(float, rope_theta, rope_args);
+  FORWARD_PROPERTY(std::string, rope_scaling_rope_type, rope_args);
+  FORWARD_PROPERTY(float, rope_scaling_factor, rope_args);
+  FORWARD_PROPERTY(float, rope_scaling_low_freq_factor, rope_args);
+  FORWARD_PROPERTY(float, rope_scaling_high_freq_factor, rope_args);
+  FORWARD_PROPERTY(float, rope_extrapolation_factor, rope_args);
+  FORWARD_PROPERTY(int64_t,
+                   rope_scaling_original_max_position_embeddings,
+                   rope_args);
+  FORWARD_PROPERTY(int64_t, rope_scaling_beta_fast, rope_args);
+  FORWARD_PROPERTY(int64_t, rope_scaling_beta_slow, rope_args);
+  FORWARD_PROPERTY(float, rope_scaling_attn_factor, rope_args);
+  FORWARD_PROPERTY(float, rope_scaling_mscale, rope_args);
+  FORWARD_PROPERTY(float, rope_scaling_mscale_all_dim, rope_args);
+  FORWARD_PROPERTY(std::vector<int64_t>, rope_scaling_mrope_section, rope_args);
+  FORWARD_PROPERTY(bool, rope_scaling_mrope_interleaved, rope_args);
+  FORWARD_PROPERTY(int32_t, rope_scaling, rope_args);
+  FORWARD_PROPERTY(float, partial_rotary_factor, rope_args);
 
   // the maximum sequence length to use for rotary position embeddings.
   PROPERTY(int64_t, max_position_embeddings) = 0;
   PROPERTY(bool, use_absolute_position_embedding) = false;
 
-  // token id for beginning of sentence.
-  PROPERTY(int32_t, bos_token_id) = 0;
+  PROPERTY(SpecialTokenArgs, special_token_args);
 
-  // token id for end of sentence.
-  PROPERTY(int32_t, eos_token_id) = -1;
-
-  // token id vector for end of sentence.
-  PROPERTY(std::vector<int32_t>, eos_token_id_vec);
-
-  // token id for pad of sentence.
-  PROPERTY(int32_t, pad_token_id) = 0;
+  FORWARD_PROPERTY(int32_t, bos_token_id, special_token_args);
+  FORWARD_PROPERTY(int32_t, eos_token_id, special_token_args);
+  FORWARD_PROPERTY(std::vector<int32_t>, eos_token_id_vec, special_token_args);
+  FORWARD_PROPERTY(int32_t, pad_token_id, special_token_args);
+  FORWARD_PROPERTY(std::unordered_set<int32_t>,
+                   stop_token_ids,
+                   special_token_args);
 
   // scaling factor used on the attention scores
   PROPERTY(std::optional<float>, attn_scalar);
@@ -167,9 +348,6 @@ struct ModelArgs {
   // whether to use bias for qkv.
   PROPERTY(bool, qkv_bias) = false;
 
-  // Stop token ids for decoding.
-  PROPERTY(std::unordered_set<int32_t>, stop_token_ids);
-
   // deepseek v2/v3
   PROPERTY(int32_t, first_k_dense_replace) = 0;
   PROPERTY(int32_t, moe_layer_freq) = 0;
@@ -178,28 +356,37 @@ struct ModelArgs {
   PROPERTY(std::string, moe_score_func);
   PROPERTY(float, moe_route_scale) = 1.0f;
   PROPERTY(bool, moe_use_shared_experts) = false;
-  PROPERTY(std::string, topk_method);
-  PROPERTY(int32_t, n_routed_experts) = 0;
-  PROPERTY(int32_t, n_shared_experts) = 0;
-  PROPERTY(int32_t, num_experts_per_tok) = 0;
-  PROPERTY(int32_t, moe_intermediate_size) = 0;
-  PROPERTY(float, routed_scaling_factor) = 0.0f;
-  PROPERTY(bool, norm_topk_prob) = false;
-  PROPERTY(int32_t, n_group) = 0;
-  PROPERTY(int32_t, topk_group) = 0;
-  PROPERTY(std::string, scoring_func);
+
+  PROPERTY(MoEArgs, moe_args);
+
+  FORWARD_PROPERTY(std::string, topk_method, moe_args);
+  FORWARD_PROPERTY(int32_t, n_routed_experts, moe_args);
+  FORWARD_PROPERTY(int32_t, n_shared_experts, moe_args);
+  FORWARD_PROPERTY(int32_t, num_experts_per_tok, moe_args);
+  FORWARD_PROPERTY(int32_t, moe_intermediate_size, moe_args);
+  FORWARD_PROPERTY(float, routed_scaling_factor, moe_args);
+  FORWARD_PROPERTY(bool, norm_topk_prob, moe_args);
+  FORWARD_PROPERTY(int32_t, n_group, moe_args);
+  FORWARD_PROPERTY(int32_t, topk_group, moe_args);
+  FORWARD_PROPERTY(std::string, scoring_func, moe_args);
+
   PROPERTY(float, swiglu_limit) = 0.0f;
   // deepseek v2/v3 MLA
   PROPERTY(bool, enable_mla) = false;
-  PROPERTY(int32_t, qk_nope_head_dim) = 0;
-  PROPERTY(int32_t, qk_rope_head_dim) = 0;
-  PROPERTY(int32_t, v_head_dim) = 0;
-  PROPERTY(int32_t, q_lora_rank) = 0;
-  PROPERTY(int32_t, kv_lora_rank) = 0;
-  // deepseek v3/v3.2 MTP
-  PROPERTY(int32_t, num_nextn_predict_layers) = 0;
-  PROPERTY(int64_t, mtp_start_layer_idx) = -1;
-  PROPERTY(std::string, mtp_mlp_type) = "moe";
+
+  PROPERTY(MlaArgs, mla_args);
+
+  FORWARD_PROPERTY(int32_t, qk_nope_head_dim, mla_args);
+  FORWARD_PROPERTY(int32_t, qk_rope_head_dim, mla_args);
+  FORWARD_PROPERTY(int32_t, v_head_dim, mla_args);
+  FORWARD_PROPERTY(int32_t, q_lora_rank, mla_args);
+  FORWARD_PROPERTY(int32_t, kv_lora_rank, mla_args);
+
+  PROPERTY(MtpArgs, mtp_args);
+
+  FORWARD_PROPERTY(int32_t, num_nextn_predict_layers, mtp_args);
+  FORWARD_PROPERTY(int64_t, mtp_start_layer_idx, mtp_args);
+  FORWARD_PROPERTY(std::string, mtp_mlp_type, mtp_args);
 
   // deepseek v3.2 indexer
   PROPERTY(int32_t, index_head_dim) = 0;
@@ -236,18 +423,18 @@ struct ModelArgs {
   PROPERTY(int64_t, max_batch_size) = 0;
   PROPERTY(int64_t, max_seq_len) = 0;
 
-  PROPERTY(int32_t, vision_start_token_id) = 0;
-  PROPERTY(int32_t, vision_end_token_id) = 0;
-  PROPERTY(int32_t, vision_token_id) = 0;
-  PROPERTY(int32_t, image_token_id) = 0;
-  PROPERTY(int32_t, video_token_id) = 0;
-  PROPERTY(int32_t, audio_token_id) = 0;
+  PROPERTY(MultimodalTokenArgs, multimodal_token_args);
 
-  // glm4v moe
-  PROPERTY(int32_t, image_start_token_id) = 0;
-  PROPERTY(int32_t, image_end_token_id) = 0;
-  PROPERTY(int32_t, video_start_token_id) = 0;
-  PROPERTY(int32_t, video_end_token_id) = 0;
+  FORWARD_PROPERTY(int32_t, vision_start_token_id, multimodal_token_args);
+  FORWARD_PROPERTY(int32_t, vision_end_token_id, multimodal_token_args);
+  FORWARD_PROPERTY(int32_t, vision_token_id, multimodal_token_args);
+  FORWARD_PROPERTY(int32_t, image_token_id, multimodal_token_args);
+  FORWARD_PROPERTY(int32_t, video_token_id, multimodal_token_args);
+  FORWARD_PROPERTY(int32_t, audio_token_id, multimodal_token_args);
+  FORWARD_PROPERTY(int32_t, image_start_token_id, multimodal_token_args);
+  FORWARD_PROPERTY(int32_t, image_end_token_id, multimodal_token_args);
+  FORWARD_PROPERTY(int32_t, video_start_token_id, multimodal_token_args);
+  FORWARD_PROPERTY(int32_t, video_end_token_id, multimodal_token_args);
 
   PROPERTY(std::string, vision_custom_adapter);
   PROPERTY(int32_t, vision_max_slice_nums) = 0;
@@ -261,23 +448,32 @@ struct ModelArgs {
   PROPERTY(int64_t, num_attention_heads) = 32;
   PROPERTY(int32_t, num_experts) = 128;
   PROPERTY(bool, output_router_logits) = false;
-  PROPERTY(int32_t, rope_scaling) = -1;
   PROPERTY(float, router_aux_loss_coef) = 0.001f;
 
   // qwen3 next initialized with 0, and will be loaded in model file
   PROPERTY(bool, attn_output_gate) = false;
-  PROPERTY(int32_t, full_attention_interval) = 0;
-  PROPERTY(std::vector<int32_t>, full_attn_layers) = {};
-  PROPERTY(int32_t, linear_conv_kernel_dim) = 0;
-  PROPERTY(int32_t, linear_key_head_dim) = 0;
-  PROPERTY(int32_t, linear_value_head_dim) = 0;
-  PROPERTY(int64_t, linear_num_key_heads) = 0;
-  PROPERTY(int32_t, linear_num_value_heads) = 0;
-  PROPERTY(float, linear_lower_bound) = -5.0f;
-  PROPERTY(std::string, mamba_ssm_dtype);
+
+  PROPERTY(HybridAttentionArgs, hybrid_attention_args);
+
+  FORWARD_PROPERTY(int32_t, full_attention_interval, hybrid_attention_args);
+  FORWARD_PROPERTY(std::vector<int32_t>,
+                   full_attn_layers,
+                   hybrid_attention_args);
+  FORWARD_PROPERTY(std::vector<std::string>,
+                   layer_types,
+                   hybrid_attention_args);
+
+  PROPERTY(LinearAttentionArgs, linear_attention_args);
+
+  FORWARD_PROPERTY(int32_t, linear_conv_kernel_dim, linear_attention_args);
+  FORWARD_PROPERTY(int32_t, linear_key_head_dim, linear_attention_args);
+  FORWARD_PROPERTY(int32_t, linear_value_head_dim, linear_attention_args);
+  FORWARD_PROPERTY(int64_t, linear_num_key_heads, linear_attention_args);
+  FORWARD_PROPERTY(int32_t, linear_num_value_heads, linear_attention_args);
+  FORWARD_PROPERTY(float, linear_lower_bound, linear_attention_args);
+  FORWARD_PROPERTY(std::string, mamba_ssm_dtype, linear_attention_args);
+
   PROPERTY(int32_t, shared_expert_intermediate_size) = 0;
-  PROPERTY(float, partial_rotary_factor) = 0.0f;
-  PROPERTY(std::vector<std::string>, layer_types) = {};
 
   // Vision model's dropout
   PROPERTY(float, mm_dropout) = 0.0f;
@@ -401,26 +597,25 @@ struct ModelArgs {
   // VLM model projector's mm_vision_feature_select_strategy
   PROPERTY(std::string, mm_vision_feature_select_strategy);
 
-  // mm image begin
-  // VLM image preprocessor centor crop
-  PROPERTY(bool, mm_image_do_center_crop) = false;
-  PROPERTY(int, mm_image_crop_height_size) = 336;
-  PROPERTY(int, mm_image_crop_width_size) = 336;
+  PROPERTY(ImagePreprocessArgs, image_preprocess_args);
 
-  // VLM image preprocessor resize
-  PROPERTY(bool, mm_image_do_resize) = false;
-  PROPERTY(int, mm_image_resize_shortest_edge) = 336;
-
-  PROPERTY(int, mm_image_resample) = 0;
-
-  // VLM image preprocessor resize
-  PROPERTY(bool, mm_image_do_rescale) = false;
-  PROPERTY(double, mm_image_rescale_factor) = 0;
-
-  // VLM image preprocessor normalization
-  PROPERTY(bool, mm_image_do_normalize) = false;
-  PROPERTY(std::vector<double>, mm_image_normalize_mean) = {};
-  PROPERTY(std::vector<double>, mm_image_normalize_std) = {};
+  FORWARD_PROPERTY(bool, mm_image_do_center_crop, image_preprocess_args);
+  FORWARD_PROPERTY(int32_t, mm_image_crop_height_size, image_preprocess_args);
+  FORWARD_PROPERTY(int32_t, mm_image_crop_width_size, image_preprocess_args);
+  FORWARD_PROPERTY(bool, mm_image_do_resize, image_preprocess_args);
+  FORWARD_PROPERTY(int32_t,
+                   mm_image_resize_shortest_edge,
+                   image_preprocess_args);
+  FORWARD_PROPERTY(int32_t, mm_image_resample, image_preprocess_args);
+  FORWARD_PROPERTY(bool, mm_image_do_rescale, image_preprocess_args);
+  FORWARD_PROPERTY(double, mm_image_rescale_factor, image_preprocess_args);
+  FORWARD_PROPERTY(bool, mm_image_do_normalize, image_preprocess_args);
+  FORWARD_PROPERTY(std::vector<double>,
+                   mm_image_normalize_mean,
+                   image_preprocess_args);
+  FORWARD_PROPERTY(std::vector<double>,
+                   mm_image_normalize_std,
+                   image_preprocess_args);
 
   // KIMI_K25
   PROPERTY(int64_t, mm_init_pos_emb_width) = 64;
@@ -505,13 +700,11 @@ struct ModelArgs {
   // ctc head
   PROPERTY(int64_t, mm_audio_ctc_pad_token_id) = 151643;
 
-  // whether to tie weight embeddings
-  PROPERTY(bool, tie_word_embeddings) = false;
+  PROPERTY(SlidingWindowArgs, sliding_window_args);
 
-  // sliding window for attention
-  PROPERTY(bool, use_sliding_window) = false;
-  PROPERTY(int32_t, sliding_window) = -1;
-  PROPERTY(int32_t, max_window_layers) = 0;
+  FORWARD_PROPERTY(bool, use_sliding_window, sliding_window_args);
+  FORWARD_PROPERTY(int32_t, sliding_window, sliding_window_args);
+  FORWARD_PROPERTY(int32_t, max_window_layers, sliding_window_args);
 
   PROPERTY(int32_t, query_num) = 0;
   PROPERTY(bool, encoder_embedding_mode) = false;

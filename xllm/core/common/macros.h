@@ -17,6 +17,7 @@ limitations under the License.
 #pragma once
 
 #include <mutex>
+#include <utility>
 
 #include "core/common/property_reflect.h"
 
@@ -64,6 +65,31 @@ namespace xllm {
           #property, &xllm_reflect_emit_##property<>);                         \
                                                                                \
   T property##_
+
+// Keep a property's established accessors when its storage moves into a nested
+// group. Only the group's PROPERTY owns and reflects the field.
+#define FORWARD_PROPERTY(T, property, group)                            \
+ public:                                                                \
+  [[nodiscard]] const T& property() const& noexcept {                   \
+    return group().property();                                          \
+  }                                                                     \
+  [[nodiscard]] T& property() & noexcept { return group().property(); } \
+  [[nodiscard]] T&& property() && noexcept {                            \
+    return std::move(group()).property();                               \
+  }                                                                     \
+                                                                        \
+  auto property(const T& value) & -> decltype(*this) {                  \
+    group().property(value);                                            \
+    return *this;                                                       \
+  }                                                                     \
+                                                                        \
+  auto property(T&& value) & -> decltype(*this) {                       \
+    group().property(std::move(value));                                 \
+    return *this;                                                       \
+  }                                                                     \
+                                                                        \
+  void property(const T& value) && = delete;                            \
+  void property(T&& value) && = delete
 
 // Opt a PROPERTY-bearing struct into field reflection. Place once at the top of
 // the struct body, e.g. `REFLECT_PROPERTIES(ModelArgs);`. It names the owning
