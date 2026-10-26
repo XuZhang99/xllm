@@ -413,10 +413,10 @@ bool DraftModelSpecWorkerImpl<TargetInput>::allocate_kv_cache_with_transfer(
 #endif
 
 template <typename TargetInput>
-TargetInput DraftModelSpecWorkerImpl<TargetInput>::prepare_decode_continuation(
-    TargetInput& inputs,
+bool DraftModelSpecWorkerImpl<TargetInput>::prepare_model_decode_continuation(
+    TargetInput& /*inputs*/,
     const ForwardOutput& /*prior_output*/) {
-  return inputs.clone();
+  return true;
 }
 
 template <typename TargetInput>

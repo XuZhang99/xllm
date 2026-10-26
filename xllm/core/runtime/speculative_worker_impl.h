@@ -131,7 +131,7 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   };
 
  protected:
-  TargetInput prepare_decode_continuation(
+  bool prepare_model_decode_continuation(
       TargetInput& inputs,
       const ForwardOutput& prior_output) override;
 

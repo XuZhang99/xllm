@@ -40,24 +40,15 @@ class ScheduleOverlap final {
   ForwardOutput consume();
   void shutdown();
 
-  // Default continuation for ordinary LLM/VLM workers. Specialized workers
-  // rebuild decode inputs instead, using the explicitly supplied prior output.
-  static LlmForwardInput replace_tokens(LlmForwardInput& input,
-                                        const ForwardOutput& prior_output,
-                                        bool use_graph_decode_input);
-  static VlmForwardInput replace_tokens(VlmForwardInput& input,
-                                        const ForwardOutput& prior_output,
-                                        bool use_graph_decode_input);
-
  private:
   template <typename Input>
   std::optional<ForwardOutput> execute_impl(WorkerImpl& worker, Input& input);
   template <typename Input>
   void prepare_continuation(WorkerImpl& worker, Input& input);
   template <typename Input>
-  static Input replace_tokens_impl(Input& input,
-                                   const ForwardOutput& prior_output,
-                                   bool use_graph_decode_input);
+  static void replace_tokens(Input& input,
+                             const ForwardOutput& prior_output,
+                             bool use_graph_decode_input);
 
   void record_output(WorkerImpl& worker,
                      const std::optional<ForwardOutput>& output,

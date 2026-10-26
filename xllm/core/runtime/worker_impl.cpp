@@ -2941,24 +2941,6 @@ int64_t WorkerImpl::get_num_layers() const {
   return num_layers;
 }
 
-LlmForwardInput WorkerImpl::prepare_decode_continuation(
-    LlmForwardInput& input,
-    const ForwardOutput& prior_output) {
-  return ScheduleOverlap::replace_tokens(
-      input,
-      prior_output,
-      can_prepare_npu_graph_decode_input(input.input_params));
-}
-
-VlmForwardInput WorkerImpl::prepare_decode_continuation(
-    VlmForwardInput& input,
-    const ForwardOutput& prior_output) {
-  return ScheduleOverlap::replace_tokens(
-      input,
-      prior_output,
-      can_prepare_npu_graph_decode_input(input.input_params));
-}
-
 void WorkerImpl::update_json_object_states_by_output(
     VlmForwardInput& input,
     const ForwardOutput& prior_output,

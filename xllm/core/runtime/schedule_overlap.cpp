@@ -54,8 +54,12 @@ void ScheduleOverlap::prepare_continuation(WorkerImpl& worker, Input& input) {
   worker.update_json_object_states_by_output(
       input, prior_output, state_.sample_sequence_ids());
   worker.sanitize_json_object_error_inputs(input);
-  if (reuse_tokens) {
-    input = worker.prepare_decode_continuation(input, prior_output);
+  if (reuse_tokens &&
+      !worker.prepare_model_decode_continuation(input, prior_output)) {
+    replace_tokens(
+        input,
+        prior_output,
+        worker.can_prepare_npu_graph_decode_input(input.input_params));
   }
 }
 
@@ -145,7 +149,7 @@ ForwardOutput ScheduleOverlap::consume() {
 void ScheduleOverlap::shutdown() { state_.shutdown(); }
 
 template <typename Input>
-Input ScheduleOverlap::replace_tokens_impl(
+void ScheduleOverlap::replace_tokens(
     Input& input,
     const ForwardOutput& prior_output,
     [[maybe_unused]] bool use_graph_decode_input) {
@@ -171,21 +175,6 @@ Input ScheduleOverlap::replace_tokens_impl(
       prior_output.sample_output.next_tokens.index({clamped_neg_indices - 1});
   input.token_ids = torch::where(neg_mask, replacement, flatten_tokens);
 #endif
-  return input.clone();
-}
-
-LlmForwardInput ScheduleOverlap::replace_tokens(
-    LlmForwardInput& input,
-    const ForwardOutput& prior_output,
-    bool use_graph_decode_input) {
-  return replace_tokens_impl(input, prior_output, use_graph_decode_input);
-}
-
-VlmForwardInput ScheduleOverlap::replace_tokens(
-    VlmForwardInput& input,
-    const ForwardOutput& prior_output,
-    bool use_graph_decode_input) {
-  return replace_tokens_impl(input, prior_output, use_graph_decode_input);
 }
 
 }  // namespace xllm

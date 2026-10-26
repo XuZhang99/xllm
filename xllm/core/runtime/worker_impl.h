@@ -398,12 +398,19 @@ class WorkerImpl {
       const LlmForwardInput& input);
   virtual std::optional<ForwardOutput> step_for_schedule_overlap(
       const VlmForwardInput& input);
-  virtual LlmForwardInput prepare_decode_continuation(
-      LlmForwardInput& input,
-      const ForwardOutput& prior_output);
-  virtual VlmForwardInput prepare_decode_continuation(
-      VlmForwardInput& input,
-      const ForwardOutput& prior_output);
+  // Return true when the model rebuilds this input in place or manages its
+  // continuation in step(). Return false without changing the input to use
+  // the coordinator's ordinary token replacement.
+  virtual bool prepare_model_decode_continuation(
+      LlmForwardInput& /*input*/,
+      const ForwardOutput& /*prior_output*/) {
+    return false;
+  }
+  virtual bool prepare_model_decode_continuation(
+      VlmForwardInput& /*input*/,
+      const ForwardOutput& /*prior_output*/) {
+    return false;
+  }
 
   // Map shard-local selections to the rows consumed by the LM head.
   torch::Tensor remap_selected_token_idxes_for_lm_head(

@@ -38,15 +38,24 @@ ForwardOutput token_output(int32_t token_id) {
 
 class OverlapTestWorker final : public WorkerImpl {
  public:
-  explicit OverlapTestWorker(std::vector<std::optional<ForwardOutput>> outputs,
-                             bool driver = true)
+  enum class ContinuationMode : int8_t {
+    CUSTOM_REBUILD,
+    DEFAULT_REPLACEMENT,
+    MODEL_MANAGED
+  };
+
+  explicit OverlapTestWorker(
+      std::vector<std::optional<ForwardOutput>> outputs,
+      bool driver = true,
+      ContinuationMode continuation_mode = ContinuationMode::CUSTOM_REBUILD)
       : WorkerImpl(ParallelArgs(/*rank=*/driver ? 0 : 1,
                                 /*world_size=*/2,
                                 /*dp_size=*/1,
                                 /*process_group=*/nullptr),
                    torch::Device(torch::kPrivateUse1, /*index=*/0),
                    options()),
-        outputs_(std::move(outputs)) {}
+        outputs_(std::move(outputs)),
+        continuation_mode_(continuation_mode) {}
 
   ~OverlapTestWorker() override { drain_pending_execution(); }
 
@@ -54,12 +63,12 @@ class OverlapTestWorker final : public WorkerImpl {
 
   void prepare_work_before_execute(const LlmForwardInput& input,
                                    LlmForwardInput& prepared) override {
-    prepared = input.clone();
+    prepare_input(input, prepared);
   }
 
   void prepare_work_before_execute(const VlmForwardInput& input,
                                    VlmForwardInput& prepared) override {
-    prepared = input.clone();
+    prepare_input(input, prepared);
   }
 
   int32_t continuation_count() const { return continuation_count_; }
@@ -72,13 +81,13 @@ class OverlapTestWorker final : public WorkerImpl {
   }
 
  protected:
-  LlmForwardInput prepare_decode_continuation(
+  bool prepare_model_decode_continuation(
       LlmForwardInput& input,
       const ForwardOutput& prior_output) override {
     return prepare_continuation(input, prior_output);
   }
 
-  VlmForwardInput prepare_decode_continuation(
+  bool prepare_model_decode_continuation(
       VlmForwardInput& input,
       const ForwardOutput& prior_output) override {
     return prepare_continuation(input, prior_output);
@@ -102,10 +111,24 @@ class OverlapTestWorker final : public WorkerImpl {
   }
 
   template <typename Input>
-  Input prepare_continuation(Input& input, const ForwardOutput& prior_output) {
+  void prepare_input(const Input& input, Input& prepared) const {
+    prepared = input.clone();
+    if (continuation_mode_ == ContinuationMode::DEFAULT_REPLACEMENT) {
+      prepared.token_ids = input.token_ids.to(device());
+    }
+  }
+
+  template <typename Input>
+  bool prepare_continuation(Input& input, const ForwardOutput& prior_output) {
     ++continuation_count_;
-    input.token_ids = prior_output.sample_output.next_tokens.to(torch::kInt32);
-    return input.clone();
+    if (continuation_mode_ == ContinuationMode::DEFAULT_REPLACEMENT) {
+      return WorkerImpl::prepare_model_decode_continuation(input, prior_output);
+    }
+    if (continuation_mode_ == ContinuationMode::CUSTOM_REBUILD) {
+      input.token_ids =
+          prior_output.sample_output.next_tokens.to(torch::kInt32);
+    }
+    return true;
   }
 
   template <typename Input>
@@ -124,6 +147,7 @@ class OverlapTestWorker final : public WorkerImpl {
   }
 
   std::vector<std::optional<ForwardOutput>> outputs_;
+  ContinuationMode continuation_mode_;
   size_t step_index_ = 0;
   int32_t continuation_count_ = 0;
   torch::Tensor executed_tokens_;
@@ -166,6 +190,57 @@ TYPED_TEST(ScheduleOverlapTest, ConsumedResultRemainsAvailableForContinuation) {
   EXPECT_EQ(worker.get_last_step_result()
                 .sample_output.next_tokens.template item<int64_t>(),
             23);
+}
+
+TYPED_TEST(ScheduleOverlapTest,
+           DefaultContinuationReplacesIndexedPlaceholders) {
+  const torch::Device device(torch::kPrivateUse1, /*index=*/0);
+  ForwardOutput prior_output;
+  prior_output.sample_output.next_tokens =
+      torch::tensor({17, 23}, torch::kInt64).to(device);
+  OverlapTestWorker worker(
+      {std::move(prior_output), token_output(31)},
+      /*driver=*/true,
+      OverlapTestWorker::ContinuationMode::DEFAULT_REPLACEMENT);
+  auto first = worker.step_async(step_input<TypeParam>(/*decode=*/false));
+  ASSERT_TRUE(std::move(first).get().has_value());
+  worker.get_last_step_result();
+
+  auto input = step_input<TypeParam>(/*decode=*/true);
+  input.token_ids = torch::tensor({-2, 9, -1}, torch::kInt32);
+  auto second = worker.step_async(input);
+  ASSERT_TRUE(std::move(second).get().has_value());
+  EXPECT_EQ(worker.continuation_count(), 1);
+  EXPECT_EQ(worker.executed_tokens().device(), device);
+  EXPECT_TRUE(torch::equal(worker.executed_tokens().to(torch::kCPU),
+                           torch::tensor({23, 9, 17}, torch::kInt32)));
+  EXPECT_TRUE(
+      torch::equal(input.token_ids, torch::tensor({-2, 9, -1}, torch::kInt32)));
+  worker.get_last_step_result();
+}
+
+TYPED_TEST(ScheduleOverlapTest, ModelManagedContinuationPreservesModelInput) {
+  JsonObjectGrammar grammar({"{", "}", "stop"}, /*stop_token_ids=*/{2});
+  OverlapTestWorker worker({token_output(0), token_output(1)},
+                           /*driver=*/true,
+                           OverlapTestWorker::ContinuationMode::MODEL_MANAGED);
+  auto first = worker.step_async(step_input<TypeParam>(/*decode=*/false));
+  ASSERT_TRUE(std::move(first).get().has_value());
+  worker.get_last_step_result();
+
+  auto input = step_input<TypeParam>(/*decode=*/true, /*token_id=*/-1);
+  input.json_object_states = {grammar.initial_state()};
+  input.sample_prior_output_rows = {0};
+  auto second = worker.step_async(input);
+  const auto output = std::move(second).get();
+  ASSERT_TRUE(output.has_value());
+  EXPECT_TRUE(output->json_object_errors.empty());
+  EXPECT_EQ(worker.continuation_count(), 1);
+  EXPECT_EQ(worker.executed_tokens().template item<int32_t>(), -1);
+  EXPECT_EQ(worker.executed_grammar_tokens(), std::vector<int32_t>({0}));
+  EXPECT_EQ(input.token_ids.template item<int32_t>(), -1);
+  EXPECT_TRUE(input.json_object_states.front().snapshot().token_ids.empty());
+  worker.get_last_step_result();
 }
 
 TYPED_TEST(ScheduleOverlapTest, EmptyStepClearsPriorContinuation) {

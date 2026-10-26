@@ -193,13 +193,11 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl<TargetInput>::step(
 }
 
 template <typename TargetInput>
-TargetInput SpeculativeWorkerImpl<TargetInput>::prepare_decode_continuation(
+bool SpeculativeWorkerImpl<TargetInput>::prepare_model_decode_continuation(
     TargetInput& inputs,
     const ForwardOutput& prior_output) {
-  // only process decode batch, so prepare draft input here.
-  TargetInput& new_inputs = inputs;
-
-  auto& input_params = new_inputs.input_params;
+  // Only decode batches need draft input rebuilding.
+  auto& input_params = inputs.input_params;
   const int32_t num_sequences = input_params.meta.num_sequences;
   const int32_t block_size = options_.block_size();
 
@@ -239,7 +237,7 @@ TargetInput SpeculativeWorkerImpl<TargetInput>::prepare_decode_continuation(
   CHECK_EQ(buf.out_positions.size(), buf.out_token_ids.size())
       << "step-update positions/tokens mismatch";
 
-  specBuilder::set_token_position_tensors(new_inputs,
+  specBuilder::set_token_position_tensors(inputs,
                                           buf.out_token_ids,
                                           buf.out_positions,
                                           inputs.token_ids.options(),
@@ -250,9 +248,9 @@ TargetInput SpeculativeWorkerImpl<TargetInput>::prepare_decode_continuation(
   input_params.attention.host.new_cache_slots =
       std::move(buf.out_new_cache_slots);
   input_params.attention.rebuild_device_buffer(device_);
-  new_inputs.runtime.device_tensors_ready = true;
+  inputs.runtime.device_tensors_ready = true;
 
-  return std::move(new_inputs);
+  return true;
 }
 
 ForwardOutput finalize_verify_output(
