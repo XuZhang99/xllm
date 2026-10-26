@@ -53,11 +53,8 @@ git submodule update --init --recursive
 # 编译 C++ 二进制文件和 Python 扩展，不编译单测目标
 python setup.py build
 
-# 只编译单测目标，不运行单测
-python setup.py build_tests
-
-# 编译并运行单测
-python setup.py test
+# 编译产品、编译并运行单测
+python setup.py build test
 
 # 编译并运行指定单测目标
 python setup.py test --test-name common_test
@@ -69,7 +66,8 @@ python setup.py bdist_wheel
 python setup.py install
 ```
 
-`build` 只编译交付产物；`build_tests` 和 `test` 复用同一个构建目录编译单测。
+`build` 只编译交付产物；`build test` 随后复用同一个构建目录编译并运行单测。
+已有产品构建时，也可单独执行 `python setup.py test` 来编译并运行单测。
 为兼容第三方构建定义，CMake 中仍保留测试目标注册。
 可传入 `--device npu` 等参数指定硬件后端。
 构建 wheel 时仍会编译和运行单测，设置 `SKIP_TEST=1` 可跳过；

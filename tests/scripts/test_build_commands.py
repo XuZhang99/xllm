@@ -48,6 +48,7 @@ class BuildCommandsTest(unittest.TestCase):
         kernels.mkdir(parents=True)
         (kernels / "fixture_kernel.py").write_text("STAGED = True\n", encoding="utf-8")
         self._stack.enter_context(mock.patch.object(self.setup, "get_cmake_dir", return_value=str(self.cmake_dir)))
+        self._stack.enter_context(mock.patch.object(self.setup.TestUT, "run_ctest"))
         self.ext = self.setup.CMakeExtension("xllm", "xllm/")
         self.env = {"PATH": "/toolchain/bin", "CCACHE_BASEDIR": str(self.root)}
 
@@ -110,10 +111,10 @@ class BuildCommandsTest(unittest.TestCase):
                 self.assertEqual(build.call_args.args[3]["OPS_CPU_NUMBER"], expected)
                 self.assertIn("-j8", build.call_args.args[2])
 
-    def test_build_tests_only_builds_the_test_tree(self) -> None:
+    def test_test_command_builds_the_test_tree(self) -> None:
         for device, cmake in (("npu", "cmake"), ("maca", "cmake_maca")):
             with self.subTest(device=device), mock.patch.object(self.setup.subprocess, "check_call") as call:
-                self._build_targets(self._command(self.setup.ExtBuildTests, device))
+                self._build_targets(self._command(self.setup.TestUT, device))
 
                 configure, build = call.call_args_list
                 self.assertEqual(configure.args[0][-1], "-DBUILD_TESTING=ON")
@@ -125,7 +126,7 @@ class BuildCommandsTest(unittest.TestCase):
     def test_command_controls_test_registration_after_opposite_configuration(self) -> None:
         commands = (
             (self.setup.ExtBuild, "OFF", "ON"),
-            (self.setup.ExtBuildTests, "OFF", "ON"),
+            (self.setup.TestUT, "OFF", "ON"),
             (self.setup.ExtBuildSingleTest, "OFF", "ON"),
         )
         for command_type, previous, expected in commands:
@@ -136,7 +137,7 @@ class BuildCommandsTest(unittest.TestCase):
                 self.assertEqual(call.call_args.args[0][-1], f"-DBUILD_TESTING={expected}")
 
     def test_standalone_mlu_tests_can_import_staged_runtime(self) -> None:
-        command = self._command(self.setup.ExtBuildTests, "mlu")
+        command = self._command(self.setup.TestUT, "mlu")
         with mock.patch.object(self.setup.subprocess, "check_call"):
             self._build_targets(command)
 
@@ -177,7 +178,7 @@ class BuildCommandsTest(unittest.TestCase):
         self.assertEqual(run.args[0], [str(executable)])
 
     def test_unsupported_test_backend_fails_before_configuration(self) -> None:
-        command = self._command(self.setup.ExtBuildTests, "musa")
+        command = self._command(self.setup.TestUT, "musa")
         with (
             mock.patch.object(self.setup.subprocess, "check_call") as call,
             self.assertRaisesRegex(ValueError, "not supported.*musa"),
@@ -186,26 +187,61 @@ class BuildCommandsTest(unittest.TestCase):
         call.assert_not_called()
 
     def test_test_command_builds_before_running_ctest(self) -> None:
-        command = self.setup.TestUT(Distribution())
+        command = self._command(self.setup.TestUT)
         calls = mock.Mock()
-        calls.attach_mock(mock.Mock(), "build")
+        calls.attach_mock(mock.Mock(), "native")
         calls.attach_mock(mock.Mock(), "ctest")
         with (
-            mock.patch.object(command, "run_command", calls.build),
+            mock.patch.object(self.setup.subprocess, "check_call", calls.native),
             mock.patch.object(command, "run_ctest", calls.ctest),
         ):
-            command.run()
-        self.assertEqual(calls.mock_calls, [mock.call.build("build_tests"), mock.call.ctest(str(self.cmake_dir))])
+            self._build_targets(command)
+        self.assertEqual([call[0] for call in calls.mock_calls], ["native", "native", "ctest"])
+        self.assertEqual(calls.mock_calls[1].args[0][-2:], ["--target", "all_tests"])
+        calls.ctest.assert_called_once_with(str(self.cmake_dir))
 
     def test_test_build_failure_prevents_running_stale_tests(self) -> None:
-        command = self.setup.TestUT(Distribution())
+        command = self._command(self.setup.TestUT)
         with (
-            mock.patch.object(command, "run_command", side_effect=subprocess.CalledProcessError(1, "cmake")),
+            mock.patch.object(
+                self.setup.subprocess,
+                "check_call",
+                side_effect=[None, subprocess.CalledProcessError(1, "cmake")],
+            ),
             mock.patch.object(command, "run_ctest") as run_ctest,
             self.assertRaises(subprocess.CalledProcessError),
         ):
-            command.run()
+            self._build_targets(command)
         run_ctest.assert_not_called()
+
+    def test_setuptools_build_test_dispatches_both_commands_with_build_options(self) -> None:
+        distribution = Distribution(
+            {
+                "ext_modules": [self.ext],
+                "cmdclass": {"build_ext": self.setup.ExtBuild, "test": self.setup.TestUT},
+                "script_name": "setup.py",
+                "script_args": ["build", "test"],
+            }
+        )
+        options = {"device": "npu", "arch": "x86", "dev": True, "tilelang_jobs": 4}
+        distribution.command_options = {
+            name: {key: ("test", value) for key, value in options.items()} for name in ("build_ext", "test")
+        }
+        self.assertTrue(distribution.parse_command_line())
+        commands = []
+
+        def record_build(command: Command, ext: object) -> None:
+            commands.append(type(command))
+            self.assertIs(ext, self.ext)
+            for key, value in options.items():
+                self.assertEqual(getattr(command, key), value)
+
+        with (
+            mock.patch.object(self.setup.subprocess, "check_output", return_value=b"cmake version 3.26.0"),
+            mock.patch.object(self.setup.ExtBuild, "build_extension", autospec=True, side_effect=record_build),
+        ):
+            distribution.run_commands()
+        self.assertEqual(commands, [self.setup.ExtBuild, self.setup.TestUT])
 
     def test_wheel_preserves_testing_and_explicit_skip(self) -> None:
         for device, skip, commands in (

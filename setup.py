@@ -622,38 +622,10 @@ class ExtBuild(build_ext):
         _stage_auto_tuning_config(self.base_dir, extdir)
 
 
-class ExtBuildTests(ExtBuild):
-    """Build the complete test tree without building the packaged executables."""
-
-    description = "Build all unit-test targets without running them."
-    build_test_targets = True
-
-    def build_cmake_targets(
-        self,
-        ext: CMakeExtension,
-        cmake_args: list[str],
-        build_args: list[str],
-        env: dict[str, str],
-        extdir: str,
-        product: str,
-    ) -> None:
-        cmake_cmd = "cmake_maca" if self.device == "maca" else "cmake"
-        self._configure_cmake(cmake_cmd, cmake_args, env)
-        subprocess.check_call(
-            [cmake_cmd, "--build", ".", "--verbose"] + build_args + ["--target", "all_tests"],
-            cwd=get_cmake_dir(),
-            env=env,
-        )
-        # Embedded MLU tests import these packages from the build directory,
-        # including when no product build has prepared that directory yet.
-        # Make xllm a regular package so an installed wheel cannot shadow it.
-        shutil.copy2(os.path.join(self.base_dir, "xllm", "__init__.py"), os.path.join(extdir, "__init__.py"))
-        _stage_mlu_triton_kernels(self.base_dir, extdir, self.device)
-        _stage_triton_compiler_package(self.base_dir, extdir)
-
-
-class ExtBuildSingleTest(ExtBuildTests):
+class ExtBuildSingleTest(ExtBuild):
     """Inherit ExtBuild, used to build and run a single test"""
+
+    build_test_targets = True
 
     user_options = ExtBuild.user_options + [
         ("test-name=", None, "name of the test target to build and run"),
@@ -867,9 +839,9 @@ class InstallWheel(install):
         return None
 
 
-class TestUT(Command):
-    description = "Run all testing binary."
-    user_options = []
+class TestUT(ExtBuild):
+    description = "Build and run all unit-test targets."
+    build_test_targets = True
 
     # Whitelist: tests that must run sequentially (not in parallel with others)
     # Add test names here if they use fork() or have device initialization conflicts
@@ -883,11 +855,29 @@ class TestUT(Command):
         "FusedMoEAll2AllMultiDeviceTest",
     ]
 
-    def initialize_options(self) -> None:
-        pass
-
-    def finalize_options(self) -> None:
-        pass
+    def build_cmake_targets(
+        self,
+        ext: CMakeExtension,
+        cmake_args: list[str],
+        build_args: list[str],
+        env: dict[str, str],
+        extdir: str,
+        product: str,
+    ) -> None:
+        cmake_cmd = "cmake_maca" if self.device == "maca" else "cmake"
+        self._configure_cmake(cmake_cmd, cmake_args, env)
+        subprocess.check_call(
+            [cmake_cmd, "--build", ".", "--verbose"] + build_args + ["--target", "all_tests"],
+            cwd=get_cmake_dir(),
+            env=env,
+        )
+        # Embedded MLU tests import these packages from the build directory,
+        # including when no product build has prepared that directory yet.
+        # Make xllm a regular package so an installed wheel cannot shadow it.
+        shutil.copy2(os.path.join(self.base_dir, "xllm", "__init__.py"), os.path.join(extdir, "__init__.py"))
+        _stage_mlu_triton_kernels(self.base_dir, extdir, self.device)
+        _stage_triton_compiler_package(self.base_dir, extdir)
+        self.run_ctest(get_cmake_dir())
 
     def run_ctest(self, cmake_dir: str) -> int:
         default_parallel: int = max(os.cpu_count() or 1, 8)
@@ -966,10 +956,6 @@ class TestUT(Command):
         except subprocess.CalledProcessError as e:
             logger.exception(f"ctest failed: {e.stderr}")
             exit(1)
-
-    def run(self) -> None:
-        self.run_command("build_tests")
-        self.run_ctest(get_cmake_dir())
 
 
 class SingleTest(Command):
@@ -1123,7 +1109,7 @@ if __name__ == "__main__":
             "tilelang_jobs": tilelang_jobs,
         },
     }
-    options["build_tests"] = options["build_ext"].copy()
+    options["test"] = options["build_ext"].copy()
     if test_name:
         options["test"] = {
             "device": device,
@@ -1164,7 +1150,6 @@ if __name__ == "__main__":
         ext_modules=[CMakeExtension("xllm", "xllm/")],
         cmdclass={
             "build_ext": ExtBuild,
-            "build_tests": ExtBuildTests,
             "test": test_cmd,
             "install": InstallWheel,
             "bdist_wheel": BuildDistWheel,
