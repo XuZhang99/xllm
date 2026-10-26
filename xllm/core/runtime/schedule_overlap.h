@@ -23,20 +23,52 @@ limitations under the License.
 
 namespace xllm {
 
-class WorkerImpl;
+class Device;
+class Stream;
 class VlmForwardInput;
+class VlmModelParams;
 
 // Executes the one-step overlap protocol on the worker's FIFO execution thread.
 // Owns continuation provenance, stream dependencies and host publication; model
 // execution and model-specific decode rebuilding remain worker capabilities.
 class ScheduleOverlap final {
  public:
-  ScheduleOverlap(bool is_driver, bool enable_eplb);
+  // Non-owning model capabilities. Execution resources are borrowed separately
+  // for each step because workers may replace their compute stream at load.
+  class ModelExecution {
+   public:
+    virtual std::optional<ForwardOutput> step_for_schedule_overlap(
+        const LlmForwardInput& input) = 0;
+    virtual std::optional<ForwardOutput> step_for_schedule_overlap(
+        const VlmForwardInput& input) = 0;
+    virtual bool prepare_model_decode_continuation(
+        LlmForwardInput& input,
+        const ForwardOutput& prior_output) = 0;
+    virtual bool prepare_model_decode_continuation(
+        VlmForwardInput& input,
+        const ForwardOutput& prior_output) = 0;
+    virtual bool can_prepare_npu_graph_decode_input(
+        const LlmModelParams& input_params) const = 0;
+    virtual bool can_prepare_npu_graph_decode_input(
+        const VlmModelParams& input_params) const = 0;
+    virtual void observe_execution_memory(bool is_warmup) = 0;
 
-  std::optional<ForwardOutput> execute(WorkerImpl& worker,
-                                       LlmForwardInput& input);
-  std::optional<ForwardOutput> execute(WorkerImpl& worker,
-                                       VlmForwardInput& input);
+   protected:
+    virtual ~ModelExecution() = default;
+  };
+
+  ScheduleOverlap(bool is_driver,
+                  bool enable_eplb,
+                  bool retire_unconsumed_inputs);
+
+  std::optional<ForwardOutput> execute(ModelExecution& executor,
+                                       LlmForwardInput& input,
+                                       Device& device,
+                                       Stream& compute_stream);
+  std::optional<ForwardOutput> execute(ModelExecution& executor,
+                                       VlmForwardInput& input,
+                                       Device& device,
+                                       Stream& compute_stream);
 
   // May be called by the host consumer concurrently with execute().
   ForwardOutput consume();
@@ -44,21 +76,28 @@ class ScheduleOverlap final {
 
  private:
   template <typename Input>
-  std::optional<ForwardOutput> execute_impl(WorkerImpl& worker, Input& input);
+  std::optional<ForwardOutput> execute_impl(ModelExecution& executor,
+                                            Input& input,
+                                            Device& device,
+                                            Stream& compute_stream);
   template <typename Input>
-  void prepare_continuation(WorkerImpl& worker, Input& input);
+  void prepare_continuation(ModelExecution& executor,
+                            Input& input,
+                            Device& device,
+                            Stream& compute_stream);
   template <typename Input>
   static void replace_tokens(Input& input,
                              const ForwardOutput& prior_output,
                              bool use_graph_decode_input);
 
-  void record_output(WorkerImpl& worker,
+  void record_output(Stream& compute_stream,
                      const std::optional<ForwardOutput>& output,
                      const std::vector<std::string>& request_ids,
                      const std::vector<std::string>& sample_sequence_ids);
-  void retire_prior_inputs(const WorkerImpl& worker) const;
+  void retire_prior_inputs() const;
 
   ScheduleOverlapState state_;
+  const bool retire_unconsumed_inputs_;
 };
 
 }  // namespace xllm

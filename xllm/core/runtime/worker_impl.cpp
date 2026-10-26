@@ -436,7 +436,11 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
     : options_(options),
       driver_(parallel_args.rank() == 0),
       dp_driver_(is_dp_driver(parallel_args)),
-      schedule_overlap_(is_driver(), EPLBConfig::get_instance().enable_eplb()),
+      schedule_overlap_(
+          is_driver(),
+          EPLBConfig::get_instance().enable_eplb(),
+          /*retire_unconsumed_inputs=*/
+          options.enable_speculative_decode() && parallel_args.dp_size() > 1),
       device_(device),
       parallel_args_(parallel_args) {
   if (options_.enable_speculative_decode() &&
@@ -1671,7 +1675,8 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async_impl(
     }
 
     if (enable_schedule_overlap()) {
-      promise.setValue(schedule_overlap_.execute(*this, input));
+      promise.setValue(
+          schedule_overlap_.execute(*this, input, device_, *compute_stream_));
       return;
     }
     auto output = this->step(input);

@@ -78,10 +78,11 @@ class OverlapTestWorker final : public WorkerImpl {
   OverlapTestWorker(
       std::vector<std::optional<ForwardOutput>> outputs,
       const ParallelArgs& parallel_args,
-      ContinuationMode continuation_mode = ContinuationMode::CUSTOM_REBUILD)
+      ContinuationMode continuation_mode = ContinuationMode::CUSTOM_REBUILD,
+      bool speculative_decode = false)
       : WorkerImpl(parallel_args,
                    torch::Device(torch::kPrivateUse1, /*index=*/0),
-                   options()),
+                   options(speculative_decode)),
         outputs_(std::move(outputs)),
         continuation_mode_(continuation_mode) {}
 
@@ -141,9 +142,10 @@ class OverlapTestWorker final : public WorkerImpl {
   }
 
  private:
-  static runtime::Options options() {
+  static runtime::Options options(bool speculative_decode) {
     runtime::Options options;
     options.enable_schedule_overlap(true);
+    options.enable_speculative_decode(speculative_decode);
     return options;
   }
 
@@ -201,6 +203,68 @@ class OverlapTestWorker final : public WorkerImpl {
   std::function<void(ForwardOutput&, Stream&)> output_hook_;
 };
 
+class OverlapTestModelExecution final : public ScheduleOverlap::ModelExecution {
+ public:
+  explicit OverlapTestModelExecution(std::vector<int32_t> output_tokens)
+      : output_tokens_(std::move(output_tokens)) {
+    observed_warmups_.reserve(output_tokens_.size());
+  }
+
+  std::optional<ForwardOutput> step_for_schedule_overlap(
+      const LlmForwardInput& input) override {
+    return execute(input.token_ids);
+  }
+
+  std::optional<ForwardOutput> step_for_schedule_overlap(
+      const VlmForwardInput& input) override {
+    return execute(input.token_ids);
+  }
+
+  bool prepare_model_decode_continuation(
+      LlmForwardInput& input,
+      const ForwardOutput& prior_output) override {
+    input.token_ids = prior_output.sample_output.next_tokens.to(torch::kInt32);
+    return true;
+  }
+
+  bool prepare_model_decode_continuation(
+      VlmForwardInput& input,
+      const ForwardOutput& prior_output) override {
+    input.token_ids = prior_output.sample_output.next_tokens.to(torch::kInt32);
+    return true;
+  }
+
+  bool can_prepare_npu_graph_decode_input(
+      const LlmModelParams& /*input_params*/) const override {
+    return false;
+  }
+
+  bool can_prepare_npu_graph_decode_input(
+      const VlmModelParams& /*input_params*/) const override {
+    return false;
+  }
+
+  void observe_execution_memory(bool is_warmup) override {
+    observed_warmups_.emplace_back(is_warmup);
+  }
+
+  const torch::Tensor& executed_tokens() const { return executed_tokens_; }
+  const std::vector<bool>& observed_warmups() const {
+    return observed_warmups_;
+  }
+
+ private:
+  std::optional<ForwardOutput> execute(const torch::Tensor& tokens) {
+    executed_tokens_ = tokens;
+    return token_output(output_tokens_.at(step_index_++));
+  }
+
+  std::vector<int32_t> output_tokens_;
+  size_t step_index_ = 0;
+  torch::Tensor executed_tokens_;
+  std::vector<bool> observed_warmups_;
+};
+
 template <typename Input>
 Input step_input(bool decode,
                  int32_t token_id = 7,
@@ -255,6 +319,36 @@ class ScheduleOverlapTest : public ::testing::Test {};
 
 using ForwardInputTypes = ::testing::Types<LlmForwardInput, VlmForwardInput>;
 TYPED_TEST_SUITE(ScheduleOverlapTest, ForwardInputTypes);
+
+TYPED_TEST(ScheduleOverlapTest,
+           ModelExecutionContinuesConsumedResultAndObservesWarmup) {
+  Device device(torch::Device(torch::kPrivateUse1, /*index=*/0));
+  device.set_device();
+  device.init_device_context();
+  auto compute_stream = device.current_stream();
+  ScheduleOverlap overlap(/*is_driver=*/true,
+                          /*enable_eplb=*/false,
+                          /*retire_unconsumed_inputs=*/false);
+  OverlapTestModelExecution execution({17, 23});
+  auto first_input = step_input<TypeParam>(/*decode=*/false);
+  first_input.input_params.meta.is_graph_warmup = true;
+  const auto first =
+      overlap.execute(execution, first_input, device, *compute_stream);
+  ASSERT_TRUE(first.has_value());
+  EXPECT_TRUE(first->is_graph_warmup);
+  EXPECT_EQ(
+      overlap.consume().sample_output.next_tokens.template item<int64_t>(), 17);
+
+  auto second_input = step_input<TypeParam>(/*decode=*/true, /*token_id=*/-1);
+  const auto second =
+      overlap.execute(execution, second_input, device, *compute_stream);
+  ASSERT_TRUE(second.has_value());
+  EXPECT_FALSE(second->is_graph_warmup);
+  EXPECT_EQ(execution.executed_tokens().template item<int32_t>(), 17);
+  EXPECT_EQ(execution.observed_warmups(), std::vector<bool>({true, false}));
+  EXPECT_EQ(
+      overlap.consume().sample_output.next_tokens.template item<int64_t>(), 23);
+}
 
 TYPED_TEST(ScheduleOverlapTest, ConsumedResultRemainsAvailableForContinuation) {
   OverlapTestWorker worker({token_output(17), token_output(23)});
@@ -592,6 +686,97 @@ TYPED_TEST(ScheduleOverlapTest, DpDriverPublishesWithoutEplb) {
   const ForwardOutput published = publication.get();
   ASSERT_TRUE(published.sample_output.next_tokens.defined());
   EXPECT_EQ(published.sample_output.next_tokens.template item<int64_t>(), 17);
+}
+
+TYPED_TEST(ScheduleOverlapTest,
+           DpSpeculativeNonDriverRetiresInputsBeforeReplacingPriorOutput) {
+  ScopedConfigValue<bool> eplb(EPLBConfig::get_instance().enable_eplb(), false);
+  std::promise<void> callback_entered;
+  auto entered = callback_entered.get_future();
+  std::promise<void> release_callback;
+  auto callback_release = release_callback.get_future().share();
+  std::atomic<bool> device_finished{false};
+  std::atomic<bool> owner_released{false};
+  std::atomic<bool> owner_released_early{false};
+  std::atomic<bool> returned_after_device_completion{false};
+  std::function<void()> callback = [&]() {
+    callback_entered.set_value();
+    callback_release.wait_for(10s);
+    device_finished.store(true);
+  };
+  std::promise<void> second_output_produced;
+  auto produced = second_output_produced.get_future();
+  const ParallelArgs parallel_args(/*rank=*/1,
+                                   /*world_size=*/4,
+                                   /*dp_size=*/2,
+                                   /*process_group=*/nullptr);
+  int32_t output_index = 0;
+  OverlapTestWorker worker({token_output(17), token_output(23)},
+                           parallel_args,
+                           OverlapTestWorker::ContinuationMode::CUSTOM_REBUILD,
+                           /*speculative_decode=*/true);
+  worker.set_output_hook([&](ForwardOutput& output, Stream& stream) {
+    if (output_index++ > 0) {
+      second_output_produced.set_value();
+      return;
+    }
+    auto guard = stream.set_stream_guard();
+    CHECK_EQ(
+        aclrtLaunchHostFunc(
+            stream.get_stream()->stream(),
+            [](void* data) { (*static_cast<std::function<void()>*>(data))(); },
+            &callback),
+        ACL_SUCCESS);
+    output.ready_event = stream.record_event();
+    CHECK(output.ready_event != nullptr);
+    output.retained_inputs.emplace_back(
+        std::shared_ptr<int32_t>(new int32_t(42), [&](int32_t* value) {
+          owner_released_early.store(!device_finished.load());
+          owner_released.store(true);
+          delete value;
+        }));
+  });
+  auto first = worker.step_async(step_input<TypeParam>(/*decode=*/false))
+                   .toUnsafeFuture()
+                   .thenValue([](std::optional<ForwardOutput> output) {
+                     return output.has_value();
+                   });
+  first.wait(2s);
+  const bool first_ready_without_device_completion = first.isReady();
+  const std::future_status callback_status = entered.wait_for(2s);
+  auto second =
+      worker.step_async(step_input<TypeParam>(/*decode=*/false))
+          .toUnsafeFuture()
+          .thenValue([&](std::optional<ForwardOutput> output) {
+            returned_after_device_completion.store(device_finished.load());
+            return output.has_value();
+          });
+  const std::future_status produced_status = produced.wait_for(2s);
+  second.wait(50ms);
+  const bool returned_early = second.isReady();
+  const bool released_before_device_completion = owner_released.load();
+
+  // Unblock device work before assertions so failures can drain the worker.
+  release_callback.set_value();
+  first.wait(2s);
+  second.wait(2s);
+  const bool first_ready = first.isReady();
+  const bool second_ready = second.isReady();
+  if (!first_ready || !second_ready) {
+    worker.begin_shutdown();
+  }
+  EXPECT_TRUE(first_ready_without_device_completion);
+  EXPECT_EQ(callback_status, std::future_status::ready);
+  EXPECT_EQ(produced_status, std::future_status::ready);
+  EXPECT_FALSE(returned_early);
+  EXPECT_FALSE(released_before_device_completion);
+  ASSERT_TRUE(first_ready);
+  ASSERT_TRUE(second_ready);
+  EXPECT_TRUE(std::move(first).get());
+  EXPECT_TRUE(std::move(second).get());
+  EXPECT_TRUE(returned_after_device_completion.load());
+  EXPECT_TRUE(owner_released.load());
+  EXPECT_FALSE(owner_released_early.load());
 }
 
 TYPED_TEST(ScheduleOverlapTest,

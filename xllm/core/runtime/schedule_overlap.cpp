@@ -18,8 +18,9 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include "core/platform/device.h"
 #include "core/runtime/json_object_decode_continuation.h"
-#include "core/runtime/worker_impl.h"
+#include "core/runtime/vlm_forward_params.h"
 #if defined(USE_NPU)
 #include "core/kernels/npu/xllm_ops/xllm_ops_api.h"
 #elif defined(USE_MUSA)
@@ -28,12 +29,19 @@ limitations under the License.
 
 namespace xllm {
 
-ScheduleOverlap::ScheduleOverlap(bool is_driver, bool enable_eplb)
+ScheduleOverlap::ScheduleOverlap(bool is_driver,
+                                 bool enable_eplb,
+                                 bool retire_unconsumed_inputs)
     : state_(/*publish_to_host=*/is_driver || enable_eplb,
-             /*retain_tokenless_output=*/enable_eplb) {}
+             /*retain_tokenless_output=*/enable_eplb),
+      retire_unconsumed_inputs_(!is_driver && !enable_eplb &&
+                                retire_unconsumed_inputs) {}
 
 template <typename Input>
-void ScheduleOverlap::prepare_continuation(WorkerImpl& worker, Input& input) {
+void ScheduleOverlap::prepare_continuation(ModelExecution& executor,
+                                           Input& input,
+                                           Device& device,
+                                           Stream& compute_stream) {
   if (input.token_ids.numel() == 0 ||
       !input.input_params.meta.batch_forward_type.has_decode()) {
     return;
@@ -45,36 +53,39 @@ void ScheduleOverlap::prepare_continuation(WorkerImpl& worker, Input& input) {
        state_.has_request_overlap(input.input_params.embedding.request_ids));
   // Only the continuation runs under this guard. Model execution retains its
   // own stream selection, including composite speculative workers.
-  auto stream_guard = worker.compute_stream_->set_stream_guard();
-  CHECK(worker.compute_stream_->wait_event(input.runtime.metadata_ready_event))
+  auto stream_guard = compute_stream.set_stream_guard();
+  CHECK(compute_stream.wait_event(input.runtime.metadata_ready_event))
       << "failed to wait input metadata before overlap continuation";
   const ForwardOutput empty_output;
   const ForwardOutput& prior_output =
       state_.has_tokens() ? state_.prior_output() : empty_output;
   if (reuse_tokens) {
-    CHECK(worker.compute_stream_->wait_event(prior_output.ready_event))
+    CHECK(compute_stream.wait_event(prior_output.ready_event))
         << "failed to wait last step output before overlap continuation";
   }
   JsonObjectDecodeContinuation::prepare(input,
                                         prior_output,
                                         state_.sample_sequence_ids(),
-                                        worker.device_,
-                                        *worker.compute_stream_);
+                                        device,
+                                        compute_stream);
   if (reuse_tokens &&
-      !worker.prepare_model_decode_continuation(input, prior_output)) {
+      !executor.prepare_model_decode_continuation(input, prior_output)) {
     replace_tokens(
         input,
         prior_output,
-        worker.can_prepare_npu_graph_decode_input(input.input_params));
+        executor.can_prepare_npu_graph_decode_input(input.input_params));
   }
 }
 
 template <typename Input>
-std::optional<ForwardOutput> ScheduleOverlap::execute_impl(WorkerImpl& worker,
-                                                           Input& input) {
-  prepare_continuation(worker, input);
-  auto output = worker.step_for_schedule_overlap(input);
-  worker.observe_execution_memory(input.input_params.meta.is_graph_warmup);
+std::optional<ForwardOutput> ScheduleOverlap::execute_impl(
+    ModelExecution& executor,
+    Input& input,
+    Device& device,
+    Stream& compute_stream) {
+  prepare_continuation(executor, input, device, compute_stream);
+  auto output = executor.step_for_schedule_overlap(input);
+  executor.observe_execution_memory(input.input_params.meta.is_graph_warmup);
   if (output.has_value()) {
 #if defined(USE_NPU)
     // No token consumer will wait for this output. Retire its asynchronous
@@ -90,23 +101,20 @@ std::optional<ForwardOutput> ScheduleOverlap::execute_impl(WorkerImpl& worker,
                                       input.json_object_errors.begin(),
                                       input.json_object_errors.end());
   }
-  record_output(worker,
+  record_output(compute_stream,
                 output,
                 input.input_params.embedding.request_ids,
                 input.sample_sequence_ids);
   return output;
 }
 
-void ScheduleOverlap::retire_prior_inputs(
-    [[maybe_unused]] const WorkerImpl& worker) const {
+void ScheduleOverlap::retire_prior_inputs() const {
 #if defined(USE_NPU)
   // Non-driver DP speculative results are never queried by the controller.
   // Replacing the prior output must not release temporary eager inputs until
   // its device work completes. A device wait alone cannot protect host owners.
   const auto& prior_output = state_.prior_output();
-  if (state_.has_tokens() && worker.options_.enable_speculative_decode() &&
-      worker.parallel_args_.dp_size() > 1 &&
-      !prior_output.retained_inputs.empty() &&
+  if (state_.has_tokens() && !prior_output.retained_inputs.empty() &&
       prior_output.ready_event != nullptr) {
     CHECK(prior_output.ready_event->synchronize())
         << "failed to retire previous DP speculative input";
@@ -115,28 +123,32 @@ void ScheduleOverlap::retire_prior_inputs(
 }
 
 void ScheduleOverlap::record_output(
-    WorkerImpl& worker,
+    Stream& compute_stream,
     const std::optional<ForwardOutput>& output,
     const std::vector<std::string>& request_ids,
     const std::vector<std::string>& sample_sequence_ids) {
-  if (!state_.publishes_to_host() && output.has_value()) {
-    retire_prior_inputs(worker);
+  if (retire_unconsumed_inputs_ && output.has_value()) {
+    retire_prior_inputs();
   }
   if (!state_.record(output, request_ids, sample_sequence_ids)) {
     // Shutdown rejects publication and cache-only updates alike. Drain before
     // the caller releases the output and its asynchronous input owners.
-    CHECK_EQ(worker.compute_stream_->synchronize(), 0);
+    CHECK_EQ(compute_stream.synchronize(), 0);
   }
 }
 
-std::optional<ForwardOutput> ScheduleOverlap::execute(WorkerImpl& worker,
-                                                      LlmForwardInput& input) {
-  return execute_impl(worker, input);
+std::optional<ForwardOutput> ScheduleOverlap::execute(ModelExecution& executor,
+                                                      LlmForwardInput& input,
+                                                      Device& device,
+                                                      Stream& compute_stream) {
+  return execute_impl(executor, input, device, compute_stream);
 }
 
-std::optional<ForwardOutput> ScheduleOverlap::execute(WorkerImpl& worker,
-                                                      VlmForwardInput& input) {
-  return execute_impl(worker, input);
+std::optional<ForwardOutput> ScheduleOverlap::execute(ModelExecution& executor,
+                                                      VlmForwardInput& input,
+                                                      Device& device,
+                                                      Stream& compute_stream) {
+  return execute_impl(executor, input, device, compute_stream);
 }
 
 ForwardOutput ScheduleOverlap::consume() { return state_.consume(); }

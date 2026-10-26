@@ -59,7 +59,7 @@ class TaskExecutionPipeline;
 struct LlmTaskCapacity;
 struct TaskModel;
 
-class WorkerImpl {
+class WorkerImpl : private ScheduleOverlap::ModelExecution {
  public:
   enum Status : int8_t {
     UNINITIALIZED = 0,
@@ -211,7 +211,7 @@ class WorkerImpl {
   virtual std::optional<ForwardOutput> execute_task_pipeline(
       const LlmForwardInput& prepared);
   // Warmup waits for execution allocations; serving keeps stream overlap.
-  void observe_execution_memory(bool is_warmup);
+  void observe_execution_memory(bool is_warmup) override;
 
   // initialize model, cache manager. async call
   virtual folly::SemiFuture<bool> init_model_async(
@@ -384,21 +384,21 @@ class WorkerImpl {
 
   // Model-specific execution and decode rebuilding. The overlap coordinator
   // owns prior results, stream dependencies and publication.
-  virtual std::optional<ForwardOutput> step_for_schedule_overlap(
-      const LlmForwardInput& input);
-  virtual std::optional<ForwardOutput> step_for_schedule_overlap(
-      const VlmForwardInput& input);
+  std::optional<ForwardOutput> step_for_schedule_overlap(
+      const LlmForwardInput& input) override;
+  std::optional<ForwardOutput> step_for_schedule_overlap(
+      const VlmForwardInput& input) override;
   // Return true when the model rebuilds this input in place or manages its
   // continuation in step(). Return false without changing the input to use
   // the coordinator's ordinary token replacement.
-  virtual bool prepare_model_decode_continuation(
+  bool prepare_model_decode_continuation(
       LlmForwardInput& /*input*/,
-      const ForwardOutput& /*prior_output*/) {
+      const ForwardOutput& /*prior_output*/) override {
     return false;
   }
-  virtual bool prepare_model_decode_continuation(
+  bool prepare_model_decode_continuation(
       VlmForwardInput& /*input*/,
-      const ForwardOutput& /*prior_output*/) {
+      const ForwardOutput& /*prior_output*/) override {
     return false;
   }
 
@@ -421,12 +421,12 @@ class WorkerImpl {
       const KVCacheCreateOptions& kv_cache_create_options);
 
   bool can_prepare_npu_graph_decode_input(
-      const LlmModelParams& input_params) const;
+      const LlmModelParams& input_params) const override;
   bool can_prepare_without_compute_stream_wait(
       const LlmModelParams& input_params) const;
   bool can_skip_npu_graph_decode_sync(const LlmModelParams& input_params) const;
   bool can_prepare_npu_graph_decode_input(
-      const VlmModelParams& input_params) const;
+      const VlmModelParams& input_params) const override;
   bool can_prepare_without_compute_stream_wait(
       const VlmModelParams& input_params) const;
   bool can_skip_npu_graph_decode_sync(const VlmModelParams& input_params) const;
@@ -480,8 +480,6 @@ class WorkerImpl {
 #endif
 
  private:
-  friend class ScheduleOverlap;
-
   bool init_model_impl(const std::string& model_weights_path,
                        int32_t random_seed,
                        MasterStatus master_status);
