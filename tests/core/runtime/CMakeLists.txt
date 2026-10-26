@@ -160,6 +160,17 @@ if(USE_NPU)
     "-Wl,--no-whole-archive")
 
   cc_test(
+    NAME worker_forward_completion_test
+    SRCS worker_forward_completion_test.cpp
+    DEPS :runtime GTest::gtest_main
+  )
+  target_link_libraries(worker_forward_completion_test PRIVATE nnopbase)
+  target_link_options(worker_forward_completion_test PRIVATE
+    "-Wl,--whole-archive"
+    "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
+    "-Wl,--no-whole-archive")
+
+  cc_test(
     NAME mtp_parallel_plan_test
     SRCS mtp_parallel_plan_test.cpp
     DEPS :runtime GTest::gtest_main

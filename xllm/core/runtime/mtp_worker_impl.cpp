@@ -334,14 +334,10 @@ std::optional<ForwardOutput> run_worker_no_sync_impl(WorkerImpl& worker,
       processed_input,
       prepare_stream,
       /*record_ready_event=*/&prepare_stream != &compute_stream);
-  if constexpr (std::is_same_v<Input, LlmForwardInput>) {
-    if (auto* llm_worker = dynamic_cast<LLMWorkerImpl*>(&worker);
-        llm_worker != nullptr) {
-      return llm_worker->execute_no_sync_on_stream(
-          processed_input, compute_stream, /*record_ready_event=*/false);
-    }
-  }
-  return worker.execute_no_sync_on_stream(processed_input, compute_stream);
+  return worker.execute_no_sync_on_stream(
+      processed_input,
+      compute_stream,
+      WorkerImpl::ForwardCompletion::CALLER_MANAGED);
 }
 
 torch::Tensor clone_host_tensor(const torch::Tensor& tensor) {

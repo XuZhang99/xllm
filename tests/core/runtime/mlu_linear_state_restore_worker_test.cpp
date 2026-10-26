@@ -164,7 +164,9 @@ class OverlapLinearStateRestoreWorker final : public LLMWorkerImpl {
 
   std::optional<ForwardOutput> execute_no_sync_on_stream(
       const LlmForwardInput& /*input*/,
-      Stream& compute_stream) override {
+      Stream& compute_stream,
+      ForwardCompletion completion) override {
+    EXPECT_EQ(completion, ForwardCompletion::RECORD_EVENT);
     c10::StreamGuard stream_guard = compute_stream.set_stream_guard();
     for (KVCache& kv_cache : kv_caches_) {
       torch::Tensor conv_cache = kv_cache.get_conv_cache();

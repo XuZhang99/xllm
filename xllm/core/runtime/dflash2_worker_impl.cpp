@@ -192,9 +192,8 @@ DraftProposal DFlash2WorkerImpl::run_decode_draft(
       /*record_ready_event=*/prepare_stream_.get() != compute_stream_.get());
   draft_impl_->set_hierarchy_layer_synchronizer(processed_input.input_params);
   std::optional<ForwardOutput> draft_output =
-      draft_impl_->execute_no_sync_on_stream(processed_input,
-                                             *compute_stream_,
-                                             /*record_ready_event=*/false);
+      draft_impl_->execute_no_sync_on_stream(
+          processed_input, *compute_stream_, ForwardCompletion::CALLER_MANAGED);
   CHECK(draft_output.has_value());
   CHECK(draft_output->logits.defined());
   CHECK(draft_output->selected_hidden.defined())

@@ -180,8 +180,10 @@ std::optional<ForwardOutput> run_worker_no_sync_impl(
   LlmForwardInput processed_input;
   worker.prepare_work_before_execute_on_stream(
       input, processed_input, prepare_stream);
-  std::optional<ForwardOutput> output =
-      worker.execute_no_sync_on_stream(processed_input, compute_stream);
+  std::optional<ForwardOutput> output = worker.execute_no_sync_on_stream(
+      processed_input,
+      compute_stream,
+      WorkerImpl::ForwardCompletion::CALLER_MANAGED);
   if (processed_output != nullptr) {
     *processed_output = std::move(processed_input);
   }

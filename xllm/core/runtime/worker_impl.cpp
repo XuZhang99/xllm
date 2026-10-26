@@ -1230,7 +1230,8 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
 
 std::optional<ForwardOutput> WorkerImpl::execute_no_sync_on_stream(
     const LlmForwardInput& /*input*/,
-    Stream& /*compute_stream*/) {
+    Stream& /*compute_stream*/,
+    ForwardCompletion /*completion*/) {
   LOG(FATAL) << "execute_no_sync_on_stream is not supported by this worker";
   return std::nullopt;
 }
@@ -2854,7 +2855,8 @@ std::optional<ForwardOutput> WorkerImpl::step(
 
 std::optional<ForwardOutput> WorkerImpl::execute_no_sync_on_stream(
     const VlmForwardInput& /*input*/,
-    Stream& /*compute_stream*/) {
+    Stream& /*compute_stream*/,
+    ForwardCompletion /*completion*/) {
   LOG(FATAL) << "execute_no_sync_on_stream is not supported by this worker";
   return std::nullopt;
 }

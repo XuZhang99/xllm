@@ -195,14 +195,21 @@ class WorkerImpl : private ScheduleOverlap::ModelExecution {
   virtual std::optional<ForwardOutput> step(const LlmForwardInput& inputs);
   virtual std::optional<ForwardOutput> step(const VlmForwardInput& inputs);
 
-  // Optional no-sync execution hook used by speculative LLM/VLM workers.
-  // Other worker types do not support this execution mode.
+  enum class ForwardCompletion : int8_t {
+    CALLER_MANAGED = 0,
+    RECORD_EVENT,
+  };
+
+  // No-sync LLM/VLM outputs retain their inputs. Composite callers manage
+  // completion after their final operation; overlap callers request an event.
   virtual std::optional<ForwardOutput> execute_no_sync_on_stream(
       const LlmForwardInput& input,
-      Stream& compute_stream);
+      Stream& compute_stream,
+      ForwardCompletion completion);
   virtual std::optional<ForwardOutput> execute_no_sync_on_stream(
       const VlmForwardInput& input,
-      Stream& compute_stream);
+      Stream& compute_stream,
+      ForwardCompletion completion);
 
   virtual void process_group_test();
 

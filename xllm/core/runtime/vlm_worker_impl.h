@@ -46,22 +46,15 @@ class VLMWorkerImpl final : public WorkerImpl {
       const VlmForwardInput& input) override;
 
  private:
-  // Execute forward + sampling on the given compute stream without a host-side
-  // synchronize, recording a ready event for cross-step dependency. Shared by
-  // the schedule-overlap decode fast path.
   std::optional<ForwardOutput> execute_no_sync_on_stream(
       const VlmForwardInput& input,
       Stream& compute_stream,
-      bool record_ready_event);
-
-  std::optional<ForwardOutput> execute_no_sync_on_stream(
-      const VlmForwardInput& input,
-      Stream& compute_stream) override;
+      ForwardCompletion completion) override;
 
   std::optional<ForwardOutput> step_internal(
       const VlmForwardInput& input,
       ForwardSyncPolicy sync_policy = ForwardSyncPolicy::LEGACY,
-      bool record_ready_event = true);
+      ForwardCompletion completion = ForwardCompletion::CALLER_MANAGED);
 };
 
 }  // namespace xllm

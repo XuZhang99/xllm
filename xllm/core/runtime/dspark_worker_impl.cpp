@@ -58,9 +58,8 @@ DraftProposal DSparkWorkerImpl::run_decode_draft(
   draft_impl_->prepare_work_before_execute_on_stream(
       logits_input, processed_input, *prepare_stream_);
   std::optional<ForwardOutput> draft_output =
-      draft_impl_->execute_no_sync_on_stream(processed_input,
-                                             *compute_stream_,
-                                             /*record_ready_event=*/false);
+      draft_impl_->execute_no_sync_on_stream(
+          processed_input, *compute_stream_, ForwardCompletion::CALLER_MANAGED);
   CHECK(draft_output.has_value())
       << "DSpark draft forward must return an output.";
   CHECK(draft_output->logits.defined())
