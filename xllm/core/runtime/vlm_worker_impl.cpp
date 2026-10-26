@@ -230,15 +230,4 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_for_schedule_overlap(
   return execute_no_sync_on_stream(input, *compute_stream_);
 }
 
-VlmForwardInput
-VLMWorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
-    VlmForwardInput& input) {
-  c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
-  CHECK(compute_stream_->wait_event(
-      schedule_overlap_state_.prior_output().ready_event))
-      << "failed to wait last step output ready event";
-  wait_input_ready_events(input, *compute_stream_);
-  return update_input_by_last_step_output(input);
-}
-
 }  // namespace xllm

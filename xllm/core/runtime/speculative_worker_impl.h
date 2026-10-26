@@ -123,8 +123,6 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   // Common step dispatch: prefill / decode / empty
   std::optional<ForwardOutput> step(const TargetInput& input) override;
 
-  TargetInput update_input_by_last_step_output(TargetInput& inputs) override;
-
   folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
@@ -133,6 +131,10 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   };
 
  protected:
+  TargetInput prepare_decode_continuation(
+      TargetInput& inputs,
+      const ForwardOutput& prior_output) override;
+
   // Algorithm-specific virtual methods for subclasses to implement
   virtual std::optional<ForwardOutput> step_prefill(
       const TargetInput& input) = 0;

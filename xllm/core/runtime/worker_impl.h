@@ -29,6 +29,7 @@ limitations under the License.
 #include "core/kv_cache/transfer/hierarchy_kv_cache_transfer.h"
 #include "core/kv_cache/transfer/kv_cache_store.h"
 #include "core/kv_cache/transfer/kv_cache_transfer.h"
+#include "core/runtime/schedule_overlap.h"
 #include "core/runtime/worker_residency_state.h"
 #include "executor.h"
 #include "forward_params.h"
@@ -43,7 +44,6 @@ limitations under the License.
 #include "options.h"
 #include "platform/device.h"
 #include "runtime/rec_forward_params.h"
-#include "runtime/schedule_overlap_state.h"
 #include "runtime/vlm_forward_params.h"
 #include "util/threadpool.h"
 #if defined(USE_NPU)
@@ -206,9 +206,6 @@ class WorkerImpl {
 
   virtual void process_group_test();
 
-  virtual LlmForwardInput update_input_by_last_step_output(
-      LlmForwardInput& inputs);
-  void update_json_object_states_by_last_step_output(LlmForwardInput& inputs);
   void update_json_object_states_by_output(
       LlmForwardInput& input,
       const ForwardOutput& prior_output,
@@ -220,9 +217,10 @@ class WorkerImpl {
   // Warmup waits for execution allocations; serving keeps stream overlap.
   void observe_execution_memory(bool is_warmup);
   void sanitize_json_object_error_inputs(LlmForwardInput& inputs);
-  virtual VlmForwardInput update_input_by_last_step_output(
-      VlmForwardInput& inputs);
-  void update_json_object_states_by_last_step_output(VlmForwardInput& inputs);
+  void update_json_object_states_by_output(
+      VlmForwardInput& input,
+      const ForwardOutput& prior_output,
+      const std::vector<std::string>& prior_sample_sequence_ids);
   void sanitize_json_object_error_inputs(VlmForwardInput& inputs);
 
   // initialize model, cache manager. async call
@@ -394,18 +392,19 @@ class WorkerImpl {
     KVCacheCreateOptions create_options;
   };
 
-  bool can_use_last_step_output_for_schedule_overlap(
-      const LlmForwardInput& input) const;
-  bool can_use_last_step_output_for_schedule_overlap(
-      const VlmForwardInput& input) const;
+  // Model-specific execution and decode rebuilding. The overlap coordinator
+  // owns prior results, stream dependencies and publication.
   virtual std::optional<ForwardOutput> step_for_schedule_overlap(
       const LlmForwardInput& input);
-  virtual LlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
-      LlmForwardInput& input);
   virtual std::optional<ForwardOutput> step_for_schedule_overlap(
       const VlmForwardInput& input);
-  virtual VlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
-      VlmForwardInput& input);
+  virtual LlmForwardInput prepare_decode_continuation(
+      LlmForwardInput& input,
+      const ForwardOutput& prior_output);
+  virtual VlmForwardInput prepare_decode_continuation(
+      VlmForwardInput& input,
+      const ForwardOutput& prior_output);
+
   // Map shard-local selections to the rows consumed by the LM head.
   torch::Tensor remap_selected_token_idxes_for_lm_head(
       const torch::Tensor& selected_token_idxes,
@@ -484,22 +483,18 @@ class WorkerImpl {
 #endif
 
  private:
+  friend class ScheduleOverlap;
+
   bool init_model_impl(const std::string& model_weights_path,
                        int32_t random_seed,
                        MasterStatus master_status);
 
   WorkerResidencyState residency_state_;
+  ScheduleOverlap schedule_overlap_;
 
   template <typename Input>
   std::optional<ForwardOutput> step_for_schedule_overlap_impl(
       const Input& input);
-  template <typename Input>
-  bool can_use_last_step_output_for_schedule_overlap_impl(
-      const Input& input) const;
-  template <typename Input>
-  Input update_input_by_last_step_output_impl(Input& inputs);
-  template <typename Input>
-  void update_json_object_states_by_last_step_output_impl(Input& input);
   template <typename Input>
   void update_json_object_states_by_output_impl(
       Input& input,
@@ -602,9 +597,6 @@ class WorkerImpl {
 
   std::unique_ptr<Executor> model_executor_;
 
-  // params for enable_schedule_overlap case
-  // an output to store the result of last step
-  ScheduleOverlapState schedule_overlap_state_;
   bool worker_execution_drained_ = false;
 
   InstanceRole instance_role_ = InstanceRole::DEFAULT;

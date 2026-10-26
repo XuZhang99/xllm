@@ -1136,14 +1136,6 @@ int32_t MTPWorkerImpl<TargetInput>::logical_block_size() const {
 }
 
 template <typename TargetInput>
-TargetInput MTPWorkerImpl<TargetInput>::
-    update_input_by_last_step_output_for_schedule_overlap(TargetInput& inputs) {
-  update_json_object_states_by_last_step_output(inputs);
-  sanitize_json_object_error_inputs(inputs);
-  return update_input_by_last_step_output(inputs);
-}
-
-template <typename TargetInput>
 bool MTPWorkerImpl<TargetInput>::owns_npu_parallel_input_prepare() const {
   return false;
 }

@@ -44,8 +44,6 @@ class VLMWorkerImpl final : public WorkerImpl {
  protected:
   std::optional<ForwardOutput> step_for_schedule_overlap(
       const VlmForwardInput& input) override;
-  VlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
-      VlmForwardInput& input) override;
 
  private:
   // Execute forward + sampling on the given compute stream without a host-side

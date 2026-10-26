@@ -50,10 +50,12 @@ class DraftModelSpecWorkerImpl : public SpeculativeWorkerImpl<TargetInput> {
       const KVCacheShape& kv_cache_shape) override;
 #endif
 
-  // Derived step_* paths build their own draft inputs.
-  TargetInput update_input_by_last_step_output(TargetInput& inputs) override;
-
  protected:
+  // Derived step_* paths build their own draft inputs.
+  TargetInput prepare_decode_continuation(
+      TargetInput& inputs,
+      const ForwardOutput& prior_output) override;
+
   using TargetModelParams =
       typename SpeculativeWorkerImpl<TargetInput>::TargetModelParams;
   using SpeculativeWorkerImpl<TargetInput>::compute_stream_;

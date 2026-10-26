@@ -71,9 +71,6 @@ class MTPWorkerImpl : public DraftModelSpecWorkerImpl<TargetInput> {
 
   std::tuple<int64_t, int64_t> estimate_kv_cache_capacity() override;
 
-  TargetInput update_input_by_last_step_output_for_schedule_overlap(
-      TargetInput& inputs) override;
-
  protected:
   using typename DraftModelSpecWorkerImpl<TargetInput>::TargetModelParams;
   using DraftModelSpecWorkerImpl<TargetInput>::compute_stream_;
@@ -93,11 +90,6 @@ class MTPWorkerImpl : public DraftModelSpecWorkerImpl<TargetInput> {
   using DraftModelSpecWorkerImpl<
       TargetInput>::estimate_kv_cache_capacity_with_draft;
   using DraftModelSpecWorkerImpl<TargetInput>::get_optimization_config;
-  using DraftModelSpecWorkerImpl<TargetInput>::update_input_by_last_step_output;
-  using DraftModelSpecWorkerImpl<
-      TargetInput>::update_json_object_states_by_last_step_output;
-  using DraftModelSpecWorkerImpl<
-      TargetInput>::sanitize_json_object_error_inputs;
   using DraftModelSpecWorkerImpl<TargetInput>::prepare_draft_input;
 
   // MTP composite: leaves own model-specific NPU input preparation.

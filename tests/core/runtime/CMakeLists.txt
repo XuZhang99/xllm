@@ -138,6 +138,17 @@ if(USE_NPU)
     "-Wl,--no-whole-archive")
 
   cc_test(
+    NAME schedule_overlap_test
+    SRCS schedule_overlap_test.cpp
+    DEPS :runtime GTest::gtest_main
+  )
+  target_link_libraries(schedule_overlap_test PRIVATE nnopbase)
+  target_link_options(schedule_overlap_test PRIVATE
+    "-Wl,--whole-archive"
+    "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
+    "-Wl,--no-whole-archive")
+
+  cc_test(
     NAME mtp_parallel_plan_test
     SRCS mtp_parallel_plan_test.cpp
     DEPS :runtime GTest::gtest_main

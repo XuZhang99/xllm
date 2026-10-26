@@ -63,8 +63,6 @@ class LLMWorkerImpl : public WorkerImpl {
 
   std::optional<ForwardOutput> step_for_schedule_overlap(
       const LlmForwardInput& input) override;
-  LlmForwardInput update_input_by_last_step_output_for_schedule_overlap(
-      LlmForwardInput& input) override;
 
  public:
 #if defined(USE_NPU)

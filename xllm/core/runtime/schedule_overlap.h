@@ -1,0 +1,71 @@
+/* Copyright 2026 The xLLM Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/xLLM-AI/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#pragma once
+
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "core/runtime/schedule_overlap_state.h"
+
+namespace xllm {
+
+class WorkerImpl;
+class VlmForwardInput;
+
+// Executes the one-step overlap protocol on the worker's FIFO execution thread.
+// Owns continuation provenance, stream dependencies and host publication; model
+// execution and model-specific decode rebuilding remain worker capabilities.
+class ScheduleOverlap final {
+ public:
+  std::optional<ForwardOutput> execute(WorkerImpl& worker,
+                                       LlmForwardInput& input);
+  std::optional<ForwardOutput> execute(WorkerImpl& worker,
+                                       VlmForwardInput& input);
+
+  // May be called by the host consumer concurrently with execute().
+  ForwardOutput consume();
+  void shutdown();
+
+  // Default continuation for ordinary LLM/VLM workers. Specialized workers
+  // rebuild decode inputs instead, using the explicitly supplied prior output.
+  static LlmForwardInput replace_tokens(LlmForwardInput& input,
+                                        const ForwardOutput& prior_output,
+                                        bool use_graph_decode_input);
+  static VlmForwardInput replace_tokens(VlmForwardInput& input,
+                                        const ForwardOutput& prior_output,
+                                        bool use_graph_decode_input);
+
+ private:
+  template <typename Input>
+  std::optional<ForwardOutput> execute_impl(WorkerImpl& worker, Input& input);
+  template <typename Input>
+  void prepare_continuation(WorkerImpl& worker, Input& input);
+  template <typename Input>
+  static Input replace_tokens_impl(Input& input,
+                                   const ForwardOutput& prior_output,
+                                   bool use_graph_decode_input);
+
+  void record_output(WorkerImpl& worker,
+                     const std::optional<ForwardOutput>& output,
+                     const std::vector<std::string>& request_ids,
+                     const std::vector<std::string>& sample_sequence_ids);
+  void retire_prior_inputs(const WorkerImpl& worker) const;
+
+  ScheduleOverlapState state_;
+};
+
+}  // namespace xllm

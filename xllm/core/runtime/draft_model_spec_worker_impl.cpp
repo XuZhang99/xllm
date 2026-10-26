@@ -413,9 +413,9 @@ bool DraftModelSpecWorkerImpl<TargetInput>::allocate_kv_cache_with_transfer(
 #endif
 
 template <typename TargetInput>
-TargetInput
-DraftModelSpecWorkerImpl<TargetInput>::update_input_by_last_step_output(
-    TargetInput& inputs) {
+TargetInput DraftModelSpecWorkerImpl<TargetInput>::prepare_decode_continuation(
+    TargetInput& inputs,
+    const ForwardOutput& /*prior_output*/) {
   return inputs.clone();
 }
 
