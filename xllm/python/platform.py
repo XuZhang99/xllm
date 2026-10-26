@@ -73,6 +73,20 @@ class CpuArchEnum(enum.Enum):
 # the CUDA kernel package for all three through ``initialize_runtime()``.
 _CUDA_LIKE = (PlatformEnum.CUDA, PlatformEnum.DCU, PlatformEnum.ILU)
 
+# Ascend SoC chip tokens, aligned with the build-time mapping in
+# ``scripts/build_support/utils.py``: the ``910`` family covers A2/A3 and
+# ``950`` covers A5. An A3 host reports the SoC name ``Ascend910_93``, so ``_``
+# belongs to the token -- ``get_ascend_soc_generation()`` keys off ``910_93``.
+_ASCEND_CHIP_TOKEN = r"(?:910|950)[A-Za-z0-9_]*"
+
+# ``npu-smi info`` draws one device per row and puts the chip name in the Name
+# column, the second ``|``-delimited cell (see the ``910B2`` fixture in
+# ``tests/python/test_platform.py``). Every other column carries unrelated
+# numbers -- an unsupported 310P3 host reports HBM as ``1950 / 65536`` -- so the
+# chip has to be read from that one cell; a search over the whole output matches
+# the ``950`` inside ``1950`` and reports a5 for a host that is not even Ascend.
+_SMI_NAME_CELL = 1
+
 
 def _torch_device_type() -> PlatformEnum | None:
     """Detect the accelerator via the framework runtime, or None if absent.
@@ -126,7 +140,9 @@ def _npu_chip_from_smi() -> str | None:
     """Best-effort lowercase Ascend chip name from ``npu-smi info``, or None.
 
     ``npu-smi`` may be absent or permission-blocked, so this never raises. The
-    chip appears in the per-device rows (e.g. ``910B2C``).
+    chip appears in the per-device rows (e.g. ``910B2C``), in the Name column --
+    the scan is confined to that column so the other columns' numbers cannot be
+    mistaken for a chip token.
     """
     try:
         completed = subprocess.run(
@@ -139,10 +155,28 @@ def _npu_chip_from_smi() -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
 
-    match = re.search(r"910[A-Za-z0-9]*", completed.stdout)
+    match = re.search(_ASCEND_CHIP_TOKEN, _smi_name_column(completed.stdout))
     if match is None:
         return None
     return match.group(0).lower()
+
+
+def _smi_name_column(info_output: str) -> str:
+    """Join the Name cells of every ``npu-smi info`` device row.
+
+    Rows look like ``| 0     910B2 | OK | 111.7 ...`` -- the cell after the
+    leading one holds the chip name, so only that cell is returned. Lines that
+    do not carry a second cell (banners, separators, the trailing summary) are
+    skipped, which keeps the caller's regex off the numeric columns.
+    """
+    cells = []
+    for line in info_output.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        parts = line.split("|")
+        if len(parts) > _SMI_NAME_CELL + 1:
+            cells.append(parts[_SMI_NAME_CELL])
+    return "\n".join(cells)
 
 
 def _npu_chip_from_acl() -> str | None:
@@ -150,7 +184,9 @@ def _npu_chip_from_acl() -> str | None:
 
     ``acl`` is often unavailable in the launcher's import path and may already
     be initialized by torch_npu, so failures are swallowed and this is only a
-    supplement to ``npu-smi``.
+    supplement to ``npu-smi``. ``acl.get_soc_name()`` returns the whole SoC name
+    (e.g. ``Ascend910B2``, ``Ascend910_93``), so the chip token keeps its
+    underscore.
     """
     try:
         import acl
@@ -162,7 +198,7 @@ def _npu_chip_from_acl() -> str | None:
         return None
     if not soc_name:
         return None
-    match = re.search(r"910[A-Za-z0-9]*", soc_name)
+    match = re.search(_ASCEND_CHIP_TOKEN, soc_name)
     if match is None:
         return None
     return match.group(0).lower()
