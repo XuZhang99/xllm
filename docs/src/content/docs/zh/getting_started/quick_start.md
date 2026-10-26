@@ -73,7 +73,8 @@ python setup.py install
 会启用单测，并复用同一个构建目录。可传入 `--device npu` 等参数指定硬件后端。
 构建 wheel 时仍会编译和运行单测，设置 `SKIP_TEST=1` 可跳过；
 `SKIP_EXPORT=1` 则单独控制普通构建是否编译 Python 扩展。
-使用 `MAX_JOBS` 控制原生代码编译并发数。运行 NPU 单测时建议设置
+使用 `MAX_JOBS` 控制原生代码和 xllm_ops 的编译并发数；如需单独调整
+xllm_ops，可设置 `OPS_CPU_NUMBER`。运行 NPU 单测时建议设置
 `CTEST_PARALLEL=1`，避免超过设备允许的进程数。
 
 ## 启动xllm

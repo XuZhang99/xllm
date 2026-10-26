@@ -530,6 +530,9 @@ class ExtBuild(build_ext):
 
         env: dict[str, str] = os.environ.copy()
         env["VCPKG_MAX_CONCURRENCY"] = str(max_jobs)
+        # xllm_ops otherwise defaults to twice the host CPU count, ignoring
+        # Ninja's job budget during its configure-time build.
+        env.setdefault("OPS_CPU_NUMBER", max_jobs)
         configure_ccache(env)
         logger.info(f"CMake Args: {cmake_args}")
         logger.info(f"Env: {env}")

@@ -74,7 +74,8 @@ enable it and reuse the same build directory. Pass `--device npu` (or another
 supported backend) to select the target device. Wheel builds still build and
 run unit tests unless `SKIP_TEST=1` is set; `SKIP_EXPORT=1` separately disables
 the Python extension in the normal build. Set `MAX_JOBS` to control native
-compilation parallelism. NPU test runs should use `CTEST_PARALLEL=1` to avoid
+compilation parallelism, including xllm_ops (override it separately with
+`OPS_CPU_NUMBER` if needed). NPU test runs should use `CTEST_PARALLEL=1` to avoid
 exceeding the device's process limit.
 
 ## Launch xllm

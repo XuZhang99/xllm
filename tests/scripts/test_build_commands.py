@@ -91,6 +91,24 @@ class BuildCommandsTest(unittest.TestCase):
             "native executable",
         )
 
+    def test_nested_ops_build_inherits_job_budget_and_preserves_override(self) -> None:
+        for override, expected in (({}, "8"), ({"OPS_CPU_NUMBER": "4"}, "4")):
+            with self.subTest(override=override):
+                command = self._command(self.setup.ExtBuild)
+                command.build_temp = str(self.cmake_dir)
+                with (
+                    mock.patch.dict(os.environ, {"MAX_JOBS": "8", **override}, clear=True),
+                    mock.patch.object(command, "get_ext_fullpath", return_value=str(self.extdir / "xllm")),
+                    mock.patch.object(self.setup, "set_npu_envs"),
+                    mock.patch.object(self.setup, "_maybe_compile_tilelang_kernels"),
+                    mock.patch.object(self.setup, "get_cxx_abi", return_value=True),
+                    mock.patch.object(self.setup, "configure_ccache"),
+                    mock.patch.object(command, "build_cmake_targets") as build,
+                ):
+                    command.build_extension(self.ext)
+                self.assertEqual(build.call_args.args[3]["OPS_CPU_NUMBER"], expected)
+                self.assertIn("-j8", build.call_args.args[2])
+
     def test_build_tests_only_builds_the_test_tree(self) -> None:
         for device, cmake in (("npu", "cmake"), ("maca", "cmake_maca")):
             with self.subTest(device=device), mock.patch.object(self.setup.subprocess, "check_call") as call:
