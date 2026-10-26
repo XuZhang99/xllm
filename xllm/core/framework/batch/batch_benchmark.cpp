@@ -459,7 +459,7 @@ void BM_Batch_ProcessSampleOutput(benchmark::State& state) {
     state.ResumeTiming();
 
     fixture->batch().process_sample_output(raw_output,
-                                           /*replace_fake_token=*/false);
+                                           BatchOutputPhase::IMMEDIATE);
 
     state.PauseTiming();
     fixture.reset();

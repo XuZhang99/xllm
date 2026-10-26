@@ -26,6 +26,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/batch_output_handler.h"
+#include "core/framework/batch/batch_output_phase.h"
 #include "core/framework/batch/batch_state.h"
 #include "core/framework/request/request.h"
 #include "core/runtime/vlm_forward_params.h"
@@ -104,25 +105,17 @@ class Batch final {
                                             ThreadPool* thread_pool,
                                             int32_t cp_size = 1);
 
-  // process output
-  //
-  // replace_fake_token:
-  // In the scenario where enable_schedule_overlap is true,
-  // the forward is divided into two stages.
-  // The first stage populates the sequence with a fake token,
-  // and the second stage replaces the previous fake token with a real token.
-  // The boolean parameter `replace_fake_token` indicates
-  // whether the current stage is the second stage.
+  // Apply sampled tokens or reserve/commit a pending overlap result.
   void process_sample_output(const SampleOutput& sample_output,
-                             bool replace_fake_token,
+                             BatchOutputPhase phase,
                              bool force_requested_beam_result_size = false);
 
   void process_sample_output(const RawForwardOutput& raw_output,
-                             bool replace_fake_token);
+                             BatchOutputPhase phase);
 
   // process output for beam search kernel
   void process_beam_search_output(const RawForwardOutput& raw_output,
-                                  bool replace_fake_token);
+                                  BatchOutputPhase phase);
 
   // Start a new sequence view after beam expansion. New beam rows have no
   // scheduler token limit.

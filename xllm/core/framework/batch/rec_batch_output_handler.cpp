@@ -64,25 +64,24 @@ void RecBatchOutputHandler::prepare(const BatchInputData& data) {
 void RecBatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
     const RawForwardOutput& output,
-    bool replace_fake_token) {
-  sequence_handler_.process_sample_output(data, output, replace_fake_token);
+    BatchOutputPhase phase) {
+  sequence_handler_.process_sample_output(data, output, phase);
 }
 
 void RecBatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
     const SampleOutput& output,
-    bool replace_fake_token,
+    BatchOutputPhase phase,
     bool force_requested_beam_result_size) {
   sequence_handler_.process_sample_output(
-      data, output, replace_fake_token, force_requested_beam_result_size);
+      data, output, phase, force_requested_beam_result_size);
 }
 
 void RecBatchOutputHandler::process_beam_search_output(
     const BatchOutputData& data,
     const RawForwardOutput& output,
-    bool replace_fake_token) {
-  sequence_handler_.process_beam_search_output(
-      data, output, replace_fake_token);
+    BatchOutputPhase phase) {
+  sequence_handler_.process_beam_search_output(data, output, phase);
 }
 
 void RecBatchOutputHandler::process_beam_sequence_group(

@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "core/framework/batch/batch_output_handler.h"
+#include "core/framework/batch/batch_output_phase.h"
 
 namespace xllm {
 
@@ -30,14 +31,14 @@ class RecBatchOutputHandler final {
   void prepare(const BatchInputData& data);
   void process_sample_output(const BatchOutputData& data,
                              const RawForwardOutput& output,
-                             bool replace_fake_token);
+                             BatchOutputPhase phase);
   void process_sample_output(const BatchOutputData& data,
                              const SampleOutput& output,
-                             bool replace_fake_token,
+                             BatchOutputPhase phase,
                              bool force_requested_beam_result_size);
   void process_beam_search_output(const BatchOutputData& data,
                                   const RawForwardOutput& output,
-                                  bool replace_fake_token);
+                                  BatchOutputPhase phase);
   void process_beam_sequence_group(const BatchOutputData& data,
                                    const ForwardOutput& output);
 

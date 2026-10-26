@@ -333,6 +333,74 @@ class BatchSpeculativeStatsTest : public ::testing::Test {
   bool original_chunked_prefill_ = false;
 };
 
+class BatchOutputPhaseTest : public ::testing::TestWithParam<bool> {
+ protected:
+  void SetUp() override {
+    original_chunked_prefill_ =
+        SchedulerConfig::get_instance().enable_chunked_prefill();
+    SchedulerConfig::get_instance().enable_chunked_prefill(false);
+    BlockManager::Options options;
+    options.num_blocks(8).block_size(4);
+    manager_ = std::make_unique<BlockManagerImpl>(options);
+  }
+
+  void TearDown() override {
+    SchedulerConfig::get_instance().enable_chunked_prefill(
+        original_chunked_prefill_);
+  }
+
+  std::unique_ptr<Request> make_beam_request(bool enable_schedule_overlap) {
+    RequestSamplingParam sampling_param;
+    sampling_param.beam_width = 2;
+    sampling_param.top_logprobs = 2;
+    sampling_param.logprobs = true;
+    StoppingChecker stopping_checker;
+    stopping_checker.set_max_generated_tokens(8);
+    RequestState state(
+        "prompt",
+        std::vector<int32_t>{1, 10, 11},
+        std::move(sampling_param),
+        SchedulerParam{},
+        std::move(stopping_checker),
+        /*seq_capacity=*/16,
+        /*n=*/2,
+        /*best_of=*/2,
+        /*logprobs=*/true,
+        /*stream=*/false,
+        /*echo=*/false,
+        /*skip_special_tokens=*/true,
+        enable_schedule_overlap,
+        [](const RequestOutput&) { return true; },
+        OutputsFunc{});
+    auto request =
+        std::make_unique<Request>("phase-request", "", "", std::move(state));
+    request->sequences().front()->add_blocks(BlockType::KV,
+                                             manager_->allocate(1));
+    return request;
+  }
+
+  void apply_output(Batch& batch, BatchOutputPhase phase, int32_t token_id) {
+    if (GetParam()) {
+      RawForwardOutput output;
+      output.outputs.emplace_back(make_raw_sample_output(
+          token_id, -0.1f, {token_id, token_id + 1}, {-0.1f, -0.2f}));
+      batch.process_sample_output(output, phase);
+      return;
+    }
+    SampleOutput output;
+    output.next_tokens = torch::tensor({token_id}, torch::kInt32);
+    output.logprobs = torch::tensor({-0.1f});
+    output.top_tokens =
+        torch::tensor({{token_id, token_id + 1}}, torch::kInt64);
+    output.top_logprobs = torch::tensor({{-0.1f, -0.2f}});
+    batch.process_sample_output(output, phase);
+  }
+
+ private:
+  bool original_chunked_prefill_ = false;
+  std::unique_ptr<BlockManagerImpl> manager_;
+};
+
 class ScopedLinearStateOutOfPlace final {
  public:
   explicit ScopedLinearStateOutOfPlace(bool enabled)
@@ -807,7 +875,7 @@ TEST(BatchTest, ProcessSampleOutputStoresMtpBootstrapEmbedding) {
   output.next_tokens = torch::tensor({42}, torch::kInt);
   output.embeddings = torch::tensor({{3.0f, 4.0f}});
 
-  batch.process_sample_output(output, /*replace_fake_token=*/false);
+  batch.process_sample_output(output, BatchOutputPhase::IMMEDIATE);
 
   torch::Tensor stored = sequence.get_mtp_bootstrap_embedding();
   ASSERT_TRUE(stored.defined());
@@ -834,7 +902,7 @@ TEST(BatchTest, ProcessRawOutputStoresMtpBootstrapEmbedding) {
   raw_output.outputs.push_back(make_raw_sample_output(
       42, std::nullopt, {}, {}, /*embeddings=*/{3.0f, 4.0f}));
 
-  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(raw_output, BatchOutputPhase::IMMEDIATE);
 
   torch::Tensor stored = sequence.get_mtp_bootstrap_embedding();
   ASSERT_TRUE(stored.defined());
@@ -878,7 +946,7 @@ TEST(BatchTest, ProcessRawOutputAccumulatesRequestSpeculativeStats) {
   raw_output.outputs.back().speculative_token_stats = {2, 5, 1};
   raw_output.outputs.push_back(make_raw_sample_output(202, std::nullopt));
   raw_output.outputs.back().speculative_token_stats = {1, 3, 1};
-  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(raw_output, BatchOutputPhase::IMMEDIATE);
 
   EXPECT_EQ(request_stats->accepted_tokens, 3);
   EXPECT_EQ(request_stats->proposed_tokens, 8);
@@ -894,7 +962,7 @@ TEST_F(BatchSpeculativeStatsTest, OverlapCountsOnlyRealValidationOutput) {
 
   RawForwardOutput fake_output;
   fake_output.outputs.emplace_back(make_raw_sample_output(-1, std::nullopt));
-  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(fake_output, BatchOutputPhase::RESERVE_PENDING);
   EXPECT_EQ(request_stats_->accepted_tokens, 0);
   EXPECT_EQ(request_stats_->proposed_tokens, 0);
   EXPECT_EQ(request_stats_->verified_rounds, 0);
@@ -903,7 +971,7 @@ TEST_F(BatchSpeculativeStatsTest, OverlapCountsOnlyRealValidationOutput) {
   RawForwardOutput prefill_output;
   prefill_output.outputs.emplace_back(
       make_raw_sample_output(101, std::nullopt));
-  batch.process_sample_output(prefill_output, /*replace_fake_token=*/true);
+  batch.process_sample_output(prefill_output, BatchOutputPhase::COMMIT_PENDING);
   EXPECT_EQ(sequence.tokens()[sequence.num_prompt_tokens()], 101);
   EXPECT_EQ(request_stats_->accepted_tokens, 0);
   EXPECT_EQ(request_stats_->proposed_tokens, 0);
@@ -911,7 +979,7 @@ TEST_F(BatchSpeculativeStatsTest, OverlapCountsOnlyRealValidationOutput) {
 
   (void)batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
-  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(fake_output, BatchOutputPhase::RESERVE_PENDING);
   EXPECT_EQ(sequence.tokens()[sequence.num_prompt_tokens() + 1], -1);
   EXPECT_EQ(request_stats_->accepted_tokens, 0);
   EXPECT_EQ(request_stats_->proposed_tokens, 0);
@@ -923,7 +991,7 @@ TEST_F(BatchSpeculativeStatsTest, OverlapCountsOnlyRealValidationOutput) {
   sample_output.speculative_token_stats = {2, 3, 1};
   RawForwardOutput real_output;
   real_output.outputs.emplace_back(std::move(sample_output));
-  batch.process_sample_output(real_output, /*replace_fake_token=*/true);
+  batch.process_sample_output(real_output, BatchOutputPhase::COMMIT_PENDING);
 
   EXPECT_EQ(sequence.num_generated_tokens(), 4);
   EXPECT_EQ(sequence.tokens()[sequence.num_prompt_tokens() + 1], 201);
@@ -948,7 +1016,7 @@ TEST_F(BatchSpeculativeStatsTest, TruncationPreservesExecutedValidationStats) {
     RawForwardOutput prefill_output;
     prefill_output.outputs.emplace_back(
         make_raw_sample_output(101, std::nullopt));
-    batch.process_sample_output(prefill_output, /*replace_fake_token=*/false);
+    batch.process_sample_output(prefill_output, BatchOutputPhase::IMMEDIATE);
     ASSERT_EQ(sequence.num_generated_tokens(), 1);
     EXPECT_EQ(request_stats_->accepted_tokens, 0);
     EXPECT_EQ(request_stats_->proposed_tokens, 0);
@@ -964,7 +1032,7 @@ TEST_F(BatchSpeculativeStatsTest, TruncationPreservesExecutedValidationStats) {
     sample_output.speculative_token_stats = {3, 3, 1};
     RawForwardOutput real_output;
     real_output.outputs.emplace_back(std::move(sample_output));
-    batch.process_sample_output(real_output, /*replace_fake_token=*/false);
+    batch.process_sample_output(real_output, BatchOutputPhase::IMMEDIATE);
 
     EXPECT_TRUE(sequence.finished());
     EXPECT_EQ(sequence.finish_reason(),
@@ -987,7 +1055,7 @@ TEST_F(BatchSpeculativeStatsTest, ZeroDraftValidationStillCountsOneRound) {
   RawForwardOutput prefill_output;
   prefill_output.outputs.emplace_back(
       make_raw_sample_output(101, std::nullopt));
-  batch.process_sample_output(prefill_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(prefill_output, BatchOutputPhase::IMMEDIATE);
   EXPECT_EQ(request_stats_->verified_rounds, 0);
 
   (void)batch.prepare_forward_input(
@@ -995,7 +1063,7 @@ TEST_F(BatchSpeculativeStatsTest, ZeroDraftValidationStillCountsOneRound) {
   RawForwardOutput verify_output;
   verify_output.outputs.emplace_back(make_raw_sample_output(201, std::nullopt));
   verify_output.outputs.back().speculative_token_stats = {0, 0, 1};
-  batch.process_sample_output(verify_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(verify_output, BatchOutputPhase::IMMEDIATE);
 
   EXPECT_EQ(request_stats_->accepted_tokens, 0);
   EXPECT_EQ(request_stats_->proposed_tokens, 0);
@@ -1254,7 +1322,7 @@ TEST(BatchTest, JsonObjectCommitMismatchSkipsRemainingSampleSlotsAndEmbedding) {
           /*token_id=*/1, -0.1f, {}, {}, /*embeddings=*/{3.0f, 4.0f}),
       make_raw_sample_output(/*token_id=*/0, -0.2f)};
   EXPECT_NO_FATAL_FAILURE(
-      batch.process_sample_output(raw_output, /*replace_fake_token=*/false));
+      batch.process_sample_output(raw_output, BatchOutputPhase::IMMEDIATE));
 
   EXPECT_EQ(sequence.num_tokens(), original_num_tokens);
   EXPECT_FALSE(sequence.get_mtp_bootstrap_embedding().defined());
@@ -1308,7 +1376,7 @@ TEST(BatchTest, JsonObjectErrorDiscardsFailedMmEmbeddingWithoutRowShift) {
   raw_output.outputs[1].mm_embeddings = {torch::tensor({3.0f, 4.0f})};
   raw_output.json_object_errors = {
       {failed.sample_sequence_id(), "missing prior sampled output row"}};
-  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(raw_output, BatchOutputPhase::IMMEDIATE);
 
   ASSERT_TRUE(failed.error_status().has_value());
   EXPECT_TRUE(healthy.finished());
@@ -1803,7 +1871,7 @@ TEST(BatchTest, JsonObjectSampleSequenceIdsFollowSamplingRows) {
   RawForwardOutput fake_output;
   fake_output.outputs = {make_raw_sample_output(-1, std::nullopt),
                          make_raw_sample_output(-2, std::nullopt)};
-  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(fake_output, BatchOutputPhase::RESERVE_PENDING);
   LlmForwardInput next_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
   EXPECT_EQ(next_input.sample_prior_output_rows, std::vector<int32_t>({0, 1}));
@@ -1884,7 +1952,7 @@ TEST(BatchTest, ReorderedMtpAcceptedRowsCommitToOwningSequences) {
   RawForwardOutput fake_output;
   fake_output.outputs = {make_raw_sample_output(-1, std::nullopt),
                          make_raw_sample_output(-2, std::nullopt)};
-  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(fake_output, BatchOutputPhase::RESERVE_PENDING);
   LlmForwardInput commit_input = batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
   EXPECT_EQ(
@@ -1936,8 +2004,8 @@ TEST(BatchTest, ReorderedMtpAcceptedRowsCommitToOwningSequences) {
   EXPECT_EQ(raw_output.outputs[1].tokens.size(), 3u);
   EXPECT_EQ(raw_output.outputs[1].tokens.back().id, 2);
 
-  EXPECT_NO_FATAL_FAILURE(
-      batch.process_sample_output(raw_output, /*replace_fake_token=*/true));
+  EXPECT_NO_FATAL_FAILURE(batch.process_sample_output(
+      raw_output, BatchOutputPhase::COMMIT_PENDING));
   ASSERT_FALSE(plain.error_status().has_value());
   ASSERT_FALSE(constrained.error_status().has_value());
   ASSERT_EQ(plain.num_generated_tokens(), 6u);
@@ -3728,7 +3796,7 @@ TEST(BatchTest, SampleRequestProcessesAllMatchedRawOutputs) {
       make_raw_sample_output(101, -0.10f, {101, 111}, {-0.10f, -1.0f}));
   raw_output.outputs.push_back(
       make_raw_sample_output(202, -0.20f, {202, 212}, {-0.20f, -2.0f}));
-  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(raw_output, BatchOutputPhase::IMMEDIATE);
 
   const size_t prompt_tokens = seq.num_prompt_tokens();
   EXPECT_EQ(seq.num_generated_tokens(), 2);
@@ -3818,7 +3886,7 @@ TEST(BatchTest, SampleRequestDistributesRawOutputsAcrossSequences) {
   raw_output.outputs.push_back(make_raw_sample_output(111, -0.11f));
   raw_output.outputs.push_back(make_raw_sample_output(221, -0.21f));
   raw_output.outputs.push_back(make_raw_sample_output(222, -0.22f));
-  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(raw_output, BatchOutputPhase::IMMEDIATE);
 
   const size_t seq1_prompt_tokens = seq1.num_prompt_tokens();
   EXPECT_EQ(seq1.num_generated_tokens(), 1);
@@ -3881,7 +3949,7 @@ TEST(BatchTest, SampleRequestFallsBackToEmptyPlaceholderOnPartialRawOutputs) {
 
   RawForwardOutput raw_output;
   raw_output.outputs.push_back(make_raw_sample_output(301, -0.30f));
-  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(raw_output, BatchOutputPhase::IMMEDIATE);
 
   const size_t prompt_tokens = seq.num_prompt_tokens();
   EXPECT_EQ(seq.num_generated_tokens(), 2);
@@ -3892,6 +3960,71 @@ TEST(BatchTest, SampleRequestFallsBackToEmptyPlaceholderOnPartialRawOutputs) {
   ASSERT_TRUE(logprobs[prompt_tokens].has_value());
   EXPECT_FALSE(logprobs[prompt_tokens + 1].has_value());
 }
+
+TEST_P(BatchOutputPhaseTest, ImmediateCommitsBeamWithGlobalOverlapEnabled) {
+  const ScopedScheduleOverlap overlap(/*enabled=*/true);
+  auto request = make_beam_request(/*enable_schedule_overlap=*/false);
+  Batch batch;
+  batch.add(request->sequences().front().get());
+  batch.add(request->sequence_group());
+  (void)batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  apply_output(batch, BatchOutputPhase::IMMEDIATE, /*token_id=*/101);
+
+  ASSERT_EQ(request->sequences().size(), 2u);
+  EXPECT_EQ(request->sequences()[0]->num_generated_tokens(), 1u);
+  EXPECT_EQ(request->sequences()[0]->tokens().back(), 101);
+  EXPECT_EQ(request->sequences()[1]->num_generated_tokens(), 1u);
+  EXPECT_EQ(request->sequences()[1]->tokens().back(), 102);
+}
+
+TEST_P(BatchOutputPhaseTest, ReserveDefersBeamWithGlobalOverlapDisabled) {
+  const ScopedScheduleOverlap overlap(/*enabled=*/false);
+  auto request = make_beam_request(/*enable_schedule_overlap=*/true);
+  Batch batch;
+  batch.add(request->sequences().front().get());
+  batch.add(request->sequence_group());
+  (void)batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  // The phase controls publication even when a worker supplies concrete tokens.
+  apply_output(batch, BatchOutputPhase::RESERVE_PENDING, /*token_id=*/201);
+  ASSERT_EQ(request->sequences().size(), 1u);
+  EXPECT_EQ(request->sequences().front()->num_generated_tokens(), 1u);
+  EXPECT_EQ(request->sequences().front()->tokens().back(), 201);
+
+  apply_output(batch, BatchOutputPhase::COMMIT_PENDING, /*token_id=*/101);
+
+  ASSERT_EQ(request->sequences().size(), 2u);
+  EXPECT_EQ(request->sequences()[0]->num_generated_tokens(), 1u);
+  EXPECT_EQ(request->sequences()[0]->tokens().back(), 101);
+  EXPECT_EQ(request->sequences()[1]->num_generated_tokens(), 1u);
+  EXPECT_EQ(request->sequences()[1]->tokens().back(), 102);
+}
+
+TEST_P(BatchOutputPhaseTest, CommitSkipsCancelledPendingTarget) {
+  const ScopedScheduleOverlap overlap(/*enabled=*/false);
+  auto request = make_beam_request(/*enable_schedule_overlap=*/true);
+  Batch batch;
+  batch.add(request->sequences().front().get());
+  batch.add(request->sequence_group());
+  (void)batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  apply_output(batch, BatchOutputPhase::RESERVE_PENDING, /*token_id=*/-1);
+  ASSERT_EQ(request->sequences().size(), 1u);
+  request->set_cancel();
+  apply_output(batch, BatchOutputPhase::COMMIT_PENDING, /*token_id=*/101);
+
+  ASSERT_EQ(request->sequences().size(), 1u);
+  EXPECT_EQ(request->sequences().front()->num_generated_tokens(), 1u);
+  EXPECT_EQ(request->sequences().front()->tokens().back(), -1);
+}
+
+INSTANTIATE_TEST_SUITE_P(RawAndTensorOutputs,
+                         BatchOutputPhaseTest,
+                         ::testing::Bool());
 
 TEST(BatchGroupTest, ApplyOutputsPreservesEmptyDpRank) {
   const ScopedScheduleOverlap overlap(/*enabled=*/false);
@@ -4061,13 +4194,13 @@ TEST(BatchTest, KeepTargetsForOverlapReplacement) {
 
   RawForwardOutput fake_output;
   fake_output.outputs.push_back(make_raw_sample_output(-1, std::nullopt));
-  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(fake_output, BatchOutputPhase::RESERVE_PENDING);
   EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], -1);
   EXPECT_FALSE(seq.finished());
 
   RawForwardOutput real_output;
   real_output.outputs.push_back(make_raw_sample_output(101, -0.1f));
-  batch.process_sample_output(real_output, /*replace_fake_token=*/true);
+  batch.process_sample_output(real_output, BatchOutputPhase::COMMIT_PENDING);
 
   EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], 101);
   EXPECT_TRUE(seq.finished());
@@ -4121,7 +4254,7 @@ TEST(BatchTest, JsonObjectErrorFailsOnlyOwningRequestWithoutTokenCommit) {
   fake_output.outputs = {make_raw_sample_output(-1, std::nullopt),
                          make_raw_sample_output(-2, std::nullopt),
                          make_raw_sample_output(-3, std::nullopt)};
-  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(fake_output, BatchOutputPhase::RESERVE_PENDING);
 
   RawForwardOutput real_output;
   real_output.outputs = {make_raw_sample_output(101, std::nullopt),
@@ -4129,7 +4262,7 @@ TEST(BatchTest, JsonObjectErrorFailsOnlyOwningRequestWithoutTokenCommit) {
                          make_raw_sample_output(103, std::nullopt)};
   real_output.json_object_errors = {
       {failed.sample_sequence_id(), "missing prior sampled output row"}};
-  batch.process_sample_output(real_output, /*replace_fake_token=*/true);
+  batch.process_sample_output(real_output, BatchOutputPhase::COMMIT_PENDING);
 
   EXPECT_EQ(failed.num_generated_tokens(), 1u);
   EXPECT_EQ(failed.tokens()[failed.num_prompt_tokens()], -1);
@@ -4166,7 +4299,7 @@ TEST(BatchTest, JsonObjectErrorForUnknownSequenceDies) {
   raw_output.json_object_errors = {
       {"unknown-request#0", "missing prior sampled output row"}};
   EXPECT_DEATH(
-      batch.process_sample_output(raw_output, /*replace_fake_token=*/false),
+      batch.process_sample_output(raw_output, BatchOutputPhase::IMMEDIATE),
       "unknown sampled sequence id");
 }
 
@@ -4210,7 +4343,7 @@ TEST(BatchTest, JsonObjectErrorFailsUnscheduledSiblingSequence) {
   raw_output.json_object_errors = {{scheduled_sequence->sample_sequence_id(),
                                     "missing prior sampled output row"}};
 
-  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(raw_output, BatchOutputPhase::RESERVE_PENDING);
 
   EXPECT_TRUE(request.finished());
   ASSERT_TRUE(request.error_status().has_value());
@@ -4267,7 +4400,7 @@ TEST(BatchTest, OverlapMTPReplacementSkipsPreemptedSequenceWithoutKVBlocks) {
   RawForwardOutput fake_output;
   fake_output.outputs.push_back(make_raw_sample_output(-1, std::nullopt));
 
-  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(fake_output, BatchOutputPhase::RESERVE_PENDING);
   EXPECT_EQ(seq.num_generated_tokens(), 1);
   EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], -1);
 
@@ -4284,8 +4417,8 @@ TEST(BatchTest, OverlapMTPReplacementSkipsPreemptedSequenceWithoutKVBlocks) {
   RawForwardOutput real_output;
   real_output.outputs.push_back(std::move(real_sample_output));
 
-  EXPECT_NO_FATAL_FAILURE(
-      batch.process_sample_output(real_output, /*replace_fake_token=*/true));
+  EXPECT_NO_FATAL_FAILURE(batch.process_sample_output(
+      real_output, BatchOutputPhase::COMMIT_PENDING));
   EXPECT_EQ(seq.num_generated_tokens(), 1);
   EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], 101);
 
@@ -4337,7 +4470,7 @@ TEST(BatchTest, OverlapMTPReplacementKeepsCompositeKvBlocks) {
   fake_token.id = -1;
   fake_sample_output.tokens.push_back(fake_token);
   fake_output.outputs.push_back(std::move(fake_sample_output));
-  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+  batch.process_sample_output(fake_output, BatchOutputPhase::RESERVE_PENDING);
 
   RawForwardOutput real_output;
   RawSampleOutput real_sample_output;
@@ -4348,7 +4481,7 @@ TEST(BatchTest, OverlapMTPReplacementKeepsCompositeKvBlocks) {
   real_token_1.id = 102;
   real_sample_output.tokens.push_back(real_token_1);
   real_output.outputs.push_back(std::move(real_sample_output));
-  batch.process_sample_output(real_output, /*replace_fake_token=*/true);
+  batch.process_sample_output(real_output, BatchOutputPhase::COMMIT_PENDING);
 
   ASSERT_EQ(seq.num_generated_tokens(), 2);
   EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], 101);

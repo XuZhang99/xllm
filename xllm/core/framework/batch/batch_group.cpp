@@ -31,14 +31,14 @@ void BatchGroup::apply_outputs(const std::vector<RawForwardOutput>& outputs,
                                BatchOutputPhase phase) {
   CHECK_EQ(outputs.size(), size())
       << "Each DP rank must have exactly one output.";
-  const bool replace_fake_token = phase == BatchOutputPhase::COMMIT_PENDING;
   for (size_t dp_rank = 0; dp_rank < size(); ++dp_rank) {
     Batch& batch = batches_[dp_rank];
     const RawForwardOutput& output = outputs[dp_rank];
-    if (replace_fake_token || output.src_seq_idxes.empty()) {
-      batch.process_sample_output(output, replace_fake_token);
+    if (phase == BatchOutputPhase::COMMIT_PENDING ||
+        output.src_seq_idxes.empty()) {
+      batch.process_sample_output(output, phase);
     } else {
-      batch.process_beam_search_output(output, /*replace_fake_token=*/false);
+      batch.process_beam_search_output(output, phase);
     }
     batch.refresh_sequences_from_groups();
   }

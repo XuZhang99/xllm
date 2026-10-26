@@ -60,20 +60,19 @@ RecForwardInput RecBatch::prepare_rec_forward_input(
 }
 
 void RecBatch::process_sample_output(const RawForwardOutput& output,
-                                     bool replace_fake_token) {
-  state_.process_sample_output(output, replace_fake_token);
+                                     BatchOutputPhase phase) {
+  state_.process_sample_output(output, phase);
 }
 
 void RecBatch::process_sample_output(const SampleOutput& output,
-                                     bool replace_fake_token,
+                                     BatchOutputPhase phase,
                                      bool force_requested_beam_result_size) {
-  state_.process_sample_output(
-      output, replace_fake_token, force_requested_beam_result_size);
+  state_.process_sample_output(output, phase, force_requested_beam_result_size);
 }
 
 void RecBatch::process_beam_search_output(const RawForwardOutput& output,
-                                          bool replace_fake_token) {
-  state_.process_beam_search_output(output, replace_fake_token);
+                                          BatchOutputPhase phase) {
+  state_.process_beam_search_output(output, phase);
 }
 
 void RecBatch::process_beam_sequence_group(const ForwardOutput& output) {

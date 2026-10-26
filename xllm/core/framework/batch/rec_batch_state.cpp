@@ -130,33 +130,29 @@ RecForwardInput RecBatchState::prepare_rec_forward_input(
 }
 
 void RecBatchState::process_sample_output(const RawForwardOutput& output,
-                                          bool replace_fake_token) {
+                                          BatchOutputPhase phase) {
   const auto sequences = get_sequences();
   output_handler_.process_sample_output(
-      {sequences, sequence_state_.sequence_groups()},
-      output,
-      replace_fake_token);
+      {sequences, sequence_state_.sequence_groups()}, output, phase);
 }
 
 void RecBatchState::process_sample_output(
     const SampleOutput& output,
-    bool replace_fake_token,
+    BatchOutputPhase phase,
     bool force_requested_beam_result_size) {
   const auto sequences = get_sequences();
   output_handler_.process_sample_output(
       {sequences, sequence_state_.sequence_groups()},
       output,
-      replace_fake_token,
+      phase,
       force_requested_beam_result_size);
 }
 
 void RecBatchState::process_beam_search_output(const RawForwardOutput& output,
-                                               bool replace_fake_token) {
+                                               BatchOutputPhase phase) {
   const auto sequences = get_sequences();
   output_handler_.process_beam_search_output(
-      {sequences, sequence_state_.sequence_groups()},
-      output,
-      replace_fake_token);
+      {sequences, sequence_state_.sequence_groups()}, output, phase);
 }
 
 void RecBatchState::process_beam_sequence_group(const ForwardOutput& output) {

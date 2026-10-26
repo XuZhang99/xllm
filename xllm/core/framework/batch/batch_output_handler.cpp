@@ -168,7 +168,8 @@ void BatchOutputHandler::add_sequence_targets(Sequence* sequence,
 void BatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
     const RawForwardOutput& raw_output,
-    bool replace_fake_token) {
+    BatchOutputPhase phase) {
+  const bool replace_fake_token = phase == BatchOutputPhase::COMMIT_PENDING;
   const auto& sequences = data.sequences;
   const std::unordered_set<std::string> failed_request_ids =
       fail_json_object_requests(sequences, raw_output.json_object_errors);
@@ -238,21 +239,15 @@ void BatchOutputHandler::process_sample_output(
       }
     }
   }
-  if (replace_fake_token) {
-    output_targets_.clear();
-  }
-
-  if (!::xllm::SchedulerConfig::get_instance().enable_schedule_overlap() ||
-      replace_fake_token) {
-    process_beam_search(data);
-  }
+  finish_sample_output(data, phase);
 }
 
 void BatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
     const SampleOutput& sample_output,
-    bool replace_fake_token,
+    BatchOutputPhase phase,
     bool force_requested_beam_result_size) {
+  const bool replace_fake_token = phase == BatchOutputPhase::COMMIT_PENDING;
   const bool has_next_tokens = sample_output.next_tokens.defined() &&
                                sample_output.next_tokens.numel() > 0;
   const bool next_tokens_are_spec_width =
@@ -359,14 +354,20 @@ void BatchOutputHandler::process_sample_output(
     // always append a token, maybe true or fake token
     append_token_for_sequence(seq, token, 0, replace_fake_token);
   }
-  if (replace_fake_token) {
+  finish_sample_output(data, phase, force_requested_beam_result_size);
+}
+
+void BatchOutputHandler::finish_sample_output(
+    const BatchOutputData& data,
+    BatchOutputPhase phase,
+    bool force_requested_beam_result_size) {
+  if (phase == BatchOutputPhase::RESERVE_PENDING) {
+    return;
+  }
+  if (phase == BatchOutputPhase::COMMIT_PENDING) {
     output_targets_.clear();
   }
-
-  if (!::xllm::SchedulerConfig::get_instance().enable_schedule_overlap() ||
-      replace_fake_token) {
-    process_beam_search(data, force_requested_beam_result_size);
-  }
+  process_beam_search(data, force_requested_beam_result_size);
 }
 
 bool BatchOutputHandler::update_sequence_state(Sequence* seq,
@@ -431,7 +432,8 @@ void BatchOutputHandler::process_beam_search(const BatchOutputData& data,
 void BatchOutputHandler::process_beam_search_output(
     const BatchOutputData& data,
     const RawForwardOutput& raw_output,
-    bool replace_fake_token) {
+    BatchOutputPhase phase) {
+  const bool replace_fake_token = phase == BatchOutputPhase::COMMIT_PENDING;
   const auto& sequences = data.sequences;
   const std::unordered_set<std::string> failed_request_ids =
       fail_json_object_requests(sequences, raw_output.json_object_errors);

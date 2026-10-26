@@ -90,10 +90,10 @@ LlmForwardInput Batch::prepare_forward_input(const ModelArgs& args,
 }
 
 void Batch::process_sample_output(const RawForwardOutput& output,
-                                  bool replace_fake_token) {
+                                  BatchOutputPhase phase) {
   const auto sequences = get_sequences();
   output_handler_.process_sample_output(
-      {sequences, state_.sequence_groups()}, output, replace_fake_token);
+      {sequences, state_.sequence_groups()}, output, phase);
 }
 
 VlmForwardInput Batch::prepare_vlm_forward_input(
@@ -116,19 +116,19 @@ VlmForwardInput Batch::prepare_vlm_forward_input(const ModelArgs& args,
 }
 
 void Batch::process_sample_output(const SampleOutput& output,
-                                  bool replace_fake_token,
+                                  BatchOutputPhase phase,
                                   bool force_requested_beam_result_size) {
   const auto sequences = get_sequences();
   output_handler_.process_sample_output({sequences, state_.sequence_groups()},
                                         output,
-                                        replace_fake_token,
+                                        phase,
                                         force_requested_beam_result_size);
 }
 
 void Batch::process_beam_search_output(const RawForwardOutput& output,
-                                       bool replace_fake_token) {
+                                       BatchOutputPhase phase) {
   const auto sequences = get_sequences();
   output_handler_.process_beam_search_output(
-      {sequences, state_.sequence_groups()}, output, replace_fake_token);
+      {sequences, state_.sequence_groups()}, output, phase);
 }
 }  // namespace xllm
