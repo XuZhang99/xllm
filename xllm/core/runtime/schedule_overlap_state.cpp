@@ -15,51 +15,47 @@ limitations under the License.
 
 #include "core/runtime/schedule_overlap_state.h"
 
+#include <glog/logging.h>
+
 #include <utility>
 
 #include "core/runtime/json_object_output_rows.h"
 
 namespace xllm {
 
-bool ScheduleOverlapState::publish(std::optional<ForwardOutput> output,
-                                   std::vector<std::string> request_ids,
-                                   std::vector<std::string> sample_sequence_ids,
-                                   bool retain_tokenless_output) {
+ScheduleOverlapState::ScheduleOverlapState(bool publish_to_host,
+                                           bool retain_tokenless_output)
+    : publish_to_host_(publish_to_host),
+      retain_tokenless_output_(retain_tokenless_output) {}
+
+bool ScheduleOverlapState::record(
+    std::optional<ForwardOutput> output,
+    std::vector<std::string> request_ids,
+    std::vector<std::string> sample_sequence_ids) {
   std::unique_lock<std::mutex> lock(mutex_);
-  condition_.wait(lock, [this] { return !pending_ || shutting_down_; });
+  if (publish_to_host_) {
+    condition_.wait(lock, [this] { return !pending_ || shutting_down_; });
+  }
   if (shutting_down_) {
     return false;
   }
   update_prior_output(std::move(output),
                       std::move(request_ids),
-                      std::move(sample_sequence_ids),
-                      retain_tokenless_output);
-  pending_ = true;
-  condition_.notify_all();
-  return true;
-}
-
-bool ScheduleOverlapState::update(std::optional<ForwardOutput> output,
-                                  std::vector<std::string> request_ids,
-                                  std::vector<std::string> sample_sequence_ids,
-                                  bool retain_tokenless_output) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (shutting_down_) {
-    return false;
+                      std::move(sample_sequence_ids));
+  if (publish_to_host_) {
+    pending_ = true;
+    condition_.notify_all();
   }
-  update_prior_output(std::move(output),
-                      std::move(request_ids),
-                      std::move(sample_sequence_ids),
-                      retain_tokenless_output);
   return true;
 }
 
-ForwardOutput ScheduleOverlapState::consume(bool retain_tokenless_output) {
+ForwardOutput ScheduleOverlapState::consume() {
+  CHECK(publish_to_host_) << "overlap output has no host consumer";
   std::unique_lock<std::mutex> lock(mutex_);
   condition_.wait(lock, [this] { return pending_ || shutting_down_; });
 
   ForwardOutput output;
-  if (pending_ && (has_tokens_ || retain_tokenless_output ||
+  if (pending_ && (has_tokens_ || retain_tokenless_output_ ||
                    !prior_output_.json_object_errors.empty())) {
     output = prior_output_;
   }
@@ -85,14 +81,13 @@ bool ScheduleOverlapState::has_request_overlap(
 void ScheduleOverlapState::update_prior_output(
     std::optional<ForwardOutput> output,
     std::vector<std::string> request_ids,
-    std::vector<std::string> sample_sequence_ids,
-    bool retain_tokenless_output) {
+    std::vector<std::string> sample_sequence_ids) {
   prior_output_ =
       output.has_value() ? std::move(output.value()) : ForwardOutput();
   request_ids_ = std::move(request_ids);
   sample_sequence_ids_ = std::move(sample_sequence_ids);
   has_tokens_ = prior_output_.sample_output.next_tokens.defined();
-  if (!output.has_value() || (!has_tokens_ && !retain_tokenless_output &&
+  if (!output.has_value() || (!has_tokens_ && !retain_tokenless_output_ &&
                               prior_output_.json_object_errors.empty())) {
     request_ids_.clear();
     sample_sequence_ids_.clear();

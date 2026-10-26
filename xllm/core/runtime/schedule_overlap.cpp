@@ -18,7 +18,6 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
-#include "core/framework/config/eplb_config.h"
 #include "core/runtime/json_object_decode_continuation.h"
 #include "core/runtime/worker_impl.h"
 #if defined(USE_NPU)
@@ -28,6 +27,10 @@ limitations under the License.
 #endif
 
 namespace xllm {
+
+ScheduleOverlap::ScheduleOverlap(bool is_driver, bool enable_eplb)
+    : state_(/*publish_to_host=*/is_driver || enable_eplb,
+             /*retain_tokenless_output=*/enable_eplb) {}
 
 template <typename Input>
 void ScheduleOverlap::prepare_continuation(WorkerImpl& worker, Input& input) {
@@ -116,25 +119,12 @@ void ScheduleOverlap::record_output(
     const std::optional<ForwardOutput>& output,
     const std::vector<std::string>& request_ids,
     const std::vector<std::string>& sample_sequence_ids) {
-  const bool retain_tokenless_output = EPLBConfig::get_instance().enable_eplb();
-  if (worker.is_driver() || retain_tokenless_output) {
-    if (!state_.publish(output,
-                        request_ids,
-                        sample_sequence_ids,
-                        retain_tokenless_output)) {
-      // Shutdown woke a blocked publication. Drain before the new output's
-      // retained inputs can be released by its caller.
-      CHECK_EQ(worker.compute_stream_->synchronize(), 0);
-    }
-    return;
-  }
-  if (output.has_value()) {
+  if (!state_.publishes_to_host() && output.has_value()) {
     retire_prior_inputs(worker);
   }
-  if (!state_.update(
-          output, request_ids, sample_sequence_ids, retain_tokenless_output)) {
-    // Non-driver futures may be discarded. Finish queued device work before
-    // the caller releases the output and its retained inputs after shutdown.
+  if (!state_.record(output, request_ids, sample_sequence_ids)) {
+    // Shutdown rejects publication and cache-only updates alike. Drain before
+    // the caller releases the output and its asynchronous input owners.
     CHECK_EQ(worker.compute_stream_->synchronize(), 0);
   }
 }
@@ -149,9 +139,7 @@ std::optional<ForwardOutput> ScheduleOverlap::execute(WorkerImpl& worker,
   return execute_impl(worker, input);
 }
 
-ForwardOutput ScheduleOverlap::consume() {
-  return state_.consume(EPLBConfig::get_instance().enable_eplb());
-}
+ForwardOutput ScheduleOverlap::consume() { return state_.consume(); }
 
 void ScheduleOverlap::shutdown() { state_.shutdown(); }
 

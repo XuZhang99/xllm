@@ -37,33 +37,67 @@ ForwardOutput token_output(int32_t token_id) {
 }
 
 TEST(ScheduleOverlapStateTest, ConsumedOutputRemainsAvailableForContinuation) {
-  ScheduleOverlapState state;
-  ASSERT_TRUE(state.publish(token_output(7),
-                            {"request"},
-                            {"sequence"},
-                            /*retain_tokenless_output=*/false));
+  ScheduleOverlapState state(/*publish_to_host=*/true,
+                             /*retain_tokenless_output=*/false);
+  ASSERT_TRUE(state.record(token_output(7), {"request"}, {"sequence"}));
 
-  ForwardOutput consumed = state.consume(/*retain_tokenless_output=*/false);
+  ForwardOutput consumed = state.consume();
   ASSERT_TRUE(consumed.sample_output.next_tokens.defined());
   EXPECT_EQ(consumed.sample_output.next_tokens.item<int64_t>(), 7);
   EXPECT_TRUE(state.has_tokens());
   EXPECT_TRUE(state.prior_output().sample_output.next_tokens.defined());
   EXPECT_EQ(state.request_ids(), (std::vector<std::string>{"request"}));
   EXPECT_TRUE(state.has_request_overlap({"new", "request"}));
+  EXPECT_EQ(state.sample_sequence_ids(),
+            (std::vector<std::string>{"sequence"}));
+
+  ASSERT_TRUE(
+      state.record(token_output(9), {"next_request"}, {"next_sequence"}));
+  consumed = state.consume();
+  EXPECT_EQ(consumed.sample_output.next_tokens.item<int64_t>(), 9);
+  EXPECT_EQ(state.prior_output().sample_output.next_tokens.item<int64_t>(), 9);
+  EXPECT_EQ(state.request_ids(), (std::vector<std::string>{"next_request"}));
+  EXPECT_EQ(state.sample_sequence_ids(),
+            (std::vector<std::string>{"next_sequence"}));
+  EXPECT_FALSE(state.has_request_overlap({"request"}));
+  EXPECT_TRUE(state.has_request_overlap({"next_request"}));
+}
+
+TEST(ScheduleOverlapStateTest,
+     CacheOnlyRecordsRefreshContinuationWithoutHostConsumption) {
+  ScheduleOverlapState state(/*publish_to_host=*/false,
+                             /*retain_tokenless_output=*/false);
+  ASSERT_TRUE(
+      state.record(token_output(7), {"prior_request"}, {"prior_sequence"}));
+
+  auto next_record = std::async(std::launch::async, [&state]() {
+    return state.record(token_output(9), {"next_request"}, {"next_sequence"});
+  });
+  const std::future_status next_status = next_record.wait_for(1s);
+  if (next_status != std::future_status::ready) {
+    state.shutdown();
+  }
+  ASSERT_EQ(next_status, std::future_status::ready);
+  ASSERT_TRUE(next_record.get());
+  EXPECT_EQ(state.prior_output().sample_output.next_tokens.item<int64_t>(), 9);
+  EXPECT_EQ(state.request_ids(), (std::vector<std::string>{"next_request"}));
+  EXPECT_EQ(state.sample_sequence_ids(),
+            (std::vector<std::string>{"next_sequence"}));
+  EXPECT_FALSE(state.has_request_overlap({"prior_request"}));
+  EXPECT_TRUE(state.has_request_overlap({"next_request"}));
 }
 
 TEST(ScheduleOverlapStateTest, EmptyPublicationClearsPriorContinuation) {
   for (const bool retain_tokenless_output : {false, true}) {
-    ScheduleOverlapState state;
-    ASSERT_TRUE(state.update(token_output(7),
-                             {"prior_request"},
-                             {"prior_sequence"},
-                             retain_tokenless_output));
+    ScheduleOverlapState state(/*publish_to_host=*/true,
+                               retain_tokenless_output);
+    ASSERT_TRUE(
+        state.record(token_output(7), {"prior_request"}, {"prior_sequence"}));
+    (void)state.consume();
     ASSERT_TRUE(state.has_tokens());
-    ASSERT_TRUE(state.publish(
-        std::nullopt, {"request"}, {"sequence"}, retain_tokenless_output));
+    ASSERT_TRUE(state.record(std::nullopt, {"request"}, {"sequence"}));
 
-    const ForwardOutput consumed = state.consume(retain_tokenless_output);
+    const ForwardOutput consumed = state.consume();
     EXPECT_FALSE(consumed.sample_output.next_tokens.defined());
     EXPECT_FALSE(state.has_tokens());
     EXPECT_FALSE(state.prior_output().sample_output.next_tokens.defined());
@@ -73,88 +107,88 @@ TEST(ScheduleOverlapStateTest, EmptyPublicationClearsPriorContinuation) {
 }
 
 TEST(ScheduleOverlapStateTest, TokenlessMetadataCanBePublishedAndConsumed) {
-  ScheduleOverlapState state;
+  ScheduleOverlapState state(/*publish_to_host=*/true,
+                             /*retain_tokenless_output=*/false);
   ForwardOutput output;
   output.json_object_errors.push_back({"sequence", "row mismatch"});
-  ASSERT_TRUE(state.publish(std::move(output),
-                            {"request"},
-                            {"sequence"},
-                            /*retain_tokenless_output=*/false));
+  ASSERT_TRUE(state.record(std::move(output), {"request"}, {"sequence"}));
 
-  const ForwardOutput consumed =
-      state.consume(/*retain_tokenless_output=*/false);
+  const ForwardOutput consumed = state.consume();
   EXPECT_FALSE(consumed.sample_output.next_tokens.defined());
   ASSERT_EQ(consumed.json_object_errors.size(), 1U);
   EXPECT_EQ(state.sample_sequence_ids(),
             (std::vector<std::string>{"sequence"}));
 }
 
-TEST(ScheduleOverlapStateTest, RetainsTokenlessOutputWhenRequested) {
-  ScheduleOverlapState state;
-  ASSERT_TRUE(state.publish(ForwardOutput{},
-                            {"request"},
-                            {"sequence"},
-                            /*retain_tokenless_output=*/true));
+TEST(ScheduleOverlapStateTest, FiltersOrdinaryTokenlessOutputFromPublication) {
+  ScheduleOverlapState state(/*publish_to_host=*/true,
+                             /*retain_tokenless_output=*/false);
+  ForwardOutput output;
+  output.expert_load_data = torch::tensor({3, 5}, torch::kInt64);
+  output.prepared_token = 11;
+  ASSERT_TRUE(state.record(std::move(output), {"request"}, {"sequence"}));
 
-  const ForwardOutput consumed =
-      state.consume(/*retain_tokenless_output=*/true);
+  const ForwardOutput consumed = state.consume();
+  EXPECT_FALSE(consumed.expert_load_data.defined());
+  EXPECT_EQ(consumed.prepared_token, -1);
+  EXPECT_FALSE(state.has_tokens());
+  EXPECT_TRUE(state.request_ids().empty());
+  EXPECT_TRUE(state.sample_sequence_ids().empty());
+}
+
+TEST(ScheduleOverlapStateTest, RetainsTokenlessOutputWhenRequested) {
+  ScheduleOverlapState state(/*publish_to_host=*/true,
+                             /*retain_tokenless_output=*/true);
+  ForwardOutput output;
+  output.expert_load_data = torch::tensor({3, 5}, torch::kInt64);
+  output.prepared_token = 11;
+  ASSERT_TRUE(state.record(std::move(output), {"request"}, {"sequence"}));
+
+  const ForwardOutput consumed = state.consume();
   EXPECT_FALSE(consumed.sample_output.next_tokens.defined());
+  ASSERT_TRUE(consumed.expert_load_data.defined());
+  EXPECT_TRUE(torch::equal(consumed.expert_load_data,
+                           torch::tensor({3, 5}, torch::kInt64)));
+  EXPECT_EQ(consumed.prepared_token, 11);
   EXPECT_EQ(state.request_ids(), (std::vector<std::string>{"request"}));
   EXPECT_EQ(state.sample_sequence_ids(),
             (std::vector<std::string>{"sequence"}));
 }
 
-TEST(ScheduleOverlapStateTest, PublishAppliesBackpressureUntilConsumed) {
-  ScheduleOverlapState state;
-  ASSERT_TRUE(state.publish(token_output(1),
-                            {},
-                            {},
-                            /*retain_tokenless_output=*/false));
+TEST(ScheduleOverlapStateTest, RecordAppliesBackpressureUntilConsumed) {
+  ScheduleOverlapState state(/*publish_to_host=*/true,
+                             /*retain_tokenless_output=*/false);
+  ASSERT_TRUE(state.record(token_output(1), {}, {}));
 
   auto second_publish = std::async(std::launch::async, [&state]() {
-    return state.publish(token_output(2),
-                         {},
-                         {},
-                         /*retain_tokenless_output=*/false);
+    return state.record(token_output(2), {}, {});
   });
   EXPECT_EQ(second_publish.wait_for(50ms), std::future_status::timeout);
-  EXPECT_EQ(state.consume(/*retain_tokenless_output=*/false)
-                .sample_output.next_tokens.item<int64_t>(),
-            1);
+  EXPECT_EQ(state.consume().sample_output.next_tokens.item<int64_t>(), 1);
   ASSERT_EQ(second_publish.wait_for(1s), std::future_status::ready);
   EXPECT_TRUE(second_publish.get());
-  EXPECT_EQ(state.consume(/*retain_tokenless_output=*/false)
-                .sample_output.next_tokens.item<int64_t>(),
-            2);
+  EXPECT_EQ(state.consume().sample_output.next_tokens.item<int64_t>(), 2);
 }
 
 TEST(ScheduleOverlapStateTest, ShutdownWakesWaitingConsumerAndProducer) {
-  ScheduleOverlapState state;
-  auto consumer = std::async(std::launch::async, [&state]() {
-    return state.consume(/*retain_tokenless_output=*/false);
-  });
+  ScheduleOverlapState state(/*publish_to_host=*/true,
+                             /*retain_tokenless_output=*/false);
+  auto consumer =
+      std::async(std::launch::async, [&state]() { return state.consume(); });
   EXPECT_EQ(consumer.wait_for(50ms), std::future_status::timeout);
   state.shutdown();
   ASSERT_EQ(consumer.wait_for(1s), std::future_status::ready);
   EXPECT_FALSE(consumer.get().sample_output.next_tokens.defined());
 
-  EXPECT_FALSE(state.publish(token_output(3),
-                             {},
-                             {},
-                             /*retain_tokenless_output=*/false));
+  EXPECT_FALSE(state.record(token_output(3), {}, {}));
 }
 
 TEST(ScheduleOverlapStateTest, ShutdownUnblocksPublicationBackpressure) {
-  ScheduleOverlapState state;
-  ASSERT_TRUE(state.publish(token_output(1),
-                            {},
-                            {},
-                            /*retain_tokenless_output=*/false));
+  ScheduleOverlapState state(/*publish_to_host=*/true,
+                             /*retain_tokenless_output=*/false);
+  ASSERT_TRUE(state.record(token_output(1), {}, {}));
   auto second_publish = std::async(std::launch::async, [&state]() {
-    return state.publish(token_output(2),
-                         {},
-                         {},
-                         /*retain_tokenless_output=*/false);
+    return state.record(token_output(2), {}, {});
   });
   EXPECT_EQ(second_publish.wait_for(50ms), std::future_status::timeout);
   state.shutdown();
@@ -166,22 +200,19 @@ TEST(ScheduleOverlapStateTest,
      ShutdownRejectsDeviceUpdatesWithoutReplacingPriorOutput) {
   std::weak_ptr<int32_t> weak_owner;
   {
-    ScheduleOverlapState state;
+    ScheduleOverlapState state(/*publish_to_host=*/false,
+                               /*retain_tokenless_output=*/false);
     auto owner = std::make_shared<int32_t>(42);
     weak_owner = owner;
     ForwardOutput output = token_output(7);
     output.retained_inputs.emplace_back(owner);
-    ASSERT_TRUE(state.update(std::move(output),
-                             {"prior_request"},
-                             {"prior_sequence"},
-                             /*retain_tokenless_output=*/false));
+    ASSERT_TRUE(
+        state.record(std::move(output), {"prior_request"}, {"prior_sequence"}));
     owner.reset();
     state.shutdown();
 
-    EXPECT_FALSE(state.update(token_output(9),
-                              {"new_request"},
-                              {"new_sequence"},
-                              /*retain_tokenless_output=*/false));
+    EXPECT_FALSE(
+        state.record(token_output(9), {"new_request"}, {"new_sequence"}));
 
     EXPECT_TRUE(state.has_tokens());
     EXPECT_EQ(state.prior_output().sample_output.next_tokens.item<int64_t>(),
@@ -195,19 +226,17 @@ TEST(ScheduleOverlapStateTest,
 }
 
 TEST(ScheduleOverlapStateTest, RetainedInputsOutliveConsumedCopy) {
-  std::weak_ptr<int> weak_owner;
+  std::weak_ptr<int32_t> weak_owner;
   {
-    ScheduleOverlapState state;
-    auto owner = std::make_shared<int>(42);
+    ScheduleOverlapState state(/*publish_to_host=*/true,
+                               /*retain_tokenless_output=*/false);
+    auto owner = std::make_shared<int32_t>(42);
     weak_owner = owner;
     ForwardOutput output = token_output(9);
     output.retained_inputs.emplace_back(owner);
-    ASSERT_TRUE(state.publish(std::move(output),
-                              {},
-                              {},
-                              /*retain_tokenless_output=*/false));
+    ASSERT_TRUE(state.record(std::move(output), {}, {}));
     owner.reset();
-    ForwardOutput consumed = state.consume(/*retain_tokenless_output=*/false);
+    ForwardOutput consumed = state.consume();
     consumed.retained_inputs.clear();
     EXPECT_FALSE(weak_owner.expired());
   }

@@ -31,31 +31,25 @@ namespace xllm {
 // consumed result therefore remains available for the next device step.
 class ScheduleOverlapState final {
  public:
-  ScheduleOverlapState() = default;
+  ScheduleOverlapState(bool publish_to_host, bool retain_tokenless_output);
   ~ScheduleOverlapState() = default;
 
   ScheduleOverlapState(const ScheduleOverlapState&) = delete;
   ScheduleOverlapState& operator=(const ScheduleOverlapState&) = delete;
 
-  // Publishes a result for the host consumer. It waits for the preceding
-  // publication to be consumed and returns false once shutdown has started.
-  bool publish(std::optional<ForwardOutput> output,
-               std::vector<std::string> request_ids,
-               std::vector<std::string> sample_sequence_ids,
-               bool retain_tokenless_output);
-
-  // Updates only the device continuation cache. This path is used by ranks
-  // whose output is not read by the host controller. Returns false after
-  // shutdown; the caller must drain device work before releasing the output.
-  bool update(std::optional<ForwardOutput> output,
+  // Records the device continuation and, for host-visible ranks, publishes it
+  // with one-slot backpressure. Returns false after shutdown; the caller must
+  // drain device work before releasing the rejected output.
+  bool record(std::optional<ForwardOutput> output,
               std::vector<std::string> request_ids,
-              std::vector<std::string> sample_sequence_ids,
-              bool retain_tokenless_output);
+              std::vector<std::string> sample_sequence_ids);
 
-  // Waits for a publication or shutdown, consumes the publication flag, and
-  // returns a copy when the result is relevant to the caller. The cached prior
-  // output is intentionally retained for the next overlapped device step.
-  ForwardOutput consume(bool retain_tokenless_output);
+  bool publishes_to_host() const { return publish_to_host_; }
+
+  // Only valid for host-visible ranks. Waits for publication or shutdown and
+  // consumes the publication flag. Returns a copy when relevant to the caller.
+  // The cached prior output is retained for the next overlapped device step.
+  ForwardOutput consume();
 
   // Wakes blocked producer and consumer calls. Cached device state is kept
   // intact so destruction can drain already submitted work safely.
@@ -75,9 +69,10 @@ class ScheduleOverlapState final {
  private:
   void update_prior_output(std::optional<ForwardOutput> output,
                            std::vector<std::string> request_ids,
-                           std::vector<std::string> sample_sequence_ids,
-                           bool retain_tokenless_output);
+                           std::vector<std::string> sample_sequence_ids);
 
+  const bool publish_to_host_;
+  const bool retain_tokenless_output_;
   mutable std::mutex mutex_;
   std::condition_variable condition_;
   ForwardOutput prior_output_;

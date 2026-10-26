@@ -31,6 +31,8 @@ class VlmForwardInput;
 // execution and model-specific decode rebuilding remain worker capabilities.
 class ScheduleOverlap final {
  public:
+  ScheduleOverlap(bool is_driver, bool enable_eplb);
+
   std::optional<ForwardOutput> execute(WorkerImpl& worker,
                                        LlmForwardInput& input);
   std::optional<ForwardOutput> execute(WorkerImpl& worker,

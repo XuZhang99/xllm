@@ -487,7 +487,6 @@ class WorkerImpl {
                        MasterStatus master_status);
 
   WorkerResidencyState residency_state_;
-  ScheduleOverlap schedule_overlap_;
 
   template <typename Input>
   std::optional<ForwardOutput> step_for_schedule_overlap_impl(
@@ -542,6 +541,10 @@ class WorkerImpl {
   bool driver_ = false;
   bool dp_driver_ = false;
 
+ private:
+  ScheduleOverlap schedule_overlap_;
+
+ protected:
   // working thread
   // make sure only 1 thread in the pool
   // if enable_schedule_overlap, two step tasks might be dispatched to

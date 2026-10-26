@@ -421,23 +421,28 @@ void apply_idle_block_dummy_input(ModelParams& input_params,
   input_params.attention.rebuild_device_buffer(device);
 }
 
+bool is_dp_driver(const ParallelArgs& parallel_args) {
+  const int32_t tp_size = parallel_args.world_size() /
+                          (parallel_args.dp_size() * parallel_args.cp_size());
+  return parallel_args.dp_size() > 1 &&
+         parallel_args.rank() % (tp_size * parallel_args.cp_size()) == 0;
+}
+
 }  // namespace
 
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
                        const torch::Device& device,
                        const runtime::Options& options)
-    : options_(options), device_(device), parallel_args_(parallel_args) {
+    : options_(options),
+      driver_(parallel_args.rank() == 0),
+      dp_driver_(is_dp_driver(parallel_args)),
+      schedule_overlap_(is_driver(), EPLBConfig::get_instance().enable_eplb()),
+      device_(device),
+      parallel_args_(parallel_args) {
   if (options_.enable_speculative_decode() &&
       options_.num_decoding_tokens() == 1) {
     is_spec_draft_ = true;
   }
-
-  // first worker is the driver
-  driver_ = parallel_args.rank() == 0;
-  int32_t tp_size = parallel_args.world_size() /
-                    (parallel_args.dp_size() * parallel_args.cp_size());
-  dp_driver_ = parallel_args.dp_size() > 1 &&
-               parallel_args.rank() % (tp_size * parallel_args.cp_size()) == 0;
 
   device_.set_device();
   device_.init_device_context();

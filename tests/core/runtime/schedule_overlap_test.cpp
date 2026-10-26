@@ -27,6 +27,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "core/framework/config/eplb_config.h"
 #include "core/framework/constrained/json_object_grammar.h"
 #include "core/runtime/worker_impl.h"
 
@@ -34,6 +35,20 @@ namespace xllm {
 namespace {
 
 using namespace std::chrono_literals;
+
+template <typename T>
+class ScopedConfigValue final {
+ public:
+  ScopedConfigValue(T& value, T new_value) : value_(value), old_value_(value) {
+    value_ = new_value;
+  }
+
+  ~ScopedConfigValue() { value_ = old_value_; }
+
+ private:
+  T& value_;
+  T old_value_;
+};
 
 ForwardOutput token_output(int32_t token_id) {
   ForwardOutput output;
@@ -53,10 +68,18 @@ class OverlapTestWorker final : public WorkerImpl {
       std::vector<std::optional<ForwardOutput>> outputs,
       bool driver = true,
       ContinuationMode continuation_mode = ContinuationMode::CUSTOM_REBUILD)
-      : WorkerImpl(ParallelArgs(/*rank=*/driver ? 0 : 1,
-                                /*world_size=*/2,
-                                /*dp_size=*/1,
-                                /*process_group=*/nullptr),
+      : OverlapTestWorker(std::move(outputs),
+                          ParallelArgs(/*rank=*/driver ? 0 : 1,
+                                       /*world_size=*/2,
+                                       /*dp_size=*/1,
+                                       /*process_group=*/nullptr),
+                          continuation_mode) {}
+
+  OverlapTestWorker(
+      std::vector<std::optional<ForwardOutput>> outputs,
+      const ParallelArgs& parallel_args,
+      ContinuationMode continuation_mode = ContinuationMode::CUSTOM_REBUILD)
+      : WorkerImpl(parallel_args,
                    torch::Device(torch::kPrivateUse1, /*index=*/0),
                    options()),
         outputs_(std::move(outputs)),
@@ -504,6 +527,71 @@ TYPED_TEST(ScheduleOverlapTest, NonDriverContinuesWithoutHostConsumption) {
   ASSERT_TRUE(std::move(second).get().has_value());
   EXPECT_EQ(worker.continuation_count(), 1);
   EXPECT_EQ(worker.executed_tokens().template item<int32_t>(), 17);
+}
+
+TYPED_TEST(ScheduleOverlapTest,
+           EplbNonDriverPublishesTokenlessMetadataWithFixedPolicy) {
+  ScopedConfigValue<bool> eplb(EPLBConfig::get_instance().enable_eplb(), true);
+  ForwardOutput output;
+  output.expert_load_data = torch::tensor({3, 5}, torch::kInt64);
+  output.prepared_token = 11;
+  OverlapTestWorker worker({std::move(output)}, /*driver=*/false);
+  ScopedConfigValue<bool> changed_eplb(EPLBConfig::get_instance().enable_eplb(),
+                                       false);
+  auto step = worker.step_async(step_input<TypeParam>(/*decode=*/false))
+                  .toUnsafeFuture();
+  step.wait(2s);
+  const bool step_ready = step.isReady();
+  if (!step_ready) {
+    worker.begin_shutdown();
+  }
+  ASSERT_TRUE(step_ready);
+  ASSERT_TRUE(std::move(step).get().has_value());
+
+  auto publication = std::async(std::launch::async, [&worker]() {
+    return worker.get_last_step_result();
+  });
+  const std::future_status publication_status = publication.wait_for(2s);
+  if (publication_status != std::future_status::ready) {
+    worker.begin_shutdown();
+  }
+  ASSERT_EQ(publication_status, std::future_status::ready);
+  const ForwardOutput published = publication.get();
+  EXPECT_FALSE(published.sample_output.next_tokens.defined());
+  ASSERT_TRUE(published.expert_load_data.defined());
+  EXPECT_TRUE(torch::equal(published.expert_load_data,
+                           torch::tensor({3, 5}, torch::kInt64)));
+  EXPECT_EQ(published.prepared_token, 11);
+}
+
+TYPED_TEST(ScheduleOverlapTest, DpDriverPublishesWithoutEplb) {
+  ScopedConfigValue<bool> eplb(EPLBConfig::get_instance().enable_eplb(), false);
+  const ParallelArgs parallel_args(/*rank=*/2,
+                                   /*world_size=*/4,
+                                   /*dp_size=*/2,
+                                   /*process_group=*/nullptr);
+  OverlapTestWorker worker({token_output(17)}, parallel_args);
+  auto step = worker.step_async(step_input<TypeParam>(/*decode=*/false))
+                  .toUnsafeFuture();
+  step.wait(2s);
+  const bool step_ready = step.isReady();
+  if (!step_ready) {
+    worker.begin_shutdown();
+  }
+  ASSERT_TRUE(step_ready);
+  ASSERT_TRUE(std::move(step).get().has_value());
+
+  auto publication = std::async(std::launch::async, [&worker]() {
+    return worker.get_last_step_result();
+  });
+  const std::future_status publication_status = publication.wait_for(2s);
+  if (publication_status != std::future_status::ready) {
+    worker.begin_shutdown();
+  }
+  ASSERT_EQ(publication_status, std::future_status::ready);
+  const ForwardOutput published = publication.get();
+  ASSERT_TRUE(published.sample_output.next_tokens.defined());
+  EXPECT_EQ(published.sample_output.next_tokens.template item<int64_t>(), 17);
 }
 
 TYPED_TEST(ScheduleOverlapTest,
