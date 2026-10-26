@@ -543,9 +543,9 @@ class ExtBuild(build_ext):
         cmake_dir = get_cmake_dir()
         if self.build_test_targets and self.device == "musa":
             raise ValueError("Unit-test targets are not supported for the musa backend.")
-        # The command owns test registration, including when reusing a cache
-        # configured by the other command or receiving CMAKE_ARGS overrides.
-        testing_option = f"-DBUILD_TESTING={'ON' if self.build_test_targets else 'OFF'}"
+        # torch_npu_ops sets properties on its tests unconditionally, so keep
+        # registration enabled and select product/test targets at build time.
+        testing_option = f"-DBUILD_TESTING={'OFF' if self.device == 'musa' else 'ON'}"
         subprocess.check_call([cmake_cmd, self.base_dir] + cmake_args + [testing_option], cwd=cmake_dir, env=env)
         with open(os.path.join(cmake_dir, "mooncake_ha_runtime_libraries.txt"), encoding="utf-8") as runtime_file:
             ha_libraries = runtime_file.read().splitlines()
@@ -646,6 +646,8 @@ class ExtBuildTests(ExtBuild):
         )
         # Embedded MLU tests import these packages from the build directory,
         # including when no product build has prepared that directory yet.
+        # Make xllm a regular package so an installed wheel cannot shadow it.
+        shutil.copy2(os.path.join(self.base_dir, "xllm", "__init__.py"), os.path.join(extdir, "__init__.py"))
         _stage_mlu_triton_kernels(self.base_dir, extdir, self.device)
         _stage_triton_compiler_package(self.base_dir, extdir)
 

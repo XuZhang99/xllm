@@ -41,6 +41,7 @@ class BuildCommandsTest(unittest.TestCase):
         (self.extdir / "xllm").write_text("native executable", encoding="utf-8")
         compiler = self.root / "xllm" / "compiler"
         (compiler / "triton").mkdir(parents=True)
+        (self.root / "xllm" / "__init__.py").write_text("STAGED_ROOT = True\n", encoding="utf-8")
         for name in ("__init__.py", "triton/__init__.py", "triton/compile.py"):
             (compiler / name).write_text("STAGED = True\n", encoding="utf-8")
         kernels = self.root / "xllm" / "core" / "kernels" / "mlu" / "triton_kernel"
@@ -78,7 +79,7 @@ class BuildCommandsTest(unittest.TestCase):
                 self._build_targets(command)
 
                 configure, build = call.call_args_list
-                self.assertEqual(configure.args[0][-1], "-DBUILD_TESTING=OFF")
+                self.assertEqual(configure.args[0][-1], "-DBUILD_TESTING=ON")
                 targets = build.args[0][build.args[0].index("--target") + 1 :]
                 expected = ["xllm", "mooncake_master", "mooncake_client", "stage_mooncake_ha_runtime"]
                 if export:
@@ -123,7 +124,7 @@ class BuildCommandsTest(unittest.TestCase):
 
     def test_command_controls_test_registration_after_opposite_configuration(self) -> None:
         commands = (
-            (self.setup.ExtBuild, "ON", "OFF"),
+            (self.setup.ExtBuild, "OFF", "ON"),
             (self.setup.ExtBuildTests, "OFF", "ON"),
             (self.setup.ExtBuildSingleTest, "OFF", "ON"),
         )
@@ -139,6 +140,11 @@ class BuildCommandsTest(unittest.TestCase):
         with mock.patch.object(self.setup.subprocess, "check_call"):
             self._build_targets(command)
 
+        installed = self.root / "installed"
+        (installed / "xllm").mkdir(parents=True)
+        (installed / "xllm" / "__init__.py").write_text(
+            "raise RuntimeError('stale installed wheel')\n", encoding="utf-8"
+        )
         result = subprocess.run(
             [
                 sys.executable,
@@ -149,7 +155,7 @@ class BuildCommandsTest(unittest.TestCase):
                 "assert compile.STAGED and fixture_kernel.STAGED",
             ],
             cwd=self.cmake_dir,
-            env={**os.environ, "PYTHONPATH": str(self.extdir.parent)},
+            env={**os.environ, "PYTHONPATH": os.pathsep.join((str(self.extdir.parent), str(installed)))},
             capture_output=True,
             text=True,
             check=False,

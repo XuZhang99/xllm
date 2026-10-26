@@ -69,8 +69,9 @@ python setup.py bdist_wheel
 python setup.py install
 ```
 
-`build` configures CMake with `BUILD_TESTING=OFF`; `build_tests` and `test`
-enable it and reuse the same build directory. Pass `--device npu` (or another
+`build` compiles the product targets; `build_tests` and `test` compile the test
+targets using the same build directory. Test targets remain registered in CMake
+for compatibility with third-party build definitions. Pass `--device npu` (or another
 supported backend) to select the target device. Wheel builds still build and
 run unit tests unless `SKIP_TEST=1` is set; `SKIP_EXPORT=1` separately disables
 the Python extension in the normal build. Set `MAX_JOBS` to control native

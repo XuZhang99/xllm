@@ -69,8 +69,9 @@ python setup.py bdist_wheel
 python setup.py install
 ```
 
-`build` 使用 `BUILD_TESTING=OFF` 配置 CMake；`build_tests` 和 `test`
-会启用单测，并复用同一个构建目录。可传入 `--device npu` 等参数指定硬件后端。
+`build` 只编译交付产物；`build_tests` 和 `test` 复用同一个构建目录编译单测。
+为兼容第三方构建定义，CMake 中仍保留测试目标注册。
+可传入 `--device npu` 等参数指定硬件后端。
 构建 wheel 时仍会编译和运行单测，设置 `SKIP_TEST=1` 可跳过；
 `SKIP_EXPORT=1` 则单独控制普通构建是否编译 Python 扩展。
 使用 `MAX_JOBS` 控制原生代码和 xllm_ops 的编译并发数；如需单独调整
