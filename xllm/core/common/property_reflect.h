@@ -74,7 +74,18 @@ class PropertyVisitor {
   virtual void visit_absent(const std::string& name) = 0;
 };
 
+template <typename Owner>
+void visit_properties(const Owner& owner, PropertyVisitor& visitor);
+
 namespace reflect {
+
+template <typename T, typename = void>
+struct IsReflected : std::false_type {};
+
+template <typename T>
+struct IsReflected<T, std::void_t<typename T::xllm_property_owner_t>>
+    : std::bool_constant<std::is_same_v<typename T::xllm_property_owner_t, T>> {
+};
 
 // int32_t/int and int64_t are addressed by their fixed-width names in the
 // PropertyVisitor overload set. On xLLM's LP64 targets `int` is int32_t, so a
@@ -102,13 +113,16 @@ inline constexpr bool kVisitable =
     std::is_same_v<T, std::unordered_set<int32_t>>;
 
 // Emit a single field value. Directly visitable types are forwarded to the
-// visitor; anything else is dropped at compile time.
+// visitor. Nested reflected structs recursively emit their leaf fields using
+// the leaf names, preserving the flat property contract. Other types are
+// dropped at compile time.
 template <typename T>
 void emit(PropertyVisitor& visitor, const std::string& name, const T& value) {
   if constexpr (kVisitable<T>) {
     visitor.visit(name, value);
+  } else if constexpr (IsReflected<T>::value) {
+    visit_properties(value, visitor);
   }
-  // Non-visitable types are intentionally skipped.
 }
 
 // std::optional fields: forward the contained value when engaged, otherwise
