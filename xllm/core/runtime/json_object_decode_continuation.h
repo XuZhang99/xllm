@@ -27,9 +27,9 @@ class LlmForwardInput;
 class Stream;
 class VlmForwardInput;
 
-// Advances per-sequence JSON constraints from accepted prior output and makes
-// failed rows safe before decode tokens are replaced or rebuilt.
-class JsonObjectContinuation final {
+// Adapts prior runtime output to JSON constraints and makes failed rows safe
+// before decode tokens are replaced or rebuilt.
+class JsonObjectDecodeContinuation final {
  public:
   static void prepare(LlmForwardInput& input,
                       const ForwardOutput& prior_output,
@@ -44,7 +44,7 @@ class JsonObjectContinuation final {
 
  private:
   template <typename Input>
-  static void advance_states(
+  static void advance_constraints(
       Input& input,
       const ForwardOutput& prior_output,
       const std::vector<std::string>& prior_sample_sequence_ids,

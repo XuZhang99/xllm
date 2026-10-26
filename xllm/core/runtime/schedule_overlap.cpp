@@ -19,7 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "core/framework/config/eplb_config.h"
-#include "core/runtime/json_object_continuation.h"
+#include "core/runtime/json_object_decode_continuation.h"
 #include "core/runtime/worker_impl.h"
 #if defined(USE_NPU)
 #include "core/kernels/npu/xllm_ops/xllm_ops_api.h"
@@ -52,11 +52,11 @@ void ScheduleOverlap::prepare_continuation(WorkerImpl& worker, Input& input) {
     CHECK(worker.compute_stream_->wait_event(prior_output.ready_event))
         << "failed to wait last step output before overlap continuation";
   }
-  JsonObjectContinuation::prepare(input,
-                                  prior_output,
-                                  state_.sample_sequence_ids(),
-                                  worker.device_,
-                                  *worker.compute_stream_);
+  JsonObjectDecodeContinuation::prepare(input,
+                                        prior_output,
+                                        state_.sample_sequence_ids(),
+                                        worker.device_,
+                                        *worker.compute_stream_);
   if (reuse_tokens &&
       !worker.prepare_model_decode_continuation(input, prior_output)) {
     replace_tokens(

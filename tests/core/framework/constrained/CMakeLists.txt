@@ -13,3 +13,13 @@ cc_test(
     :sampler
     GTest::gtest_main
 )
+
+cc_test(
+  NAME
+    json_object_constraint_batch_test
+  SRCS
+    json_object_constraint_batch_test.cpp
+  DEPS
+    :json_object_constraint_batch
+    GTest::gtest_main
+)

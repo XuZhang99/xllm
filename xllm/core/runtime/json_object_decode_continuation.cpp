@@ -13,11 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/runtime/json_object_continuation.h"
+#include "core/runtime/json_object_decode_continuation.h"
 
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include "core/framework/constrained/json_object_constraint_batch.h"
 #include "core/platform/stream.h"
 #include "core/runtime/forward_params.h"
 #include "core/runtime/json_object_output_rows.h"
@@ -27,7 +28,7 @@ limitations under the License.
 namespace xllm {
 
 template <typename Input>
-void JsonObjectContinuation::advance_states(
+void JsonObjectDecodeContinuation::advance_constraints(
     Input& input,
     const ForwardOutput& prior_output,
     const std::vector<std::string>& prior_sample_sequence_ids,
@@ -99,76 +100,35 @@ void JsonObjectContinuation::advance_states(
 
   for (size_t state_idx = 0; state_idx < input.json_object_states.size();
        ++state_idx) {
-    JsonObjectGrammarState& state = input.json_object_states[state_idx];
-    if (!state.initialized()) {
-      continue;
-    }
-
-    const std::string& sequence_id = input.sample_sequence_ids[state_idx];
-    const int32_t output_idx = output_rows[state_idx];
-    if (output_idx == detail::kInvalidJsonObjectOutputRow) {
-      state = JsonObjectGrammarState();
-      continue;
-    }
-    if (output_idx == detail::kNoPriorJsonObjectOutputRow) {
-      continue;
-    }
-    CHECK(has_prior_output);
-    CHECK_GE(output_idx, 0);
-    CHECK_LT(output_idx, next_tokens.size(0));
-    if (next_tokens.dim() == 1) {
-      const int32_t token_id =
-          static_cast<int32_t>(next_tokens[output_idx].item<int64_t>());
-      if (token_id >= 0) {
-        if (!state.can_accept_token(token_id)) {
-          const JsonObjectGrammarSnapshot snapshot = state.snapshot();
-          LOG(ERROR)
-              << "last-step token violates json_object grammar, sequence_id="
-              << sequence_id << ", output_row=" << output_idx
-              << ", token_offset=0, token_id=" << token_id
-              << ", committed_tokens=" << snapshot.token_ids.size()
-              << ", state_fingerprint=" << state.fingerprint();
-          input.json_object_errors.push_back(
-              {sequence_id, "prior token violates json_object grammar"});
-          state = JsonObjectGrammarState();
-          continue;
-        }
-        CHECK(state.accept_token(token_id));
-      }
-      continue;
-    }
-
-    const torch::Tensor output_row = next_tokens[output_idx];
-    for (int64_t token_idx = 0; token_idx < output_row.numel(); ++token_idx) {
-      const int32_t token_id =
-          static_cast<int32_t>(output_row[token_idx].item<int64_t>());
-      if (token_id < 0) {
-        break;
-      }
-      if (!state.can_accept_token(token_id)) {
-        const JsonObjectGrammarSnapshot snapshot = state.snapshot();
-        LOG(ERROR)
-            << "last-step token violates json_object grammar, sequence_id="
-            << sequence_id << ", output_row=" << output_idx
-            << ", token_offset=" << token_idx << ", token_id=" << token_id
-            << ", committed_tokens=" << snapshot.token_ids.size()
-            << ", state_fingerprint=" << state.fingerprint();
-        input.json_object_errors.push_back(
-            {sequence_id, "prior token violates json_object grammar"});
-        state = JsonObjectGrammarState();
-        break;
-      }
-      CHECK(state.accept_token(token_id));
+    if (output_rows[state_idx] == detail::kInvalidJsonObjectOutputRow) {
+      input.json_object_states[state_idx] = JsonObjectGrammarState();
+      output_rows[state_idx] = detail::kNoPriorJsonObjectOutputRow;
     }
   }
+
+  JsonObjectConstraintBatch constraints(input.json_object_states);
+  const auto violations = constraints.advance(next_tokens, output_rows);
+  for (const JsonObjectConstraintViolation& violation : violations) {
+    const std::string& sequence_id =
+        input.sample_sequence_ids[violation.state_index];
+    LOG(ERROR) << "last-step token violates json_object grammar, sequence_id="
+               << sequence_id
+               << ", output_row=" << output_rows[violation.state_index]
+               << ", token_offset=" << violation.token_offset
+               << ", token_id=" << violation.token_id
+               << ", committed_tokens=" << violation.committed_tokens
+               << ", state_fingerprint=" << violation.state_fingerprint;
+    input.json_object_errors.push_back(
+        {sequence_id, "prior token violates json_object grammar"});
+  }
   input.sampling_params.filter_bitmask =
-      build_json_object_filter_bitmask(input.json_object_states, device);
+      constraints.build_filter_bitmask(device);
   // Prefer compact bitmask; clear dense float mask to avoid duplicate H2D.
   input.sampling_params.filter_mask = torch::Tensor();
 }
 
 template <typename Input>
-void JsonObjectContinuation::sanitize_error_inputs(Input& input) {
+void JsonObjectDecodeContinuation::sanitize_error_inputs(Input& input) {
   std::string error;
   CHECK(detail::sanitize_json_object_error_token_ids(
       &input.token_ids,
@@ -179,24 +139,24 @@ void JsonObjectContinuation::sanitize_error_inputs(Input& input) {
       << error;
 }
 
-void JsonObjectContinuation::prepare(
+void JsonObjectDecodeContinuation::prepare(
     LlmForwardInput& input,
     const ForwardOutput& prior_output,
     const std::vector<std::string>& prior_sample_sequence_ids,
     const torch::Device& device,
     Stream& compute_stream) {
-  advance_states(
+  advance_constraints(
       input, prior_output, prior_sample_sequence_ids, device, compute_stream);
   sanitize_error_inputs(input);
 }
 
-void JsonObjectContinuation::prepare(
+void JsonObjectDecodeContinuation::prepare(
     VlmForwardInput& input,
     const ForwardOutput& prior_output,
     const std::vector<std::string>& prior_sample_sequence_ids,
     const torch::Device& device,
     Stream& compute_stream) {
-  advance_states(
+  advance_constraints(
       input, prior_output, prior_sample_sequence_ids, device, compute_stream);
   sanitize_error_inputs(input);
 }
