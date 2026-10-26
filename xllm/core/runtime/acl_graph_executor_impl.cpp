@@ -52,7 +52,9 @@ constexpr uint64_t kSpecVerifyQMaxSeqLenShift = 32;
 constexpr uint64_t kSpecVerifyBucketMask = (1ull << 16) - 1;
 constexpr uint64_t kSpecVerifyFieldMask = (1ull << 16) - 1;
 constexpr uint64_t kSpecVerifyExpandedBlockMask = (1ull << 15) - 1;
-constexpr size_t kMaxSpecVerifyGraphVariantsPerSlot = 16;
+// Keep prefill workspace headroom after sustained decoding. The limit must be
+// rank-independent so TP ranks retain identical capture/replay decisions.
+constexpr size_t kMaxSpecVerifyGraphVariantsPerSlot = 8;
 constexpr uint64_t kMlaGraphKeyMask = 1ull << 62;
 constexpr uint64_t kMlaGraphKeyPayloadMask = (1ull << 62) - 1;
 bool uses_static_mtp_graph_task_variant(const ModelInputParams& params,
