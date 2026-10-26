@@ -19,7 +19,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/batch.h"
-#include "core/framework/batch/batch_output_phase.h"
+#include "core/framework/batch/batch_output_action.h"
 
 namespace xllm {
 
@@ -59,9 +59,9 @@ class BatchGroup final {
   const_iterator cbegin() const { return batches_.cbegin(); }
   const_iterator cend() const { return batches_.cend(); }
 
-  // Apply each rank's output using the same writeback phase.
+  // Apply each rank's output using the same writeback action.
   void apply_outputs(const std::vector<RawForwardOutput>& outputs,
-                     BatchOutputPhase phase);
+                     BatchOutputAction action);
 
  private:
   Container batches_;

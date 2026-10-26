@@ -59,20 +59,17 @@ RecForwardInput RecBatch::prepare_rec_forward_input(
       num_decoding_tokens, min_decoding_batch_size, args, thread_pool);
 }
 
-void RecBatch::process_sample_output(const RawForwardOutput& output,
-                                     BatchOutputPhase phase) {
-  state_.process_sample_output(output, phase);
+void RecBatch::process_sample_output(const RawForwardOutput& output) {
+  state_.process_sample_output(output);
 }
 
 void RecBatch::process_sample_output(const SampleOutput& output,
-                                     BatchOutputPhase phase,
                                      bool force_requested_beam_result_size) {
-  state_.process_sample_output(output, phase, force_requested_beam_result_size);
+  state_.process_sample_output(output, force_requested_beam_result_size);
 }
 
-void RecBatch::process_beam_search_output(const RawForwardOutput& output,
-                                          BatchOutputPhase phase) {
-  state_.process_beam_search_output(output, phase);
+void RecBatch::process_beam_search_output(const RawForwardOutput& output) {
+  state_.process_beam_search_output(output);
 }
 
 void RecBatch::process_beam_sequence_group(const ForwardOutput& output) {

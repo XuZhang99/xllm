@@ -694,8 +694,8 @@ ForwardOutput LLMEngine::step(BatchGroup& batch) {
   }
   batch.apply_outputs(outputs,
                       options_.enable_schedule_overlap()
-                          ? BatchOutputPhase::RESERVE_PENDING
-                          : BatchOutputPhase::IMMEDIATE);
+                          ? BatchOutputAction::RESERVE_PENDING
+                          : BatchOutputAction::IMMEDIATE);
 
   COUNTER_ADD(engine_latency_seconds, timer.elapsed_seconds());
   return {};

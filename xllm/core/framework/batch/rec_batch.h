@@ -18,7 +18,6 @@ limitations under the License.
 #include <limits>
 #include <utility>
 
-#include "core/framework/batch/batch_output_phase.h"
 #include "core/framework/batch/rec_batch_state.h"
 
 namespace xllm {
@@ -75,13 +74,10 @@ class RecBatch final {
                                             uint32_t min_decoding_batch_size,
                                             const ModelArgs& args,
                                             MPMCThreadPool* thread_pool);
-  void process_sample_output(const RawForwardOutput& output,
-                             BatchOutputPhase phase);
+  void process_sample_output(const RawForwardOutput& output);
   void process_sample_output(const SampleOutput& output,
-                             BatchOutputPhase phase,
                              bool force_requested_beam_result_size);
-  void process_beam_search_output(const RawForwardOutput& output,
-                                  BatchOutputPhase phase);
+  void process_beam_search_output(const RawForwardOutput& output);
   void process_beam_sequence_group(const ForwardOutput& output);
   void finish();
 

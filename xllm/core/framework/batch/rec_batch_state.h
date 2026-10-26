@@ -20,7 +20,6 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "core/framework/batch/batch_output_phase.h"
 #include "core/framework/batch/batch_state.h"
 #include "core/framework/batch/rec_batch_output_handler.h"
 
@@ -79,13 +78,10 @@ class RecBatchState final {
                                             const ModelArgs& args,
                                             MPMCThreadPool* thread_pool);
 
-  void process_sample_output(const RawForwardOutput& output,
-                             BatchOutputPhase phase);
+  void process_sample_output(const RawForwardOutput& output);
   void process_sample_output(const SampleOutput& output,
-                             BatchOutputPhase phase,
                              bool force_requested_beam_result_size);
-  void process_beam_search_output(const RawForwardOutput& output,
-                                  BatchOutputPhase phase);
+  void process_beam_search_output(const RawForwardOutput& output);
   void process_beam_sequence_group(const ForwardOutput& output);
   void finish();
 

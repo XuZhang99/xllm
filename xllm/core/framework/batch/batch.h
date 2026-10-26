@@ -25,8 +25,8 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "core/framework/batch/batch_output_action.h"
 #include "core/framework/batch/batch_output_handler.h"
-#include "core/framework/batch/batch_output_phase.h"
 #include "core/framework/batch/batch_state.h"
 #include "core/framework/request/request.h"
 #include "core/runtime/vlm_forward_params.h"
@@ -107,15 +107,15 @@ class Batch final {
 
   // Apply sampled tokens or reserve/commit a pending overlap result.
   void process_sample_output(const SampleOutput& sample_output,
-                             BatchOutputPhase phase,
+                             BatchOutputAction action,
                              bool force_requested_beam_result_size = false);
 
   void process_sample_output(const RawForwardOutput& raw_output,
-                             BatchOutputPhase phase);
+                             BatchOutputAction action);
 
   // process output for beam search kernel
   void process_beam_search_output(const RawForwardOutput& raw_output,
-                                  BatchOutputPhase phase);
+                                  BatchOutputAction action);
 
   // Start a new sequence view after beam expansion. New beam rows have no
   // scheduler token limit.

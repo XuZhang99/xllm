@@ -25,7 +25,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "core/framework/batch/batch_output_phase.h"
+#include "core/framework/batch/batch_output_action.h"
 #include "core/framework/batch/rec_batch_factory.h"
 #include "core/framework/batch/rec_batch_output_handler.h"
 #include "core/framework/batch/sampling_input_builder.h"
@@ -353,7 +353,6 @@ TEST(BatchFactoryTest, RecOutputsRefreshSamplingTargetsAcrossForwards) {
   SampleOutput sample_output;
   sample_output.next_tokens = torch::tensor({42}, torch::kInt);
   batch.process_sample_output(sample_output,
-                              BatchOutputPhase::IMMEDIATE,
                               /*force_requested_beam_result_size=*/false);
   EXPECT_EQ(first_sequence->num_generated_tokens(), 0);
   ASSERT_EQ(second_sequence->num_generated_tokens(), 1);
@@ -369,7 +368,7 @@ TEST(BatchFactoryTest, RecOutputsRefreshSamplingTargetsAcrossForwards) {
   raw_output.outputs.resize(2);
   raw_output.outputs[0].tokens = {RawToken{.id = 51}};
   raw_output.outputs[1].tokens = {RawToken{.id = 43}};
-  batch.process_sample_output(raw_output, BatchOutputPhase::IMMEDIATE);
+  batch.process_sample_output(raw_output);
 
   ASSERT_EQ(first_sequence->num_generated_tokens(), 1);
   ASSERT_EQ(second_sequence->num_generated_tokens(), 2);
@@ -409,8 +408,7 @@ TEST(BatchFactoryTest, RecImmediateOutputsCommitBeamsWithGlobalOverlapEnabled) {
     output.logprobs = torch::tensor({-0.1F});
     output.top_tokens = torch::tensor({{41, 42, 43}}, torch::kInt64);
     output.top_logprobs = torch::tensor({{-0.1F, -0.2F, -0.3F}});
-    batch.process_sample_output(
-        output, BatchOutputPhase::IMMEDIATE, force_requested_beam_result_size);
+    batch.process_sample_output(output, force_requested_beam_result_size);
 
     const size_t result_size = force_requested_beam_result_size ? 3 : 2;
     ASSERT_EQ(request->sequences().size(), result_size);
@@ -420,6 +418,44 @@ TEST(BatchFactoryTest, RecImmediateOutputsCommitBeamsWithGlobalOverlapEnabled) {
       EXPECT_EQ(beam->num_generated_tokens(), 1u);
       EXPECT_EQ(beam->tokens().back(), 41 + static_cast<int32_t>(i));
     }
+  }
+}
+
+TEST(BatchFactoryTest, RecRawOutputsCommitBeamsWithGlobalOverlapEnabled) {
+  ScopedConfigValue<bool> schedule_overlap(
+      SchedulerConfig::get_instance().enable_schedule_overlap(), true);
+  ScopedConfigValue<bool> chunked_prefill(
+      SchedulerConfig::get_instance().enable_chunked_prefill(), false);
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  RecBatchFactory factory(/*dp_size=*/1, BatchInputType::SEQUENCE);
+  auto request = make_request(/*rank=*/0, RecType::kLlmRec, /*beam_width=*/2);
+  auto& sampling = request->state().sampling_param;
+  sampling.logprobs = true;
+  sampling.top_logprobs = 3;
+  sampling.num_return_sequences = 3;
+  auto* sequence = request->sequences().front().get();
+  sequence->add_blocks(BlockType::KV, manager.allocate(/*num_blocks=*/1));
+  auto batches = factory.create_batches({request}, {sequence}, {3});
+  auto& batch = batches[0];
+  (void)batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  RawForwardOutput output;
+  output.outputs.resize(1);
+  output.outputs[0].tokens = {RawToken{.id = 41,
+                                       .logprob = -0.1F,
+                                       .top_tokens = {41, 42, 43},
+                                       .top_logprobs = {-0.1F, -0.2F, -0.3F}}};
+  batch.process_sample_output(output);
+
+  ASSERT_EQ(request->sequences().size(), 2u);
+  for (size_t i = 0; i < request->sequences().size(); ++i) {
+    const auto& beam = request->sequences()[i];
+    EXPECT_NE(dynamic_cast<const LlmRecSequence*>(beam.get()), nullptr);
+    EXPECT_EQ(beam->num_generated_tokens(), 1u);
+    EXPECT_EQ(beam->tokens().back(), 41 + static_cast<int32_t>(i));
   }
 }
 
@@ -446,7 +482,7 @@ TEST(BatchOutputHandlerTest, DoesNotSampleOneRecDecoderContext) {
   output.outputs[0].tokens = {RawToken{.id = 42}};
   handler.process_sample_output({data.sequences, data.sequence_groups},
                                 output,
-                                BatchOutputPhase::IMMEDIATE);
+                                BatchOutputAction::IMMEDIATE);
   EXPECT_EQ(sequence->num_generated_tokens(), 0u);
 }
 
@@ -487,8 +523,7 @@ TEST(RecBatchOutputHandlerTest,
   raw_output.outputs.resize(2);
   raw_output.outputs[0].tokens = {RawToken{.id = 42}};
   raw_output.outputs[1].tokens = {RawToken{.id = 51}};
-  handler.process_sample_output(
-      output_data, raw_output, BatchOutputPhase::IMMEDIATE);
+  handler.process_sample_output(output_data, raw_output);
   ASSERT_EQ(context_sequence->num_generated_tokens(), 1u);
   ASSERT_EQ(bos_sequence->num_generated_tokens(), 1u);
   EXPECT_EQ(context_sequence->tokens()[0], 42);
@@ -504,7 +539,6 @@ TEST(RecBatchOutputHandlerTest,
   sample_output.next_tokens = torch::tensor({43, 52}, torch::kInt);
   handler.process_sample_output(output_data,
                                 sample_output,
-                                BatchOutputPhase::IMMEDIATE,
                                 /*force_requested_beam_result_size=*/false);
   ASSERT_EQ(context_sequence->num_generated_tokens(), 2u);
   ASSERT_EQ(bos_sequence->num_generated_tokens(), 2u);
@@ -552,8 +586,7 @@ TEST(RecBatchOutputHandlerTest, ContextTargetsRequireLegacyGroupContract) {
     output.outputs.resize(1);
     output.outputs[0].tokens = {RawToken{.id = 61}};
     handler.process_sample_output({data.sequences, data.sequence_groups},
-                                  output,
-                                  BatchOutputPhase::IMMEDIATE);
+                                  output);
     EXPECT_EQ(context_sequence->num_generated_tokens(), 0u);
     ASSERT_EQ(bos_sequence->num_generated_tokens(), 1u);
     EXPECT_EQ(bos_sequence->tokens()[1], 61);
@@ -1043,11 +1076,11 @@ TEST(BatchOutputHandlerDeathTest, RejectsBeamSourceOutsideBatch) {
   output.out_tokens = {4};
   output.out_logprobs = {0.0F};
   EXPECT_DEATH(batches[0].process_beam_search_output(
-                   output, BatchOutputPhase::IMMEDIATE),
+                   output, BatchOutputAction::IMMEDIATE),
                "data.sequences.size");
   output.src_seq_idxes = {-1};
   EXPECT_DEATH(batches[0].process_beam_search_output(
-                   output, BatchOutputPhase::IMMEDIATE),
+                   output, BatchOutputAction::IMMEDIATE),
                "src_seq_idx >= 0");
 }
 

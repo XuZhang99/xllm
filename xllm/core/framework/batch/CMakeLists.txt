@@ -16,7 +16,7 @@ cc_library(
     rec_batch.h
     rec_batch_state.h
     rec_batch_group.h
-    batch_output_phase.h
+    batch_output_action.h
     batch_output_handler.h
     rec_batch_output_handler.h
     batch_sequence_plan.h

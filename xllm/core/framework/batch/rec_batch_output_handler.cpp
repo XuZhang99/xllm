@@ -22,6 +22,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "core/framework/batch/batch_output_action.h"
 #include "core/framework/request/onerec_sequence.h"
 #include "core/framework/request/rec_sequence.h"
 #include "core/util/rec_model_utils.h"
@@ -63,25 +64,26 @@ void RecBatchOutputHandler::prepare(const BatchInputData& data) {
 
 void RecBatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
-    const RawForwardOutput& output,
-    BatchOutputPhase phase) {
-  sequence_handler_.process_sample_output(data, output, phase);
+    const RawForwardOutput& output) {
+  sequence_handler_.process_sample_output(
+      data, output, BatchOutputAction::IMMEDIATE);
 }
 
 void RecBatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
     const SampleOutput& output,
-    BatchOutputPhase phase,
     bool force_requested_beam_result_size) {
-  sequence_handler_.process_sample_output(
-      data, output, phase, force_requested_beam_result_size);
+  sequence_handler_.process_sample_output(data,
+                                          output,
+                                          BatchOutputAction::IMMEDIATE,
+                                          force_requested_beam_result_size);
 }
 
 void RecBatchOutputHandler::process_beam_search_output(
     const BatchOutputData& data,
-    const RawForwardOutput& output,
-    BatchOutputPhase phase) {
-  sequence_handler_.process_beam_search_output(data, output, phase);
+    const RawForwardOutput& output) {
+  sequence_handler_.process_beam_search_output(
+      data, output, BatchOutputAction::IMMEDIATE);
 }
 
 void RecBatchOutputHandler::process_beam_sequence_group(

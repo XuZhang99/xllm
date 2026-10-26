@@ -168,8 +168,8 @@ void BatchOutputHandler::add_sequence_targets(Sequence* sequence,
 void BatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
     const RawForwardOutput& raw_output,
-    BatchOutputPhase phase) {
-  const bool replace_fake_token = phase == BatchOutputPhase::COMMIT_PENDING;
+    BatchOutputAction action) {
+  const bool replace_fake_token = action == BatchOutputAction::COMMIT_PENDING;
   const auto& sequences = data.sequences;
   const std::unordered_set<std::string> failed_request_ids =
       fail_json_object_requests(sequences, raw_output.json_object_errors);
@@ -239,15 +239,15 @@ void BatchOutputHandler::process_sample_output(
       }
     }
   }
-  finish_sample_output(data, phase);
+  finish_sample_output(data, action);
 }
 
 void BatchOutputHandler::process_sample_output(
     const BatchOutputData& data,
     const SampleOutput& sample_output,
-    BatchOutputPhase phase,
+    BatchOutputAction action,
     bool force_requested_beam_result_size) {
-  const bool replace_fake_token = phase == BatchOutputPhase::COMMIT_PENDING;
+  const bool replace_fake_token = action == BatchOutputAction::COMMIT_PENDING;
   const bool has_next_tokens = sample_output.next_tokens.defined() &&
                                sample_output.next_tokens.numel() > 0;
   const bool next_tokens_are_spec_width =
@@ -354,17 +354,17 @@ void BatchOutputHandler::process_sample_output(
     // always append a token, maybe true or fake token
     append_token_for_sequence(seq, token, 0, replace_fake_token);
   }
-  finish_sample_output(data, phase, force_requested_beam_result_size);
+  finish_sample_output(data, action, force_requested_beam_result_size);
 }
 
 void BatchOutputHandler::finish_sample_output(
     const BatchOutputData& data,
-    BatchOutputPhase phase,
+    BatchOutputAction action,
     bool force_requested_beam_result_size) {
-  if (phase == BatchOutputPhase::RESERVE_PENDING) {
+  if (action == BatchOutputAction::RESERVE_PENDING) {
     return;
   }
-  if (phase == BatchOutputPhase::COMMIT_PENDING) {
+  if (action == BatchOutputAction::COMMIT_PENDING) {
     output_targets_.clear();
   }
   process_beam_search(data, force_requested_beam_result_size);
@@ -432,8 +432,8 @@ void BatchOutputHandler::process_beam_search(const BatchOutputData& data,
 void BatchOutputHandler::process_beam_search_output(
     const BatchOutputData& data,
     const RawForwardOutput& raw_output,
-    BatchOutputPhase phase) {
-  const bool replace_fake_token = phase == BatchOutputPhase::COMMIT_PENDING;
+    BatchOutputAction action) {
+  const bool replace_fake_token = action == BatchOutputAction::COMMIT_PENDING;
   const auto& sequences = data.sequences;
   const std::unordered_set<std::string> failed_request_ids =
       fail_json_object_requests(sequences, raw_output.json_object_errors);

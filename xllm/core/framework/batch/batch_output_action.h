@@ -17,7 +17,8 @@ limitations under the License.
 
 namespace xllm {
 
-enum class BatchOutputPhase {
+// Selects how this call applies outputs; it is not retained batch state.
+enum class BatchOutputAction {
   IMMEDIATE,        // Apply real outputs from a synchronous step.
   RESERVE_PENDING,  // Apply worker placeholders; do not create them here.
   COMMIT_PENDING,   // Replace retained output targets with real outputs.

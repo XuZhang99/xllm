@@ -21,7 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/batch/batch_input_data.h"
-#include "core/framework/batch/batch_output_phase.h"
+#include "core/framework/batch/batch_output_action.h"
 #include "core/runtime/forward_params.h"
 
 namespace xllm {
@@ -47,14 +47,14 @@ class BatchOutputHandler final {
   void add_sequence_target(Sequence* sequence);
   void process_sample_output(const BatchOutputData& data,
                              const RawForwardOutput& output,
-                             BatchOutputPhase phase);
+                             BatchOutputAction action);
   void process_sample_output(const BatchOutputData& data,
                              const SampleOutput& output,
-                             BatchOutputPhase phase,
+                             BatchOutputAction action,
                              bool force_requested_beam_result_size);
   void process_beam_search_output(const BatchOutputData& data,
                                   const RawForwardOutput& output,
-                                  BatchOutputPhase phase);
+                                  BatchOutputAction action);
 
  private:
   struct OutputTarget {
@@ -69,7 +69,7 @@ class BatchOutputHandler final {
                                  int32_t token_idx,
                                  bool replace_fake_token);
   void finish_sample_output(const BatchOutputData& data,
-                            BatchOutputPhase phase,
+                            BatchOutputAction action,
                             bool force_requested_beam_result_size = false);
   void process_beam_search(const BatchOutputData& data,
                            bool force_requested_result_size = false);

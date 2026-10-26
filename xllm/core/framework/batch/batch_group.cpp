@@ -28,17 +28,17 @@ BatchGroup::BatchGroup(size_t dp_size) : batches_() {
 }
 
 void BatchGroup::apply_outputs(const std::vector<RawForwardOutput>& outputs,
-                               BatchOutputPhase phase) {
+                               BatchOutputAction action) {
   CHECK_EQ(outputs.size(), size())
       << "Each DP rank must have exactly one output.";
   for (size_t dp_rank = 0; dp_rank < size(); ++dp_rank) {
     Batch& batch = batches_[dp_rank];
     const RawForwardOutput& output = outputs[dp_rank];
-    if (phase == BatchOutputPhase::COMMIT_PENDING ||
+    if (action == BatchOutputAction::COMMIT_PENDING ||
         output.src_seq_idxes.empty()) {
-      batch.process_sample_output(output, phase);
+      batch.process_sample_output(output, action);
     } else {
-      batch.process_beam_search_output(output, phase);
+      batch.process_beam_search_output(output, action);
     }
     batch.refresh_sequences_from_groups();
   }

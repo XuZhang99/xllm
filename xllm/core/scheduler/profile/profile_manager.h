@@ -116,7 +116,7 @@ class ProfileManager {
             [engine](BatchGroup& batch) { return engine->step(batch); },
             [engine](BatchGroup& batch) {
               batch.apply_outputs(engine->collect_step_outputs(batch),
-                                  BatchOutputPhase::COMMIT_PENDING);
+                                  BatchOutputAction::COMMIT_PENDING);
             },
             std::move(distributed_worker_manager)) {}
 

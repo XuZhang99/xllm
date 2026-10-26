@@ -26,7 +26,6 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "core/common/global_flags.h"
-#include "core/framework/batch/batch_output_phase.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/model_loader/hf_model_config.h"
@@ -457,11 +456,9 @@ ForwardOutput RecEngine::LlmRecEnginePipeline::step(RecBatchGroup& batches) {
         LOG(FATAL) << "Failed to execute model, result has no value";
       }
       if (result.value().src_seq_idxes.empty()) {
-        batches[dp_rank].process_sample_output(result.value(),
-                                               BatchOutputPhase::IMMEDIATE);
+        batches[dp_rank].process_sample_output(result.value());
       } else {
-        batches[dp_rank].process_beam_search_output(
-            result.value(), BatchOutputPhase::IMMEDIATE);
+        batches[dp_rank].process_beam_search_output(result.value());
         // Transfer src_blocks_ to blocks_ for beam search sequences
         // RecEngine doesn't have Scheduler/BlockManagerPool to trigger this
         for (size_t i = 0; i < batches[dp_rank].size(); ++i) {
@@ -717,7 +714,6 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
 
   timer.reset();
   batches[0].process_sample_output(prefill_output.sample_output,
-                                   BatchOutputPhase::IMMEDIATE,
                                    /*force_requested_beam_result_size=*/false);
   HISTOGRAM_OBSERVE(rec_sampling_latency_microseconds,
                     timer.elapsed_microseconds());
@@ -744,7 +740,6 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
     timer.reset();
     batches[0].process_sample_output(
         decode_output.sample_output,
-        BatchOutputPhase::IMMEDIATE,
         /*force_requested_beam_result_size=*/i + 1 == kRecDecodeSteps);
     HISTOGRAM_OBSERVE(rec_sampling_latency_microseconds,
                       timer.elapsed_microseconds());
@@ -870,7 +865,6 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
   } else {
     batches[0].process_sample_output(
         output.sample_output,
-        BatchOutputPhase::IMMEDIATE,
         /*force_requested_beam_result_size=*/false);
   }
   HISTOGRAM_OBSERVE(rec_sampling_latency_microseconds,
