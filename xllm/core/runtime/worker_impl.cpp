@@ -1675,14 +1675,28 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async_impl(
       set_hierarchy_layer_synchronizer(input.input_params);
     }
 
-    if (enable_schedule_overlap()) {
-      promise.setValue(
-          schedule_overlap_.execute(*this, input, device_, *compute_stream_));
-      return;
+    const bool overlap = enable_schedule_overlap();
+    if (overlap) {
+      schedule_overlap_.prepare_continuation(
+          input,
+          device_,
+          *compute_stream_,
+          [this, &input](const ForwardOutput& prior_output) {
+            if (prepare_model_decode_continuation(input, prior_output)) {
+              return ScheduleOverlap::DecodeContinuation::MODEL_MANAGED;
+            }
+            return can_prepare_npu_graph_decode_input(input.input_params)
+                       ? ScheduleOverlap::DecodeContinuation::
+                             REPLACE_GRAPH_TOKENS
+                       : ScheduleOverlap::DecodeContinuation::REPLACE_TOKENS;
+          });
     }
-    auto output = this->step(input);
+    auto output =
+        overlap ? step_for_schedule_overlap(input) : this->step(input);
     observe_execution_memory(input.input_params.meta.is_graph_warmup);
-    if (output.has_value()) {
+    if (overlap) {
+      schedule_overlap_.complete_step(input, *compute_stream_, output);
+    } else if (output.has_value()) {
       output->is_graph_warmup = input.input_params.meta.is_graph_warmup;
     }
     promise.setValue(std::move(output));

@@ -15,6 +15,9 @@ limitations under the License.
 
 #pragma once
 
+#include <c10/util/FunctionRef.h>
+
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -26,65 +29,56 @@ namespace xllm {
 class Device;
 class Stream;
 class VlmForwardInput;
-class VlmModelParams;
 
-// Executes the one-step overlap protocol on the worker's FIFO execution thread.
-// Owns continuation provenance, stream dependencies and host publication; model
-// execution and model-specific decode rebuilding remain worker capabilities.
+// Owns continuation provenance, stream dependencies and host publication on the
+// worker's FIFO execution thread. The worker executes the model between
+// prepare_continuation() and complete_step().
 class ScheduleOverlap final {
  public:
-  // Non-owning model capabilities. Execution resources are borrowed separately
-  // for each step because workers may replace their compute stream at load.
-  class ModelExecution {
-   public:
-    virtual std::optional<ForwardOutput> step_for_schedule_overlap(
-        const LlmForwardInput& input) = 0;
-    virtual std::optional<ForwardOutput> step_for_schedule_overlap(
-        const VlmForwardInput& input) = 0;
-    virtual bool prepare_model_decode_continuation(
-        LlmForwardInput& input,
-        const ForwardOutput& prior_output) = 0;
-    virtual bool prepare_model_decode_continuation(
-        VlmForwardInput& input,
-        const ForwardOutput& prior_output) = 0;
-    virtual bool can_prepare_npu_graph_decode_input(
-        const LlmModelParams& input_params) const = 0;
-    virtual bool can_prepare_npu_graph_decode_input(
-        const VlmModelParams& input_params) const = 0;
-    virtual void observe_execution_memory(bool is_warmup) = 0;
-
-   protected:
-    virtual ~ModelExecution() = default;
+  enum class DecodeContinuation : int8_t {
+    MODEL_MANAGED = 0,
+    REPLACE_TOKENS,
+    REPLACE_GRAPH_TOKENS,
   };
+  using PrepareModelContinuation =
+      c10::function_ref<DecodeContinuation(const ForwardOutput&)>;
 
   ScheduleOverlap(bool is_driver,
                   bool enable_eplb,
                   bool retire_unconsumed_inputs);
 
-  std::optional<ForwardOutput> execute(ModelExecution& executor,
-                                       LlmForwardInput& input,
-                                       Device& device,
-                                       Stream& compute_stream);
-  std::optional<ForwardOutput> execute(ModelExecution& executor,
-                                       VlmForwardInput& input,
-                                       Device& device,
-                                       Stream& compute_stream);
+  // The callback is borrowed only for this call. It runs on compute_stream
+  // after continuation dependencies are ready, and only when reusing tokens.
+  void prepare_continuation(LlmForwardInput& input,
+                            Device& device,
+                            Stream& compute_stream,
+                            PrepareModelContinuation prepare_model);
+  void prepare_continuation(VlmForwardInput& input,
+                            Device& device,
+                            Stream& compute_stream,
+                            PrepareModelContinuation prepare_model);
 
-  // May be called by the host consumer concurrently with execute().
+  void complete_step(const LlmForwardInput& input,
+                     Stream& compute_stream,
+                     std::optional<ForwardOutput>& output);
+  void complete_step(const VlmForwardInput& input,
+                     Stream& compute_stream,
+                     std::optional<ForwardOutput>& output);
+
+  // May be called by the host consumer concurrently with the execution thread.
   ForwardOutput consume();
   void shutdown();
 
  private:
   template <typename Input>
-  std::optional<ForwardOutput> execute_impl(ModelExecution& executor,
-                                            Input& input,
-                                            Device& device,
-                                            Stream& compute_stream);
+  void prepare_continuation_impl(Input& input,
+                                 Device& device,
+                                 Stream& compute_stream,
+                                 PrepareModelContinuation prepare_model);
   template <typename Input>
-  void prepare_continuation(ModelExecution& executor,
-                            Input& input,
-                            Device& device,
-                            Stream& compute_stream);
+  void complete_step_impl(const Input& input,
+                          Stream& compute_stream,
+                          std::optional<ForwardOutput>& output);
   template <typename Input>
   static void replace_tokens(Input& input,
                              const ForwardOutput& prior_output,

@@ -38,10 +38,11 @@ ScheduleOverlap::ScheduleOverlap(bool is_driver,
                                 retire_unconsumed_inputs) {}
 
 template <typename Input>
-void ScheduleOverlap::prepare_continuation(ModelExecution& executor,
-                                           Input& input,
-                                           Device& device,
-                                           Stream& compute_stream) {
+void ScheduleOverlap::prepare_continuation_impl(
+    Input& input,
+    Device& device,
+    Stream& compute_stream,
+    PrepareModelContinuation prepare_model) {
   if (input.token_ids.numel() == 0 ||
       !input.input_params.meta.batch_forward_type.has_decode()) {
     return;
@@ -68,24 +69,20 @@ void ScheduleOverlap::prepare_continuation(ModelExecution& executor,
                                         state_.sample_sequence_ids(),
                                         device,
                                         compute_stream);
-  if (reuse_tokens &&
-      !executor.prepare_model_decode_continuation(input, prior_output)) {
-    replace_tokens(
-        input,
-        prior_output,
-        executor.can_prepare_npu_graph_decode_input(input.input_params));
+  if (reuse_tokens) {
+    const DecodeContinuation continuation = prepare_model(prior_output);
+    if (continuation != DecodeContinuation::MODEL_MANAGED) {
+      replace_tokens(input,
+                     prior_output,
+                     continuation == DecodeContinuation::REPLACE_GRAPH_TOKENS);
+    }
   }
 }
 
 template <typename Input>
-std::optional<ForwardOutput> ScheduleOverlap::execute_impl(
-    ModelExecution& executor,
-    Input& input,
-    Device& device,
-    Stream& compute_stream) {
-  prepare_continuation(executor, input, device, compute_stream);
-  auto output = executor.step_for_schedule_overlap(input);
-  executor.observe_execution_memory(input.input_params.meta.is_graph_warmup);
+void ScheduleOverlap::complete_step_impl(const Input& input,
+                                         Stream& compute_stream,
+                                         std::optional<ForwardOutput>& output) {
   if (output.has_value()) {
 #if defined(USE_NPU)
     // No token consumer will wait for this output. Retire its asynchronous
@@ -105,7 +102,6 @@ std::optional<ForwardOutput> ScheduleOverlap::execute_impl(
                 output,
                 input.input_params.embedding.request_ids,
                 input.sample_sequence_ids);
-  return output;
 }
 
 void ScheduleOverlap::retire_prior_inputs() const {
@@ -137,18 +133,32 @@ void ScheduleOverlap::record_output(
   }
 }
 
-std::optional<ForwardOutput> ScheduleOverlap::execute(ModelExecution& executor,
-                                                      LlmForwardInput& input,
-                                                      Device& device,
-                                                      Stream& compute_stream) {
-  return execute_impl(executor, input, device, compute_stream);
+void ScheduleOverlap::prepare_continuation(
+    LlmForwardInput& input,
+    Device& device,
+    Stream& compute_stream,
+    PrepareModelContinuation prepare_model) {
+  prepare_continuation_impl(input, device, compute_stream, prepare_model);
 }
 
-std::optional<ForwardOutput> ScheduleOverlap::execute(ModelExecution& executor,
-                                                      VlmForwardInput& input,
-                                                      Device& device,
-                                                      Stream& compute_stream) {
-  return execute_impl(executor, input, device, compute_stream);
+void ScheduleOverlap::prepare_continuation(
+    VlmForwardInput& input,
+    Device& device,
+    Stream& compute_stream,
+    PrepareModelContinuation prepare_model) {
+  prepare_continuation_impl(input, device, compute_stream, prepare_model);
+}
+
+void ScheduleOverlap::complete_step(const LlmForwardInput& input,
+                                    Stream& compute_stream,
+                                    std::optional<ForwardOutput>& output) {
+  complete_step_impl(input, compute_stream, output);
+}
+
+void ScheduleOverlap::complete_step(const VlmForwardInput& input,
+                                    Stream& compute_stream,
+                                    std::optional<ForwardOutput>& output) {
+  complete_step_impl(input, compute_stream, output);
 }
 
 ForwardOutput ScheduleOverlap::consume() { return state_.consume(); }

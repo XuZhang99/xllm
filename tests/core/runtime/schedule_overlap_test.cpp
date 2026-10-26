@@ -203,68 +203,6 @@ class OverlapTestWorker final : public WorkerImpl {
   std::function<void(ForwardOutput&, Stream&)> output_hook_;
 };
 
-class OverlapTestModelExecution final : public ScheduleOverlap::ModelExecution {
- public:
-  explicit OverlapTestModelExecution(std::vector<int32_t> output_tokens)
-      : output_tokens_(std::move(output_tokens)) {
-    observed_warmups_.reserve(output_tokens_.size());
-  }
-
-  std::optional<ForwardOutput> step_for_schedule_overlap(
-      const LlmForwardInput& input) override {
-    return execute(input.token_ids);
-  }
-
-  std::optional<ForwardOutput> step_for_schedule_overlap(
-      const VlmForwardInput& input) override {
-    return execute(input.token_ids);
-  }
-
-  bool prepare_model_decode_continuation(
-      LlmForwardInput& input,
-      const ForwardOutput& prior_output) override {
-    input.token_ids = prior_output.sample_output.next_tokens.to(torch::kInt32);
-    return true;
-  }
-
-  bool prepare_model_decode_continuation(
-      VlmForwardInput& input,
-      const ForwardOutput& prior_output) override {
-    input.token_ids = prior_output.sample_output.next_tokens.to(torch::kInt32);
-    return true;
-  }
-
-  bool can_prepare_npu_graph_decode_input(
-      const LlmModelParams& /*input_params*/) const override {
-    return false;
-  }
-
-  bool can_prepare_npu_graph_decode_input(
-      const VlmModelParams& /*input_params*/) const override {
-    return false;
-  }
-
-  void observe_execution_memory(bool is_warmup) override {
-    observed_warmups_.emplace_back(is_warmup);
-  }
-
-  const torch::Tensor& executed_tokens() const { return executed_tokens_; }
-  const std::vector<bool>& observed_warmups() const {
-    return observed_warmups_;
-  }
-
- private:
-  std::optional<ForwardOutput> execute(const torch::Tensor& tokens) {
-    executed_tokens_ = tokens;
-    return token_output(output_tokens_.at(step_index_++));
-  }
-
-  std::vector<int32_t> output_tokens_;
-  size_t step_index_ = 0;
-  torch::Tensor executed_tokens_;
-  std::vector<bool> observed_warmups_;
-};
-
 template <typename Input>
 Input step_input(bool decode,
                  int32_t token_id = 7,
@@ -321,7 +259,7 @@ using ForwardInputTypes = ::testing::Types<LlmForwardInput, VlmForwardInput>;
 TYPED_TEST_SUITE(ScheduleOverlapTest, ForwardInputTypes);
 
 TYPED_TEST(ScheduleOverlapTest,
-           ModelExecutionContinuesConsumedResultAndObservesWarmup) {
+           ContinuationAndCompletionPreserveConsumedResult) {
   Device device(torch::Device(torch::kPrivateUse1, /*index=*/0));
   device.set_device();
   device.init_device_context();
@@ -329,23 +267,48 @@ TYPED_TEST(ScheduleOverlapTest,
   ScheduleOverlap overlap(/*is_driver=*/true,
                           /*enable_eplb=*/false,
                           /*retire_unconsumed_inputs=*/false);
-  OverlapTestModelExecution execution({17, 23});
+  auto reject_continuation = [](const ForwardOutput& /*prior_output*/) {
+    ADD_FAILURE()
+        << "model continuation requires prior tokens and decode input";
+    return ScheduleOverlap::DecodeContinuation::MODEL_MANAGED;
+  };
+  auto no_prior_input = step_input<TypeParam>(/*decode=*/true);
+  overlap.prepare_continuation(
+      no_prior_input, device, *compute_stream, reject_continuation);
   auto first_input = step_input<TypeParam>(/*decode=*/false);
   first_input.input_params.meta.is_graph_warmup = true;
-  const auto first =
-      overlap.execute(execution, first_input, device, *compute_stream);
-  ASSERT_TRUE(first.has_value());
+  overlap.prepare_continuation(
+      first_input, device, *compute_stream, reject_continuation);
+  std::optional<ForwardOutput> first = token_output(17);
+  overlap.complete_step(first_input, *compute_stream, first);
   EXPECT_TRUE(first->is_graph_warmup);
   EXPECT_EQ(
       overlap.consume().sample_output.next_tokens.template item<int64_t>(), 17);
 
+  auto empty_input = step_input<TypeParam>(/*decode=*/true);
+  empty_input.token_ids = torch::empty({0}, torch::kInt32);
+  overlap.prepare_continuation(
+      empty_input, device, *compute_stream, reject_continuation);
+  overlap.prepare_continuation(
+      first_input, device, *compute_stream, reject_continuation);
+
   auto second_input = step_input<TypeParam>(/*decode=*/true, /*token_id=*/-1);
-  const auto second =
-      overlap.execute(execution, second_input, device, *compute_stream);
-  ASSERT_TRUE(second.has_value());
+  int32_t continuation_count = 0;
+  overlap.prepare_continuation(
+      second_input,
+      device,
+      *compute_stream,
+      [&second_input, &continuation_count](const ForwardOutput& prior_output) {
+        ++continuation_count;
+        second_input.token_ids =
+            prior_output.sample_output.next_tokens.to(torch::kInt32);
+        return ScheduleOverlap::DecodeContinuation::MODEL_MANAGED;
+      });
+  EXPECT_EQ(continuation_count, 1);
+  EXPECT_EQ(second_input.token_ids.template item<int32_t>(), 17);
+  std::optional<ForwardOutput> second = token_output(23);
+  overlap.complete_step(second_input, *compute_stream, second);
   EXPECT_FALSE(second->is_graph_warmup);
-  EXPECT_EQ(execution.executed_tokens().template item<int32_t>(), 17);
-  EXPECT_EQ(execution.observed_warmups(), std::vector<bool>({true, false}));
   EXPECT_EQ(
       overlap.consume().sample_output.next_tokens.template item<int64_t>(), 23);
 }
