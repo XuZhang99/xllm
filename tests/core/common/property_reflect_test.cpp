@@ -695,6 +695,8 @@ TEST(PropertyReflectTest, SharesMlaGeometryStorageAndKeepsFlatReflectionKeys) {
 
 TEST(PropertyReflectTest, KeepsMlaGeometryIndependentFromExecutionSelection) {
   ModelArgs args{};
+  EXPECT_FALSE(args.attention_args().enable_mla());
+  EXPECT_EQ(&args.enable_mla(), &args.attention_args().enable_mla());
   args.mla_args()
       .qk_nope_head_dim(128)
       .qk_rope_head_dim(64)
@@ -707,6 +709,9 @@ TEST(PropertyReflectTest, KeepsMlaGeometryIndependentFromExecutionSelection) {
   EXPECT_EQ(args.head_dim(), 256);
   EXPECT_EQ(args.rotary_dim(), 64);
 
+  args.attention_args().enable_mla(true);
+  EXPECT_TRUE(args.attention_args().enable_mla());
+  EXPECT_TRUE(args.enable_mla());
   args.enable_mla(true);
   EXPECT_EQ(args.qk_nope_head_dim(), 128);
   EXPECT_EQ(args.qk_rope_head_dim(), 64);
@@ -724,10 +729,26 @@ TEST(PropertyReflectTest, KeepsMlaGeometryIndependentFromExecutionSelection) {
   visit_properties(args, visitor);
   EXPECT_TRUE(visitor.bool_values_.at("enable_mla"));
   EXPECT_EQ(visitor.visit_counts_.at("enable_mla"), 1);
+  EXPECT_EQ(visitor.visit_counts_.count("attention_args"), 0);
+  EXPECT_EQ(visitor.visit_counts_.count("attention_args.enable_mla"), 0);
   EXPECT_EQ(visitor.int32_values_.at("qk_rope_head_dim"), 32);
   EXPECT_EQ(visitor.int32_values_.at("q_lora_rank"), 1536);
   EXPECT_EQ(visitor.int64_values_.at("head_dim"), 256);
   EXPECT_EQ(visitor.int64_values_.at("rotary_dim"), 64);
+}
+
+TEST(PropertyReflectTest, OwnsAttentionTypeSelectionAfterCopy) {
+  ModelArgs original{};
+  original.attention_args().enable_mla(true);
+
+  ModelArgs copied = original;
+  copied.enable_mla(false);
+
+  EXPECT_TRUE(original.enable_mla());
+  EXPECT_FALSE(copied.enable_mla());
+  EXPECT_EQ(&original.enable_mla(), &original.attention_args().enable_mla());
+  EXPECT_EQ(&copied.enable_mla(), &copied.attention_args().enable_mla());
+  EXPECT_NE(&original.enable_mla(), &copied.enable_mla());
 }
 
 TEST(PropertyReflectTest, PreservesLinearAttentionDefaults) {

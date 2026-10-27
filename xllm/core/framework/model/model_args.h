@@ -134,6 +134,15 @@ struct MlaArgs final {
   PROPERTY(int32_t, kv_lora_rank) = 0;
 };
 
+// Attention implementation selection shared by model attention variants.
+// Runtime execution options remain outside ModelArgs; this flag only records
+// the checkpoint-defined MLA attention type.
+struct AttentionArgs final {
+  REFLECT_PROPERTIES(AttentionArgs);
+
+  PROPERTY(bool, enable_mla) = false;
+};
+
 // Linear and recurrent attention geometry and checkpoint-defined state dtype.
 struct LinearAttentionArgs final {
   REFLECT_PROPERTIES(LinearAttentionArgs);
@@ -787,8 +796,10 @@ struct ModelArgs {
   FORWARD_PROPERTY(bool, output_router_logits, moe_args);
   FORWARD_PROPERTY(float, router_aux_loss_coef, moe_args);
   FORWARD_PROPERTY(int32_t, shared_expert_intermediate_size, moe_args);
-  // deepseek v2/v3 MLA
-  PROPERTY(bool, enable_mla) = false;
+
+  PROPERTY(AttentionArgs, attention_args);
+
+  FORWARD_PROPERTY(bool, enable_mla, attention_args);
 
   PROPERTY(MlaArgs, mla_args);
 
