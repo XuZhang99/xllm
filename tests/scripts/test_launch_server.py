@@ -21,6 +21,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import textwrap
 import unittest
@@ -30,6 +31,9 @@ from unittest import mock
 import xllm
 from xllm import launch_server
 from xllm._npu_runtime import configure_npu_runtime
+
+_CC = shutil.which("cc")
+_COMPILER_PATH = os.environ.get("PATH", os.defpath)
 
 
 class NpuRuntimeTest(unittest.TestCase):
@@ -121,10 +125,19 @@ class NpuRuntimeTest(unittest.TestCase):
             from unittest import mock
             import xllm
 
+            def load_operator_library(path: str, mode: int) -> None:
+                assert {bundle!r}
+                assert ('torch_npu' in sys.modules) is {npu!r}
+                assert path == {str(package_dir / "opp/vendors/custom_xllm_math/op_api/lib/libcust_opapi.so")!r}
+
             assert 'torch_npu' not in sys.modules
             assert 'xllm_export' not in sys.modules
-            with mock.patch.object(xllm, '_find_export_so_path', return_value={str(export)!r}):
+            with (
+                mock.patch.object(xllm, '_find_export_so_path', return_value={str(export)!r}),
+                mock.patch('xllm._npu_runtime.ctypes.CDLL', side_effect=load_operator_library) as preload,
+            ):
                 from xllm import xllm_export
+            assert preload.call_count == {int(bundle)}
             assert xllm_export.LOADED
             assert sys.modules['xllm_export'] is xllm_export
             assert 'torch' not in sys.modules
@@ -148,6 +161,114 @@ class NpuRuntimeTest(unittest.TestCase):
 
     def test_offline_export_without_bundle_or_torch_npu_remains_supported(self) -> None:
         self._run_offline_export(self.root / "installed" / "xllm", bundle=False, npu=False)
+
+    def _build_native_offline_fixture(self) -> tuple[Path, Path]:
+        package = self.root / "installed" / "xllm"
+        self._make_binary(package)
+        for name in ("__init__.py", "_npu_runtime.py"):
+            shutil.copy2(Path(xllm.__file__).parent / name, package / name)
+        (package.parent / "torch_npu.py").write_text("INITIALIZED = True\n", encoding="utf-8")
+        bundled = package / "opp/vendors/custom_xllm_math/op_api/lib"
+        external = self.root / "external-vendor"
+        external.mkdir()
+
+        def compile_library(source: str, output: Path, *options: str) -> None:
+            result = subprocess.run(
+                [_CC, "-shared", "-fPIC", "-x", "c", "-", "-o", str(output), *options],
+                input=source,
+                env=dict(os.environ, PATH=_COMPILER_PATH),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        for directory, revision in ((bundled, 7), (external, 99)):
+            compile_library(
+                f"int operator_revision(void) {{ return {revision}; }}\n",
+                directory / "libcust_opapi.so",
+                "-Wl,-soname,libcust_opapi.so",
+            )
+        compile_library(
+            "#include <Python.h>\n"
+            "extern int operator_revision(void);\n"
+            "PyMODINIT_FUNC PyInit_xllm_export(void) {\n"
+            '  static struct PyModuleDef definition = {PyModuleDef_HEAD_INIT, "xllm_export", NULL, -1, NULL};\n'
+            "  PyObject *module = PyModule_Create(&definition);\n"
+            '  if (module) PyModule_AddIntConstant(module, "OPERATOR_REVISION", operator_revision());\n'
+            "  return module;\n"
+            "}\n",
+            package / f"xllm_export{sysconfig.get_config_var('EXT_SUFFIX')}",
+            f"-I{sysconfig.get_paths()['include']}",
+            f"-L{bundled}",
+            "-lcust_opapi",
+            "-Wl,--enable-new-dtags,-rpath,$ORIGIN/opp/vendors/custom_xllm_math/op_api/lib",
+        )
+        return package, external
+
+    def _run_native_offline_fixture(self, package: Path, external: Path, script: str) -> None:
+        environment = dict(os.environ, LD_LIBRARY_PATH=str(external))
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script],
+            cwd=package.parent,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(sys.platform.startswith("linux") and _CC, "ELF loader and a C compiler are required")
+    def test_offline_extension_prefers_bundle_over_startup_library_search_path(self) -> None:
+        package, external = self._build_native_offline_fixture()
+        # Prove that startup LD_LIBRARY_PATH would win over the extension's
+        # RUNPATH without the package's in-process library initialization.
+        self._run_native_offline_fixture(
+            package,
+            external,
+            "import importlib.util, xllm\n"
+            "spec = importlib.util.spec_from_file_location('xllm_export', xllm._find_export_so_path())\n"
+            "module = importlib.util.module_from_spec(spec)\n"
+            "assert module.OPERATOR_REVISION == 99\n",
+        )
+        self._run_native_offline_fixture(
+            package,
+            external,
+            "from pathlib import Path\n"
+            "from xllm import xllm_export\n"
+            "assert xllm_export.OPERATOR_REVISION == 7\n"
+            "maps = Path('/proc/self/maps').read_text()\n"
+            f"assert {str(external / 'libcust_opapi.so')!r} not in maps\n"
+            f"assert {str(package / 'opp/vendors/custom_xllm_math/op_api/lib/libcust_opapi.so')!r} in maps\n",
+        )
+
+    @unittest.skipUnless(sys.platform.startswith("linux") and _CC, "ELF loader and a C compiler are required")
+    def test_offline_extension_without_bundle_keeps_external_operator_library(self) -> None:
+        package, external = self._build_native_offline_fixture()
+        shutil.rmtree(package / "opp")
+        self._run_native_offline_fixture(
+            package,
+            external,
+            "from xllm import xllm_export\nassert xllm_export.OPERATOR_REVISION == 99\n",
+        )
+
+    @unittest.skipUnless(sys.platform.startswith("linux") and _CC, "ELF loader and a C compiler are required")
+    def test_unloadable_bundle_fails_without_using_external_operator_library(self) -> None:
+        package, external = self._build_native_offline_fixture()
+        library = package / "opp/vendors/custom_xllm_math/op_api/lib/libcust_opapi.so"
+        library.write_bytes(b"invalid ELF library")
+        self._run_native_offline_fixture(
+            package,
+            external,
+            "import sys\n"
+            "try:\n"
+            "    from xllm import xllm_export\n"
+            "except OSError as error:\n"
+            f"    assert {str(library)!r} in str(error)\n"
+            "else:\n"
+            "    raise AssertionError('invalid bundle was ignored')\n"
+            "assert 'xllm_export' not in sys.modules\n",
+        )
 
     def test_binary_without_bundle_keeps_existing_environment(self) -> None:
         binary = self._make_binary(self.root / "source", bundle=False)

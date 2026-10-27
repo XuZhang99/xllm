@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import functools
 import os
 from pathlib import Path
 
@@ -29,12 +31,14 @@ def _prepend_env_path(name: str, path: Path) -> None:
     os.environ[name] = os.pathsep.join(dict.fromkeys(paths))
 
 
-def configure_npu_runtime(binary_path: str) -> None:
+def configure_npu_runtime(binary_path: str) -> Path | None:
     """Select the operator bundle belonging to the binary about to be run.
 
     The source-tree launcher can select an installed binary or an explicit
     ``--binary-path``. Only inspect that binary's directory, so an unrelated
     launcher's bundled operators cannot override its runtime dependencies.
+    Return the validated API library for callers loading an extension in the
+    current process; changing LD_LIBRARY_PATH only affects future processes.
     """
     opp_root = Path(binary_path).resolve().parent / "opp"
     if not os.path.lexists(opp_root):
@@ -52,3 +56,16 @@ def configure_npu_runtime(binary_path: str) -> None:
 
     _prepend_env_path("LD_LIBRARY_PATH", library_dir)
     _prepend_env_path("ASCEND_CUSTOM_OPP_PATH", vendor_root)
+    return required_library
+
+
+@functools.cache
+def preload_npu_ops(library_path: Path) -> ctypes.CDLL:
+    """Keep the bundled API loaded before resolving the extension's dependencies.
+
+    glibc retains the library search path from process startup. An absolute
+    dlopen selects this bundle before an older library on that search path;
+    global visibility also makes its symbols available to operator plugins.
+    Keep the handle alive for the lifetime of the process.
+    """
+    return ctypes.CDLL(str(library_path), mode=ctypes.RTLD_GLOBAL)
