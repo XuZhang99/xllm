@@ -33,9 +33,8 @@ ScheduleOverlap::ScheduleOverlap(bool is_driver,
                                  bool enable_eplb,
                                  bool retire_unconsumed_inputs)
     : state_(/*publish_to_host=*/is_driver || enable_eplb,
-             /*retain_tokenless_output=*/enable_eplb),
-      retire_unconsumed_inputs_(!is_driver && !enable_eplb &&
-                                retire_unconsumed_inputs) {}
+             /*retain_tokenless_output=*/enable_eplb,
+             retire_unconsumed_inputs) {}
 
 template <typename Input>
 std::optional<ForwardOutput> ScheduleOverlap::execute_impl(WorkerImpl& worker,
@@ -111,28 +110,11 @@ void ScheduleOverlap::complete_step_impl(const Input& input,
                 input.sample_sequence_ids);
 }
 
-void ScheduleOverlap::retire_prior_inputs() const {
-#if defined(USE_NPU)
-  // Non-driver DP speculative results are never queried by the controller.
-  // Replacing the prior output must not release temporary eager inputs until
-  // its device work completes. A device wait alone cannot protect host owners.
-  const auto& prior_output = state_.prior_output();
-  if (state_.has_tokens() && !prior_output.retained_inputs.empty() &&
-      prior_output.ready_event != nullptr) {
-    CHECK(prior_output.ready_event->synchronize())
-        << "failed to retire previous DP speculative input";
-  }
-#endif
-}
-
 void ScheduleOverlap::record_output(
     Stream& compute_stream,
     const std::optional<ForwardOutput>& output,
     const std::vector<std::string>& request_ids,
     const std::vector<std::string>& sample_sequence_ids) {
-  if (retire_unconsumed_inputs_ && output.has_value()) {
-    retire_prior_inputs();
-  }
   if (!state_.record(output, request_ids, sample_sequence_ids)) {
     // Shutdown rejects publication and cache-only updates alike. Drain before
     // the caller releases the output and its asynchronous input owners.

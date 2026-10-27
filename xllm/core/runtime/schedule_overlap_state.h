@@ -31,15 +31,19 @@ namespace xllm {
 // consumed result therefore remains available for the next device step.
 class ScheduleOverlapState final {
  public:
-  ScheduleOverlapState(bool publish_to_host, bool retain_tokenless_output);
+  ScheduleOverlapState(bool publish_to_host,
+                       bool retain_tokenless_output,
+                       bool retire_unconsumed_inputs = false);
   ~ScheduleOverlapState() = default;
 
   ScheduleOverlapState(const ScheduleOverlapState&) = delete;
   ScheduleOverlapState& operator=(const ScheduleOverlapState&) = delete;
 
-  // Records the device continuation and, for host-visible ranks, publishes it
-  // with one-slot backpressure. Returns false after shutdown; the caller must
-  // drain device work before releasing the rejected output.
+  // Called by the single producer to replace the device continuation and, for
+  // host-visible ranks, publish it with one-slot backpressure. Retires cached
+  // asynchronous inputs before replacement when no host consumer can do so.
+  // Returns false after shutdown; the caller must drain device work before
+  // releasing the rejected output.
   bool record(std::optional<ForwardOutput> output,
               std::vector<std::string> request_ids,
               std::vector<std::string> sample_sequence_ids);
@@ -67,12 +71,14 @@ class ScheduleOverlapState final {
   bool has_request_overlap(const std::vector<std::string>& request_ids) const;
 
  private:
+  void retire_prior_inputs() const;
   void update_prior_output(std::optional<ForwardOutput> output,
                            std::vector<std::string> request_ids,
                            std::vector<std::string> sample_sequence_ids);
 
   const bool publish_to_host_;
   const bool retain_tokenless_output_;
+  const bool retire_unconsumed_inputs_;
   mutable std::mutex mutex_;
   std::condition_variable condition_;
   ForwardOutput prior_output_;

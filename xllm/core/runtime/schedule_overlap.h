@@ -65,10 +65,8 @@ class ScheduleOverlap final {
                      const std::optional<ForwardOutput>& output,
                      const std::vector<std::string>& request_ids,
                      const std::vector<std::string>& sample_sequence_ids);
-  void retire_prior_inputs() const;
 
   ScheduleOverlapState state_;
-  const bool retire_unconsumed_inputs_;
 };
 
 }  // namespace xllm
