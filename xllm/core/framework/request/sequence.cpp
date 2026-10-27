@@ -206,7 +206,6 @@ Sequence::Sequence(const Sequence& other, size_t index)
       dp_rank_(other.dp_rank_),
       cur_generated_token_idx_(other.cur_generated_token_idx_),
       first_token_(other.first_token_),
-      is_pre_scheduled_step_prefill_(other.is_pre_scheduled_step_prefill_),
       updated_since_last_beam_search_(other.updated_since_last_beam_search_) {
   logprob_state_ = other.logprob_state_;
   // A forked sequence (beam / best_of) shares the prompt KV prefix by

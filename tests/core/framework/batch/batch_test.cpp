@@ -396,6 +396,24 @@ class BatchOutputActionTest : public ::testing::TestWithParam<bool> {
     batch.process_sample_output(output, action);
   }
 
+  void apply_outputs(Batch& batch,
+                     BatchOutputAction action,
+                     const std::vector<int32_t>& token_ids) {
+    if (GetParam()) {
+      RawForwardOutput output;
+      output.outputs.reserve(token_ids.size());
+      for (int32_t token_id : token_ids) {
+        output.outputs.emplace_back(
+            make_raw_sample_output(token_id, std::nullopt));
+      }
+      batch.process_sample_output(output, action);
+      return;
+    }
+    SampleOutput output;
+    output.next_tokens = torch::tensor(token_ids, torch::kInt32);
+    batch.process_sample_output(output, action);
+  }
+
  private:
   bool original_chunked_prefill_ = false;
   std::unique_ptr<BlockManagerImpl> manager_;
@@ -4022,6 +4040,140 @@ TEST_P(BatchOutputActionTest, CommitSkipsCancelledPendingTarget) {
   ASSERT_EQ(request->sequences().size(), 1u);
   EXPECT_EQ(request->sequences().front()->num_generated_tokens(), 1u);
   EXPECT_EQ(request->sequences().front()->tokens().back(), -1);
+}
+
+TEST_P(BatchOutputActionTest, ChunkedPrefillKeepsFinalAndDecodeOutputTargets) {
+  const ScopedScheduleOverlap overlap(/*enabled=*/true);
+  SchedulerConfig::get_instance().enable_chunked_prefill(true);
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(4);
+  Sequence sequence = make_overlap_sequence({1, 10, 11, 12, 13},
+                                            /*seq_capacity=*/16,
+                                            &sampling_param,
+                                            &stopping_checker);
+  sequence.add_blocks(BlockType::KV, manager.allocate(2));
+
+  Batch first_chunk;
+  first_chunk.add(&sequence, /*allowed_max_token=*/2);
+  const auto first_input = first_chunk.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+  EXPECT_FALSE(first_input.sampling_params.selected_token_idxes.defined());
+  apply_outputs(first_chunk,
+                BatchOutputAction::RESERVE_PENDING,
+                /*token_ids=*/{});
+
+  Batch second_chunk;
+  second_chunk.add(&sequence, /*allowed_max_token=*/2);
+  const auto second_input = second_chunk.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+  EXPECT_FALSE(second_input.sampling_params.selected_token_idxes.defined());
+  apply_outputs(second_chunk,
+                BatchOutputAction::RESERVE_PENDING,
+                /*token_ids=*/{});
+  apply_outputs(first_chunk,
+                BatchOutputAction::COMMIT_PENDING,
+                /*token_ids=*/{});
+  EXPECT_EQ(sequence.num_generated_tokens(), 0u);
+
+  Batch final_chunk;
+  final_chunk.add(&sequence, /*allowed_max_token=*/1);
+  const auto final_input = final_chunk.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+  EXPECT_EQ(final_input.sampling_params.selected_token_idxes.numel(), 1);
+  apply_outputs(final_chunk,
+                BatchOutputAction::RESERVE_PENDING,
+                /*token_ids=*/{-1});
+  apply_outputs(second_chunk,
+                BatchOutputAction::COMMIT_PENDING,
+                /*token_ids=*/{});
+  ASSERT_EQ(sequence.num_generated_tokens(), 1u);
+  EXPECT_EQ(sequence.tokens()[5], -1);
+
+  Batch decode;
+  decode.add(&sequence, /*allowed_max_token=*/1);
+  (void)decode.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+  apply_outputs(decode,
+                BatchOutputAction::RESERVE_PENDING,
+                /*token_ids=*/{-1});
+  ASSERT_EQ(sequence.num_generated_tokens(), 2u);
+
+  apply_outputs(final_chunk,
+                BatchOutputAction::COMMIT_PENDING,
+                /*token_ids=*/{101});
+  EXPECT_EQ(sequence.tokens()[5], 101);
+  EXPECT_EQ(sequence.tokens()[6], -1);
+  apply_outputs(decode,
+                BatchOutputAction::COMMIT_PENDING,
+                /*token_ids=*/{102});
+  EXPECT_EQ(sequence.num_generated_tokens(), 2u);
+  EXPECT_EQ(sequence.tokens()[5], 101);
+  EXPECT_EQ(sequence.tokens()[6], 102);
+}
+
+TEST_P(BatchOutputActionTest, MixedChunkedPrefillKeepsEachStepsOutputRowOrder) {
+  const ScopedScheduleOverlap overlap(/*enabled=*/true);
+  SchedulerConfig::get_instance().enable_chunked_prefill(true);
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(4);
+  Sequence first = make_overlap_sequence({1, 10, 11, 12, 13},
+                                         /*seq_capacity=*/16,
+                                         &sampling_param,
+                                         &stopping_checker);
+  Sequence second = make_overlap_sequence({1, 20, 21},
+                                          /*seq_capacity=*/16,
+                                          &sampling_param,
+                                          &stopping_checker);
+  first.add_blocks(BlockType::KV, manager.allocate(2));
+  second.add_blocks(BlockType::KV, manager.allocate(2));
+
+  Batch prior;
+  prior.add(&first, /*allowed_max_token=*/2);
+  prior.add(&second, /*allowed_max_token=*/3);
+  const auto prior_input = prior.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+  EXPECT_EQ(prior_input.sampling_params.selected_token_idxes.numel(), 1);
+  apply_outputs(prior,
+                BatchOutputAction::RESERVE_PENDING,
+                /*token_ids=*/{-1});
+  EXPECT_EQ(first.num_generated_tokens(), 0u);
+  ASSERT_EQ(second.num_generated_tokens(), 1u);
+
+  Batch current;
+  current.add(&first, /*allowed_max_token=*/3);
+  current.add(&second, /*allowed_max_token=*/1);
+  const auto current_input = current.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+  EXPECT_EQ(current_input.sampling_params.selected_token_idxes.numel(), 2);
+  apply_outputs(current,
+                BatchOutputAction::RESERVE_PENDING,
+                /*token_ids=*/{-1, -1});
+
+  apply_outputs(prior,
+                BatchOutputAction::COMMIT_PENDING,
+                /*token_ids=*/{201});
+  ASSERT_EQ(first.num_generated_tokens(), 1u);
+  EXPECT_EQ(first.tokens()[5], -1);
+  ASSERT_EQ(second.num_generated_tokens(), 2u);
+  EXPECT_EQ(second.tokens()[3], 201);
+  EXPECT_EQ(second.tokens()[4], -1);
+
+  apply_outputs(current,
+                BatchOutputAction::COMMIT_PENDING,
+                /*token_ids=*/{101, 202});
+  EXPECT_EQ(first.num_generated_tokens(), 1u);
+  EXPECT_EQ(first.tokens()[5], 101);
+  EXPECT_EQ(second.num_generated_tokens(), 2u);
+  EXPECT_EQ(second.tokens()[3], 201);
+  EXPECT_EQ(second.tokens()[4], 202);
 }
 
 INSTANTIATE_TEST_SUITE_P(RawAndTensorOutputs,

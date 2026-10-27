@@ -31,10 +31,10 @@ struct BatchOutputData {
   const std::vector<SequencesGroup*>& sequence_groups;
 };
 
-// Captures sampling targets before input building
-// advances KV state, and keeps them through both phases of schedule-overlap
-// writeback. Requests own the target sequences and must outlive the pending
-// forward.
+// Captures sampling targets before input building advances KV state. These
+// targets determine output row ownership through both phases of
+// schedule-overlap writeback, independently of later sequence stages. Requests
+// own the target sequences and must outlive the pending forward.
 class BatchOutputHandler final {
  public:
   void clear() { output_targets_.clear(); }
@@ -63,7 +63,6 @@ class BatchOutputHandler final {
     bool from_sample_slot = false;
   };
 
-  bool update_sequence_state(Sequence* sequence, bool replace_fake_token);
   void append_token_for_sequence(Sequence* sequence,
                                  const Token& token,
                                  int32_t token_idx,

@@ -25,7 +25,6 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "core/framework/config/scheduler_config.h"
 #include "core/util/tensor_helper.h"
 
 namespace xllm {
@@ -197,13 +196,8 @@ void BatchOutputHandler::process_sample_output(
       }
     }
 
-    if (!target.from_sample_slot) {
-      if (seq->finished()) {
-        continue;
-      }
-      if (update_sequence_state(seq, replace_fake_token)) {
-        continue;
-      }
+    if (!target.from_sample_slot && seq->finished()) {
+      continue;
     }
 
     const bool missing_output = output_idx >= raw_output.outputs.size();
@@ -306,13 +300,8 @@ void BatchOutputHandler::process_sample_output(
       continue;
     }
 
-    if (!target.from_sample_slot) {
-      if (seq->finished()) {
-        continue;
-      }
-      if (update_sequence_state(seq, replace_fake_token)) {
-        continue;
-      }
+    if (!target.from_sample_slot && seq->finished()) {
+      continue;
     }
 
     if (output_idx >= static_cast<size_t>(num_outputs)) {
@@ -370,28 +359,6 @@ void BatchOutputHandler::finish_sample_output(
   process_beam_search(data, force_requested_beam_result_size);
 }
 
-bool BatchOutputHandler::update_sequence_state(Sequence* seq,
-                                               bool replace_fake_token) {
-  // In chunked prefill case, if enable_schedule_overlap, we need the
-  // prefill-or-not state of last stage, otherwise, we need the state
-  // of current stage.
-  if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-    if (!replace_fake_token && seq->is_chunked_prefill_stage()) {
-      seq->pre_scheduled_step_prefill_queue().push(true);
-      // if not replace_fake_token, pop out here to avoid endless growth
-      if (seq->pre_scheduled_step_prefill_queue().size() > 2) {
-        seq->pre_scheduled_step_prefill_queue().pop();
-      }
-      return true;
-    } else if (replace_fake_token &&
-               seq->pre_scheduled_step_prefill_queue().front()) {
-      seq->pre_scheduled_step_prefill_queue().pop();
-      return true;
-    }
-  }
-  return false;
-}
-
 void BatchOutputHandler::append_token_for_sequence(Sequence* seq,
                                                    const Token& token,
                                                    int32_t token_idx,
@@ -399,26 +366,9 @@ void BatchOutputHandler::append_token_for_sequence(Sequence* seq,
   // always append a token, maybe true or fake token
   if (!replace_fake_token) {
     seq->append_token(token);
-    if (seq->error_status().has_value()) {
-      return;
-    }
-    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      seq->pre_scheduled_step_prefill_queue().push(false);
-      // if not replace_fake_token, pop out here to avoid endless growth
-      if (seq->pre_scheduled_step_prefill_queue().size() > 2) {
-        seq->pre_scheduled_step_prefill_queue().pop();
-      }
-    }
   } else if (!seq->cancelled()) {
     // truly update the real token if replace_fake_token
     seq->update_last_step_token(token, token_idx);
-    if (seq->error_status().has_value()) {
-      return;
-    }
-    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() &&
-        token_idx == 0) {
-      seq->pre_scheduled_step_prefill_queue().pop();
-    }
   }
 }
 

@@ -425,10 +425,6 @@ class Sequence {
         std::max(stream_output_token_offset_, num_prompt_tokens_ + 1);
   }
 
-  std::queue<bool>& pre_scheduled_step_prefill_queue() {
-    return is_pre_scheduled_step_prefill_;
-  }
-
   KVCacheState& kv_state() { return kv_state_; }
 
   bool has_any_blocks() const {
@@ -719,13 +715,6 @@ class Sequence {
 
   // record first token in disaggregated PD mode.
   std::optional<RemoteToken> first_token_;
-
-  // when enable_schedule_overlap, use this to record whether is the
-  // "prefill" stage at the execution of appending the fake token id.
-  // In the appending stage, we push the state into the queue, in the
-  // update stage, we pop the state from the queue.
-  // 2 valid elements at most, maximum 2 steps pre scheduled.
-  std::queue<bool> is_pre_scheduled_step_prefill_;
 
   std::atomic<bool> cancelled_{false};
 
