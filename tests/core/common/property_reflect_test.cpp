@@ -1777,7 +1777,10 @@ TEST(PropertyReflectTest,
       "mm_projector_hidden_act",
       "mm_projector_n_layers",
       "mm_vision_feature_layer",
-      "mm_vision_feature_select_strategy"};
+      "mm_vision_feature_select_strategy",
+      "mm_init_pos_emb_width",
+      "mm_init_pos_emb_height",
+      "mm_init_pos_emb_time"};
   const std::vector<std::string> moe_names = {
       "first_k_dense_replace",
       "moe_layer_freq",
@@ -1840,6 +1843,9 @@ TEST(PropertyReflectTest, KeepsMovedFieldsInIndependentArgumentGroups) {
       .in_channels(/*value=*/16)
       .out_channels(/*value=*/32);
   args.vision_args().query_num(/*value=*/64);
+  args.mm_init_pos_emb_width(/*value=*/192);
+  args.mm_init_pos_emb_height(/*value=*/128);
+  args.mm_init_pos_emb_time(/*value=*/6);
   args.hyperconnection_args()
       .hc_mult(/*value=*/4)
       .hc_sinkhorn_iters(/*value=*/8)
@@ -1856,6 +1862,9 @@ TEST(PropertyReflectTest, KeepsMovedFieldsInIndependentArgumentGroups) {
   EXPECT_EQ(args.in_channels(), 16);
   EXPECT_EQ(args.out_channels(), 32);
   EXPECT_EQ(args.query_num(), 64);
+  EXPECT_EQ(args.mm_init_pos_emb_width(), 192);
+  EXPECT_EQ(args.mm_init_pos_emb_height(), 128);
+  EXPECT_EQ(args.mm_init_pos_emb_time(), 6);
   EXPECT_EQ(args.hc_mult(), 4);
   EXPECT_EQ(args.hc_sinkhorn_iters(), 8);
   EXPECT_FLOAT_EQ(args.hc_eps(), 1e-4f);
@@ -1869,9 +1878,20 @@ TEST(PropertyReflectTest, KeepsMovedFieldsInIndependentArgumentGroups) {
   EXPECT_EQ(args.num_attention_heads(), 96);
   EXPECT_FLOAT_EQ(args.rms_norm_eps(), 1e-5f);
   EXPECT_EQ(args.query_num(), 0);
+  EXPECT_EQ(args.mm_init_pos_emb_width(), 64);
+  EXPECT_EQ(args.mm_init_pos_emb_height(), 64);
+  EXPECT_EQ(args.mm_init_pos_emb_time(), 4);
   EXPECT_EQ(args.hc_mult(), 4);
   EXPECT_EQ(args.hc_sinkhorn_iters(), 8);
   EXPECT_FLOAT_EQ(args.hc_eps(), 1e-4f);
+
+  args.mm_init_pos_emb_width(/*value=*/192);
+  args.mm_init_pos_emb_height(/*value=*/128);
+  args.mm_init_pos_emb_time(/*value=*/6);
+  args.image_video_args(/*value=*/ImageVideoArgs{});
+  EXPECT_EQ(args.mm_init_pos_emb_width(), 192);
+  EXPECT_EQ(args.mm_init_pos_emb_height(), 128);
+  EXPECT_EQ(args.mm_init_pos_emb_time(), 6);
 
   RecordingPropertyVisitor visitor;
   visit_properties(args, visitor);
@@ -1885,6 +1905,9 @@ TEST(PropertyReflectTest, KeepsMovedFieldsInIndependentArgumentGroups) {
                                   "in_channels",
                                   "out_channels",
                                   "query_num",
+                                  "mm_init_pos_emb_width",
+                                  "mm_init_pos_emb_height",
+                                  "mm_init_pos_emb_time",
                                   "hc_mult",
                                   "hc_sinkhorn_iters",
                                   "hc_eps"}) {

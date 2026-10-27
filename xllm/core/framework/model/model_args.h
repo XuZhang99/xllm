@@ -445,6 +445,9 @@ class VisionArgs final {
   PROPERTY(int64_t, mm_projector_n_layers) = 0;
   PROPERTY(int64_t, mm_vision_feature_layer) = 0;
   PROPERTY(std::string, mm_vision_feature_select_strategy);
+  PROPERTY(int64_t, mm_init_pos_emb_width) = 64;
+  PROPERTY(int64_t, mm_init_pos_emb_height) = 64;
+  PROPERTY(int64_t, mm_init_pos_emb_time) = 4;
 };
 
 // Image and video processor settings beyond the common image transform.
@@ -452,9 +455,6 @@ class ImageVideoArgs final {
  public:
   REFLECT_PROPERTIES(ImageVideoArgs);
 
-  PROPERTY(int64_t, mm_init_pos_emb_width) = 64;
-  PROPERTY(int64_t, mm_init_pos_emb_height) = 64;
-  PROPERTY(int64_t, mm_init_pos_emb_time) = 4;
   PROPERTY(int64_t, mm_km_in_patch_limit) = 16384;
   PROPERTY(int64_t, mm_km_patch_size) = 14;
   PROPERTY(std::vector<int64_t>, mm_km_image_mean) = {};
@@ -1003,9 +1003,9 @@ struct ModelArgs {
 
   PROPERTY(ImageVideoArgs, image_video_args);
 
-  FORWARD_PROPERTY(int64_t, mm_init_pos_emb_width, image_video_args);
-  FORWARD_PROPERTY(int64_t, mm_init_pos_emb_height, image_video_args);
-  FORWARD_PROPERTY(int64_t, mm_init_pos_emb_time, image_video_args);
+  FORWARD_PROPERTY(int64_t, mm_init_pos_emb_width, vision_args);
+  FORWARD_PROPERTY(int64_t, mm_init_pos_emb_height, vision_args);
+  FORWARD_PROPERTY(int64_t, mm_init_pos_emb_time, vision_args);
   FORWARD_PROPERTY(int64_t, mm_km_in_patch_limit, image_video_args);
   FORWARD_PROPERTY(int64_t, mm_km_patch_size, image_video_args);
   FORWARD_PROPERTY(std::vector<int64_t>, mm_km_image_mean, image_video_args);
