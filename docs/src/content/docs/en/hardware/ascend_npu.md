@@ -77,7 +77,7 @@ python setup.py install --device npu
 
 You can also install directly with `python setup.py install`; the installer automatically detects the backend from the current PyTorch environment when `--device` is omitted.
 
-An NPU wheel includes the complete `${ASCEND_OPP_PATH}/vendors/custom_xllm_math` directory from the build environment at `xllm/opp/vendors/custom_xllm_math`, including shared libraries, operator metadata, tiling libraries, and kernels. Packaging requires complete installed operator resources matching the Git revision of `third_party/xllm_ops`; missing resources or a revision mismatch fail the build. Other vendors are not bundled. Prepare any additional operator packages required by your model according to its deployment instructions.
+An NPU wheel includes the complete xllm_ops vendor from the build environment, including shared libraries, operator metadata, tiling libraries, and kernels. Packaging follows the build's vendor selection: `${ASCEND_OPP_PATH}/vendors/custom_xllm_math` when its `op_api/include/aclnnop` directory exists, otherwise the legacy `${ASCEND_OPP_PATH}/vendors/xllm`. Both layouts are packaged at the fixed `xllm/opp/vendors/custom_xllm_math` path used by the launcher and native libraries. Packaging requires complete installed operator resources matching the Git revision of `third_party/xllm_ops`; missing resources or a revision mismatch fail the build. Other vendors are not bundled. Prepare any additional operator packages required by your model according to its deployment instructions.
 
 To install an existing wheel on the target machine without rebuilding, replace the path below with the actual wheel file:
 

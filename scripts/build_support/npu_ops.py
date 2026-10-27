@@ -21,7 +21,7 @@ from pathlib import Path
 
 from scripts.logger import logger
 
-_VENDOR = "custom_xllm_math"
+_BUNDLED_VENDOR = "custom_xllm_math"
 _VERSION_MARKER = ".xllm_ops_git_head"
 
 
@@ -53,7 +53,14 @@ def _vendor_path(env: Mapping[str, str]) -> Path:
     npu_home = env.get("NPU_HOME_PATH")
     if npu_home and (Path(npu_home).expanduser() / "opp").resolve() != opp:
         raise RuntimeError("NPU_HOME_PATH and ASCEND_OPP_PATH select different operator installations")
-    return opp / "vendors" / _VENDOR
+    # Match CMake's revision-marker selection, including when both layouts
+    # remain installed after a toolkit upgrade. Do not select a different
+    # vendor just because the build-selected installation is incomplete.
+    vendors = opp / "vendors"
+    current_vendor = vendors / "custom_xllm_math"
+    if (current_vendor / "op_api/include/aclnnop").is_dir():
+        return current_vendor
+    return vendors / "xllm"
 
 
 def _validate_vendor(vendor: Path, source_git_head: str) -> None:
@@ -83,7 +90,9 @@ def _validate_vendor(vendor: Path, source_git_head: str) -> None:
 def stage_npu_ops_vendor(base_dir: str, extdir: str, device: str, env: Mapping[str, str]) -> None:
     """Ship the matching vendor, including metadata, kernels and host libraries.
 
-    Copy the entire installation and materialize symbolic links: a wheel must
+    Normalize both supported installation names to the wheel's fixed vendor
+    path, shared by its RPATH and runtime registration. Copy the entire
+    installation and materialize symbolic links: a wheel must
     not depend on resources remaining in the build machine's CANN directory.
     Other backends remove this build-owned subtree to avoid stale NPU assets
     after reusing a setuptools build directory.
@@ -103,13 +112,13 @@ def stage_npu_ops_vendor(base_dir: str, extdir: str, device: str, env: Mapping[s
 
     Path(extdir).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".xllm-ops-", dir=extdir) as temporary_root:
-        staged_vendor = Path(temporary_root) / _VENDOR
+        staged_vendor = Path(temporary_root) / _BUNDLED_VENDOR
         try:
             shutil.copytree(vendor, staged_vendor, symlinks=False)
         except OSError as error:
             raise RuntimeError(f"Failed to collect the complete NPU operator vendor from {vendor}: {error}") from error
         _validate_vendor(staged_vendor, source_git_head)
-        destination = destination_root / "vendors" / _VENDOR
+        destination = destination_root / "vendors" / _BUNDLED_VENDOR
         destination.parent.mkdir(parents=True)
         staged_vendor.rename(destination)
     logger.info("Staged complete NPU operator vendor from %s into %s", vendor, destination)

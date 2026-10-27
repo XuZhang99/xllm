@@ -14,6 +14,7 @@
 """Collect complete, matching NPU operators without an Ascend installation."""
 
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ import textwrap
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from setuptools import Distribution
 from setuptools.command.install_lib import install_lib
@@ -88,6 +90,54 @@ class NpuOpsStagingTest(unittest.TestCase):
     def _stage(self, device: str = "npu", env: dict[str, str] | None = None) -> None:
         stage_npu_ops_vendor(str(self.source), str(self.extdir), device, self.env if env is None else env)
 
+    def _use_legacy_vendor(self) -> None:
+        legacy = self.vendor.parent / "xllm"
+        self.vendor.rename(legacy)
+        self.vendor = legacy
+        old_header = "op_api/include/aclnnop/aclnn_example.h"
+        legacy_header = "op_api/include/aclnn_example.h"
+        (self.vendor / old_header).rename(self.vendor / legacy_header)
+        (self.vendor / "op_api/include/aclnnop").rmdir()
+        self.files[legacy_header] = self.files.pop(old_header)
+
+    def test_normalizes_complete_legacy_vendor_to_bundled_path(self) -> None:
+        self._use_legacy_vendor()
+        self._stage()
+        shutil.rmtree(self.vendor)
+        for name, contents in self.files.items():
+            with self.subTest(resource=name):
+                self.assertEqual((self.destination / name).read_text(encoding="utf-8"), contents)
+        self.assertFalse((self.destination.parent / "xllm").exists())
+
+    def test_prefers_current_layout_when_both_vendors_are_installed(self) -> None:
+        legacy = self.vendor.parent / "xllm"
+        shutil.copytree(self.vendor, legacy)
+        (legacy / ".xllm_ops_git_head").write_text("older revision\n", encoding="utf-8")
+        self._stage()
+        self.assertEqual((self.destination / ".xllm_ops_git_head").read_text().strip(), self.git_head)
+
+    def test_uses_legacy_layout_when_current_header_probe_is_absent(self) -> None:
+        self._use_legacy_vendor()
+        leftover = self.vendor.parent / "custom_xllm_math"
+        leftover.mkdir()
+        (leftover / ".xllm_ops_git_head").write_text("older revision\n", encoding="utf-8")
+        self._stage()
+        self.assertTrue((self.destination / "op_api/include/aclnn_example.h").is_file())
+
+    def test_does_not_fall_back_to_legacy_when_selected_current_vendor_is_invalid(self) -> None:
+        shutil.copytree(self.vendor, self.vendor.parent / "xllm")
+        (self.vendor / ".xllm_ops_git_head").write_text("older revision\n", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "NPU operator revision mismatch"):
+            self._stage()
+        self.assertFalse(self.destination.exists())
+
+    def test_rejects_legacy_vendor_with_different_operator_revision(self) -> None:
+        self._use_legacy_vendor()
+        (self.vendor / ".xllm_ops_git_head").write_text("older revision\n", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "NPU operator revision mismatch"):
+            self._stage()
+        self.assertFalse(self.destination.exists())
+
     def test_preserves_complete_vendor_after_build_installation_is_removed(self) -> None:
         self._stage()
         shutil.rmtree(self.vendor)
@@ -134,6 +184,13 @@ class NpuOpsStagingTest(unittest.TestCase):
         self.assertFalse(any(resource.is_symlink() for resource in self.destination.rglob("*")))
 
     def test_actual_wheel_preserves_complete_vendor_and_test_named_kernel(self) -> None:
+        self._assert_wheel_preserves_complete_vendor()
+
+    def test_actual_wheel_preserves_complete_legacy_vendor(self) -> None:
+        self._use_legacy_vendor()
+        self._assert_wheel_preserves_complete_vendor()
+
+    def _assert_wheel_preserves_complete_vendor(self) -> None:
         kernel = "op_impl/ai_core/tbe/kernel/ascend910_93/example/kernel_test.o"
         self.files[kernel] = "a production kernel whose name contains _test"
         (self.vendor / kernel).write_text(self.files[kernel], encoding="utf-8")
@@ -142,6 +199,8 @@ class NpuOpsStagingTest(unittest.TestCase):
 
         build_lib = self.root / "build" / f"lib.linux-x86_64-cpython-{get_python_version()}"
         shutil.copytree(self.extdir.parent, build_lib)
+        shutil.copy2(_REPO_ROOT / "xllm/_npu_runtime.py", build_lib / "xllm/_npu_runtime.py")
+        (build_lib / "xllm/xllm").write_text("native host fixture", encoding="utf-8")
         (build_lib / "xllm" / "slot_buffer_test").write_text("native unit test", encoding="utf-8")
         script = textwrap.dedent(
             """
@@ -192,6 +251,15 @@ class NpuOpsStagingTest(unittest.TestCase):
                 with self.subTest(resource=name):
                     self.assertEqual(wheel.read(f"xllm/opp/vendors/custom_xllm_math/{name}").decode("utf-8"), contents)
             self.assertNotIn("xllm/slot_buffer_test", wheel.namelist())
+            installed = self.root / "installed-wheel"
+            wheel.extractall(installed)
+        runtime = runpy.run_path(str(installed / "xllm/_npu_runtime.py"))
+        bundle = (installed / "xllm/opp/vendors/custom_xllm_math").resolve()
+        with mock.patch.dict(os.environ, {"ASCEND_OPP_PATH": "/base/opp"}, clear=True):
+            runtime["configure_npu_runtime"](str(installed / "xllm/xllm"))
+            self.assertEqual(os.environ["ASCEND_CUSTOM_OPP_PATH"], str(bundle))
+            self.assertEqual(os.environ["LD_LIBRARY_PATH"], str(bundle / "op_api/lib"))
+            self.assertEqual(os.environ["ASCEND_OPP_PATH"], "/base/opp")
 
     def test_rejects_missing_or_empty_required_resources(self) -> None:
         required = (
