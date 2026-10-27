@@ -83,7 +83,7 @@ bool configure_bundled_npu_ops() {
       ModelConfig::get_instance().model_impl());
   const std::string paths = absl::StrJoin(
       bundled_npu_vendor_paths(bundle, system_vendors, existing, is_python),
-      ':');
+      ":");
   if (::setenv("ASCEND_CUSTOM_OPP_PATH", paths.c_str(), /*overwrite=*/1) != 0) {
     LOG(ERROR) << "cannot register bundled NPU ops: " << std::strerror(errno);
     return false;
