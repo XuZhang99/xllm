@@ -53,15 +53,19 @@ inline constexpr bool is_block_draft_model_type(std::string_view model_type) {
          is_dspark_draft_model_type(model_type);
 }
 
-struct TokenEmbeddingArgs final {
+class TokenEmbeddingArgs final {
+ public:
   REFLECT_PROPERTIES(TokenEmbeddingArgs);
 
   PROPERTY(int64_t, vocab_size) = -1;
   PROPERTY(bool, tie_word_embeddings) = false;
+  PROPERTY(bool, encoder_embedding_mode) = false;
+  PROPERTY(bool, embedding_mode) = false;
 };
 
 // Model-defined sequence boundary, padding, and default decoding stop tokens.
-struct SpecialTokenArgs final {
+class SpecialTokenArgs final {
+ public:
   REFLECT_PROPERTIES(SpecialTokenArgs);
 
   PROPERTY(int32_t, bos_token_id) = 0;
@@ -72,7 +76,8 @@ struct SpecialTokenArgs final {
 };
 
 // Shared expert geometry and token-routing configuration.
-struct MoEArgs final {
+class MoEArgs final {
+ public:
   REFLECT_PROPERTIES(MoEArgs);
 
   PROPERTY(std::string, topk_method);
@@ -94,7 +99,6 @@ struct MoEArgs final {
   PROPERTY(float, swiglu_limit) = 0.0f;
   PROPERTY(int32_t, decoder_sparse_step) = 1;
   PROPERTY(std::vector<int32_t>, mlp_only_layers) = {};
-  PROPERTY(int64_t, num_attention_heads) = 32;
   PROPERTY(int32_t, num_experts) = 128;
   PROPERTY(bool, output_router_logits) = false;
   PROPERTY(float, router_aux_loss_coef) = 0.001f;
@@ -102,7 +106,8 @@ struct MoEArgs final {
 };
 
 // Multi-token prediction layer structure and checkpoint addressing.
-struct MtpArgs final {
+class MtpArgs final {
+ public:
   REFLECT_PROPERTIES(MtpArgs);
 
   PROPERTY(int32_t, num_nextn_predict_layers) = 0;
@@ -111,7 +116,8 @@ struct MtpArgs final {
 };
 
 // Attention head geometry, excluding backend-specific cache storage padding.
-struct AttentionHeadArgs final {
+class AttentionHeadArgs final {
+ public:
   REFLECT_PROPERTIES(AttentionHeadArgs);
 
   PROPERTY(int64_t, head_dim) = 0;
@@ -119,12 +125,14 @@ struct AttentionHeadArgs final {
   PROPERTY(int64_t, n_heads) = 0;
   PROPERTY(int64_t, decoder_n_heads) = 0;
   PROPERTY(int64_t, actual_n_heads) = 0;
+  PROPERTY(int64_t, num_attention_heads) = 32;
   PROPERTY(std::optional<int64_t>, n_kv_heads);
   PROPERTY(std::optional<int64_t>, decoder_n_kv_heads);
 };
 
 // Low-rank attention projection ranks and query/key/value head geometry.
-struct MlaArgs final {
+class MlaArgs final {
+ public:
   REFLECT_PROPERTIES(MlaArgs);
 
   PROPERTY(int32_t, qk_nope_head_dim) = 0;
@@ -137,14 +145,16 @@ struct MlaArgs final {
 // Attention implementation selection shared by model attention variants.
 // Runtime execution options remain outside ModelArgs; this flag only records
 // the checkpoint-defined MLA attention type.
-struct AttentionArgs final {
+class AttentionArgs final {
+ public:
   REFLECT_PROPERTIES(AttentionArgs);
 
   PROPERTY(bool, enable_mla) = false;
 };
 
 // Linear and recurrent attention geometry and checkpoint-defined state dtype.
-struct LinearAttentionArgs final {
+class LinearAttentionArgs final {
+ public:
   REFLECT_PROPERTIES(LinearAttentionArgs);
 
   PROPERTY(int32_t, linear_conv_kernel_dim) = 0;
@@ -157,7 +167,8 @@ struct LinearAttentionArgs final {
 };
 
 // Checkpoint-defined placement of full and linear attention layers.
-struct HybridAttentionArgs final {
+class HybridAttentionArgs final {
+ public:
   REFLECT_PROPERTIES(HybridAttentionArgs);
 
   PROPERTY(int32_t, full_attention_interval) = 0;
@@ -166,7 +177,8 @@ struct HybridAttentionArgs final {
 };
 
 // Rotary position embedding geometry and checkpoint-defined scaling.
-struct RopeArgs final {
+class RopeArgs final {
+ public:
   REFLECT_PROPERTIES(RopeArgs);
 
   PROPERTY(int64_t, rotary_dim) = 0;
@@ -190,7 +202,8 @@ struct RopeArgs final {
 };
 
 // Token IDs used to delimit multimodal content in model inputs.
-struct MultimodalTokenArgs final {
+class MultimodalTokenArgs final {
+ public:
   REFLECT_PROPERTIES(MultimodalTokenArgs);
 
   PROPERTY(int32_t, vision_start_token_id) = 0;
@@ -207,7 +220,8 @@ struct MultimodalTokenArgs final {
 
 // Image processor settings for cropping, resizing, rescaling, and
 // normalization.
-struct ImagePreprocessArgs final {
+class ImagePreprocessArgs final {
+ public:
   REFLECT_PROPERTIES(ImagePreprocessArgs);
 
   PROPERTY(bool, mm_image_do_center_crop) = false;
@@ -224,7 +238,8 @@ struct ImagePreprocessArgs final {
 };
 
 // Model-defined sliding-window attention behavior and layer coverage.
-struct SlidingWindowArgs final {
+class SlidingWindowArgs final {
+ public:
   REFLECT_PROPERTIES(SlidingWindowArgs);
 
   PROPERTY(bool, use_sliding_window) = false;
@@ -233,7 +248,8 @@ struct SlidingWindowArgs final {
 };
 
 // DSpark's checkpoint-defined confidence head and optional Markov input.
-struct ConfidenceHeadArgs final {
+class ConfidenceHeadArgs final {
+ public:
   REFLECT_PROPERTIES(ConfidenceHeadArgs);
 
   // Registers confidence_head.proj for acceptance-probability estimation.
@@ -244,7 +260,8 @@ struct ConfidenceHeadArgs final {
 };
 
 // Checkpoint-defined local-convolution and selector geometry for DFlash2.
-struct DFlash2Args final {
+class DFlash2Args final {
+ public:
   REFLECT_PROPERTIES(DFlash2Args);
 
   PROPERTY(int32_t, dflash2_block_size) = 0;
@@ -255,7 +272,8 @@ struct DFlash2Args final {
 };
 
 // Core transformer architecture and sequence-position configuration.
-struct ModelArchitectureArgs final {
+class ModelArchitectureArgs final {
+ public:
   REFLECT_PROPERTIES(ModelArchitectureArgs);
 
   PROPERTY(std::string, model_type);
@@ -267,10 +285,17 @@ struct ModelArchitectureArgs final {
   PROPERTY(int64_t, n_encoder_layers) = 0;
   PROPERTY(int64_t, max_position_embeddings) = 0;
   PROPERTY(bool, use_absolute_position_embedding) = false;
+  PROPERTY(float, initializer_range) = 0.02f;
+  PROPERTY(float, rms_norm_eps) = 0.0f;
+  PROPERTY(float, layer_norm_eps) = 0.0f;
+  PROPERTY(std::vector<std::string>, mlp_layer_types) = {};
+  PROPERTY(int64_t, in_channels) = -1;
+  PROPERTY(int64_t, out_channels) = -1;
 };
 
 // Backend-independent KV cache geometry and model capacity limits.
-struct KVCacheArgs final {
+class KVCacheArgs final {
+ public:
   REFLECT_PROPERTIES(KVCacheArgs);
 
   PROPERTY(int64_t, kv_cache_storage_head_dim) = 0;
@@ -279,12 +304,11 @@ struct KVCacheArgs final {
 };
 
 // Attention normalization, projection, and model-specific bias switches.
-struct AttentionConfigArgs final {
+class AttentionConfigArgs final {
+ public:
   REFLECT_PROPERTIES(AttentionConfigArgs);
 
   PROPERTY(bool, use_qk_norm) = false;
-  PROPERTY(float, rms_norm_eps) = 0.0f;
-  PROPERTY(float, layer_norm_eps) = 0.0f;
   PROPERTY(std::optional<float>, attn_scalar);
   PROPERTY(bool, no_bias) = false;
   PROPERTY(bool, qkv_bias) = false;
@@ -294,13 +318,11 @@ struct AttentionConfigArgs final {
 };
 
 // Speculative model structure and target-side admission controls.
-struct SpeculativeArgs final {
+class SpeculativeArgs final {
+ public:
   REFLECT_PROPERTIES(SpeculativeArgs);
 
   PROPERTY(int64_t, draft_vocab_size) = 0;
-  PROPERTY(int32_t, query_num) = 0;
-  PROPERTY(bool, encoder_embedding_mode) = false;
-  PROPERTY(bool, embedding_mode) = false;
   PROPERTY(int64_t, num_speculative_tokens) = 0;
   PROPERTY(bool, enable_embedded_eagle3_draft) = false;
   PROPERTY(int32_t, max_concurrent_prefills_per_dp) = 0;
@@ -312,7 +334,8 @@ struct SpeculativeArgs final {
 };
 
 // DeepSeek sparse indexer and router metadata.
-struct IndexerArgs final {
+class IndexerArgs final {
+ public:
   REFLECT_PROPERTIES(IndexerArgs);
 
   PROPERTY(int32_t, index_head_dim) = 0;
@@ -327,11 +350,11 @@ struct IndexerArgs final {
   PROPERTY(int32_t, index_skip_topk_offset) = 0;
   PROPERTY(bool, index_share_for_mtp_iteration) = false;
   PROPERTY(std::vector<std::string>, indexer_types) = {};
-  PROPERTY(std::vector<std::string>, mlp_layer_types) = {};
 };
 
 // DeepSeek-V4 low-rank attention, routing, and hashing geometry.
-struct DeepseekV4Args final {
+class DeepseekV4Args final {
+ public:
   REFLECT_PROPERTIES(DeepseekV4Args);
 
   PROPERTY(int32_t, rope_head_dim) = 0;
@@ -346,13 +369,21 @@ struct DeepseekV4Args final {
   PROPERTY(float, beta_fast) = 0.0f;
   PROPERTY(float, beta_slow) = 0.0f;
   PROPERTY(std::string, scale_fmt);
+};
+
+// Hyperconnection topology and sinkhorn normalization configuration.
+class HyperconnectionArgs final {
+ public:
+  REFLECT_PROPERTIES(HyperconnectionArgs);
+
   PROPERTY(int32_t, hc_mult) = 0;
   PROPERTY(int32_t, hc_sinkhorn_iters) = 0;
   PROPERTY(float, hc_eps) = 1e-6f;
 };
 
 // DSpark-specific Markov and sparse-attention runtime-independent geometry.
-struct DSparkArgs final {
+class DSparkArgs final {
+ public:
   REFLECT_PROPERTIES(DSparkArgs);
 
   PROPERTY(int64_t, markov_rank) = 0;
@@ -362,9 +393,11 @@ struct DSparkArgs final {
 };
 
 // Vision encoder, projector, and model-defined generation configuration.
-struct VisionArgs final {
+class VisionArgs final {
+ public:
   REFLECT_PROPERTIES(VisionArgs);
 
+  PROPERTY(int32_t, query_num) = 0;
   PROPERTY(std::string, vision_custom_adapter);
   PROPERTY(int32_t, vision_max_slice_nums) = 0;
   PROPERTY(float, mm_dropout) = 0.0f;
@@ -412,11 +445,11 @@ struct VisionArgs final {
   PROPERTY(int64_t, mm_projector_n_layers) = 0;
   PROPERTY(int64_t, mm_vision_feature_layer) = 0;
   PROPERTY(std::string, mm_vision_feature_select_strategy);
-  PROPERTY(float, initializer_range) = 0.02f;
 };
 
 // Image and video processor settings beyond the common image transform.
-struct ImageVideoArgs final {
+class ImageVideoArgs final {
+ public:
   REFLECT_PROPERTIES(ImageVideoArgs);
 
   PROPERTY(int64_t, mm_init_pos_emb_width) = 64;
@@ -463,7 +496,8 @@ struct ImageVideoArgs final {
 };
 
 // Audio encoder and CTC configuration used by multimodal models.
-struct AudioArgs final {
+class AudioArgs final {
+ public:
   REFLECT_PROPERTIES(AudioArgs);
 
   PROPERTY(int64_t, mm_audio_sampling_rate) = 16000;
@@ -484,11 +518,10 @@ struct AudioArgs final {
 };
 
 // VAE architecture and codec-specific configuration.
-struct VaeArgs final {
+class VaeArgs final {
+ public:
   REFLECT_PROPERTIES(VaeArgs);
 
-  PROPERTY(int64_t, in_channels) = -1;
-  PROPERTY(int64_t, out_channels) = -1;
   PROPERTY(std::vector<std::string>, down_block_types) = {};
   PROPERTY(std::vector<std::string>, up_block_types) = {};
   PROPERTY(std::vector<int64_t>, block_out_channels) = {};
@@ -549,7 +582,8 @@ struct VaeArgs final {
 };
 
 // Diffusion transformer architecture and checkpoint-defined conditioning.
-struct DitArgs final {
+class DitArgs final {
+ public:
   REFLECT_PROPERTIES(DitArgs);
 
   PROPERTY(int64_t, joint_attention_dim) = 0;
@@ -560,7 +594,7 @@ struct DitArgs final {
   PROPERTY(float, mlp_ratio) = 3.0f;
   PROPERTY(int, timestep_guidance_channels) = 256;
   PROPERTY(int64_t, patch_size) = 1;
-  PROPERTY(std::vector<int64_t>, wan_patch_size) = {1, 2, 2};
+  PROPERTY(std::vector<int64_t>, wan_patch_size) = { 1, 2, 2 };
   PROPERTY(bool, cross_attn_norm) = true;
   PROPERTY(double, eps) = 1e-6;
   PROPERTY(int64_t, ffn_dim) = 13824;
@@ -596,12 +630,13 @@ struct DitArgs final {
   PROPERTY(bool, use_layer3d_rope) = false;
   PROPERTY(double, mlp_width_ratio) = 4.0;
   PROPERTY(int64_t, text_dim) = 4096;
-  PROPERTY(std::vector<int64_t>, rope_dim_list) = {16, 56, 56};
+  PROPERTY(std::vector<int64_t>, rope_dim_list) = { 16, 56, 56 };
   PROPERTY(int64_t, rope_theta_dit) = 10000;
 };
 
 // T5 encoder architecture and relative-position configuration.
-struct T5Args final {
+class T5Args final {
+ public:
   REFLECT_PROPERTIES(T5Args);
 
   PROPERTY(int64_t, d_model) = 0;
@@ -615,7 +650,8 @@ struct T5Args final {
 };
 
 // Diffusion scheduler configuration independent of device/runtime options.
-struct SchedulerArgs final {
+class SchedulerArgs final {
+ public:
   REFLECT_PROPERTIES(SchedulerArgs);
 
   PROPERTY(int64_t, num_train_timesteps) = 0;
@@ -666,12 +702,18 @@ struct ModelArgs {
   FORWARD_PROPERTY(int64_t, intermediate_size, model_architecture_args);
   FORWARD_PROPERTY(int64_t, n_layers, model_architecture_args);
   FORWARD_PROPERTY(int64_t, n_encoder_layers, model_architecture_args);
-  FORWARD_PROPERTY(int64_t,
-                   max_position_embeddings,
-                   model_architecture_args);
+  FORWARD_PROPERTY(int64_t, max_position_embeddings, model_architecture_args);
   FORWARD_PROPERTY(bool,
                    use_absolute_position_embedding,
                    model_architecture_args);
+  FORWARD_PROPERTY(float, initializer_range, model_architecture_args);
+  FORWARD_PROPERTY(float, rms_norm_eps, model_architecture_args);
+  FORWARD_PROPERTY(float, layer_norm_eps, model_architecture_args);
+  FORWARD_PROPERTY(std::vector<std::string>,
+                   mlp_layer_types,
+                   model_architecture_args);
+  FORWARD_PROPERTY(int64_t, in_channels, model_architecture_args);
+  FORWARD_PROPERTY(int64_t, out_channels, model_architecture_args);
 
   PROPERTY(TokenEmbeddingArgs, token_embedding_args);
 
@@ -679,6 +721,8 @@ struct ModelArgs {
   // their functional parameter group.
   FORWARD_PROPERTY(int64_t, vocab_size, token_embedding_args);
   FORWARD_PROPERTY(bool, tie_word_embeddings, token_embedding_args);
+  FORWARD_PROPERTY(bool, encoder_embedding_mode, token_embedding_args);
+  FORWARD_PROPERTY(bool, embedding_mode, token_embedding_args);
 
   PROPERTY(AttentionHeadArgs, attention_head_args);
 
@@ -687,6 +731,7 @@ struct ModelArgs {
   FORWARD_PROPERTY(int64_t, n_heads, attention_head_args);
   FORWARD_PROPERTY(int64_t, decoder_n_heads, attention_head_args);
   FORWARD_PROPERTY(int64_t, actual_n_heads, attention_head_args);
+  FORWARD_PROPERTY(int64_t, num_attention_heads, attention_head_args);
   FORWARD_PROPERTY(std::optional<int64_t>, n_kv_heads, attention_head_args);
   FORWARD_PROPERTY(std::optional<int64_t>,
                    decoder_n_kv_heads,
@@ -696,9 +741,7 @@ struct ModelArgs {
 
   // Storage elements per full-attention K/V head, including backend padding.
   // Zero reuses the logical head_dim.
-  FORWARD_PROPERTY(int64_t,
-                   kv_cache_storage_head_dim,
-                   kv_cache_args);
+  FORWARD_PROPERTY(int64_t, kv_cache_storage_head_dim, kv_cache_args);
 
   PROPERTY(SpeculativeArgs, speculative_args);
 
@@ -727,8 +770,6 @@ struct ModelArgs {
   PROPERTY(AttentionConfigArgs, attention_config_args);
 
   FORWARD_PROPERTY(bool, use_qk_norm, attention_config_args);
-  FORWARD_PROPERTY(float, rms_norm_eps, attention_config_args);
-  FORWARD_PROPERTY(float, layer_norm_eps, attention_config_args);
   FORWARD_PROPERTY(std::optional<float>, attn_scalar, attention_config_args);
   FORWARD_PROPERTY(bool, no_bias, attention_config_args);
   FORWARD_PROPERTY(bool, qkv_bias, attention_config_args);
@@ -791,7 +832,6 @@ struct ModelArgs {
   FORWARD_PROPERTY(float, swiglu_limit, moe_args);
   FORWARD_PROPERTY(int32_t, decoder_sparse_step, moe_args);
   FORWARD_PROPERTY(std::vector<int32_t>, mlp_only_layers, moe_args);
-  FORWARD_PROPERTY(int64_t, num_attention_heads, moe_args);
   FORWARD_PROPERTY(int32_t, num_experts, moe_args);
   FORWARD_PROPERTY(bool, output_router_logits, moe_args);
   FORWARD_PROPERTY(float, router_aux_loss_coef, moe_args);
@@ -830,7 +870,6 @@ struct ModelArgs {
   FORWARD_PROPERTY(int32_t, index_skip_topk_offset, indexer_args);
   FORWARD_PROPERTY(bool, index_share_for_mtp_iteration, indexer_args);
   FORWARD_PROPERTY(std::vector<std::string>, indexer_types, indexer_args);
-  FORWARD_PROPERTY(std::vector<std::string>, mlp_layer_types, indexer_args);
 
   PROPERTY(DeepseekV4Args, deepseek_v4_args);
 
@@ -846,9 +885,12 @@ struct ModelArgs {
   FORWARD_PROPERTY(float, beta_fast, deepseek_v4_args);
   FORWARD_PROPERTY(float, beta_slow, deepseek_v4_args);
   FORWARD_PROPERTY(std::string, scale_fmt, deepseek_v4_args);
-  FORWARD_PROPERTY(int32_t, hc_mult, deepseek_v4_args);
-  FORWARD_PROPERTY(int32_t, hc_sinkhorn_iters, deepseek_v4_args);
-  FORWARD_PROPERTY(float, hc_eps, deepseek_v4_args);
+
+  PROPERTY(HyperconnectionArgs, hyperconnection_args);
+
+  FORWARD_PROPERTY(int32_t, hc_mult, hyperconnection_args);
+  FORWARD_PROPERTY(int32_t, hc_sinkhorn_iters, hyperconnection_args);
+  FORWARD_PROPERTY(float, hc_eps, hyperconnection_args);
 
   FORWARD_PROPERTY(int64_t, max_batch_size, kv_cache_args);
   FORWARD_PROPERTY(int64_t, max_seq_len, kv_cache_args);
@@ -868,6 +910,7 @@ struct ModelArgs {
 
   PROPERTY(VisionArgs, vision_args);
 
+  FORWARD_PROPERTY(int32_t, query_num, vision_args);
   FORWARD_PROPERTY(std::string, vision_custom_adapter, vision_args);
   FORWARD_PROPERTY(int32_t, vision_max_slice_nums, vision_args);
   FORWARD_PROPERTY(float, mm_dropout, vision_args);
@@ -916,10 +959,7 @@ struct ModelArgs {
   FORWARD_PROPERTY(std::string, mm_projector_hidden_act, vision_args);
   FORWARD_PROPERTY(int64_t, mm_projector_n_layers, vision_args);
   FORWARD_PROPERTY(int64_t, mm_vision_feature_layer, vision_args);
-  FORWARD_PROPERTY(std::string,
-                   mm_vision_feature_select_strategy,
-                   vision_args);
-  FORWARD_PROPERTY(float, initializer_range, vision_args);
+  FORWARD_PROPERTY(std::string, mm_vision_feature_select_strategy, vision_args);
 
   PROPERTY(HybridAttentionArgs, hybrid_attention_args);
 
@@ -972,20 +1012,12 @@ struct ModelArgs {
   FORWARD_PROPERTY(std::vector<int64_t>, mm_km_image_std, image_video_args);
   FORWARD_PROPERTY(int64_t, mm_km_merge_kernel_size, image_video_args);
   FORWARD_PROPERTY(int64_t, mm_km_fixed_output_tokens, image_video_args);
-  FORWARD_PROPERTY(int64_t,
-                   mm_km_patch_limit_on_one_side,
-                   image_video_args);
-  FORWARD_PROPERTY(int64_t,
-                   mm_km_in_patch_limit_each_frame,
-                   image_video_args);
+  FORWARD_PROPERTY(int64_t, mm_km_patch_limit_on_one_side, image_video_args);
+  FORWARD_PROPERTY(int64_t, mm_km_in_patch_limit_each_frame, image_video_args);
   FORWARD_PROPERTY(int64_t, mm_km_in_patch_limit_video, image_video_args);
   FORWARD_PROPERTY(float, mm_km_sample_fps, image_video_args);
-  FORWARD_PROPERTY(int64_t,
-                   mm_km_max_num_frames_each_video,
-                   image_video_args);
-  FORWARD_PROPERTY(int64_t,
-                   mm_km_temporal_merge_kernel_size,
-                   image_video_args);
+  FORWARD_PROPERTY(int64_t, mm_km_max_num_frames_each_video, image_video_args);
+  FORWARD_PROPERTY(int64_t, mm_km_temporal_merge_kernel_size, image_video_args);
   FORWARD_PROPERTY(std::string, mm_km_timestamp_mode, image_video_args);
   FORWARD_PROPERTY(bool, mm_video_do_rescale, image_video_args);
   FORWARD_PROPERTY(std::vector<double>,
@@ -1041,14 +1073,9 @@ struct ModelArgs {
   FORWARD_PROPERTY(int32_t, sliding_window, sliding_window_args);
   FORWARD_PROPERTY(int32_t, max_window_layers, sliding_window_args);
 
-  FORWARD_PROPERTY(int32_t, query_num, speculative_args);
-  FORWARD_PROPERTY(bool, encoder_embedding_mode, speculative_args);
-  FORWARD_PROPERTY(bool, embedding_mode, speculative_args);
   FORWARD_PROPERTY(int64_t, num_speculative_tokens, speculative_args);
   FORWARD_PROPERTY(bool, enable_embedded_eagle3_draft, speculative_args);
-  FORWARD_PROPERTY(int32_t,
-                   max_concurrent_prefills_per_dp,
-                   speculative_args);
+  FORWARD_PROPERTY(int32_t, max_concurrent_prefills_per_dp, speculative_args);
   FORWARD_PROPERTY(std::vector<int32_t>, layers_to_capture, speculative_args);
   FORWARD_PROPERTY(bool, norm_before_fc, speculative_args);
   FORWARD_PROPERTY(bool, norm_before_residual, speculative_args);
@@ -1057,8 +1084,6 @@ struct ModelArgs {
 
   PROPERTY(VaeArgs, vae_args);
 
-  FORWARD_PROPERTY(int64_t, in_channels, vae_args);
-  FORWARD_PROPERTY(int64_t, out_channels, vae_args);
   FORWARD_PROPERTY(std::vector<std::string>, down_block_types, vae_args);
   FORWARD_PROPERTY(std::vector<std::string>, up_block_types, vae_args);
   FORWARD_PROPERTY(std::vector<int64_t>, block_out_channels, vae_args);
