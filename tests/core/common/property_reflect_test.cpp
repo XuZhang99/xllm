@@ -1594,5 +1594,149 @@ TEST(PropertyReflectTest, PreservesOptionalAttentionHeadFallbacksAfterCopy) {
   }
 }
 
+TEST(PropertyReflectTest,
+     PreservesRemainingModelArgumentGroupsAndFlatReflectionKeys) {
+  const ModelArgs args{};
+  EXPECT_EQ(args.model_type(), "");
+  EXPECT_EQ(args.dtype(), "");
+  EXPECT_EQ(args.hidden_size(), 0);
+  EXPECT_EQ(args.kv_cache_storage_head_dim(), 0);
+  EXPECT_EQ(args.max_batch_size(), 0);
+  EXPECT_EQ(args.max_seq_len(), 0);
+  EXPECT_FALSE(args.use_qk_norm());
+  EXPECT_FALSE(args.attn_scalar().has_value());
+  EXPECT_EQ(args.draft_vocab_size(), 0);
+  EXPECT_EQ(args.num_speculative_tokens(), 0);
+  EXPECT_EQ(args.index_kpool(), 1);
+  EXPECT_EQ(args.index_topk_freq(), 1);
+  EXPECT_FLOAT_EQ(args.hc_eps(), 1e-6f);
+
+  RecordingPropertyVisitor visitor;
+  visit_properties(args, visitor);
+
+  const std::vector<std::string> model_architecture_names = {
+      "model_type", "dtype", "hidden_size", "hidden_act",
+      "intermediate_size", "n_layers", "n_encoder_layers",
+      "max_position_embeddings", "use_absolute_position_embedding"};
+  const std::vector<std::string> kv_cache_names = {
+      "kv_cache_storage_head_dim", "max_batch_size", "max_seq_len"};
+  const std::vector<std::string> attention_config_names = {
+      "use_qk_norm",       "rms_norm_eps", "layer_norm_eps", "attn_scalar",
+      "no_bias",           "qkv_bias",     "attention_bias",
+      "attention_dropout", "attn_output_gate"};
+  const std::vector<std::string> speculative_names = {
+      "draft_vocab_size", "query_num", "encoder_embedding_mode",
+      "embedding_mode",   "num_speculative_tokens",
+      "enable_embedded_eagle3_draft", "max_concurrent_prefills_per_dp",
+      "layers_to_capture", "norm_before_fc", "norm_before_residual",
+      "norm_output", "fc_norm"};
+  const std::vector<std::string> indexer_names = {
+      "index_head_dim", "index_n_heads", "index_topk", "index_kpool",
+      "index_kpool_compress", "index_kpool_always_select_tail",
+      "indexer_rope_interleave", "index_topk_freq", "index_topk_pattern",
+      "index_skip_topk_offset", "index_share_for_mtp_iteration",
+      "indexer_types", "mlp_layer_types"};
+  const std::vector<std::string> deepseek_v4_names = {
+      "rope_head_dim", "o_lora_rank", "o_groups", "compress_ratios",
+      "compress_rope_theta", "window_size", "n_activated_experts",
+      "n_hash_layers", "factor", "beta_fast", "beta_slow", "scale_fmt",
+      "hc_mult", "hc_sinkhorn_iters", "hc_eps"};
+  const std::vector<std::string> moe_names = {
+      "first_k_dense_replace", "moe_layer_freq", "use_moe",
+      "moe_score_func", "moe_route_scale", "moe_use_shared_experts",
+      "swiglu_limit", "decoder_sparse_step", "mlp_only_layers",
+      "num_attention_heads", "num_experts", "output_router_logits",
+      "router_aux_loss_coef", "shared_expert_intermediate_size"};
+
+  for (const auto& names : {model_architecture_names,
+                            kv_cache_names,
+                            attention_config_names,
+                            speculative_names,
+                            indexer_names,
+                            deepseek_v4_names,
+                            moe_names}) {
+    for (const std::string& name : names) {
+      EXPECT_EQ(visitor.visit_counts_.at(name), 1) << name;
+    }
+  }
+  for (const std::string& group : {"model_architecture_args",
+                                   "kv_cache_args",
+                                   "attention_config_args",
+                                   "speculative_args",
+                                   "indexer_args",
+                                   "deepseek_v4_args",
+                                   "moe_args"}) {
+    EXPECT_EQ(visitor.visit_counts_.count(group), 0) << group;
+  }
+  EXPECT_EQ(visitor.visit_counts_.count("model_architecture_args.model_type"),
+            0);
+  EXPECT_EQ(visitor.visit_counts_.count("moe_args.first_k_dense_replace"), 0);
+}
+
+TEST(PropertyReflectTest,
+     SharesRemainingModelArgumentGroupStorageAndFlatAccessors) {
+  ModelArgs args{};
+  args.model_architecture_args().model_type("qwen3").hidden_size(4096);
+  args.kv_cache_args().max_seq_len(32768);
+  args.attention_config_args().qkv_bias(true);
+  args.speculative_args().num_speculative_tokens(5);
+  args.indexer_args().index_topk(64);
+  args.deepseek_v4_args().rope_head_dim(64);
+  args.moe_args().first_k_dense_replace(3);
+
+  EXPECT_EQ(args.model_type(), "qwen3");
+  EXPECT_EQ(args.hidden_size(), 4096);
+  EXPECT_EQ(args.max_seq_len(), 32768);
+  EXPECT_TRUE(args.qkv_bias());
+  EXPECT_EQ(args.num_speculative_tokens(), 5);
+  EXPECT_EQ(args.index_topk(), 64);
+  EXPECT_EQ(args.rope_head_dim(), 64);
+  EXPECT_EQ(args.first_k_dense_replace(), 3);
+  EXPECT_EQ(&args.model_type(), &args.model_architecture_args().model_type());
+  EXPECT_EQ(&args.max_seq_len(), &args.kv_cache_args().max_seq_len());
+  EXPECT_EQ(&args.qkv_bias(), &args.attention_config_args().qkv_bias());
+  EXPECT_EQ(&args.num_speculative_tokens(),
+            &args.speculative_args().num_speculative_tokens());
+  EXPECT_EQ(&args.index_topk(), &args.indexer_args().index_topk());
+  EXPECT_EQ(&args.rope_head_dim(), &args.deepseek_v4_args().rope_head_dim());
+  EXPECT_EQ(&args.first_k_dense_replace(),
+            &args.moe_args().first_k_dense_replace());
+
+  RecordingPropertyVisitor visitor;
+  visit_properties(args, visitor);
+  EXPECT_EQ(visitor.string_values_.at("model_type"), "qwen3");
+  EXPECT_EQ(visitor.int64_values_.at("hidden_size"), 4096);
+  EXPECT_EQ(visitor.int64_values_.at("max_seq_len"), 32768);
+  EXPECT_TRUE(visitor.bool_values_.at("qkv_bias"));
+  EXPECT_EQ(visitor.int64_values_.at("num_speculative_tokens"), 5);
+  EXPECT_EQ(visitor.int32_values_.at("index_topk"), 64);
+  EXPECT_EQ(visitor.int32_values_.at("rope_head_dim"), 64);
+  EXPECT_EQ(visitor.int32_values_.at("first_k_dense_replace"), 3);
+}
+
+TEST(PropertyReflectTest, OwnsRemainingModelArgumentGroupsAfterCopy) {
+  ModelArgs original{};
+  original.speculative_args().layers_to_capture({1, 4});
+  original.indexer_args().indexer_types({"dense", "sparse"});
+  original.deepseek_v4_args().compress_ratios({2, 4});
+  original.moe_args().mlp_only_layers({0, 2});
+
+  ModelArgs copied = original;
+  copied.speculative_args().layers_to_capture({3});
+  copied.indexer_args().indexer_types({"shared"});
+  copied.deepseek_v4_args().compress_ratios({8});
+  copied.moe_args().mlp_only_layers({1});
+
+  EXPECT_EQ(original.layers_to_capture(), std::vector<int32_t>({1, 4}));
+  EXPECT_EQ(original.indexer_types(),
+            std::vector<std::string>({"dense", "sparse"}));
+  EXPECT_EQ(original.compress_ratios(), std::vector<int32_t>({2, 4}));
+  EXPECT_EQ(original.mlp_only_layers(), std::vector<int32_t>({0, 2}));
+  EXPECT_EQ(copied.layers_to_capture(), std::vector<int32_t>({3}));
+  EXPECT_EQ(copied.indexer_types(), std::vector<std::string>({"shared"}));
+  EXPECT_EQ(copied.compress_ratios(), std::vector<int32_t>({8}));
+  EXPECT_EQ(copied.mlp_only_layers(), std::vector<int32_t>({1}));
+}
+
 }  // namespace
 }  // namespace xllm
