@@ -77,6 +77,16 @@ python setup.py install --device npu
 
 也可以直接使用 `python setup.py install` 安装；省略 `--device` 时，安装脚本会根据当前 PyTorch 环境自动识别设备后端。
 
+NPU wheel 会将构建环境中 `${ASCEND_OPP_PATH}/vendors/custom_xllm_math` 的完整目录打包到 `xllm/opp/vendors/custom_xllm_math`，包含动态库、算子描述、tiling 库和 kernel。打包时要求已安装的算子资源完整，且其版本与 `third_party/xllm_ops` 的 Git 提交一致；资源缺失或版本不匹配会使构建失败。其他 vendor 不会一并打包，模型所需的额外算子包仍需按对应部署说明准备。
+
+已有 wheel 时，可以直接在目标机器安装，无需重新编译。将下方路径替换为实际 wheel 文件：
+
+```bash
+python -m pip install /path/to/xllm_npu*.whl
+```
+
+目标环境仍需具备与 wheel 兼容的 CANN、驱动、硬件以及 Python/PyTorch 环境，但无需另行安装 wheel 已包含的 `custom_xllm_math`。`xllm` 启动器会自动配置该算子包的动态库和自定义 OPP 搜索路径，保留基础 CANN OPP 配置。
+
 `python setup.py build` 仅构建产物；统一启动命令需要安装 wheel 及其包含的服务二进制。继续前先检查已安装的命令：
 
 ```bash

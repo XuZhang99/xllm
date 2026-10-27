@@ -77,6 +77,16 @@ python setup.py install --device npu
 
 You can also install directly with `python setup.py install`; the installer automatically detects the backend from the current PyTorch environment when `--device` is omitted.
 
+An NPU wheel includes the complete `${ASCEND_OPP_PATH}/vendors/custom_xllm_math` directory from the build environment at `xllm/opp/vendors/custom_xllm_math`, including shared libraries, operator metadata, tiling libraries, and kernels. Packaging requires complete installed operator resources matching the Git revision of `third_party/xllm_ops`; missing resources or a revision mismatch fail the build. Other vendors are not bundled. Prepare any additional operator packages required by your model according to its deployment instructions.
+
+To install an existing wheel on the target machine without rebuilding, replace the path below with the actual wheel file:
+
+```bash
+python -m pip install /path/to/xllm_npu*.whl
+```
+
+The target environment still needs CANN, drivers, hardware, and Python/PyTorch versions compatible with the wheel, but does not need a separate installation of the bundled `custom_xllm_math` vendor. The `xllm` launcher automatically configures its shared-library and custom OPP search paths while preserving the base CANN OPP configuration.
+
 `python setup.py build` only builds the artifacts; the unified command requires the installed wheel and its packaged server binary. Check the installed command before continuing:
 
 ```bash

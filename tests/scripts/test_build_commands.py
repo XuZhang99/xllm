@@ -69,6 +69,7 @@ class BuildCommandsTest(unittest.TestCase):
                 stack.enter_context(mock.patch.object(self.setup, "BUILD_EXPORT", export))
                 for stage in (
                     "_stage_triton_npu_runtime_binaries",
+                    "_stage_npu_ops_vendor",
                     "_stage_mooncake_runtime_binaries",
                     "_stage_mlu_triton_kernels",
                     "_stage_triton_compiler_package",
@@ -78,6 +79,10 @@ class BuildCommandsTest(unittest.TestCase):
                 call = stack.enter_context(mock.patch.object(self.setup.subprocess, "check_call"))
 
                 self._build_targets(command)
+
+                self.setup._stage_npu_ops_vendor.assert_called_once_with(
+                    str(self.root), str(self.extdir), "npu", self.env
+                )
 
                 configure, build = call.call_args_list
                 self.assertEqual(configure.args[0][-1], "-DBUILD_TESTING=ON")

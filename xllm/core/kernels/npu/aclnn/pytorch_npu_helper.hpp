@@ -205,10 +205,6 @@ inline std::vector<std::string> get_default_custom_lib_path() {
   return default_vendors_list;
 }
 
-const std::vector<std::string> g_custom_lib_path = get_custom_lib_path();
-const std::vector<std::string> g_default_custom_lib_path =
-    get_default_custom_lib_path();
-
 constexpr aclDataType kATenScalarTypeToAclDataTypeTable
     [static_cast<int64_t>(at::ScalarType::NumOptions) + 1] = {
 #define DEFINE_ENUM(_1, n) n,
@@ -251,12 +247,18 @@ inline void* get_op_api_lib_handler(const char* lib_name) {
 }
 
 inline void* get_op_api_func_addr(const char* api_name) {
-  if (!g_custom_lib_path.empty()) {
-    for (auto& it : g_custom_lib_path) {
+  // Startup registers the bundled OPP and settles config.ini before first use.
+  // Reading these during static initialization captures the old vendor order.
+  static const std::vector<std::string> custom_lib_paths =
+      get_custom_lib_path();
+  static const std::vector<std::string> default_custom_lib_paths =
+      get_default_custom_lib_path();
+  if (!custom_lib_paths.empty()) {
+    for (auto& it : custom_lib_paths) {
       std::string cust_opapi_lib =
           real_path(it + "/" + get_cust_op_api_lib_name());
       if (cust_opapi_lib.empty()) {
-        break;
+        continue;
       }
       void* cust_op_api_handler =
           get_op_api_lib_handler(cust_opapi_lib.c_str());
@@ -272,12 +274,12 @@ inline void* get_op_api_func_addr(const char* api_name) {
     ASCEND_LOGI("%s is not in custom lib.", api_name);
   }
 
-  if (!g_default_custom_lib_path.empty()) {
-    for (auto& it : g_default_custom_lib_path) {
+  if (!default_custom_lib_paths.empty()) {
+    for (auto& it : default_custom_lib_paths) {
       std::string default_cust_opapi_lib =
           real_path(it + "/" + get_cust_op_api_lib_name());
       if (default_cust_opapi_lib.empty()) {
-        break;
+        continue;
       }
       void* cust_op_api_handler =
           get_op_api_lib_handler(default_cust_opapi_lib.c_str());

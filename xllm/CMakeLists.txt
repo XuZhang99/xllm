@@ -130,6 +130,15 @@ endif()
 xllm_export_native_host(xllm)
 xllm_export_native_host(xllm_export)
 
+if(USE_NPU)
+  foreach(_native_host xllm xllm_export)
+    set_property(TARGET ${_native_host} APPEND PROPERTY BUILD_RPATH
+      "$ORIGIN/opp/vendors/custom_xllm_math/op_api/lib")
+    set_property(TARGET ${_native_host} APPEND PROPERTY INSTALL_RPATH
+      "$ORIGIN/opp/vendors/custom_xllm_math/op_api/lib")
+  endforeach()
+endif()
+
 # link brpc
 target_link_libraries(xllm PRIVATE glog::glog brpc leveldb::leveldb protobuf::libprotobuf ${OpenCV_LIBS} ${FFMPEG_LIBRARIES})
 add_dependencies(xllm brpc-static)

@@ -54,13 +54,18 @@ def _load_xllm_export() -> ModuleType:
     if loaded_module is not None:
         return loaded_module
 
+    export_so_path = _find_export_so_path()
+
+    from xllm._npu_runtime import configure_npu_runtime
+
+    configure_npu_runtime(export_so_path)
+
     # Initialize torch_npu on the main thread before loading its shared
     # libraries or letting the C++ engine spawn worker threads. It is absent
     # on non-NPU platforms. Both offline entry points need this ordering.
     if importlib.util.find_spec("torch_npu") is not None:
         import torch_npu  # noqa: F401
 
-    export_so_path = _find_export_so_path()
     spec = importlib.util.spec_from_file_location("xllm_export", export_so_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"failed to create import spec for xllm_export: {export_so_path}")
