@@ -749,14 +749,6 @@ class BuildDistWheel(bdist_wheel):
         logger.info("🔨 build project...")
         self.run_command("build")
 
-        if "SKIP_TEST" in os.environ:
-            logger.info("⏭️ skipping UT because SKIP_TEST is set")
-        elif self.device == "musa":
-            logger.info("Skipping UT because the musa backend does not provide test targets")
-        else:
-            logger.info("🧪 testing UT...")
-            self.run_command("test")
-
         if self.arch == "arm":
             ext_path = get_base_dir() + f"/build/lib.linux-aarch64-cpython-{get_python_version()}/"
         else:

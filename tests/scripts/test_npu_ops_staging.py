@@ -190,7 +190,10 @@ class NpuOpsStagingTest(unittest.TestCase):
         self._use_legacy_vendor()
         self._assert_wheel_preserves_complete_vendor()
 
-    def _assert_wheel_preserves_complete_vendor(self) -> None:
+    def test_install_builds_complete_wheel_without_invoking_tests(self) -> None:
+        self._assert_wheel_preserves_complete_vendor(command="install")
+
+    def _assert_wheel_preserves_complete_vendor(self, command: str = "bdist_wheel") -> None:
         kernel = "op_impl/ai_core/tbe/kernel/ascend910_93/example/kernel_test.o"
         self.files[kernel] = "a production kernel whose name contains _test"
         (self.vendor / kernel).write_text(self.files[kernel], encoding="utf-8")
@@ -206,6 +209,7 @@ class NpuOpsStagingTest(unittest.TestCase):
             """
             import os
             import sys
+            from pathlib import Path
             from unittest import mock
             from setuptools import Distribution
             from scripts.build_support.utils import load_setup_module
@@ -218,7 +222,11 @@ class NpuOpsStagingTest(unittest.TestCase):
                 "version": "0.0",
                 "packages": [],
                 "ext_modules": [setup.CMakeExtension("xllm", "xllm/")],
-                "cmdclass": {"bdist_wheel": setup.BuildDistWheel, "install": setup.InstallWheel},
+                "cmdclass": {
+                    "bdist_wheel": setup.BuildDistWheel,
+                    "install": setup.InstallWheel,
+                    "test": setup.TestUT,
+                },
             })
             distribution.script_name = "setup.py"
             distribution.command_options = {"build": {"build_lib": ("fixture", sys.argv[2])}}
@@ -229,14 +237,26 @@ class NpuOpsStagingTest(unittest.TestCase):
             wheel.plat_name = "linux_x86_64"
             wheel.dist_dir = sys.argv[3]
             wheel.ensure_finalized()
-            with mock.patch.object(build, "run"), mock.patch.dict(os.environ, {"SKIP_TEST": "1"}):
-                wheel.run()
+            os.environ.pop("SKIP_TEST", None)
+            with (
+                mock.patch.object(build, "run"),
+                mock.patch.object(setup.TestUT, "run", side_effect=AssertionError("unexpected unit tests")),
+                mock.patch.object(setup.subprocess, "check_call") as install,
+            ):
+                distribution.run_command(sys.argv[4])
+            if sys.argv[4] == "install":
+                wheel_path = next(Path(wheel.dist_dir).glob("*.whl"))
+                install.assert_called_once_with([
+                    sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheel_path)
+                ])
+            else:
+                install.assert_not_called()
             """
         )
         env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
         dist_dir = self.root / "dist"
         result = subprocess.run(
-            [sys.executable, "-c", script, str(self.root), str(build_lib), str(dist_dir)],
+            [sys.executable, "-c", script, str(self.root), str(build_lib), str(dist_dir), command],
             cwd=self.root,
             env=env,
             capture_output=True,
