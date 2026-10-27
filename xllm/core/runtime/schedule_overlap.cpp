@@ -55,9 +55,9 @@ void ScheduleOverlap::prepare_continuation_impl(WorkerImpl& worker,
   }
 
   const bool reuse_tokens =
-      state_.has_tokens() &&
-      (input.json_object_states.empty() ||
-       state_.has_request_overlap(input.input_params.embedding.request_ids));
+      input.json_object_states.empty()
+          ? state_.has_tokens()
+          : state_.can_reuse_tokens(input.input_params.embedding.request_ids);
   // Only the continuation runs under this guard. Model execution retains its
   // own stream selection, including composite speculative workers.
   Stream& compute_stream = *worker.compute_stream_;

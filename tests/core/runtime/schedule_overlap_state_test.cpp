@@ -63,6 +63,16 @@ TEST(ScheduleOverlapStateTest, ConsumedOutputRemainsAvailableForContinuation) {
   EXPECT_TRUE(state.has_request_overlap({"next_request"}));
 }
 
+TEST(ScheduleOverlapStateTest, ChecksContinuationTokensAndRequestOwnership) {
+  ScheduleOverlapState state(/*publish_to_host=*/true,
+                             /*retain_tokenless_output=*/false);
+  EXPECT_FALSE(state.can_reuse_tokens({"request"}));
+
+  ASSERT_TRUE(state.record(token_output(7), {"request"}, {"sequence"}));
+  EXPECT_TRUE(state.can_reuse_tokens({"request", "next"}));
+  EXPECT_FALSE(state.can_reuse_tokens({"other"}));
+}
+
 TEST(ScheduleOverlapStateTest,
      CacheOnlyRecordsRefreshContinuationWithoutHostConsumption) {
   ScheduleOverlapState state(/*publish_to_host=*/false,

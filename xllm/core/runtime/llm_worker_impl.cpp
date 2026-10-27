@@ -225,12 +225,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const LlmForwardInput& input) {
 
 std::optional<ForwardOutput> LLMWorkerImpl::step_for_schedule_overlap(
     const LlmForwardInput& input) {
-  // The worker thread orders checkpoint restores after the preceding chunk's
-  // writes on compute_stream_, rather than preparing them on prepare_stream_.
-  if (has_request_state_cache()) {
-    c10::StreamGuard restore_guard = compute_stream_->set_stream_guard();
-    try_restore_linear_state_slots(ModelParamsView(input.input_params));
-  }
+  prepare_schedule_overlap(input);
   return execute_no_sync_on_stream(
       input, *compute_stream_, ForwardCompletion::RECORD_EVENT);
 }
@@ -405,11 +400,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
 #endif
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
     wait_kv_push();
-    output.retained_inputs.emplace_back(
-        std::make_shared<LlmForwardInput>(input.clone()));
-    if (completion == ForwardCompletion::RECORD_EVENT) {
-      output.ready_event = device_.current_stream()->record_event_or_sync();
-    }
+    finalize_no_sync_output(output, input, completion);
     return output;
   }
   if (should_sync_default_stream) {

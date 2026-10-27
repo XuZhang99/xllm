@@ -1001,20 +1001,36 @@ void WorkerImpl::try_restore_linear_state_slots(const ModelParamsView& params) {
 }
 
 template <typename Input>
-std::optional<ForwardOutput> WorkerImpl::step_for_schedule_overlap_impl(
-    const Input& input) {
+void WorkerImpl::prepare_schedule_overlap_impl(const Input& input) {
 #if defined(USE_NPU) || defined(USE_MLU) || defined(USE_CUDA) || \
     defined(USE_MUSA)
-  // Restore on compute_stream_ after the previous chunk's forward. Composite
-  // speculative workers defer this to their cache-owning inner workers.
   if (has_request_state_cache()) {
     c10::StreamGuard compute_guard = compute_stream_->set_stream_guard();
-    CHECK(compute_stream_->wait_event(input.runtime.metadata_ready_event))
-        << "failed to wait input metadata ready event on compute stream";
+    if (input.runtime.metadata_ready_event != nullptr) {
+      CHECK(compute_stream_->wait_event(input.runtime.metadata_ready_event))
+          << "failed to wait input metadata ready event on compute stream";
+    }
     try_restore_linear_state_slots(ModelParamsView(input.input_params));
-    return step(input);
   }
+#else
+  (void)input;
 #endif
+}
+
+void WorkerImpl::prepare_schedule_overlap(const LlmForwardInput& input) {
+  prepare_schedule_overlap_impl(input);
+}
+
+void WorkerImpl::prepare_schedule_overlap(const VlmForwardInput& input) {
+  prepare_schedule_overlap_impl(input);
+}
+
+template <typename Input>
+std::optional<ForwardOutput> WorkerImpl::step_for_schedule_overlap_impl(
+    const Input& input) {
+  prepare_schedule_overlap(input);
+  // Composite workers own their phase dispatch in step(). Leaf workers
+  // override this method when they can expose a no-sync forward boundary.
   return step(input);
 }
 
