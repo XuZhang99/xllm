@@ -15,9 +15,6 @@ limitations under the License.
 
 #pragma once
 
-#include <c10/util/FunctionRef.h>
-
-#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -26,44 +23,25 @@ limitations under the License.
 
 namespace xllm {
 
-class Device;
 class Stream;
+class WorkerImpl;
 class VlmForwardInput;
 
-// Owns continuation provenance, stream dependencies and host publication on the
-// worker's FIFO execution thread. The worker executes the model between
-// prepare_continuation() and complete_step().
+// Coordinates one overlap step on the worker's FIFO execution thread. It owns
+// continuation provenance, stream dependencies and host publication while the
+// worker supplies model execution capabilities.
 class ScheduleOverlap final {
  public:
-  enum class DecodeContinuation : int8_t {
-    MODEL_MANAGED = 0,
-    REPLACE_TOKENS,
-    REPLACE_GRAPH_TOKENS,
-  };
-  using PrepareModelContinuation =
-      c10::function_ref<DecodeContinuation(const ForwardOutput&)>;
-
   ScheduleOverlap(bool is_driver,
                   bool enable_eplb,
                   bool retire_unconsumed_inputs);
 
-  // The callback is borrowed only for this call. It runs on compute_stream
-  // after continuation dependencies are ready, and only when reusing tokens.
-  void prepare_continuation(LlmForwardInput& input,
-                            Device& device,
-                            Stream& compute_stream,
-                            PrepareModelContinuation prepare_model);
-  void prepare_continuation(VlmForwardInput& input,
-                            Device& device,
-                            Stream& compute_stream,
-                            PrepareModelContinuation prepare_model);
-
-  void complete_step(const LlmForwardInput& input,
-                     Stream& compute_stream,
-                     std::optional<ForwardOutput>& output);
-  void complete_step(const VlmForwardInput& input,
-                     Stream& compute_stream,
-                     std::optional<ForwardOutput>& output);
+  // Runs the complete overlap protocol using the worker's current execution
+  // resources and model-specific hooks.
+  std::optional<ForwardOutput> execute(WorkerImpl& worker,
+                                       LlmForwardInput& input);
+  std::optional<ForwardOutput> execute(WorkerImpl& worker,
+                                       VlmForwardInput& input);
 
   // May be called by the host consumer concurrently with the execution thread.
   ForwardOutput consume();
@@ -71,10 +49,9 @@ class ScheduleOverlap final {
 
  private:
   template <typename Input>
-  void prepare_continuation_impl(Input& input,
-                                 Device& device,
-                                 Stream& compute_stream,
-                                 PrepareModelContinuation prepare_model);
+  std::optional<ForwardOutput> execute_impl(WorkerImpl& worker, Input& input);
+  template <typename Input>
+  void prepare_continuation_impl(WorkerImpl& worker, Input& input);
   template <typename Input>
   void complete_step_impl(const Input& input,
                           Stream& compute_stream,

@@ -487,6 +487,8 @@ class WorkerImpl {
 #endif
 
  private:
+  friend class ScheduleOverlap;
+
   bool init_model_impl(const std::string& model_weights_path,
                        int32_t random_seed,
                        MasterStatus master_status);

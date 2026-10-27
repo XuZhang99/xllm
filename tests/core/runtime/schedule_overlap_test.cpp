@@ -258,59 +258,26 @@ class ScheduleOverlapTest : public ::testing::Test {};
 using ForwardInputTypes = ::testing::Types<LlmForwardInput, VlmForwardInput>;
 TYPED_TEST_SUITE(ScheduleOverlapTest, ForwardInputTypes);
 
-TYPED_TEST(ScheduleOverlapTest,
-           ContinuationAndCompletionPreserveConsumedResult) {
-  Device device(torch::Device(torch::kPrivateUse1, /*index=*/0));
-  device.set_device();
-  device.init_device_context();
-  auto compute_stream = device.current_stream();
-  ScheduleOverlap overlap(/*is_driver=*/true,
-                          /*enable_eplb=*/false,
-                          /*retire_unconsumed_inputs=*/false);
-  auto reject_continuation = [](const ForwardOutput& /*prior_output*/) {
-    ADD_FAILURE()
-        << "model continuation requires prior tokens and decode input";
-    return ScheduleOverlap::DecodeContinuation::MODEL_MANAGED;
-  };
-  auto no_prior_input = step_input<TypeParam>(/*decode=*/true);
-  overlap.prepare_continuation(
-      no_prior_input, device, *compute_stream, reject_continuation);
-  auto first_input = step_input<TypeParam>(/*decode=*/false);
-  first_input.input_params.meta.is_graph_warmup = true;
-  overlap.prepare_continuation(
-      first_input, device, *compute_stream, reject_continuation);
-  std::optional<ForwardOutput> first = token_output(17);
-  overlap.complete_step(first_input, *compute_stream, first);
-  EXPECT_TRUE(first->is_graph_warmup);
-  EXPECT_EQ(
-      overlap.consume().sample_output.next_tokens.template item<int64_t>(), 17);
+TYPED_TEST(ScheduleOverlapTest, DecodeWithoutPriorTokensSkipsContinuation) {
+  OverlapTestWorker worker({token_output(17)});
+  auto step = worker.step_async(step_input<TypeParam>(/*decode=*/true));
+  ASSERT_TRUE(std::move(step).get().has_value());
+  EXPECT_EQ(worker.continuation_count(), 0);
+  EXPECT_EQ(worker.executed_tokens().template item<int32_t>(), 7);
+  worker.get_last_step_result();
+}
 
-  auto empty_input = step_input<TypeParam>(/*decode=*/true);
-  empty_input.token_ids = torch::empty({0}, torch::kInt32);
-  overlap.prepare_continuation(
-      empty_input, device, *compute_stream, reject_continuation);
-  overlap.prepare_continuation(
-      first_input, device, *compute_stream, reject_continuation);
+TYPED_TEST(ScheduleOverlapTest, PrefillIgnoresPriorContinuation) {
+  OverlapTestWorker worker({token_output(17), token_output(23)});
+  auto first = worker.step_async(step_input<TypeParam>(/*decode=*/false));
+  ASSERT_TRUE(std::move(first).get().has_value());
+  worker.get_last_step_result();
 
-  auto second_input = step_input<TypeParam>(/*decode=*/true, /*token_id=*/-1);
-  int32_t continuation_count = 0;
-  overlap.prepare_continuation(
-      second_input,
-      device,
-      *compute_stream,
-      [&second_input, &continuation_count](const ForwardOutput& prior_output) {
-        ++continuation_count;
-        second_input.token_ids =
-            prior_output.sample_output.next_tokens.to(torch::kInt32);
-        return ScheduleOverlap::DecodeContinuation::MODEL_MANAGED;
-      });
-  EXPECT_EQ(continuation_count, 1);
-  EXPECT_EQ(second_input.token_ids.template item<int32_t>(), 17);
-  std::optional<ForwardOutput> second = token_output(23);
-  overlap.complete_step(second_input, *compute_stream, second);
-  EXPECT_FALSE(second->is_graph_warmup);
-  EXPECT_EQ(
-      overlap.consume().sample_output.next_tokens.template item<int64_t>(), 23);
+  auto second = worker.step_async(step_input<TypeParam>(/*decode=*/false));
+  ASSERT_TRUE(std::move(second).get().has_value());
+  EXPECT_EQ(worker.continuation_count(), 0);
+  EXPECT_EQ(worker.executed_tokens().template item<int32_t>(), 7);
+  worker.get_last_step_result();
 }
 
 TYPED_TEST(ScheduleOverlapTest, ConsumedResultRemainsAvailableForContinuation) {
@@ -474,7 +441,7 @@ TYPED_TEST(ScheduleOverlapTest, EmptyStepClearsPriorContinuation) {
   ASSERT_TRUE(std::move(first).get().has_value());
   worker.get_last_step_result();
 
-  TypeParam empty;
+  auto empty = step_input<TypeParam>(/*decode=*/true);
   empty.token_ids = torch::empty({0}, torch::kInt32);
   auto idle = worker.step_async(empty);
   EXPECT_FALSE(std::move(idle).get().has_value());
