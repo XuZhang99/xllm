@@ -1864,11 +1864,14 @@ TEST(PropertyReflectTest, KeepsMovedFieldsInIndependentArgumentGroups) {
   // other groups.
   args.moe_args(/*value=*/MoEArgs{});
   args.attention_config_args(/*value=*/AttentionConfigArgs{});
+  args.deepseek_v4_args(/*value=*/DeepseekV4Args{});
   args.vision_args(/*value=*/VisionArgs{});
   EXPECT_EQ(args.num_attention_heads(), 96);
   EXPECT_FLOAT_EQ(args.rms_norm_eps(), 1e-5f);
   EXPECT_EQ(args.query_num(), 0);
   EXPECT_EQ(args.hc_mult(), 4);
+  EXPECT_EQ(args.hc_sinkhorn_iters(), 8);
+  EXPECT_FLOAT_EQ(args.hc_eps(), 1e-4f);
 
   RecordingPropertyVisitor visitor;
   visit_properties(args, visitor);
