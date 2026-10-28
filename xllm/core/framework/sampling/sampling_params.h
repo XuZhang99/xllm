@@ -163,6 +163,13 @@ struct SamplingParameters {
   torch::Tensor seeds;
   torch::Tensor seed_offsets;
 
+  // Right-aligned tokenized words [rows, words, width] and generated suffixes
+  // [rows, width - 1], padded with -1. Prompt tokens never match bad words.
+  torch::Tensor bad_words;
+  torch::Tensor bad_word_suffix;
+  // Accepted overlap tokens not yet present in the scheduler's token counts.
+  torch::Tensor prefix_tokens;
+
   // [num_tokens] LongTensor
   torch::Tensor top_k;
 
@@ -254,7 +261,7 @@ struct SamplingFieldDesc {
 
 // Omitted flags default to false; a plain token-indexed field is a bare
 // {.member=...}.
-inline constexpr std::array<SamplingFieldDesc, 18> kSamplingFields = {
+inline constexpr std::array<SamplingFieldDesc, 21> kSamplingFields = {
     {{.member = &SamplingParameters::frequency_penalties},
      {.member = &SamplingParameters::presence_penalties},
      {.member = &SamplingParameters::repetition_penalties},
@@ -284,7 +291,10 @@ inline constexpr std::array<SamplingFieldDesc, 18> kSamplingFields = {
       .is_greedy = true},
      {.member = &SamplingParameters::seed_offsets,
       .per_request = true,
-      .is_greedy = true}}};
+      .is_greedy = true},
+     {.member = &SamplingParameters::bad_words},
+     {.member = &SamplingParameters::bad_word_suffix},
+     {.member = &SamplingParameters::prefix_tokens}}};
 
 // Out-of-line because it derives from kSamplingFields (below the struct).
 inline bool SamplingParameters::has_post_penalty_transforms() const {
@@ -326,6 +336,11 @@ inline void prepare_draft_sampling(bool is_probabilistic_draft,
   sampling_params.min_token_positions = torch::Tensor();
   sampling_params.min_tokens_remaining = torch::Tensor();
   sampling_params.min_token_ids = torch::Tensor();
+  sampling_params.bad_words = torch::Tensor();
+  sampling_params.bad_word_suffix = torch::Tensor();
+  sampling_params.prefix_tokens = torch::Tensor();
+  sampling_params.seeds = torch::Tensor();
+  sampling_params.seed_offsets = torch::Tensor();
   if (!is_probabilistic_draft) {
     sampling_params.sampling_mode = SamplingMode::GREEDY;
     sampling_params.do_sample = torch::Tensor();
@@ -356,6 +371,15 @@ inline void expand_sampling_params_for_verify(
                                : arange_indices(total_num_val_tokens, device);
   repeat_interleave_if_defined(sampling_params.do_sample, repeats);
 }
+
+// Advance the compact generated suffix with a padded accepted-token prefix.
+torch::Tensor append_token_suffix(const torch::Tensor& suffix,
+                                  const torch::Tensor& tokens);
+
+// Repair state staged before the previous overlap output was committed.
+void advance_sampling_history(SamplingParameters& params,
+                              const torch::Tensor& prior_tokens,
+                              const std::vector<int32_t>& output_rows);
 
 // Draft proposals and acceptances executed by the verifier, before output
 // truncation. Accepted drafts exclude the target replacement/bonus token.

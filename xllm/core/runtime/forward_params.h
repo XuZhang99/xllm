@@ -205,6 +205,10 @@ inline bool add_sampling_to_plan(const SamplingParameters& source,
          plan.add(source.min_token_ids, &target.min_token_ids) &&
          plan.add(source.seeds, &target.seeds) &&
          plan.add(source.seed_offsets, &target.seed_offsets) &&
+         plan.add(source.bad_words, &target.bad_words) &&
+         plan.add(source.bad_word_suffix, &target.bad_word_suffix) &&
+         plan.add(source.prefix_tokens, &target.prefix_tokens) &&
+
          plan.add(source.top_k, &target.top_k) &&
          plan.add(source.unique_token_ids, &target.unique_token_ids) &&
          plan.add(source.unique_token_counts, &target.unique_token_counts) &&

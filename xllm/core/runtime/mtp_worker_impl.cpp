@@ -1954,6 +1954,17 @@ std::optional<ForwardOutput> MTPWorkerImpl<TargetInput>::run_validate(
     // the verify transforms in rejection_sample), because its
     // per-sequence grammar state advances with each speculative token.
     SamplingParameters verify_params = input.sampling_params;
+    if (verify_params.min_token_positions.defined()) {
+      // Overlap can leave the scheduler's generated count behind accepted
+      // tokens. Use the corrected target positions; rejection sampling applies
+      // the candidate and bonus offsets within each verify row.
+      const auto first_positions =
+          validate_input.positions
+              .view({batch_size, num_speculative_tokens + 1})
+              .select(/*dim=*/1, /*index=*/0);
+      verify_params.min_tokens_remaining =
+          verify_params.min_token_positions - first_positions;
+    }
     if (validate_input.sampling_params.filter_bitmask.defined()) {
       verify_params.filter_bitmask =
           validate_input.sampling_params.filter_bitmask;
