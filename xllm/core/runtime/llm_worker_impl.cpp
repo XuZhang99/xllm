@@ -359,7 +359,17 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
     if (!input.skip_sampling_for_logits_only) {
-      auto sample_output = sample(logits, sampling_params);
+      auto sample_output = [&]() {
+        if (!sampling_params.min_token_positions.defined()) {
+          return sample(logits, sampling_params);
+        }
+        SamplingParameters target_sampling = sampling_params;
+        const auto selected_positions = input.positions.index_select(
+            /*dim=*/0, sampling_params.selected_token_idxes.to(torch::kInt64));
+        target_sampling.min_tokens_remaining =
+            sampling_params.min_token_positions - selected_positions;
+        return sample(logits, target_sampling);
+      }();
       // beam search kernel
       BeamSearchOutput beam_search_output;
       if (sampling_params.use_beam_search &&
