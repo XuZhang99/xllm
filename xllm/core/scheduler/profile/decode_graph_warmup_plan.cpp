@@ -176,9 +176,28 @@ int64_t draft_graph_bucket(int32_t local_batch_size,
 DecodeGraphWarmupPlan build_decode_graph_warmup_plan(
     const DecodeGraphWarmupConfig& warmup_config,
     int32_t max_global_batch_size,
-    int32_t dp_size) {
+    int32_t dp_size,
+    bool capture_exact_batches) {
   DecodeGraphWarmupPlan plan = build_target_decode_graph_warmup_plan(
       warmup_config, max_global_batch_size, dp_size);
+  if (capture_exact_batches &&
+      warmup_config.enable_graph_mode_decode_no_padding && dp_size > 0 &&
+      max_global_batch_size >= dp_size) {
+    const int32_t max_local_batch_size =
+        warmup_config.max_graph_batch_size > 0
+            ? std::min(max_global_batch_size / dp_size,
+                       warmup_config.max_graph_batch_size)
+            : max_global_batch_size / dp_size;
+    plan.batch_sizes.reserve(plan.batch_sizes.size() + max_local_batch_size);
+    for (int32_t local_batch_size = 1; local_batch_size <= max_local_batch_size;
+         ++local_batch_size) {
+      plan.batch_sizes.emplace_back(local_batch_size * dp_size);
+    }
+    std::sort(plan.batch_sizes.begin(), plan.batch_sizes.end());
+    plan.batch_sizes.erase(
+        std::unique(plan.batch_sizes.begin(), plan.batch_sizes.end()),
+        plan.batch_sizes.end());
+  }
   if (!Platform::supports_mtp_decode_graph_warmup() ||
       warmup_config.draft_shapes.empty() ||
       warmup_config.enable_graph_mode_decode_no_padding || dp_size <= 0 ||

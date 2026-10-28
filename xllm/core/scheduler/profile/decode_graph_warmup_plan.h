@@ -45,9 +45,12 @@ DecodeGraphWarmupPlan get_compatibility_decode_graph_warmup_plan(
 // needed to warm compatible token-row buckets. Independent draft shapes seed
 // the padded schedule before redundant target representatives are removed;
 // target-only deduplication must never discard a required draft capture.
+// Executors admitting every exact no-padding batch must request complete
+// batch coverage instead of the native compatibility-only schedule.
 DecodeGraphWarmupPlan build_decode_graph_warmup_plan(
     const DecodeGraphWarmupConfig& warmup_config,
     int32_t max_global_batch_size,
-    int32_t dp_size);
+    int32_t dp_size,
+    bool capture_exact_batches = false);
 
 }  // namespace xllm

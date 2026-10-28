@@ -141,10 +141,13 @@ ProfileManager::ProfileManager(
                                       .acl_graph_decode_batch_size_limit())),
             static_cast<uint32_t>(std::max<int32_t>(1, options_.dp_size()))));
   }
-  decode_graph_warmup_plan_ =
-      build_decode_graph_warmup_plan(options_.decode_graph_warmup_config(),
-                                     max_decode_batch_size,
-                                     options_.dp_size());
+  decode_graph_warmup_plan_ = build_decode_graph_warmup_plan(
+      options_.decode_graph_warmup_config(),
+      max_decode_batch_size,
+      options_.dp_size(),
+      /*capture_exact_batches=*/
+      Platform::is_npu() && ModelConfig::is_python_model_impl(
+                                ModelConfig::get_instance().model_impl()));
   block_manager_pool_ = engine_->block_manager_pool();
   CHECK(block_manager_pool_ != nullptr);
   prefill_time_predictor_ = std::make_unique<TimePredictor>(
@@ -1307,10 +1310,13 @@ void ProfileManager::warmup_decode_for_graph() {
       measure_graph_decode_capacity(max_decode_batch_size, decode_seq_len);
   const int32_t warmup_capacity =
       std::min(max_decode_batch_size, allocatable_sequences);
-  decode_graph_warmup_plan_ =
-      build_decode_graph_warmup_plan(options_.decode_graph_warmup_config(),
-                                     warmup_capacity,
-                                     options_.dp_size());
+  decode_graph_warmup_plan_ = build_decode_graph_warmup_plan(
+      options_.decode_graph_warmup_config(),
+      warmup_capacity,
+      options_.dp_size(),
+      /*capture_exact_batches=*/
+      Platform::is_npu() && ModelConfig::is_python_model_impl(
+                                ModelConfig::get_instance().model_impl()));
   const std::vector<int32_t>& decode_batch_sizes =
       decode_graph_warmup_plan_.batch_sizes;
   const int32_t decode_bucket_count =

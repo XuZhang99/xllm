@@ -702,6 +702,70 @@ TEST(DecodeGraphWarmupPlanTest, NoPaddingKeepsCompatibilityBatches) {
             (std::vector<int32_t>{1, 2, 4, 8, 16, 32, 48, 64}));
 }
 
+TEST(DecodeGraphWarmupPlanTest, ExactNoPaddingCoversEveryAdmittedBatch) {
+  for (const int32_t decoding_tokens : {1, 5}) {
+    const DecodeGraphWarmupConfig warmup_config =
+        make_decode_graph_warmup_config(
+            decoding_tokens,
+            /*num_speculative_tokens=*/decoding_tokens - 1,
+            /*enable_no_padding=*/true,
+            /*max_graph_batch_size=*/32);
+    const DecodeGraphWarmupPlan plan =
+        build_decode_graph_warmup_plan(warmup_config,
+                                       /*max_global_batch_size=*/32,
+                                       /*dp_size=*/1,
+                                       /*capture_exact_batches=*/true);
+    ASSERT_EQ(plan.batch_sizes.size(), 32);
+    for (int32_t batch_size = 1; batch_size <= 32; ++batch_size) {
+      EXPECT_EQ(plan.batch_sizes[batch_size - 1], batch_size);
+    }
+  }
+}
+
+TEST(DecodeGraphWarmupPlanTest, ExactNoPaddingKeepsNonDivisibleDpTail) {
+  const DecodeGraphWarmupConfig warmup_config = make_decode_graph_warmup_config(
+      /*num_decoding_tokens=*/5,
+      /*num_speculative_tokens=*/4,
+      /*enable_no_padding=*/true,
+      /*max_graph_batch_size=*/4);
+  const DecodeGraphWarmupPlan plan =
+      build_decode_graph_warmup_plan(warmup_config,
+                                     /*max_global_batch_size=*/7,
+                                     /*dp_size=*/2,
+                                     /*capture_exact_batches=*/true);
+  EXPECT_EQ(plan.batch_sizes, (std::vector<int32_t>{2, 4, 6, 7}));
+}
+
+TEST(DecodeGraphWarmupPlanTest, ExactNoPaddingHonorsLocalGraphLimit) {
+  const DecodeGraphWarmupConfig warmup_config = make_decode_graph_warmup_config(
+      /*num_decoding_tokens=*/5,
+      /*num_speculative_tokens=*/4,
+      /*enable_no_padding=*/true,
+      /*max_graph_batch_size=*/2);
+  const DecodeGraphWarmupPlan plan =
+      build_decode_graph_warmup_plan(warmup_config,
+                                     /*max_global_batch_size=*/8,
+                                     /*dp_size=*/2,
+                                     /*capture_exact_batches=*/true);
+  EXPECT_EQ(plan.batch_sizes, (std::vector<int32_t>{2, 4, 8}));
+}
+
+TEST(DecodeGraphWarmupPlanTest, ExactBatchCapabilityPreservesPaddedPlan) {
+  const DecodeGraphWarmupConfig warmup_config = make_decode_graph_warmup_config(
+      /*num_decoding_tokens=*/5,
+      /*num_speculative_tokens=*/4,
+      /*enable_no_padding=*/false,
+      /*max_graph_batch_size=*/32);
+  const DecodeGraphWarmupPlan baseline = build_decode_graph_warmup_plan(
+      warmup_config, /*max_global_batch_size=*/32, /*dp_size=*/1);
+  const DecodeGraphWarmupPlan plan =
+      build_decode_graph_warmup_plan(warmup_config,
+                                     /*max_global_batch_size=*/32,
+                                     /*dp_size=*/1,
+                                     /*capture_exact_batches=*/true);
+  EXPECT_EQ(plan.batch_sizes, baseline.batch_sizes);
+}
+
 TEST(DecodeGraphWarmupPlanTest,
      NoPaddingGraphLimitAddsIntermediateMtpTokenBuckets) {
   if (!Platform::supports_mtp_decode_graph_warmup()) {
