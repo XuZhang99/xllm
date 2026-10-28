@@ -668,6 +668,23 @@ class PreparedAclGraphRunner(AclGraphRunner):
                 pages * page_size,
             )
 
+    def get_prepared_aux_hidden_states(
+        self, input_ids: torch.Tensor, positions: torch.Tensor, metadata: AttentionMetadata
+    ) -> list[torch.Tensor]:
+        """Return this Slot's captured outputs for every KV-capacity tier."""
+        binding = self._prepared_binding(input_ids, positions, metadata)
+        outputs = []
+        for key, entry in self._prepared_graphs.items():
+            if (key[:-1] if self._device_kv_lengths else key) != binding:
+                continue
+            output = entry.static_output
+            if not isinstance(output, tuple) or len(output) < 2 or not isinstance(output[1], torch.Tensor):
+                raise RuntimeError("prepared context warmup requires captured auxiliary hidden states")
+            outputs.append(output[1])
+        if not outputs:
+            raise RuntimeError("prepared context warmup requires a warmed Slot binding")
+        return outputs
+
     def _resolve_entry(
         self,
         input_ids: torch.Tensor,
