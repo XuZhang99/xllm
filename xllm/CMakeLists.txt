@@ -131,11 +131,9 @@ xllm_export_native_host(xllm)
 xllm_export_native_host(xllm_export)
 
 if(USE_NPU)
+  include(npu_runtime)
   foreach(_native_host xllm xllm_export)
-    set_property(TARGET ${_native_host} APPEND PROPERTY BUILD_RPATH
-      "$ORIGIN/opp/vendors/custom_xllm_math/op_api/lib")
-    set_property(TARGET ${_native_host} APPEND PROPERTY INSTALL_RPATH
-      "$ORIGIN/opp/vendors/custom_xllm_math/op_api/lib")
+    xllm_configure_npu_runtime(${_native_host})
   endforeach()
 endif()
 

@@ -5,6 +5,7 @@ cc_library(
     npu_startup
   HDRS
     startup.h
+    native_host_path.h
     vendor_paths.h
   SRCS
     startup.cpp

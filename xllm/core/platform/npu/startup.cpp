@@ -18,7 +18,6 @@ limitations under the License.
 #include <absl/strings/str_join.h>
 #include <absl/strings/str_split.h>
 #include <acl/acl.h>
-#include <dlfcn.h>
 #include <fcntl.h>
 #include <glog/logging.h>
 #include <pybind11/embed.h>
@@ -41,6 +40,7 @@ limitations under the License.
 #include "core/framework/config/distributed_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/platform/device_name_utils.h"
+#include "core/platform/npu/native_host_path.h"
 #include "core/platform/npu/vendor_paths.h"
 
 namespace py = pybind11;
@@ -48,17 +48,16 @@ namespace py = pybind11;
 namespace xllm {
 namespace {
 bool configure_bundled_npu_ops() {
-  // dladdr also works when this code is linked into a shared native host.
   static const int32_t kStartupAnchor = 0;
-  Dl_info location{};
-  if (::dladdr(&kStartupAnchor, &location) == 0 ||
-      location.dli_fname == nullptr) {
-    LOG(ERROR) << "cannot locate the native host for bundled NPU ops";
+  std::error_code error;
+  const std::filesystem::path host = native_host_path(&kStartupAnchor, error);
+  if (error) {
+    LOG(ERROR) << "cannot locate the native host for bundled NPU ops: "
+               << error.message();
     return false;
   }
   namespace fs = std::filesystem;
-  const fs::path bundle = fs::canonical(location.dli_fname).parent_path() /
-                          "opp/vendors/custom_xllm_math";
+  const fs::path bundle = host.parent_path() / "opp/vendors/custom_xllm_math";
   if (!fs::exists(bundle)) {
     return true;
   }
