@@ -824,9 +824,9 @@ KVCacheCapacity KVCacheEstimator::estimate(
       !kv_cache_config.enable_virtual_memory() && !is_mtp_draft_engine;
   estimate_options.enable_disagg_pd = options.enable_disagg_pd();
   estimate_options.instance_role = options.instance_role();
+  estimate_options.num_speculative_tokens =
+      static_cast<int64_t>(options.num_speculative_tokens());
   if (!context.is_multimodal) {
-    estimate_options.num_speculative_tokens =
-        static_cast<int64_t>(options.num_speculative_tokens());
     estimate_options.dp_size = options.dp_size();
     estimate_options.enable_dp_fair_token_budget =
         ::xllm::SchedulerConfig::get_instance().enable_dp_fair_token_budget();

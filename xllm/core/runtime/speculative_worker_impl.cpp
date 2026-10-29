@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "core/runtime/speculative_worker_impl.h"
 
+#include <type_traits>
+
 #include "common/global_flags.h"
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/eplb/eplb_utils.h"
@@ -168,6 +170,21 @@ bool SpeculativeWorkerImpl<TargetInput>::allocate_kv_cache_with_transfer(
 template <typename TargetInput>
 std::optional<ForwardOutput> SpeculativeWorkerImpl<TargetInput>::step(
     const TargetInput& input) {
+  if constexpr (std::is_same_v<TargetInput, VlmForwardInput>) {
+    if (input.runtime.input_host_buffer_has_layout) {
+      // Rebuild host views before speculative code derives text draft inputs.
+      // Each leaf worker still owns device preparation on its ordered stream.
+      TargetInput unpacked_input;
+      if (input.runtime.device_tensors_ready) {
+        unpacked_input = input.clone();
+        unpacked_input.runtime.input_host_buffer_has_layout = false;
+      } else {
+        CHECK(detail::unpack_from_input_host_buffer(
+            input, torch::Device(torch::kCPU), unpacked_input));
+      }
+      return step(unpacked_input);
+    }
+  }
   auto& mutable_params = input.input_params;
   set_hierarchy_layer_synchronizer(mutable_params);
   const bool run_speculative_decode =

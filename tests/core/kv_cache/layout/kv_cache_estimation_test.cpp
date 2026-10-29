@@ -403,6 +403,34 @@ TEST(KVCacheEstimationTest, ReservesLinearAttentionState) {
   EXPECT_EQ(capacity.n_blocks(), 254);
 }
 
+TEST(KVCacheEstimationTest, MultimodalRuntimeReservesMtpCheckpoints) {
+  ModelArgs model_args = make_linear_attention_args();
+  model_args.model_type("qwen3_5");
+  runtime::Options runtime_options;
+  runtime_options.block_size(16)
+      .max_seqs_per_batch(8)
+      .max_linear_state_cache_slots(16)
+      .num_speculative_tokens(4);
+
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.world_size = 1;
+  context.virtual_memory_cache_size = 1024 * 1024;
+  context.is_multimodal = true;
+
+  const KVCacheCapacity capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  EXPECT_EQ(capacity.linear_ssm_checkpoint_stride(), 5);
+  EXPECT_EQ(capacity.linear_conv_state_len(), 6);
+
+  runtime_options.num_speculative_tokens(0);
+  const KVCacheCapacity without_mtp =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+  EXPECT_EQ(without_mtp.linear_ssm_checkpoint_stride(), 1);
+  EXPECT_EQ(without_mtp.linear_conv_state_len(), 2);
+}
+
 #if defined(USE_MLU)
 TEST(KVCacheEstimationTest, KPoolReservesSpeculativeTailWithRequestState) {
   ModelArgs args = make_linear_attention_args();
