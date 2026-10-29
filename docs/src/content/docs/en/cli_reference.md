@@ -80,23 +80,7 @@ xLLM uses gflags to manage service startup parameters. `--model <PATH>` is the o
 | `vmm_startup_timeout_ms` | `int32` | `120000` | Positive timeout in milliseconds applied separately to the master's node-registration wait and each non-master's physical-pool readiness wait during VMM startup. Independent of per-request RPC timeouts; each wait has its own timer. |
 | `phy_page_granularity_size` | `int64` | `2097152` | Granularity size of one physical page in bytes, default 2 MiB, for continuous KV Cache. |
 
-### Virtual KV Cache
-
-`enable_vmm_kvcache` and `enable_vmm_weights` default to `false` and can be enabled independently. KV-only VMM keeps the configured weight loader and does not imply `enable_manual_loader`. Weight-only VMM keeps the physical KV Cache implementation. Enabling both lets KV Cache and weights share the VMM pool. The VMM capacity, reserve and startup settings apply whenever either flag is enabled. Model sleep, wakeup and fork require `enable_vmm_weights=true`. Weight VMM currently supports the LLM backend. Weight-only VMM requires `vmm_elastic=true`; a fixed weight pool would consume the memory needed by the physical KV Cache.
-
-With `enable_vmm_kvcache=true` and `vmm_elastic=true`, physical backing grows as pages are mapped. Idle KV backing is released after the last block on a page is returned. The VMM pool reserves a stable virtual address arena, then activates logical slots automatically as demand exceeds the initial capacity. With an explicitly configured positive `max_memory_utilization`, the arena is bounded by that fraction of total device memory, and physical growth also keeps the remaining fraction free on each worker. Omitting the ratio or setting it to `0` lets the arena cover total device memory. `max_cache_size` remains an optional byte limit. Actual growth and request admission always use live available memory and preserve execution headroom, so native allocator statistics allow memory released outside the pool to provide additional KV capacity without restarting. Backends without reliable allocator statistics retain conservative execution watermarks. Use `vmm_memory_reserve_bytes` for direct SDK buffers and execution shapes not covered by warmup.
-
-Append the following flags to an existing launch command to disable both explicit capacity ceilings and keep an additional 1 GiB free for execution. In elastic mode, omitting `max_memory_utilization` has the same effect as setting it to `0`:
-
-```bash
---enable_vmm_kvcache=true \
---vmm_elastic=true \
---max_memory_utilization=0 \
---max_cache_size=0 \
---vmm_memory_reserve_bytes=1073741824
-```
-
-Tune the additional reserve from device measurements. `vmm_memory_reserve_bytes=0` still preserves runtime execution headroom. When using graphs with elastic virtual memory, startup warmup is required (`disable_graph_warmup=false`). PD KV transfer and remote weight transfer using Mooncake require a fully resident pool: use `vmm_elastic=false` and a positive `max_memory_utilization`. See [Elastic virtual KV](/en/dev_guide/code_arch/#elastic-virtual-kv) for details.
+For VMM usage and capacity guidance, see [Virtual Memory for KV Cache and Model Weights](/en/features/virtual_memory/).
 
 ### kv_events_config
 

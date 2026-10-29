@@ -80,23 +80,7 @@ xLLM 使用 gflags 管理服务启动参数。`--model <PATH>` 是唯一必填�
 | `vmm_startup_timeout_ms` | `int32` | `120000` | VMM 启动时，master 等待节点注册、各非 master 等待物理池就绪分别使用的超时，单位毫秒，须为正数。独立于单次 RPC 超时，每个等待阶段单独计时。 |
 | `phy_page_granularity_size` | `int64` | `2097152` | 单个物理页的粒度大小，单位 byte，默认 2 MiB；用于连续 KV Cache。 |
 
-### 虚拟 KV Cache
-
-`enable_vmm_kvcache` 和 `enable_vmm_weights` 默认为 `false`，可以独立启用。仅启用 KV VMM 时继续使用配置的权重加载器，不会隐式启用 `enable_manual_loader`；仅启用权重 VMM 时继续使用物理 KV Cache。两者同时启用时，KV Cache 与权重共享 VMM 池。任一开关启用后，VMM 容量、预留空间及启动配置均生效。模型休眠、唤醒和 fork 需要 `enable_vmm_weights=true`。权重 VMM 目前仅支持 LLM 后端。仅启用权重 VMM 时要求 `vmm_elastic=true`，避免固定权重页池占用物理 KV Cache 所需的显存。
-
-同时设置 `enable_vmm_kvcache=true` 和 `vmm_elastic=true` 时，物理内存随页映射按需增长，KV 页的最后一个 block 归还后释放该页的物理内存。VMM 池预留稳定虚拟地址，需求超过初始容量时自动激活更多逻辑槽位。显式配置正数 `max_memory_utilization` 时，arena 不超过设备总显存的该比例，物理增长也会在每个 worker 上保留剩余比例的空闲显存。不配置 ratio 或设为 `0` 时，arena 可覆盖设备总显存；`max_cache_size` 仍是可选的字节上限。实际增长和请求准入始终受实时可用显存及执行余量约束，原生 allocator 统计可区分执行缓存回收与池外显存释放，后者可提供新增 KV 容量，无需重启。不支持可靠 allocator 统计的后端保留保守执行水位。未被预热覆盖的执行形状和直接分配的 SDK buffer 需通过 `vmm_memory_reserve_bytes` 预留空间。
-
-可在原有启动命令中加入以下参数，取消两个显式容量上限，并为执行额外预留 1 GiB 空闲显存。弹性模式下，不配置 `max_memory_utilization` 与设为 `0` 效果相同：
-
-```bash
---enable_vmm_kvcache=true \
---vmm_elastic=true \
---max_memory_utilization=0 \
---max_cache_size=0 \
---vmm_memory_reserve_bytes=1073741824
-```
-
-额外预留量应根据设备实测调整。`vmm_memory_reserve_bytes=0` 仍会保留运行时执行所需的空间。弹性虚拟内存使用 graph 时必须执行启动预热（`disable_graph_warmup=false`）。使用 Mooncake 的 PD KV 传输及远端权重传输要求池完全驻留，应设置 `vmm_elastic=false` 并使用正数 `max_memory_utilization`。详见[弹性虚拟 KV](/zh/dev_guide/code_arch/#弹性虚拟-kv)。
+VMM 的使用方式和容量配置说明见[KV Cache 与模型权重的虚拟内存](/zh/features/virtual_memory/)。
 
 ### kv_events_config
 
