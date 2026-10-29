@@ -465,7 +465,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 #endif
 
 #if defined(USE_NPU)
-  if (::xllm::KVCacheConfig::get_instance().enable_virtual_memory() &&
+  if (::xllm::LoadConfig::get_instance().enable_vmm_weights() &&
       !::xllm::KVCacheConfig::get_instance().vmm_elastic()) {
     // Construct the memory owners before the shared transport so registered
     // regions remain alive until the transport stops during process shutdown.
@@ -543,7 +543,7 @@ bool WorkerImpl::allocate_kv_cache_storage(
 
   const bool has_grouped_cache = kv_cache_shape.has_grouped_cache_layout();
   if (has_grouped_cache) {
-    CHECK(!::xllm::KVCacheConfig::get_instance().enable_virtual_memory())
+    CHECK(!::xllm::KVCacheConfig::get_instance().enable_vmm_kvcache())
         << "Grouped KV cache layout does not support VirtualMemory cache.";
   }
   const auto& args = context_.get_model_args();
@@ -614,7 +614,7 @@ bool WorkerImpl::allocate_kv_cache_storage(
     ssm_dtype = resolve_ssm_dtype(args.mamba_ssm_dtype(), dtype_);
   }
 
-  if (::xllm::KVCacheConfig::get_instance().enable_virtual_memory()) {
+  if (::xllm::KVCacheConfig::get_instance().enable_vmm_kvcache()) {
     CHECK(tensor_allocator == nullptr)
         << "Virtual memory KV cache cannot use another tensor allocator.";
     tensor_allocator = create_vmm_kv_tensor_allocator(
@@ -633,8 +633,8 @@ bool WorkerImpl::allocate_kv_cache_storage(
       .layer_types(std::move(layout_options).layer_types())
       .model_id(options_.model_id())
       .model_type(args.model_type())
-      .enable_virtual_memory(
-          ::xllm::KVCacheConfig::get_instance().enable_virtual_memory())
+      .enable_vmm_kvcache(
+          ::xllm::KVCacheConfig::get_instance().enable_vmm_kvcache())
       .enable_linear_attention(enable_linear_attention)
       .enable_lighting_indexer(enable_lighting_indexer)
       .layer_cache_owned(std::move(layer_cache_owned))
@@ -678,7 +678,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   const ModelArgs& model_args = context_.get_model_args();
   std::unique_ptr<VirtualKVCacheTransferMemoryProvider> memory_provider;
 #if defined(USE_NPU)
-  if (::xllm::KVCacheConfig::get_instance().enable_virtual_memory()) {
+  if (::xllm::KVCacheConfig::get_instance().enable_vmm_kvcache()) {
     memory_provider = create_virtual_kv_cache_transfer_memory_provider(
         WorkerMemoryResources::get_instance().kv_cache_memory(),
         GlobalVirtualMemoryRegion::get_instance());
@@ -1664,7 +1664,9 @@ void WorkerImpl::execute_cuda_block_copy_kernel(
 
 void WorkerImpl::observe_execution_memory(bool is_warmup) {
   const auto& cache_config = KVCacheConfig::get_instance();
-  if (!cache_config.enable_virtual_memory() || !cache_config.vmm_elastic()) {
+  if ((!cache_config.enable_vmm_kvcache() &&
+       !LoadConfig::get_instance().enable_vmm_weights()) ||
+      !cache_config.vmm_elastic()) {
     return;
   }
   if (is_warmup) {

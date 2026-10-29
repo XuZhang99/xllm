@@ -291,7 +291,7 @@ class GenericIndexerAllocationTest : public ::testing::Test {
 };
 
 TEST_F(GenericIndexerAllocationTest, VirtualIndexerUsesAllocatorWithoutWrites) {
-  options_.enable_virtual_memory(true);
+  options_.enable_vmm_kvcache(true);
   std::vector<KVCache> caches;
   allocate_kv_caches(caches, shape_, options_);
 
@@ -394,7 +394,7 @@ TEST_F(NpuKVCacheTest, VirtualMemoryPreservesSharedIndexerOwnership) {
       .num_layers(4)
       .model_id("virtual-shared-indexer")
       .model_type("glm_moe_dsa")
-      .enable_virtual_memory(true)
+      .enable_vmm_kvcache(true)
       .enable_lighting_indexer(true)
       .indexer_cache_enabled_layers({true, false, true, false})
       .tensor_allocator(allocator);
@@ -467,7 +467,7 @@ TEST_F(NpuKVCacheTest, VirtualMemoryRejectsNpuNzLayout) {
       .dtype(torch::kBFloat16)
       .num_layers(1)
       .model_type("deepseek_v3")
-      .enable_virtual_memory(true)
+      .enable_vmm_kvcache(true)
       .tensor_allocator(std::make_shared<RecordingKVCacheTensorAllocator>());
 
   EXPECT_DEATH(create_kv_cache_tensors(shape, options),
@@ -544,7 +544,7 @@ TEST(KVCacheTest, VirtualMemoryRejectsQuantizedIndexerCache) {
       .num_layers(1)
       .model_id("virtual-quantized-indexer")
       .model_type("glm_moe_dsa")
-      .enable_virtual_memory(true)
+      .enable_vmm_kvcache(true)
       .enable_lighting_indexer(true)
       .enable_indexer_cache_quant(true)
       .tensor_allocator(std::make_shared<RecordingKVCacheTensorAllocator>());

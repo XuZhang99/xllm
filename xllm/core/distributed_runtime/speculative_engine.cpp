@@ -24,6 +24,7 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/eplb/eplb_controller.h"
 #include "core/kv_cache/layout/kv_cache_estimation.h"
@@ -121,6 +122,15 @@ bool SpeculativeEngineBase<TargetEngine>::init_model(
 
   model_args_ = engine_->model_args();
 
+  if ((KVCacheConfig::get_instance().enable_vmm_kvcache() ||
+       LoadConfig::get_instance().enable_vmm_weights()) &&
+      draft_engine_ != nullptr && !should_skip_external_draft_kv_cache()) {
+    LOG(ERROR) << "Virtual memory does not support an external speculative "
+                  "draft engine because target and draft would register the "
+                  "same model_id.";
+    return false;
+  }
+
   if (use_draft_engine_) {
     if (!draft_engine_->init_model(/*master_status=*/MasterStatus::WAKEUP,
                                    prepare_model)) {
@@ -171,14 +181,6 @@ bool SpeculativeEngineBase<TargetEngine>::allocate_kv_cache(
           return engine_->allocate_kv_cache(capacity);
         }
       };
-
-  if (KVCacheConfig::get_instance().enable_virtual_memory() &&
-      draft_engine_ != nullptr && !should_skip_external_draft_kv_cache()) {
-    LOG(ERROR) << "Virtual memory does not support an external speculative "
-                  "draft engine because target and draft would register the "
-                  "same model_id.";
-    return false;
-  }
 
   if (!use_draft_engine_) {
     return allocate_target_cache(target_kv_cache_cap);

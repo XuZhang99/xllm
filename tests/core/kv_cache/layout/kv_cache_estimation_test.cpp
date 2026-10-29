@@ -91,6 +91,43 @@ TEST(KVCacheEstimationTest, RuntimeBudgetCapsBeforeVlmEncoderReservation) {
   EXPECT_EQ(capacity.cache_size_in_bytes(), 4 * 1024 * 1024);
 }
 
+TEST(KVCacheEstimationTest, SleepingWeightsKeepTheirFutureDeviceCapacity) {
+  ModelArgs model_args = make_standard_args();
+  runtime::Options runtime_options;
+  runtime_options.max_memory_utilization(0.9).block_size(16);
+
+  constexpr int64_t kGiB = 1024LL * 1024 * 1024;
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.worker_memory = {{80 * kGiB, 80 * kGiB}};
+  // The residency coordinator includes TP rounding and its safety pages.
+  context.reserved_memory_bytes = 10 * kGiB;
+
+  const KVCacheCapacity capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  // Keep both the 10 GiB weight demand and the 8 GiB utilization headroom.
+  EXPECT_EQ(capacity.cache_size_in_bytes(), 62 * kGiB);
+}
+
+TEST(KVCacheEstimationTest, SleepingWeightReservationPrecedesExplicitKvCap) {
+  ModelArgs model_args = make_standard_args();
+  runtime::Options runtime_options;
+  runtime_options.max_memory_utilization(1.0)
+      .max_cache_size(4 * 1024 * 1024)
+      .block_size(16);
+
+  KVCacheEstimateContext context;
+  context.dtype = torch::kFloat16;
+  context.worker_memory = {{16 * 1024 * 1024, 16 * 1024 * 1024}};
+  context.reserved_memory_bytes = 8 * 1024 * 1024;
+
+  const KVCacheCapacity capacity =
+      KVCacheEstimator(model_args).estimate(runtime_options, context);
+
+  EXPECT_EQ(capacity.cache_size_in_bytes(), 4 * 1024 * 1024);
+}
+
 TEST(KVCacheEstimationTest, VirtualMemoryBudgetBypassesWorkerAndRuntimeCaps) {
   ModelArgs model_args = make_standard_args();
   runtime::Options runtime_options;

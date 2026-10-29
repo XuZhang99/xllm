@@ -46,6 +46,8 @@ struct KVCacheEstimateContext {
   int64_t linear_state_cache_block_limit = 0;
   std::vector<KVCacheMemorySnapshot> worker_memory;
   std::optional<int64_t> virtual_memory_cache_size;
+  // Future device allocations absent from the worker memory snapshot.
+  int64_t reserved_memory_bytes = 0;
   bool is_multimodal = false;
 };
 

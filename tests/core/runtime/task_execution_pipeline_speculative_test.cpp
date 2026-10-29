@@ -1816,9 +1816,9 @@ class PipelineExecutionMemoryTest : public SpeculativePipelineTest {
   void SetUp() override {
     SpeculativePipelineTest::SetUp();
     auto& config = KVCacheConfig::get_instance();
-    previous_virtual_memory_ = config.enable_virtual_memory();
+    previous_virtual_memory_ = config.enable_vmm_kvcache();
     previous_elastic_ = config.vmm_elastic();
-    config.enable_virtual_memory(true).vmm_elastic(true);
+    config.enable_vmm_kvcache(true).vmm_elastic(true);
     auto& pool = PhysicalPagePool::get_instance();
     ASSERT_TRUE(pool.reset());
     pool.init(torch::Device(torch::kCPU),
@@ -1840,7 +1840,7 @@ class PipelineExecutionMemoryTest : public SpeculativePipelineTest {
     SpeculativePipelineTest::TearDown();
     EXPECT_TRUE(PhysicalPagePool::get_instance().reset());
     auto& config = KVCacheConfig::get_instance();
-    config.enable_virtual_memory(previous_virtual_memory_)
+    config.enable_vmm_kvcache(previous_virtual_memory_)
         .vmm_elastic(previous_elastic_);
   }
 
@@ -1958,7 +1958,7 @@ TEST_P(PipelineExecutionMemoryPathTest, FixedPoolSkipsExecutionSampling) {
 
 TEST_P(PipelineExecutionMemoryPathTest, DisabledVmmSkipsExecutionSampling) {
   create_path();
-  KVCacheConfig::get_instance().enable_virtual_memory(false);
+  KVCacheConfig::get_instance().enable_vmm_kvcache(false);
   execute_warmup();
   EXPECT_EQ(PhysicalPagePool::get_instance().num_allocatable(), 6U);
 }

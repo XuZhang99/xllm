@@ -761,7 +761,8 @@ int64_t KVCacheEstimator::estimate_memory_budget(
   int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
   for (size_t i = 0; i < context.worker_memory.size(); ++i) {
     const KVCacheMemorySnapshot& memory = context.worker_memory[i];
-    int64_t available_memory = memory.available_memory;
+    int64_t available_memory =
+        memory.available_memory - context.reserved_memory_bytes;
     const int64_t total_memory = memory.total_memory;
     LOG(INFO) << "worker #" << i
               << ": available memory: " << readable_size(available_memory)
@@ -820,8 +821,8 @@ KVCacheCapacity KVCacheEstimator::estimate(
       options.is_draft_engine() &&
       SpeculativeConfig::is_mtp_algorithm(options.speculative_algorithm());
   estimate_options.enable_prefix_cache =
-      options.enable_prefix_cache() &&
-      !kv_cache_config.enable_virtual_memory() && !is_mtp_draft_engine;
+      options.enable_prefix_cache() && !kv_cache_config.enable_vmm_kvcache() &&
+      !is_mtp_draft_engine;
   estimate_options.enable_disagg_pd = options.enable_disagg_pd();
   estimate_options.instance_role = options.instance_role();
   estimate_options.num_speculative_tokens =

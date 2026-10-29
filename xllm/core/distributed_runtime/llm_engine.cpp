@@ -35,8 +35,10 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/options.h"
 #include "core/common/global_flags.h"
+#include "core/distributed_runtime/distributed_virtual_memory_coordinator.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/service_config.h"
@@ -85,7 +87,7 @@ LLMEngine::LLMEngine(
     std::shared_ptr<DistributedWorkerManager> distributed_worker_manager)
     : options_(options),
       distributed_worker_manager_(std::move(distributed_worker_manager)) {
-  CHECK(!KVCacheConfig::get_instance().enable_virtual_memory() ||
+  CHECK(!KVCacheConfig::get_instance().enable_vmm_kvcache() ||
         options_.host_blocks_factor() <= 1.0)
       << "Virtual memory does not support host KV cache offload; set "
          "--host_blocks_factor=0.";
@@ -279,6 +281,19 @@ bool LLMEngine::init_model(MasterStatus master_status,
     return false;
   }
 
+  if (LoadConfig::get_instance().enable_vmm_weights() &&
+      !KVCacheConfig::get_instance().enable_vmm_kvcache() &&
+      master_status != MasterStatus::WAKEUP) {
+    // Sleeping weights have no device allocation yet. Keep ordinary KV
+    // tensors from consuming the page budget needed by the first wakeup.
+    const size_t weight_pages =
+        DistributedVirtualMemoryCoordinator::get_instance()
+            .get_weight_page_count(options_.model_id());
+    initial_weight_reservation_bytes_ =
+        weight_pages *
+        KVCacheConfig::get_instance().phy_page_granularity_size();
+  }
+
   // init model for each worker in parallel
   // multiple workers, call async init
   std::vector<folly::SemiFuture<bool>> futures;
@@ -302,7 +317,13 @@ bool LLMEngine::init_model(MasterStatus master_status,
 
 KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   return KVCacheManagerFactory::estimate_capacity(
-      args_, options_, dtype_, dp_local_tp_size_, worker_clients_);
+      args_,
+      options_,
+      dtype_,
+      dp_local_tp_size_,
+      worker_clients_,
+      /*is_multimodal=*/false,
+      initial_weight_reservation_bytes_);
 }
 
 bool LLMEngine::allocate_kv_cache(
@@ -396,7 +417,7 @@ bool LLMEngine::allocate_kv_cache(
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_kvcache_store(options_.enable_kvcache_store())
       .prefetch_batch_size(options_.prefetch_batch_size())
-      .enable_virtual_memory(kv_cache_config.enable_virtual_memory())
+      .enable_vmm_kvcache(kv_cache_config.enable_vmm_kvcache())
       .num_layers(args_.n_layers())
       .slot_size(kv_cache_cap.slot_size())
       .model_id(options_.model_id())

@@ -235,7 +235,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     ForwardSyncPolicy sync_policy,
     ForwardCompletion completion) {
   MULTI_MODEL_STEP_LOCK(
-      ::xllm::KVCacheConfig::get_instance().enable_virtual_memory());
+      ::xllm::LoadConfig::get_instance().enable_vmm_weights());
 
   Timer timer;
   auto& sampling_params = input.sampling_params;
