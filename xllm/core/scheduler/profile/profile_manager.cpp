@@ -113,14 +113,16 @@ DecodeGraphWarmupPlan build_profile_decode_warmup_plan(
   DecodeGraphWarmupPlan plan = build_decode_graph_warmup_plan(
       config, max_global_batch_size, options.dp_size());
   const auto& model = ModelConfig::get_instance();
-  if (!options.enable_task_pipeline() || model.backend() != "vlm" ||
+  const bool requires_exact_shapes =
+      Platform::is_npu() ||
+      (options.enable_task_pipeline() && model.backend() == "vlm");
+  if (!requires_exact_shapes || options.dp_size() != 1 ||
       !ModelConfig::is_python_model_impl(model.model_impl()) ||
       !config.enable_graph_mode_decode_no_padding) {
     return plan;
   }
-  // Worker-owned VLM execution replays exact Python graph shapes. The native
+  // Python execution replays exact graph shapes without padding. The native
   // compatibility schedule can omit intermediate sequence counts such as 3.
-  CHECK_EQ(options.dp_size(), 1);
   const int32_t limit =
       config.max_graph_batch_size > 0
           ? std::min(max_global_batch_size, config.max_graph_batch_size)

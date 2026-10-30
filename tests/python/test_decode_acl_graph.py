@@ -85,6 +85,141 @@ def _metadata(linear_state_indices: torch.Tensor, rows: int | None = None) -> Si
     )
 
 
+def _capacity_metadata(rows: int, kv_length: int = 1, query_width: int = 1) -> SimpleNamespace:
+    metadata = _metadata(torch.arange(rows // query_width, dtype=torch.int32), rows)
+    pages = (kv_length + 3) // 4
+    metadata.block_table = torch.arange(1, rows * pages + 1, dtype=torch.int32).reshape(rows, pages)
+    metadata.kv_seq_lens.fill_(kv_length)
+    metadata.kv_seq_lens_host_values = [kv_length] * rows
+    metadata.kv_cu_seq_lens = None
+    metadata.paged_kv_indptr, metadata.paged_kv_indices, metadata.paged_kv_last_page_len = (
+        build_row_aligned_paged_kv_metadata(metadata.block_table, metadata.kv_seq_lens_host_values, 4)
+    )
+    if query_width > 1:
+        metadata.is_spec_verify = True
+        metadata.q_seq_lens_host = torch.full((rows // query_width,), query_width, dtype=torch.int32)
+        metadata.q_cu_seq_lens = torch.arange(0, rows + 1, query_width, dtype=torch.int32)
+        metadata.expanded_decode_metadata = SimpleNamespace(
+            enabled=True,
+            kv_seq_lens=metadata.kv_seq_lens,
+            block_table=metadata.block_table,
+            paged_kv_indptr=metadata.paged_kv_indptr,
+            paged_kv_indices=metadata.paged_kv_indices,
+            paged_kv_last_page_len=metadata.paged_kv_last_page_len,
+            paged_attention_tiling_data=None,
+            kv_seq_lens_host=None,
+            kv_seq_lens_host_values=metadata.kv_seq_lens_host_values,
+        )
+    return metadata
+
+
+def test_decode_startup_captures_all_kv_capacities_from_short_metadata() -> None:
+    runner = _runner(max_batch=4, max_model_len=512, device_kv_lengths=True)
+    tokens = torch.arange(3, dtype=torch.int32)
+    metadata = _capacity_metadata(3)
+    captured_pages: list[int] = []
+
+    def _prepare_entry(*_args: object, graph_key: tuple[object, ...], kv_capacity_pages: int, **_: object) -> None:
+        assert metadata.block_table.shape == (3, 1)
+        captured_pages.append(kv_capacity_pages)
+        runner._graphs[graph_key] = AclGraphEntry()
+
+    assert runner.prepare_execution(tokens, metadata) is None
+    assert runner.prepare_execution(tokens, metadata, is_graph_warmup=True) is not None
+    with patch.object(runner, "_prepare_graph_entry", side_effect=_prepare_entry):
+        runner.warmup(tokens, tokens, metadata, is_graph_warmup=True)
+        runner.warmup(tokens, tokens, metadata, is_graph_warmup=True)
+        assert captured_pages == [4, 32, 129]
+        for length, expected_pages in ((1, 4), (128, 32), (512, 129)):
+            runtime_metadata = _capacity_metadata(3, length)
+            assert runner.prepare_execution(tokens, runtime_metadata) is not None
+            key = runner.warmup(tokens, tokens, runtime_metadata)
+            assert key[-1] == expected_pages
+            assert key in runner._graphs
+        assert captured_pages == [4, 32, 129]
+
+
+def test_decode_startup_tracks_sparse_prefix_rows_and_expanded_verify_separately() -> None:
+    runner = _runner(
+        max_batch=160,
+        num_decoding_tokens=5,
+        enable_graph_mode_decode_no_padding=True,
+        device_kv_lengths=True,
+    )
+    runner._has_linear_cache = True
+    runner._model_owns_linear_spec_verify = True
+    runner.attention_backend.supports_linear_spec_verify_graph = True
+
+    def _prepare_entry(*_args: object, graph_key: tuple[object, ...], **_: object) -> None:
+        runner._graphs[graph_key] = AclGraphEntry()
+
+    with patch.object(runner, "_prepare_graph_entry", side_effect=_prepare_entry) as capture:
+        for rows in (75, 15):
+            tokens = torch.arange(rows, dtype=torch.int32)
+            metadata = _capacity_metadata(rows)
+            assert runner.prepare_execution(tokens, metadata, is_graph_warmup=True) is not None
+            runner.warmup(tokens, tokens, metadata, is_graph_warmup=True)
+            assert runner.can_execute(tokens, metadata)
+
+        missing_tokens = torch.arange(16, dtype=torch.int32)
+        assert not runner.can_execute(missing_tokens, _capacity_metadata(16))
+        tokens = torch.arange(75, dtype=torch.int32)
+        expanded_metadata = _capacity_metadata(75, query_width=5)
+        assert not runner.can_execute(tokens, expanded_metadata)
+        assert runner.prepare_execution(tokens, expanded_metadata, is_graph_warmup=True) is not None
+        runner.warmup(tokens, tokens, expanded_metadata, is_graph_warmup=True)
+        assert runner.can_execute(tokens, expanded_metadata)
+        assert runner.can_execute(tokens, _capacity_metadata(75))
+        assert not runner.can_execute(torch.arange(15, dtype=torch.int32), _capacity_metadata(15, query_width=5))
+        assert capture.call_count == 3
+
+
+@pytest.mark.parametrize("missing_variant", ["capacity", "embedding", "topk", "query_layout"])
+def test_admitted_decode_shape_still_rejects_missing_graph_variants(missing_variant: str) -> None:
+    runner = _runner(max_batch=4, max_model_len=512, device_kv_lengths=True)
+    tokens = torch.arange(4, dtype=torch.int32)
+    metadata = _capacity_metadata(4)
+
+    def _prepare_entry(*_args: object, graph_key: tuple[object, ...], **_: object) -> None:
+        runner._graphs[graph_key] = AclGraphEntry()
+
+    with patch.object(runner, "_prepare_graph_entry", side_effect=_prepare_entry) as capture:
+        key = runner.warmup(tokens, tokens, metadata, is_graph_warmup=True)
+        embedding = None
+        topk = None
+        if missing_variant == "capacity":
+            del runner._graphs[key]
+        elif missing_variant == "embedding":
+            embedding = torch.ones((4, 8), dtype=torch.float32)
+        elif missing_variant == "topk":
+            topk = torch.ones((4, 1, 8), dtype=torch.int32)
+        else:
+            metadata.kpool_query_lens = (2, 2)
+        assert runner.prepare_execution(tokens, metadata, embedding, topk) is not None
+        with pytest.raises(RuntimeError, match="not captured during startup warmup: graph_key="):
+            runner.warmup(tokens, tokens, metadata, embedding, topk)
+        assert capture.call_count == 3
+
+
+def test_failed_decode_startup_capture_does_not_admit_shape() -> None:
+    runner = _runner(max_batch=4, max_model_len=512, device_kv_lengths=True)
+    tokens = torch.arange(4, dtype=torch.int32)
+    metadata = _capacity_metadata(4)
+
+    def _prepare_entry(*_args: object, graph_key: tuple[object, ...], kv_capacity_pages: int, **_: object) -> None:
+        if kv_capacity_pages == 32:
+            raise RuntimeError("capture failed")
+        runner._graphs[graph_key] = AclGraphEntry()
+
+    with (
+        patch.object(runner, "_prepare_graph_entry", side_effect=_prepare_entry),
+        pytest.raises(RuntimeError, match="capture failed"),
+    ):
+        runner.warmup(tokens, tokens, metadata, is_graph_warmup=True)
+    assert runner._graphs
+    assert runner.prepare_execution(tokens, metadata) is None
+
+
 class _FakeBlockDraftAttentionBackend:
     page_size = 4
     logical_page_size = 4

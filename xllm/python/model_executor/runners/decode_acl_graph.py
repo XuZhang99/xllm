@@ -150,6 +150,7 @@ class DecodeAclGraphRunner(AclGraphRunner):
         )
         self._uses_compressed_kpool_tail = False
         self._graphs: dict[_GraphKey, AclGraphEntry] = {}
+        self._startup_batch_shapes: set[tuple[int, bool]] = set()
         self._dp_graph_variants: dict[_GraphKey, int] = {}
         self._enable_mega_moe_token_mask = enable_mega_moe_token_mask
         self._paged_kv_indices_buffer: torch.Tensor | None = None
@@ -182,6 +183,8 @@ class DecodeAclGraphRunner(AclGraphRunner):
         metadata: AttentionMetadata,
         input_embedding: torch.Tensor | None = None,
         mtp_topk_indices: torch.Tensor | None = None,
+        *,
+        is_graph_warmup: bool = False,
     ) -> DecodeAclGraphMetadata | None:
         """Admit a step and return metadata reusable until its replay is queued.
 
@@ -236,6 +239,17 @@ class DecodeAclGraphRunner(AclGraphRunner):
             if batch_size > self.max_batch:
                 return None
             padded_batch_size = self._padded_batch_size(batch_size, metadata)
+
+        # Physical KV capacity can limit startup shapes. Draft prefix steps
+        # also flatten multiple rows per request, so the largest warmed row
+        # count does not imply coverage of smaller shapes. Select eager for
+        # unsupported shapes before execution; missing variants still fail.
+        if (
+            self._device_kv_lengths
+            and not is_graph_warmup
+            and (padded_batch_size, is_expanded_spec_verify) not in self._startup_batch_shapes
+        ):
+            return None
 
         def reject_layout(reason: str) -> None:
             if self.dp_size > 1:
@@ -674,7 +688,9 @@ class DecodeAclGraphRunner(AclGraphRunner):
         if self._device_kv_lengths:
             if not is_graph_warmup:
                 if graph_key not in self._graphs:
-                    raise RuntimeError("KV capacity graph was not captured during startup warmup")
+                    raise RuntimeError(
+                        f"KV capacity graph was not captured during startup warmup: graph_key={graph_key!r}"
+                    )
                 return graph_key
             capacity_pages = kv_capacity_buckets(self._capacity_page_limit())
             previous_count = len(self._graphs)
@@ -716,6 +732,7 @@ class DecodeAclGraphRunner(AclGraphRunner):
                     len(capacity_pages),
                     len(self._graphs),
                 )
+            self._startup_batch_shapes.add((padded_batch_size, expanded is not None))
             return graph_key
         if not self._synchronize_dp_graph_presence(graph_key, input_ids):
             return graph_key

@@ -1165,7 +1165,7 @@ class ModelExecutor:
                     # Subclasses can have a different admission/input contract.
                     # Ordinary decode reuses its resolved values only in this call.
                     decode_metadata = graph_runner.prepare_execution(
-                        input_ids, metadata, input_embedding, mtp_topk_indices
+                        input_ids, metadata, input_embedding, mtp_topk_indices, is_graph_warmup=is_graph_warmup
                     )
                     use_graph = decode_metadata is not None
                 else:

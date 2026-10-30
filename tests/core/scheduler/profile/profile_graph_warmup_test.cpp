@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/framework/block/block_manager_pool.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/request/incremental_decoder.h"
@@ -83,6 +84,19 @@ class ScopedVmmConfigSnapshot final {
  private:
   bool enabled_;
   bool elastic_;
+};
+
+class ScopedModelImplSnapshot final {
+ public:
+  ScopedModelImplSnapshot()
+      : model_impl_(ModelConfig::get_instance().model_impl()) {}
+
+  ~ScopedModelImplSnapshot() {
+    ModelConfig::get_instance().model_impl(model_impl_);
+  }
+
+ private:
+  std::string model_impl_;
 };
 
 class ScopedSpeculativeSamplingConfigSnapshot final {
@@ -1134,6 +1148,58 @@ TEST(GraphWarmupTest, OrdinaryStepsWarmBucketsAndDrainBeforeReleasingKv) {
   config.acl_graph_decode_batch_size_limit(previous_limit);
 #else
   GTEST_SKIP() << "Startup graph warmup is disabled on this platform.";
+#endif
+}
+
+TEST(GraphWarmupTest, PythonNoPaddingWarmsEverySequenceCount) {
+#if defined(USE_NPU)
+  ScopedDecodeGraphConfigSnapshot execution_snapshot;
+  ScopedModelImplSnapshot model_snapshot;
+  ModelConfig::get_instance().model_impl("python");
+  ExecutionConfig::get_instance()
+      .enable_graph(true)
+      .disable_graph_warmup(false)
+      .acl_graph_decode_batch_size_limit(4);
+  for (const int32_t num_speculative_tokens : {0, 4}) {
+    for (const bool no_padding : {false, true}) {
+      for (const bool overlap : {false, true}) {
+        SCOPED_TRACE(num_speculative_tokens);
+        SCOPED_TRACE(no_padding);
+        SCOPED_TRACE(overlap);
+        RecordingProfileEngine engine(overlap);
+        const std::vector<size_t> used_before =
+            engine.block_manager_pool()->num_used_blocks();
+        ProfileManager::Options options;
+        options.max_tokens_per_batch(20)
+            .max_seqs_per_batch(4)
+            .dp_size(1)
+            .enable_task_pipeline(false)
+            .enable_schedule_overlap(overlap)
+            .enable_profile_step_time(false)
+            .enable_profile_kv_blocks(false)
+            .instance_role(InstanceRole::DECODE)
+            .decode_graph_warmup_config(
+                make_decode_graph_warmup_config(num_speculative_tokens + 1,
+                                                num_speculative_tokens,
+                                                no_padding,
+                                                /*max_graph_batch_size=*/4));
+
+        ProfileManager profile_manager(&engine, options);
+
+        std::vector<int32_t> expected = {4, 3, 2, 1};
+        if (!no_padding) {
+          expected = num_speculative_tokens == 0
+                         ? std::vector<int32_t>{4, 2, 1}
+                         : std::vector<int32_t>{4, 3, 1};
+        }
+        EXPECT_EQ(engine.observed_batches(), expected);
+        EXPECT_EQ(engine.pending_steps(), 0);
+        EXPECT_EQ(engine.block_manager_pool()->num_used_blocks(), used_before);
+      }
+    }
+  }
+#else
+  GTEST_SKIP() << "Ordinary Python ACL graph warmup requires NPU.";
 #endif
 }
 
