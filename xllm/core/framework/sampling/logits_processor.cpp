@@ -244,44 +244,42 @@ namespace {
 
 void apply_prefix_penalties(torch::Tensor& logits,
                             const SamplingParameters& params) {
-  if (!params.prefix_tokens.defined() ||
-      (!params.penalties.repetition_penalties.defined() &&
-       !params.penalties.frequency_penalties.defined())) {
+  if (!params.prefix_tokens().defined() ||
+      (!params.repetition_penalties().defined() &&
+       !params.frequency_penalties().defined())) {
     return;
   }
-  const auto& prefix = params.prefix_tokens;
+  const auto& prefix = params.prefix_tokens();
   for (int64_t column = 0; column < prefix.size(1); ++column) {
     const torch::Tensor token = prefix.select(1, column).unsqueeze(1);
     const torch::Tensor index = token.clamp_min(0);
-    const torch::Tensor in_base = params.penalties.unique_token_ids.eq(token);
+    const torch::Tensor in_base = params.unique_token_ids().eq(token);
     const torch::Tensor valid_base =
-        torch::arange(params.penalties.unique_token_ids.size(1),
-                      index.options())
+        torch::arange(params.unique_token_ids().size(1), index.options())
             .unsqueeze(0)
-            .lt(params.penalties.unique_token_ids_lens.unsqueeze(1));
+            .lt(params.unique_token_ids_lens().unsqueeze(1));
     const torch::Tensor in_prefix =
         prefix.narrow(1, 0, column).eq(token).any(/*dim=*/1, /*keepdim=*/true);
-    if (params.penalties.repetition_penalties.defined()) {
+    if (params.repetition_penalties().defined()) {
       const torch::Tensor fresh = token.ge(0).logical_and(
           (in_base.logical_and(valid_base).any(1, true).logical_or(in_prefix))
               .logical_not());
       const torch::Tensor scores = logits.gather(1, index);
-      const torch::Tensor penalty =
-          params.penalties.repetition_penalties.unsqueeze(1);
+      const torch::Tensor penalty = params.repetition_penalties().unsqueeze(1);
       torch::Tensor delta =
           torch::where(scores < 0, scores * penalty, scores / penalty) - scores;
       delta.masked_fill_(torch::isfinite(scores).logical_not(), 0);
       logits.scatter_add_(
           1, index, torch::where(fresh, delta, 0).to(logits.scalar_type()));
     }
-    if (params.penalties.frequency_penalties.defined()) {
+    if (params.frequency_penalties().defined()) {
       const torch::Tensor seen =
-          in_base.logical_and(params.penalties.unique_token_counts.gt(0))
+          in_base.logical_and(params.unique_token_counts().gt(0))
               .any(1, true)
               .logical_or(in_prefix);
       const torch::Tensor penalty =
-          params.penalties.frequency_penalties.unsqueeze(1) +
-          params.penalties.presence_penalties.unsqueeze(1) * seen.logical_not();
+          params.frequency_penalties().unsqueeze(1) +
+          params.presence_penalties().unsqueeze(1) * seen.logical_not();
       logits.scatter_add_(
           1,
           index,
@@ -291,19 +289,17 @@ void apply_prefix_penalties(torch::Tensor& logits,
 }
 
 void apply_bad_words(torch::Tensor& logits, const SamplingParameters& params) {
-  if (!params.constraints.bad_words.defined()) {
+  if (!params.bad_words().defined()) {
     return;
   }
-  const int64_t width = params.constraints.bad_words.size(2);
-  const torch::Tensor ids = params.constraints.bad_words.select(2, width - 1);
+  const int64_t width = params.bad_words().size(2);
+  const torch::Tensor ids = params.bad_words().select(2, width - 1);
   torch::Tensor matches = ids.ge(0);
   if (width > 1) {
-    const torch::Tensor prefixes =
-        params.constraints.bad_words.narrow(2, 0, width - 1);
+    const torch::Tensor prefixes = params.bad_words().narrow(2, 0, width - 1);
     matches.logical_and_(
         prefixes.lt(0)
-            .logical_or(
-                prefixes.eq(params.constraints.bad_word_suffix.unsqueeze(1)))
+            .logical_or(prefixes.eq(params.bad_word_suffix().unsqueeze(1)))
             .all(/*dim=*/2));
   }
   const torch::Tensor bias =
@@ -317,28 +313,27 @@ void apply_bad_words(torch::Tensor& logits, const SamplingParameters& params) {
 
 void apply_sampling_penalties(torch::Tensor& logits,
                               const SamplingParameters& params) {
-  if (params.constraints.logits_bias.defined()) {
-    logits.add_(params.constraints.logits_bias);
+  if (params.logits_bias().defined()) {
+    logits.add_(params.logits_bias());
   }
-  if (params.constraints.min_token_ids.defined()) {
-    apply_min_token_block(logits,
-                          params.constraints.min_token_ids,
-                          params.constraints.min_tokens_remaining);
+  if (params.min_token_ids().defined()) {
+    apply_min_token_block(
+        logits, params.min_token_ids(), params.min_tokens_remaining());
   }
   // Apply repetition before frequency and presence penalties.
-  if (params.penalties.repetition_penalties.defined()) {
+  if (params.repetition_penalties().defined()) {
     apply_repetition_penalties(logits,
-                               params.penalties.unique_token_ids,
-                               params.penalties.repetition_penalties,
-                               params.penalties.unique_token_ids_lens);
+                               params.unique_token_ids(),
+                               params.repetition_penalties(),
+                               params.unique_token_ids_lens());
   }
 
-  if (params.penalties.frequency_penalties.defined()) {
+  if (params.frequency_penalties().defined()) {
     apply_frequency_presence_penalties(logits,
-                                       params.penalties.unique_token_ids,
-                                       params.penalties.unique_token_counts,
-                                       params.penalties.frequency_penalties,
-                                       params.penalties.presence_penalties);
+                                       params.unique_token_ids(),
+                                       params.unique_token_counts(),
+                                       params.frequency_penalties(),
+                                       params.presence_penalties());
   }
   apply_prefix_penalties(logits, params);
   apply_bad_words(logits, params);
@@ -348,13 +343,13 @@ void process_logits(torch::Tensor& logits,
                     const SamplingParameters& params,
                     const torch::Tensor& filter_mask) {
   const torch::Tensor& effective_filter_mask =
-      filter_mask.defined() ? filter_mask : params.constraints.filter_mask;
+      filter_mask.defined() ? filter_mask : params.filter_mask();
   apply_sampling_penalties(logits, params);
 
   // Only penalties/bias/filters can move the argmax; the rest is
   // argmax-preserving (see SamplingParameters::is_all_greedy).
-  if (params.constraints.filter_bitmask.defined()) {
-    apply_token_bitmask_inplace(logits, params.constraints.filter_bitmask);
+  if (params.filter_bitmask().defined()) {
+    apply_token_bitmask_inplace(logits, params.filter_bitmask());
   } else if (effective_filter_mask.defined()) {
     CHECK_EQ(effective_filter_mask.sizes(), logits.sizes())
         << "filter_mask must match the logits shape";
@@ -364,34 +359,28 @@ void process_logits(torch::Tensor& logits,
     return;
   }
 
-  torch::Tensor top_p = params.distribution.top_p;
-  if (params.distribution.top_k.defined() &&
-      params.distribution.top_p.defined()) {
+  torch::Tensor top_p = params.top_p();
+  if (params.top_k().defined() && params.top_p().defined()) {
     // Native top-k/top-p consumes top-p in the logits dtype.
     top_p = top_p.to(logits.scalar_type());
   }
-  const bool has_transforms = params.distribution.temperatures.defined() ||
-                              params.distribution.min_p.defined() ||
-                              params.distribution.top_k.defined() ||
-                              top_p.defined();
+  const bool has_transforms = params.temperatures().defined() ||
+                              params.min_p().defined() ||
+                              params.top_k().defined() || top_p.defined();
   if (has_transforms) {
     kernel::FusedLogitsTransformParams transform_params{
-        logits,
-        params.distribution.temperatures,
-        params.distribution.min_p,
-        params.distribution.top_k,
-        top_p};
+        logits, params.temperatures(), params.min_p(), params.top_k(), top_p};
     if (kernel::supports_fused_logits_transform(transform_params)) {
       // Falling through would apply the same transforms a second time.
       kernel::fused_logits_transform(transform_params);
       return;
     }
   }
-  if (params.distribution.temperatures.defined()) {
-    apply_temperatures(logits, params.distribution.temperatures);
+  if (params.temperatures().defined()) {
+    apply_temperatures(logits, params.temperatures());
   }
-  apply_min_p(logits, params.distribution.min_p);
-  apply_top_k_top_p(logits, params.distribution.top_k, top_p);
+  apply_min_p(logits, params.min_p());
+  apply_top_k_top_p(logits, params.top_k(), top_p);
 }
 
 }  // namespace xllm

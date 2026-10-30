@@ -106,15 +106,15 @@ TEST(UnifiedBlockAdmissionTest, RejectsNonGreedyAndTransformedRequests) {
   LlmForwardInput input;
   input.input_params.meta.batch_forward_type = BatchForwardType::DECODE;
   EXPECT_TRUE(supports_unified_block_graph(capacity, 1, input));
-  input.sampling_params.output.logprobs = true;
+  input.sampling_params.logprobs() = true;
   EXPECT_FALSE(supports_unified_block_graph(capacity, 1, input));
-  input.sampling_params.output.logprobs = false;
-  input.sampling_params.selection.sampling_mode = SamplingMode::MIXED;
+  input.sampling_params.logprobs() = false;
+  input.sampling_params.sampling_mode() = SamplingMode::MIXED;
   EXPECT_FALSE(supports_unified_block_graph(capacity, 1, input));
-  input.sampling_params.selection.sampling_mode = SamplingMode::GREEDY;
-  for (auto* transform : {&input.sampling_params.distribution.top_k,
-                          &input.sampling_params.distribution.min_p,
-                          &input.sampling_params.constraints.logits_bias}) {
+  input.sampling_params.sampling_mode() = SamplingMode::GREEDY;
+  for (auto* transform : {&input.sampling_params.top_k(),
+                          &input.sampling_params.min_p(),
+                          &input.sampling_params.logits_bias()}) {
     *transform = torch::tensor({1});
     EXPECT_FALSE(supports_unified_block_graph(capacity, 1, input));
     *transform = torch::Tensor();
@@ -1403,8 +1403,7 @@ class SpeculativePipelineTest : public ::testing::Test {
     params.attention.device.new_cache_slots = torch::empty({width}, integers);
     params.attention.device.block_tables =
         torch::arange(8, integers).view({1, 8}).repeat({width, 1});
-    value.sampling_params.selection.selected_token_idxes =
-        torch::zeros({1}, integers);
+    value.sampling_params.selected_token_idxes() = torch::zeros({1}, integers);
     return value;
   }
 
@@ -1431,10 +1430,9 @@ class SpeculativePipelineTest : public ::testing::Test {
     if (!decode) {
       params.embedding.extra_token_ids = {-1};
     }
-    input.sampling_params.selection.selected_token_idxes =
+    input.sampling_params.selected_token_idxes() =
         torch::tensor({query - 1}, torch::kInt32);
-    input.sampling_params.selection.do_sample =
-        torch::tensor({false}, torch::kBool);
+    input.sampling_params.do_sample() = torch::tensor({false}, torch::kBool);
     return input;
   }
 
@@ -1589,9 +1587,9 @@ class SpeculativePipelineTest : public ::testing::Test {
     host.new_cache_slots = std::move(slots);
     host.block_tables =
         torch::tensor(block_tables, torch::kInt32).view({batch_size, 2});
-    value.sampling_params.selection.selected_token_idxes =
+    value.sampling_params.selected_token_idxes() =
         torch::tensor(selected, torch::kInt32);
-    value.sampling_params.selection.sampling_mode = SamplingMode::GREEDY;
+    value.sampling_params.sampling_mode() = SamplingMode::GREEDY;
     return value;
   }
 
@@ -2479,7 +2477,7 @@ TEST_F(SpeculativePipelineTest,
   host.kv_seq_lens = {18};
   host.q_cu_seq_lens = {4};
   host.new_cache_slots = {62, 63, 16, 17};
-  prefill.sampling_params.selection.selected_token_idxes =
+  prefill.sampling_params.selected_token_idxes() =
       torch::tensor({3}, torch::kInt32);
 
   auto invalid = prefill.clone();
@@ -2559,8 +2557,8 @@ TEST_F(SpeculativePipelineTest, LogprobsFollowAcceptedTokensAndPreserveShape) {
   ASSERT_NE(pipeline_, nullptr);
   execute(input(false));
   auto decode = input(true);
-  decode.sampling_params.output.logprobs = true;
-  decode.sampling_params.output.max_top_logprobs = 2;
+  decode.sampling_params.logprobs() = true;
+  decode.sampling_params.max_top_logprobs() = 2;
   const auto output = execute(decode);
   ASSERT_TRUE(output.sample_output.next_tokens.defined());
   EXPECT_TRUE(torch::equal(output.sample_output.next_tokens,
@@ -2594,14 +2592,14 @@ TEST_F(SpeculativePipelineTest,
   create();
   ASSERT_NE(pipeline_, nullptr);
   auto prefill = input(false);
-  prefill.sampling_params.selection.do_sample.fill_(true);
-  prefill.sampling_params.selection.sampling_mode = SamplingMode::RANDOM;
+  prefill.sampling_params.do_sample().fill_(true);
+  prefill.sampling_params.sampling_mode() = SamplingMode::RANDOM;
   const auto first = execute(prefill);
   ASSERT_TRUE(first.sample_output.next_tokens.defined());
   EXPECT_EQ(first.sample_output.next_tokens.item<int64_t>(), 7);
   auto decode = input(true, 7, 2);
-  decode.sampling_params.selection.do_sample.fill_(true);
-  decode.sampling_params.selection.sampling_mode = SamplingMode::RANDOM;
+  decode.sampling_params.do_sample().fill_(true);
+  decode.sampling_params.sampling_mode() = SamplingMode::RANDOM;
   const auto accepted = execute(decode);
   ASSERT_TRUE(accepted.sample_output.next_tokens.defined());
   EXPECT_TRUE(torch::equal(accepted.sample_output.next_tokens,
@@ -2638,14 +2636,14 @@ TEST_P(CpSpeculativePipelineTest,
   create();
   ASSERT_NE(pipeline_, nullptr);
   auto prefill = input(false);
-  prefill.sampling_params.selection.do_sample.fill_(true);
-  prefill.sampling_params.selection.sampling_mode = SamplingMode::RANDOM;
+  prefill.sampling_params.do_sample().fill_(true);
+  prefill.sampling_params.sampling_mode() = SamplingMode::RANDOM;
   const auto first = execute(prefill);
   ASSERT_TRUE(first.sample_output.next_tokens.defined());
   EXPECT_EQ(first.sample_output.next_tokens.item<int64_t>(), 7);
   auto decode = input(true, /*token=*/7, /*position=*/2);
-  decode.sampling_params.selection.do_sample.fill_(true);
-  decode.sampling_params.selection.sampling_mode = SamplingMode::RANDOM;
+  decode.sampling_params.do_sample().fill_(true);
+  decode.sampling_params.sampling_mode() = SamplingMode::RANDOM;
   const auto accepted = execute(decode);
   ASSERT_TRUE(accepted.sample_output.next_tokens.defined());
   EXPECT_TRUE(torch::equal(accepted.sample_output.next_tokens,
@@ -3133,11 +3131,11 @@ TEST_F(SpeculativePipelineTest,
   ASSERT_NE(pipeline_, nullptr);
   warmup_dspark_batch_graphs();
   const auto with_logprobs = [](LlmForwardInput input) {
-    input.sampling_params.output.logprobs = true;
-    input.sampling_params.output.max_top_logprobs = 2;
+    input.sampling_params.logprobs() = true;
+    input.sampling_params.max_top_logprobs() = 2;
     // The normalized greedy decision comes from SamplingMode, not a
     // temperature shortcut or the presence of output probability fields.
-    input.sampling_params.distribution.temperatures = torch::ones({3});
+    input.sampling_params.temperatures() = torch::ones({3});
     return input;
   };
   const auto prefill =
@@ -3271,13 +3269,13 @@ TEST_F(SpeculativePipelineTest,
   warmup_dspark_batch_graphs();
   EXPECT_EQ(leader.broadcasts(), 0U);
   const auto mixed = [](LlmForwardInput input) {
-    input.sampling_params.selection.do_sample =
+    input.sampling_params.do_sample() =
         torch::tensor({false, true}, torch::kBool);
     // Zero temperatures must not bypass consensus for an explicit mixed batch.
-    input.sampling_params.selection.sampling_mode = SamplingMode::MIXED;
-    input.sampling_params.distribution.temperatures = torch::zeros({2});
-    input.sampling_params.output.logprobs = true;
-    input.sampling_params.output.max_top_logprobs = 2;
+    input.sampling_params.sampling_mode() = SamplingMode::MIXED;
+    input.sampling_params.temperatures() = torch::zeros({2});
+    input.sampling_params.logprobs() = true;
+    input.sampling_params.max_top_logprobs() = 2;
     return input;
   };
   const auto check_probabilities = [](const ForwardOutput& output,
@@ -3823,13 +3821,12 @@ TEST_F(SpeculativePipelineTest,
   for (const bool decode : {false, true}) {
     for (const auto mode : {SamplingMode::RANDOM, SamplingMode::MIXED}) {
       auto request = dspark_batch_input(2, decode);
-      request.sampling_params.selection.sampling_mode = mode;
-      request.sampling_params.distribution.temperatures =
-          torch::full({2}, 0.5F);
+      request.sampling_params.sampling_mode() = mode;
+      request.sampling_params.temperatures() = torch::full({2}, 0.5F);
       if (mode == SamplingMode::MIXED) {
-        request.sampling_params.selection.do_sample =
+        request.sampling_params.do_sample() =
             torch::tensor({false, true}, torch::kBool);
-        request.sampling_params.distribution.temperatures[0] = 0.0F;
+        request.sampling_params.temperatures()[0] = 0.0F;
       }
       const auto submitted = pipeline_->submit(request);
       EXPECT_FALSE(submitted.status.ok());
@@ -3913,7 +3910,7 @@ TEST_F(SpeculativePipelineTest,
   create();
   ASSERT_NE(pipeline_, nullptr);
   auto logprob_request = dspark_batch_input(3, /*decode=*/false);
-  logprob_request.sampling_params.output.logprobs = true;
+  logprob_request.sampling_params.logprobs() = true;
   EXPECT_FALSE(pipeline_->submit(logprob_request).status.ok());
   EXPECT_TRUE(target_->forward_inputs.empty());
   EXPECT_TRUE(draft_->forward_inputs.empty());
@@ -4001,9 +3998,8 @@ TEST_F(SpeculativePipelineTest,
   const size_t broadcasts = leader.broadcasts();
   leader.replace_target_draws(0);
   auto request = dspark_batch_input(3, /*decode=*/true);
-  request.sampling_params.selection.sampling_mode = SamplingMode::RANDOM;
-  request.sampling_params.distribution.temperatures =
-      torch::tensor({0.5F, 0.7F, 1.0F});
+  request.sampling_params.sampling_mode() = SamplingMode::RANDOM;
+  request.sampling_params.temperatures() = torch::tensor({0.5F, 0.7F, 1.0F});
   const auto output = execute(request);
   EXPECT_EQ(leader.broadcasts(), broadcasts + 1);
   EXPECT_TRUE(torch::equal(output.sample_output.next_tokens.select(1, 0),
@@ -4038,11 +4034,10 @@ TEST_F(SpeculativePipelineTest,
     execute(dspark_batch_input(3, /*decode=*/false));
     const size_t broadcasts = leader.broadcasts();
     auto request = dspark_batch_input(3, /*decode=*/true);
-    request.sampling_params.selection.sampling_mode = SamplingMode::MIXED;
-    request.sampling_params.selection.do_sample =
+    request.sampling_params.sampling_mode() = SamplingMode::MIXED;
+    request.sampling_params.do_sample() =
         torch::tensor({false, true, true}, torch::kBool);
-    request.sampling_params.distribution.temperatures =
-        torch::tensor({0.0F, 0.5F, 0.7F});
+    request.sampling_params.temperatures() = torch::tensor({0.0F, 0.5F, 0.7F});
     const auto output = execute(request);
     const auto expected =
         torch::tensor({4, 6, 8}, torch::kInt64).unsqueeze(1) +
@@ -4272,11 +4267,10 @@ TEST_F(SpeculativePipelineTest,
     const auto mixed_request = [this](bool placeholder, int32_t position) {
       auto value =
           dspark_batch_input(3, /*decode=*/true, placeholder, position);
-      value.sampling_params.selection.sampling_mode = SamplingMode::MIXED;
-      value.sampling_params.selection.do_sample =
+      value.sampling_params.sampling_mode() = SamplingMode::MIXED;
+      value.sampling_params.do_sample() =
           torch::tensor({false, true, true}, torch::kBool);
-      value.sampling_params.distribution.temperatures =
-          torch::tensor({0.0F, 0.5F, 1.0F});
+      value.sampling_params.temperatures() = torch::tensor({0.0F, 0.5F, 1.0F});
       return value;
     };
     const auto first = pipeline_->submit(mixed_request(false, 2));
@@ -4312,8 +4306,8 @@ TEST_F(SpeculativePipelineTest,
   execute(dspark_batch_input(3, /*decode=*/false));
   leader.replace_target_draws(0);
   auto request = dspark_batch_input(3, /*decode=*/true);
-  request.sampling_params.selection.sampling_mode = SamplingMode::RANDOM;
-  request.sampling_params.distribution.temperatures = torch::full({3}, 0.5F);
+  request.sampling_params.sampling_mode() = SamplingMode::RANDOM;
+  request.sampling_params.temperatures() = torch::full({3}, 0.5F);
   const auto output = execute(request);
   EXPECT_TRUE(torch::equal(output.sample_output.next_tokens.select(1, 0),
                            torch::zeros({3}, torch::kInt64)));
@@ -4409,8 +4403,8 @@ TEST_P(RecurrentBlockPipelineTest,
                                    int32_t position = 2) {
     auto source = dspark_batch_input(rows, decode, placeholder, position);
     if (!adaptive) {
-      source.sampling_params.output.logprobs = true;
-      source.sampling_params.output.max_top_logprobs = 2;
+      source.sampling_params.logprobs() = true;
+      source.sampling_params.max_top_logprobs() = 2;
     }
     auto& params = source.input_params;
     params.embedding.linear_state_ids.resize(rows);
@@ -4609,13 +4603,13 @@ TEST_P(RecurrentBlockPipelineTest,
     value.input_params.embedding.linear_state_ids = {1, 2, 3};
     value.input_params.linear_state_validity_mask.assign(3, decode ? 1 : 0);
     if (minimum) {
-      value.sampling_params.constraints.min_token_positions =
+      value.sampling_params.min_token_positions() =
           torch::tensor({3, 3, 20}, torch::kLong);
       // Deliberately stale host estimates: ordered device context is the
       // authority after accepted tokens are published by an earlier Slot.
-      value.sampling_params.constraints.min_tokens_remaining =
+      value.sampling_params.min_tokens_remaining() =
           torch::tensor({100, 100, 100}, torch::kLong);
-      value.sampling_params.constraints.min_token_ids =
+      value.sampling_params.min_token_ids() =
           torch::tensor({{4, -1}, {7, -1}, {8, -1}}, torch::kLong);
     }
     return value;
@@ -4682,37 +4676,34 @@ TEST_F(SpeculativePipelineTest, AdaptiveDSparkRejectsUnsupportedAdmission) {
   create();
   ASSERT_NE(pipeline_, nullptr);
   auto inconsistent_flags = dspark_batch_input(2, /*decode=*/false);
-  inconsistent_flags.sampling_params.selection.sampling_mode =
-      SamplingMode::MIXED;
+  inconsistent_flags.sampling_params.sampling_mode() = SamplingMode::MIXED;
   EXPECT_FALSE(pipeline_->submit(inconsistent_flags).status.ok());
   auto minimum_length = dspark_batch_input(2, /*decode=*/false);
-  minimum_length.sampling_params.constraints.min_token_positions =
+  minimum_length.sampling_params.min_token_positions() =
       torch::tensor({8, 8}, torch::kInt32);
-  minimum_length.sampling_params.constraints.min_token_ids =
+  minimum_length.sampling_params.min_token_ids() =
       torch::tensor({{0, 2}, {0, 2}}, torch::kInt64);
   EXPECT_FALSE(pipeline_->submit(minimum_length).status.ok());
   auto penalty = dspark_batch_input(2, /*decode=*/false);
-  penalty.sampling_params.penalties.repetition_penalties =
-      torch::tensor({1.0F, 1.1F});
+  penalty.sampling_params.repetition_penalties() = torch::tensor({1.0F, 1.1F});
   EXPECT_FALSE(pipeline_->submit(penalty).status.ok());
   auto logprobs = dspark_batch_input(2, /*decode=*/false);
-  logprobs.sampling_params.output.logprobs = true;
+  logprobs.sampling_params.logprobs() = true;
   EXPECT_FALSE(pipeline_->submit(logprobs).status.ok());
   auto mask = dspark_batch_input(2, /*decode=*/false);
-  mask.sampling_params.constraints.filter_mask = torch::zeros({2, 32});
+  mask.sampling_params.filter_mask() = torch::zeros({2, 32});
   EXPECT_FALSE(pipeline_->submit(mask).status.ok());
   auto bitmask = dspark_batch_input(2, /*decode=*/false);
-  bitmask.sampling_params.constraints.filter_bitmask =
-      torch::ones({2, 1}, torch::kInt64);
+  bitmask.sampling_params.filter_bitmask() = torch::ones({2, 1}, torch::kInt64);
   EXPECT_FALSE(pipeline_->submit(bitmask).status.ok());
   auto beam = dspark_batch_input(2, /*decode=*/false);
-  beam.sampling_params.beam_search.use_beam_search = true;
+  beam.sampling_params.use_beam_search() = true;
   EXPECT_FALSE(pipeline_->submit(beam).status.ok());
   auto embeddings = dspark_batch_input(2, /*decode=*/false);
-  embeddings.sampling_params.output.is_embeddings = true;
+  embeddings.sampling_params.is_embeddings() = true;
   EXPECT_FALSE(pipeline_->submit(embeddings).status.ok());
   auto multiple_returns = dspark_batch_input(2, /*decode=*/false);
-  multiple_returns.sampling_params.beam_search.num_return_sequences = 2;
+  multiple_returns.sampling_params.num_return_sequences() = 2;
   EXPECT_FALSE(pipeline_->submit(multiple_returns).status.ok());
   EXPECT_TRUE(target_->forward_inputs.empty());
   EXPECT_TRUE(draft_->forward_inputs.empty());
@@ -4735,12 +4726,12 @@ TEST_F(SpeculativePipelineTest,
                              -std::numeric_limits<float>::infinity(),
                              std::numeric_limits<float>::quiet_NaN()}) {
       auto request = dspark_batch_input(2, decode);
-      request.sampling_params.constraints.logits_bias = torch::zeros({2, 32});
-      request.sampling_params.constraints.logits_bias[0][3] = bias;
+      request.sampling_params.logits_bias() = torch::zeros({2, 32});
+      request.sampling_params.logits_bias()[0][3] = bias;
       EXPECT_FALSE(pipeline_->submit(request).status.ok());
     }
     auto device_bias = dspark_batch_input(2, decode);
-    device_bias.sampling_params.constraints.logits_bias =
+    device_bias.sampling_params.logits_bias() =
         torch::zeros({2, 32}, target_->options());
     EXPECT_FALSE(pipeline_->submit(device_bias).status.ok());
     EXPECT_EQ(target_->forward_inputs.size(), target_forwards);
@@ -5670,11 +5661,11 @@ TEST_F(SpeculativePipelineTest, MinimumLengthConstrainsTargetButNotDraft) {
   create();
   execute(input(false));
   auto decode = input(true);
-  decode.sampling_params.constraints.min_token_positions =
+  decode.sampling_params.min_token_positions() =
       torch::tensor({100}, torch::kLong);
-  decode.sampling_params.constraints.min_tokens_remaining =
+  decode.sampling_params.min_tokens_remaining() =
       torch::tensor({100}, torch::kLong);
-  decode.sampling_params.constraints.min_token_ids =
+  decode.sampling_params.min_token_ids() =
       torch::tensor({{4, -1}}, torch::kLong);
   const auto result = execute(decode);
   // The first draft still proposes 4; the target must reject that blocked id.
@@ -6048,10 +6039,10 @@ TEST_F(SpeculativePipelineTest,
           torch::tensor({2}, torch::kInt32).to(device_),
           torch::tensor({3}, torch::kInt32).to(device_),
           /*block_size=*/16);
-      EXPECT_EQ(
-          ordinary_input.sampling_params.selection.selected_token_idxes.cpu()
-              .item<int32_t>(),
-          accepted - 1);
+      EXPECT_EQ(ordinary_input.sampling_params.selected_token_idxes()
+                    .cpu()
+                    .item<int32_t>(),
+                accepted - 1);
       EXPECT_TRUE(torch::equal(
           ordinary_input.positions.cpu(),
           torch::arange(
@@ -6064,7 +6055,7 @@ TEST_F(SpeculativePipelineTest,
                                                     ordinary_snapshot.view());
       const auto ordinary_logits = ordinary.logits(
           ordinary_output.hidden_states,
-          ordinary_input.sampling_params.selection.selected_token_idxes);
+          ordinary_input.sampling_params.selected_token_idxes());
       EXPECT_TRUE(torch::equal(ordinary_cache.front().get_k_cache(),
                                draft_cache_.front().get_k_cache()));
       EXPECT_TRUE(torch::equal(ordinary_cache.front().get_v_cache(),
@@ -6122,9 +6113,9 @@ TEST_F(SpeculativePipelineTest,
                                                  later_input.positions,
                                                  ordinary_cache,
                                                  later_snapshot.view());
-      const auto later_logits = ordinary.logits(
-          later_output.hidden_states,
-          later_input.sampling_params.selection.selected_token_idxes);
+      const auto later_logits =
+          ordinary.logits(later_output.hidden_states,
+                          later_input.sampling_params.selected_token_idxes());
       borrowed.fill_(19.0);
       draft_->logit_increments = {1};
       const auto second = execute(
@@ -6231,9 +6222,9 @@ TEST_F(SpeculativePipelineTest,
                                          prefix_input.positions,
                                          ordinary_cache,
                                          prefix_snapshot.view());
-    const auto logits = ordinary.logits(
-        output.hidden_states,
-        prefix_input.sampling_params.selection.selected_token_idxes);
+    const auto logits =
+        ordinary.logits(output.hidden_states,
+                        prefix_input.sampling_params.selected_token_idxes());
     const int32_t committed = 2 + accepted;
     EXPECT_TRUE(
         torch::allclose(output.hidden_states.narrow(0, accepted - 1, 1).cpu(),

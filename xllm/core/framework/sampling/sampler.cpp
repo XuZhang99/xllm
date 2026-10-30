@@ -61,13 +61,13 @@ torch::Tensor gumbel_noise(const SamplingParameters& params,
                            const torch::Device& device) {
   torch::Tensor noise = torch::empty(
       sizes, torch::TensorOptions().dtype(torch::kFloat32).device(device));
-  if (params.random.seeds.defined()) {
+  if (params.seeds().defined()) {
     CHECK(sizes.size() == 2 || sizes.size() == 3);
-    const torch::Tensor seeds = params.random.seeds.to(torch::kCPU);
-    const torch::Tensor offsets = params.random.seed_offsets.to(torch::kCPU);
+    const torch::Tensor seeds = params.seeds().to(torch::kCPU);
+    const torch::Tensor offsets = params.seed_offsets().to(torch::kCPU);
     const torch::Tensor seeded = seeds.ne(-1);
     const torch::Tensor random_rows =
-        params.selection.sampling_mode == SamplingMode::MIXED
+        params.sampling_mode() == SamplingMode::MIXED
             ? params.require_do_sample().to(torch::kCPU)
             : torch::ones({sizes[0]}, torch::kBool);
     torch::Generator generator = make_sampling_generator(device);
@@ -96,7 +96,7 @@ torch::Tensor gumbel_noise(const SamplingParameters& params,
   noise.clamp_min_(std::numeric_limits<float>::min()).log_();
   // Fill after the log_: masking first would turn the sentinel into
   // log(0) = -inf.
-  if (params.selection.sampling_mode == SamplingMode::MIXED) {
+  if (params.sampling_mode() == SamplingMode::MIXED) {
     noise.masked_fill_(
         greedy_mask(params, device)
             .view(batch_broadcast_shape(noise.size(0), noise.dim())),
@@ -133,33 +133,33 @@ SampleOutput sample(torch::Tensor& logits,
   SampleOutput output;
   // vLLM reports probabilities from the unmodified model distribution.
   const torch::Tensor raw_logprobs =
-      params.output.logprobs && !params.beam_search.use_beam_search
+      params.logprobs() && !params.use_beam_search()
           ? torch::log_softmax(logits, /*dim=*/-1, torch::kFloat32)
           : torch::Tensor();
 
   process_logits(logits, params, filter_mask);
 
   // Keep the model dtype; consumers upcast where the reduction needs fp32.
-  if (params.output.return_logits) {
+  if (params.return_logits()) {
     output.draft_logits = logits;
   }
 
-  if (params.selection.sampling_mode == SamplingMode::MIXED) {
+  if (params.sampling_mode() == SamplingMode::MIXED) {
     const torch::Tensor& do_sample = params.require_do_sample();
     CHECK_EQ(do_sample.dim(), 1)
-        << "params.selection.do_sample must be 1D [num_seqs], got "
+        << "params.do_sample() must be 1D [num_seqs], got "
         << do_sample.sizes();
     CHECK_EQ(logits.size(0), do_sample.size(0));
   }
 
   torch::Tensor samples;
-  if (params.random.seeds.defined() &&
-      params.selection.sampling_mode != SamplingMode::GREEDY) {
+  if (params.seeds().defined() &&
+      params.sampling_mode() != SamplingMode::GREEDY) {
     samples = gumbel_argmax(
         logits, gumbel_noise(params, logits.sizes(), logits.device()));
-  } else if (params.selection.sampling_mode == SamplingMode::RANDOM) {
+  } else if (params.sampling_mode() == SamplingMode::RANDOM) {
     samples = gumbel_sample(logits);
-  } else if (params.selection.sampling_mode == SamplingMode::GREEDY) {
+  } else if (params.sampling_mode() == SamplingMode::GREEDY) {
     samples = greedy_sample(logits);
   } else {
     torch::Tensor noise = gumbel_noise(params, logits.sizes(), logits.device());
@@ -167,7 +167,7 @@ SampleOutput sample(torch::Tensor& logits,
   }
   output.next_tokens = samples;
 
-  if (params.output.logprobs) {
+  if (params.logprobs()) {
     if (::xllm::ModelConfig::get_instance().enable_qwen3_reranker()) {
       int32_t false_id = 2152;  // "no"
       int32_t true_id = 9693;   // "yes"
@@ -188,13 +188,13 @@ SampleOutput sample(torch::Tensor& logits,
     auto selected_logprobs = logprobs.gather(/*dim=*/-1, samples.view({-1, 1}));
     output.logprobs = selected_logprobs.view({-1});
 
-    if (params.output.max_top_logprobs > 0) {
+    if (params.max_top_logprobs() > 0) {
       // max_top_logprobs is the batch-wide max, so one request asking for
       // more than the vocabulary would fail every request in the batch. The
       // factories reject this up front; clamp as a last line of defense —
       // every consumer sizes by the returned row width.
       const int64_t k =
-          std::min<int64_t>(params.output.max_top_logprobs, logprobs.size(-1));
+          std::min<int64_t>(params.max_top_logprobs(), logprobs.size(-1));
       auto [values, indices] = logprobs.topk(k, /*dim=*/-1);
       output.top_logprobs = values;
       output.top_tokens = indices;

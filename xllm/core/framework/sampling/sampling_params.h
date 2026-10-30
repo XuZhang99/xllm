@@ -25,6 +25,7 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
+#include "core/common/macros.h"
 #include "core/util/tensor_helper.h"
 
 namespace xllm {
@@ -109,117 +110,124 @@ struct RequestSamplingParam {
   }
 };
 
-struct SamplingSelection {
+class SamplingSelection final {
+ public:
   // selected tokens are tokens for sampling the next token,
   // including the generated tokens and the last prompt token
   // IntTensor
-  torch::Tensor selected_token_idxes;
+  PROPERTY(torch::Tensor, selected_token_idxes);
 
   // whether to sample for each sequence.
   // [num_seqs] BoolTensor
   // Defined only for mixed batches (see init); use require_do_sample() for
   // per-row dispatch. Per-sequence row domain.
-  torch::Tensor do_sample;
+  PROPERTY(torch::Tensor, do_sample);
 
   // How this batch's sequences are sampled (see SamplingMode).
-  SamplingMode sampling_mode = SamplingMode::GREEDY;
+  PROPERTY(SamplingMode, sampling_mode) = SamplingMode::GREEDY;
 };
 
-struct SamplingDistribution {
+class SamplingDistribution final {
+ public:
   // [num_tokens] FloatTensor
-  torch::Tensor temperatures;
+  PROPERTY(torch::Tensor, temperatures);
 
   // [num_tokens] FloatTensor
-  torch::Tensor top_p;
+  PROPERTY(torch::Tensor, top_p);
 
   // Minimum probability relative to the largest probability in each row.
-  torch::Tensor min_p;
+  PROPERTY(torch::Tensor, min_p);
 
   // [num_tokens] LongTensor
-  torch::Tensor top_k;
+  PROPERTY(torch::Tensor, top_k);
 };
 
-struct SamplingPenalties {
+class SamplingPenalties final {
+ public:
   // [num_tokens] FloatTensor
-  torch::Tensor frequency_penalties;
+  PROPERTY(torch::Tensor, frequency_penalties);
 
   // [num_tokens] FloatTensor
-  torch::Tensor presence_penalties;
+  PROPERTY(torch::Tensor, presence_penalties);
 
   // [num_tokens] FloatTensor
-  torch::Tensor repetition_penalties;
+  PROPERTY(torch::Tensor, repetition_penalties);
 
   // the unique token id and count of each sequence in the batch.
   // [num_tokens, max_unique_tokens] LongTensor
-  torch::Tensor unique_token_ids;
+  PROPERTY(torch::Tensor, unique_token_ids);
 
   // [num_tokens, max_unique_tokens] IntTensor
-  torch::Tensor unique_token_counts;
+  PROPERTY(torch::Tensor, unique_token_counts);
 
   // the number of unique tokens in each sequence.
   // [num_tokens] IntTensor
-  torch::Tensor unique_token_ids_lens;
+  PROPERTY(torch::Tensor, unique_token_ids_lens);
 };
 
-struct SamplingConstraints {
+class SamplingConstraints final {
+ public:
   // Dense additive mask for token-level structured output constraints. Zero
   // entries are allowed and negative entries are forbidden.
-  torch::Tensor filter_mask;
+  PROPERTY(torch::Tensor, filter_mask);
 
   // Compact allowed-token bitmask [num_tokens, ceil(vocab/32)] int32. When
   // defined, sample() prefers this over filter_mask (smaller H2D).
-  torch::Tensor filter_bitmask;
+  PROPERTY(torch::Tensor, filter_bitmask);
 
   // Per-selected-row additive logits bias.
-  torch::Tensor logits_bias;
+  PROPERTY(torch::Tensor, logits_bias);
 
   // Compact task minimum-length constraints. Limits are absolute logical
   // input positions; remaining counts are refreshed before target sampling.
-  torch::Tensor min_token_positions;
+  PROPERTY(torch::Tensor, min_token_positions);
 
-  torch::Tensor min_tokens_remaining;
+  PROPERTY(torch::Tensor, min_tokens_remaining);
 
   // [selected_rows, stop_ids], int64; -1 pads unconstrained entries.
-  torch::Tensor min_token_ids;
+  PROPERTY(torch::Tensor, min_token_ids);
 
   // Right-aligned tokenized words [rows, words, width] and generated suffixes
   // [rows, width - 1], padded with -1. Prompt tokens never match bad words.
-  torch::Tensor bad_words;
+  PROPERTY(torch::Tensor, bad_words);
 
-  torch::Tensor bad_word_suffix;
+  PROPERTY(torch::Tensor, bad_word_suffix);
 };
 
-struct SamplingRandom {
-  torch::Tensor seeds;
+class SamplingRandom final {
+ public:
+  PROPERTY(torch::Tensor, seeds);
 
-  torch::Tensor seed_offsets;
+  PROPERTY(torch::Tensor, seed_offsets);
 };
 
-struct SamplingOutput {
+class SamplingOutput final {
+ public:
   // whether to output logprobs for each generated token.
-  bool logprobs = false;
+  PROPERTY(bool, logprobs) = false;
 
   // whether to expose post-temperature sampling logits on SampleOutput.
-  bool return_logits = false;
+  PROPERTY(bool, return_logits) = false;
 
   // whether to get the embeddings of the tokens. used by embeddings model.
-  bool is_embeddings = false;
+  PROPERTY(bool, is_embeddings) = false;
 
   // max number of top logprobs in the batch.
   // only used when logprobs is true.
-  int64_t max_top_logprobs = 0;
+  PROPERTY(int64_t, max_top_logprobs) = 0;
 };
 
-struct SamplingBeamSearch {
+class SamplingBeamSearch final {
+ public:
   // Beam search accumulated log probability.
   // [num_seq, 1] FloatTensor
-  torch::Tensor acc_logprob;
+  PROPERTY(torch::Tensor, acc_logprob);
 
   // requested final beam result width for request-level beam search output.
-  int32_t num_return_sequences = 0;
+  PROPERTY(int32_t, num_return_sequences) = 0;
 
   // for beam search
-  bool use_beam_search = false;
+  PROPERTY(bool, use_beam_search) = false;
 };
 
 class SamplingParameters final {
@@ -234,21 +242,56 @@ class SamplingParameters final {
   SamplingParameters to(const torch::Device& device,
                         torch::ScalarType dtype) const;
 
-  SamplingSelection selection;
-  SamplingDistribution distribution;
-  SamplingPenalties penalties;
-  SamplingConstraints constraints;
-  SamplingRandom random;
-  SamplingOutput output;
-  SamplingBeamSearch beam_search;
+  PROPERTY(SamplingSelection, selection);
+  FORWARD_PROPERTY(torch::Tensor, selected_token_idxes, selection);
+  FORWARD_PROPERTY(torch::Tensor, do_sample, selection);
+  FORWARD_PROPERTY(SamplingMode, sampling_mode, selection);
+
+  PROPERTY(SamplingDistribution, distribution);
+  FORWARD_PROPERTY(torch::Tensor, temperatures, distribution);
+  FORWARD_PROPERTY(torch::Tensor, top_p, distribution);
+  FORWARD_PROPERTY(torch::Tensor, min_p, distribution);
+  FORWARD_PROPERTY(torch::Tensor, top_k, distribution);
+
+  PROPERTY(SamplingPenalties, penalties);
+  FORWARD_PROPERTY(torch::Tensor, frequency_penalties, penalties);
+  FORWARD_PROPERTY(torch::Tensor, presence_penalties, penalties);
+  FORWARD_PROPERTY(torch::Tensor, repetition_penalties, penalties);
+  FORWARD_PROPERTY(torch::Tensor, unique_token_ids, penalties);
+  FORWARD_PROPERTY(torch::Tensor, unique_token_counts, penalties);
+  FORWARD_PROPERTY(torch::Tensor, unique_token_ids_lens, penalties);
+
+  PROPERTY(SamplingConstraints, constraints);
+  FORWARD_PROPERTY(torch::Tensor, filter_mask, constraints);
+  FORWARD_PROPERTY(torch::Tensor, filter_bitmask, constraints);
+  FORWARD_PROPERTY(torch::Tensor, logits_bias, constraints);
+  FORWARD_PROPERTY(torch::Tensor, min_token_positions, constraints);
+  FORWARD_PROPERTY(torch::Tensor, min_tokens_remaining, constraints);
+  FORWARD_PROPERTY(torch::Tensor, min_token_ids, constraints);
+  FORWARD_PROPERTY(torch::Tensor, bad_words, constraints);
+  FORWARD_PROPERTY(torch::Tensor, bad_word_suffix, constraints);
+
+  PROPERTY(SamplingRandom, random);
+  FORWARD_PROPERTY(torch::Tensor, seeds, random);
+  FORWARD_PROPERTY(torch::Tensor, seed_offsets, random);
+
+  PROPERTY(SamplingOutput, output);
+  FORWARD_PROPERTY(bool, logprobs, output);
+  FORWARD_PROPERTY(bool, return_logits, output);
+  FORWARD_PROPERTY(bool, is_embeddings, output);
+  FORWARD_PROPERTY(int64_t, max_top_logprobs, output);
+
+  PROPERTY(SamplingBeamSearch, beam_search);
+  FORWARD_PROPERTY(torch::Tensor, acc_logprob, beam_search);
+  FORWARD_PROPERTY(int32_t, num_return_sequences, beam_search);
+  FORWARD_PROPERTY(bool, use_beam_search, beam_search);
 
   // Accepted overlap tokens not yet present in the scheduler's token counts.
-  torch::Tensor prefix_tokens;
+  PROPERTY(torch::Tensor, prefix_tokens);
 
   int64_t num_sample_seqs() const {
-    return selection.selected_token_idxes.defined()
-               ? selection.selected_token_idxes.numel()
-               : 0;
+    return selected_token_idxes().defined() ? selected_token_idxes().numel()
+                                            : 0;
   }
 
   // Whether any post-penalty transform (top-k, top-p, min-p, filter masks)
@@ -262,15 +305,15 @@ class SamplingParameters final {
   // argmax; the argmax-preserving transforms (temperature, min-p, top-k/
   // top-p) are dead on it.
   bool is_all_greedy() const {
-    return selection.sampling_mode == SamplingMode::GREEDY &&
-           !output.logprobs && !output.return_logits;
+    return sampling_mode() == SamplingMode::GREEDY && !logprobs() &&
+           !return_logits();
   }
 
-  // Fails fast unless the batch is mixed (see selection.do_sample).
+  // Fails fast unless the batch is mixed (see do_sample()).
   const torch::Tensor& require_do_sample() const {
-    CHECK(selection.do_sample.defined())
+    CHECK(do_sample().defined())
         << "mixed sampling requires do_sample to be defined";
-    return selection.do_sample;
+    return do_sample();
   }
 };
 
@@ -280,24 +323,25 @@ inline torch::Tensor greedy_mask(const SamplingParameters& params,
       /*dim=*/-1);
 }
 
-// Type-erased tensor access for registries spanning composed sampling groups.
+// Tensor access for registries through the forwarded sampling properties.
 // Both overloads retain the source object's constness and return borrowed
 // views.
 class SamplingTensorAccessor final {
  public:
-  using MutableGetter = torch::Tensor& (*)(SamplingParameters&);
-  using ConstGetter = const torch::Tensor& (*)(const SamplingParameters&);
+  using MutableGetter = torch::Tensor& (SamplingParameters::*)() & noexcept;
+  using ConstGetter =
+      const torch::Tensor& (SamplingParameters::*)() const& noexcept;
 
   constexpr SamplingTensorAccessor(MutableGetter mutable_getter,
                                    ConstGetter const_getter)
       : mutable_getter_(mutable_getter), const_getter_(const_getter) {}
 
   torch::Tensor& operator()(SamplingParameters& params) const {
-    return mutable_getter_(params);
+    return (params.*mutable_getter_)();
   }
 
   const torch::Tensor& operator()(const SamplingParameters& params) const {
-    return const_getter_(params);
+    return (params.*const_getter_)();
   }
 
   constexpr bool operator==(const SamplingTensorAccessor& other) const {
@@ -308,23 +352,6 @@ class SamplingTensorAccessor final {
   MutableGetter mutable_getter_;
   ConstGetter const_getter_;
 };
-
-template <auto Group, auto Member>
-inline constexpr SamplingTensorAccessor kSamplingTensor = {
-    +[](SamplingParameters& params) -> torch::Tensor& {
-      return (params.*Group).*Member;
-    },
-    +[](const SamplingParameters& params) -> const torch::Tensor& {
-      return (params.*Group).*Member;
-    }};
-
-inline constexpr SamplingTensorAccessor kSamplingPrefixTokens = {
-    +[](SamplingParameters& params) -> torch::Tensor& {
-      return params.prefix_tokens;
-    },
-    +[](const SamplingParameters& params) -> const torch::Tensor& {
-      return params.prefix_tokens;
-    }};
 
 // Registry of the per-token sampling fields. Roles: per_request (the seeds
 // — never expand to verify width), is_greedy (dead on a greedy batch), and
@@ -340,63 +367,71 @@ struct SamplingFieldDesc {
 // Omitted flags default to false; a plain token-indexed field is a bare
 // {.member=...}.
 inline constexpr std::array<SamplingFieldDesc, 21> kSamplingFields = {
-    {{.member = kSamplingTensor<&SamplingParameters::penalties,
-                                &SamplingPenalties::frequency_penalties>},
-     {.member = kSamplingTensor<&SamplingParameters::penalties,
-                                &SamplingPenalties::presence_penalties>},
-     {.member = kSamplingTensor<&SamplingParameters::penalties,
-                                &SamplingPenalties::repetition_penalties>},
-     {.member = kSamplingTensor<&SamplingParameters::distribution,
-                                &SamplingDistribution::temperatures>,
-      .is_greedy = true},
-     {.member = kSamplingTensor<&SamplingParameters::distribution,
-                                &SamplingDistribution::top_p>,
-      .is_greedy = true,
-      .post_penalty_transform = true},
-     {.member = kSamplingTensor<&SamplingParameters::distribution,
-                                &SamplingDistribution::min_p>,
-      .is_greedy = true,
-      .post_penalty_transform = true},
-     {.member = kSamplingTensor<&SamplingParameters::constraints,
-                                &SamplingConstraints::logits_bias>},
-     {.member = kSamplingTensor<&SamplingParameters::constraints,
-                                &SamplingConstraints::min_token_positions>,
-      .is_greedy = true},
-     {.member = kSamplingTensor<&SamplingParameters::constraints,
-                                &SamplingConstraints::min_tokens_remaining>,
-      .is_greedy = true},
-     {.member = kSamplingTensor<&SamplingParameters::constraints,
-                                &SamplingConstraints::min_token_ids>,
-      .is_greedy = true},
-     {.member = kSamplingTensor<&SamplingParameters::distribution,
-                                &SamplingDistribution::top_k>,
-      .is_greedy = true,
-      .post_penalty_transform = true},
-     {.member = kSamplingTensor<&SamplingParameters::penalties,
-                                &SamplingPenalties::unique_token_ids>},
-     {.member = kSamplingTensor<&SamplingParameters::penalties,
-                                &SamplingPenalties::unique_token_counts>},
-     {.member = kSamplingTensor<&SamplingParameters::penalties,
-                                &SamplingPenalties::unique_token_ids_lens>},
-     {.member = kSamplingTensor<&SamplingParameters::constraints,
-                                &SamplingConstraints::filter_mask>,
-      .post_penalty_transform = true},
-     {.member = kSamplingTensor<&SamplingParameters::constraints,
-                                &SamplingConstraints::filter_bitmask>,
-      .post_penalty_transform = true},
+    {{.member =
+          SamplingTensorAccessor{&SamplingParameters::frequency_penalties,
+                                 &SamplingParameters::frequency_penalties}},
      {.member =
-          kSamplingTensor<&SamplingParameters::random, &SamplingRandom::seeds>,
+          SamplingTensorAccessor{&SamplingParameters::presence_penalties,
+                                 &SamplingParameters::presence_penalties}},
+     {.member =
+          SamplingTensorAccessor{&SamplingParameters::repetition_penalties,
+                                 &SamplingParameters::repetition_penalties}},
+     {.member = SamplingTensorAccessor{&SamplingParameters::temperatures,
+                                       &SamplingParameters::temperatures},
+      .is_greedy = true},
+     {.member = SamplingTensorAccessor{&SamplingParameters::top_p,
+                                       &SamplingParameters::top_p},
+      .is_greedy = true,
+      .post_penalty_transform = true},
+     {.member = SamplingTensorAccessor{&SamplingParameters::min_p,
+                                       &SamplingParameters::min_p},
+      .is_greedy = true,
+      .post_penalty_transform = true},
+     {.member = SamplingTensorAccessor{&SamplingParameters::logits_bias,
+                                       &SamplingParameters::logits_bias}},
+     {.member =
+          SamplingTensorAccessor{&SamplingParameters::min_token_positions,
+                                 &SamplingParameters::min_token_positions},
+      .is_greedy = true},
+     {.member =
+          SamplingTensorAccessor{&SamplingParameters::min_tokens_remaining,
+                                 &SamplingParameters::min_tokens_remaining},
+      .is_greedy = true},
+     {.member = SamplingTensorAccessor{&SamplingParameters::min_token_ids,
+                                       &SamplingParameters::min_token_ids},
+      .is_greedy = true},
+     {.member = SamplingTensorAccessor{&SamplingParameters::top_k,
+                                       &SamplingParameters::top_k},
+      .is_greedy = true,
+      .post_penalty_transform = true},
+     {.member = SamplingTensorAccessor{&SamplingParameters::unique_token_ids,
+                                       &SamplingParameters::unique_token_ids}},
+     {.member =
+          SamplingTensorAccessor{&SamplingParameters::unique_token_counts,
+                                 &SamplingParameters::unique_token_counts}},
+     {.member =
+          SamplingTensorAccessor{&SamplingParameters::unique_token_ids_lens,
+                                 &SamplingParameters::unique_token_ids_lens}},
+     {.member = SamplingTensorAccessor{&SamplingParameters::filter_mask,
+                                       &SamplingParameters::filter_mask},
+      .post_penalty_transform = true},
+     {.member = SamplingTensorAccessor{&SamplingParameters::filter_bitmask,
+                                       &SamplingParameters::filter_bitmask},
+      .post_penalty_transform = true},
+     {.member = SamplingTensorAccessor{&SamplingParameters::seeds,
+                                       &SamplingParameters::seeds},
       .per_request = true,
       .is_greedy = true},
-     {.member = kSamplingTensor<&SamplingParameters::random,
-                                &SamplingRandom::seed_offsets>,
+     {.member = SamplingTensorAccessor{&SamplingParameters::seed_offsets,
+                                       &SamplingParameters::seed_offsets},
       .per_request = true,
       .is_greedy = true},
-     {.member = kSamplingTensor<&SamplingParameters::constraints,
-                                &SamplingConstraints::bad_words>},
-     {.member = kSamplingTensor<&SamplingParameters::constraints,
-                                &SamplingConstraints::bad_word_suffix>},
-     {.member = kSamplingPrefixTokens}}};
+     {.member = SamplingTensorAccessor{&SamplingParameters::bad_words,
+                                       &SamplingParameters::bad_words}},
+     {.member = SamplingTensorAccessor{&SamplingParameters::bad_word_suffix,
+                                       &SamplingParameters::bad_word_suffix}},
+     {.member = SamplingTensorAccessor{&SamplingParameters::prefix_tokens,
+                                       &SamplingParameters::prefix_tokens}}}};
 
 // Out-of-line because it derives from kSamplingFields (below the class).
 inline bool SamplingParameters::has_post_penalty_transforms() const {
@@ -432,24 +467,24 @@ inline void clear_sampling_transforms(SamplingParameters& sampling_params) {
 // probabilistic exposes draft logits exactly when the verifier needs q.
 inline void prepare_draft_sampling(bool is_probabilistic_draft,
                                    SamplingParameters& sampling_params) {
-  sampling_params.output.logprobs = false;
-  sampling_params.output.max_top_logprobs = 0;
-  sampling_params.beam_search.use_beam_search = false;
-  sampling_params.constraints.min_token_positions = torch::Tensor();
-  sampling_params.constraints.min_tokens_remaining = torch::Tensor();
-  sampling_params.constraints.min_token_ids = torch::Tensor();
-  sampling_params.constraints.bad_words = torch::Tensor();
-  sampling_params.constraints.bad_word_suffix = torch::Tensor();
-  sampling_params.prefix_tokens = torch::Tensor();
-  sampling_params.random.seeds = torch::Tensor();
-  sampling_params.random.seed_offsets = torch::Tensor();
+  sampling_params.logprobs() = false;
+  sampling_params.max_top_logprobs() = 0;
+  sampling_params.use_beam_search() = false;
+  sampling_params.min_token_positions() = torch::Tensor();
+  sampling_params.min_tokens_remaining() = torch::Tensor();
+  sampling_params.min_token_ids() = torch::Tensor();
+  sampling_params.bad_words() = torch::Tensor();
+  sampling_params.bad_word_suffix() = torch::Tensor();
+  sampling_params.prefix_tokens() = torch::Tensor();
+  sampling_params.seeds() = torch::Tensor();
+  sampling_params.seed_offsets() = torch::Tensor();
   if (!is_probabilistic_draft) {
-    sampling_params.selection.sampling_mode = SamplingMode::GREEDY;
-    sampling_params.selection.do_sample = torch::Tensor();
+    sampling_params.sampling_mode() = SamplingMode::GREEDY;
+    sampling_params.do_sample() = torch::Tensor();
     clear_sampling_transforms(sampling_params);
   }
-  sampling_params.output.return_logits =
-      sampling_params.selection.sampling_mode != SamplingMode::GREEDY;
+  sampling_params.return_logits() =
+      sampling_params.sampling_mode() != SamplingMode::GREEDY;
 }
 
 // Clears every sampling field for a logits-only forward; the rejection sampler
@@ -468,10 +503,10 @@ inline void expand_sampling_params_for_verify(
     const torch::Device& device,
     torch::Tensor cached_indices = torch::Tensor()) {
   clear_all_sampling_fields(sampling_params);
-  sampling_params.selection.selected_token_idxes =
+  sampling_params.selected_token_idxes() =
       cached_indices.defined() ? std::move(cached_indices)
                                : arange_indices(total_num_val_tokens, device);
-  repeat_interleave_if_defined(sampling_params.selection.do_sample, repeats);
+  repeat_interleave_if_defined(sampling_params.do_sample(), repeats);
 }
 
 // Advance the compact generated suffix with a padded accepted-token prefix.

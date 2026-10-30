@@ -1752,7 +1752,7 @@ TEST(BatchTest, Basic) {
     /*seq3*/ 200,  19, 17, 1,  2,  15, 3,  4,  5,  6,  7,  8,  9, 10, 11, 13
     };
   // seq4 has no sampling parameters
-  EXPECT_TRUE(equal(sampling_params.penalties.unique_token_ids, unique_ids));
+  EXPECT_TRUE(equal(sampling_params.unique_token_ids(), unique_ids));
 
   // const std::vector<int32_t> unique_counts = {
   //   /*seq1*/  1,  1,  1,  2,  2,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  
@@ -1760,10 +1760,10 @@ TEST(BatchTest, Basic) {
   //   /*seq3*/  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1
   // };
   // // seq4 has no sampling parameters
-  // EXPECT_TRUE(equal(sampling_params.penalties.unique_token_counts, unique_counts));
+  // EXPECT_TRUE(equal(sampling_params.unique_token_counts(), unique_counts));
 
   const std::vector<int32_t> token_ids_lens = {6, 5, 16};
-  EXPECT_TRUE(equal(sampling_params.penalties.unique_token_ids_lens, token_ids_lens));
+  EXPECT_TRUE(equal(sampling_params.unique_token_ids_lens(), token_ids_lens));
 
   // The model's output hidden_states shape is [num_tokens, hidden_size].
   // selected_token_idxes is used to select the required corresponding token's hidden_state from it, perform logits calculation, and obtain the probability that the token belongs to each class.
@@ -1771,8 +1771,8 @@ TEST(BatchTest, Basic) {
   // Generally, num_selected_tokens equals num_sample_tokens.
   const std::vector<int32_t> expected_selected_token_idxes = {8,9,10};
   // seq4 has no sampling parameters
-  EXPECT_EQ(sampling_params.selection.selected_token_idxes.size(0), batch.size()-1);
-  EXPECT_TRUE(equal(sampling_params.selection.selected_token_idxes, expected_selected_token_idxes));
+  EXPECT_EQ(sampling_params.selected_token_idxes().size(0), batch.size()-1);
+  EXPECT_TRUE(equal(sampling_params.selected_token_idxes(), expected_selected_token_idxes));
 
   // clang-format on
 }
@@ -1830,9 +1830,9 @@ TEST(BatchTest, SampleRequestInjectsAllMatchedSlots) {
 
   const auto& sampling_params_out = forward_input.sampling_params;
   const std::vector<int32_t> expected_selected_token_idxes = {1, 4};
-  EXPECT_TRUE(equal(sampling_params_out.selection.selected_token_idxes,
+  EXPECT_TRUE(equal(sampling_params_out.selected_token_idxes(),
                     expected_selected_token_idxes));
-  EXPECT_EQ(sampling_params_out.selection.selected_token_idxes.size(0), 2);
+  EXPECT_EQ(sampling_params_out.selected_token_idxes().size(0), 2);
 }
 
 TEST(BatchTest, JsonObjectSampleSequenceIdsFollowSamplingRows) {
@@ -1888,21 +1888,18 @@ TEST(BatchTest, JsonObjectSampleSequenceIdsFollowSamplingRows) {
   EXPECT_EQ(forward_input.sample_prior_output_rows,
             std::vector<int32_t>({-1, -1}));
   ASSERT_EQ(forward_input.json_object_states.size(), 2u);
-  ASSERT_TRUE(
-      forward_input.sampling_params.constraints.filter_bitmask.defined());
-  EXPECT_FALSE(forward_input.sampling_params.constraints.filter_mask.defined());
-  EXPECT_EQ(forward_input.sampling_params.constraints.filter_bitmask.size(0),
-            2);
-  EXPECT_EQ(forward_input.sampling_params.constraints.filter_bitmask.size(1),
-            1);
-  EXPECT_EQ(
-      forward_input.sampling_params.constraints.filter_bitmask.index({0, 0})
-          .item<int32_t>(),
-      -1);
-  EXPECT_NE(
-      forward_input.sampling_params.constraints.filter_bitmask.index({1, 0})
-          .item<int32_t>(),
-      -1);
+  ASSERT_TRUE(forward_input.sampling_params.filter_bitmask().defined());
+  EXPECT_FALSE(forward_input.sampling_params.filter_mask().defined());
+  EXPECT_EQ(forward_input.sampling_params.filter_bitmask().size(0), 2);
+  EXPECT_EQ(forward_input.sampling_params.filter_bitmask().size(1), 1);
+  EXPECT_EQ(forward_input.sampling_params.filter_bitmask()
+                .index({0, 0})
+                .item<int32_t>(),
+            -1);
+  EXPECT_NE(forward_input.sampling_params.filter_bitmask()
+                .index({1, 0})
+                .item<int32_t>(),
+            -1);
 
   RawForwardOutput fake_output;
   fake_output.outputs = {make_raw_sample_output(-1, std::nullopt),
@@ -1979,7 +1976,7 @@ TEST(BatchTest, ReorderedMtpAcceptedRowsCommitToOwningSequences) {
   EXPECT_EQ(
       first_input.sample_sequence_ids,
       std::vector<std::string>({"req-plain-chain#1", "req-json-chain#0"}));
-  EXPECT_TRUE(equal(first_input.sampling_params.selection.selected_token_idxes,
+  EXPECT_TRUE(equal(first_input.sampling_params.selected_token_idxes(),
                     std::vector<int32_t>({1, 3})));
   ASSERT_EQ(first_input.json_object_states.size(), 2u);
   EXPECT_FALSE(first_input.json_object_states[0].initialized());
@@ -2098,9 +2095,8 @@ TEST(BatchTest, JsonObjectMetadataIsSkippedWhenDisabled) {
   EXPECT_EQ(forward_input.sample_sequence_ids,
             std::vector<std::string>{sequence.sample_sequence_id()});
   EXPECT_EQ(forward_input.sample_prior_output_rows, std::vector<int32_t>{-1});
-  EXPECT_FALSE(
-      forward_input.sampling_params.constraints.filter_bitmask.defined());
-  EXPECT_FALSE(forward_input.sampling_params.constraints.filter_mask.defined());
+  EXPECT_FALSE(forward_input.sampling_params.filter_bitmask().defined());
+  EXPECT_FALSE(forward_input.sampling_params.filter_mask().defined());
 }
 
 TEST(BatchTest, ChunkedPDTransferUsesStepWindow) {
@@ -2347,7 +2343,7 @@ TEST(BatchTest, ForwardInputPackedRoundTripPreservesTransportFields) {
       torch::tensor({{3.0f, 4.0f}});
   input.sample_sequence_ids = {"req-packed#0"};
   input.sample_prior_output_rows = {3};
-  input.sampling_params.constraints.filter_bitmask =
+  input.sampling_params.filter_bitmask() =
       torch::tensor({{static_cast<int32_t>(-1)}},
                     torch::TensorOptions().dtype(torch::kInt32));
   bool is_creator = false;
@@ -2384,10 +2380,10 @@ TEST(BatchTest, ForwardInputPackedRoundTripPreservesTransportFields) {
   EXPECT_EQ(round_trip.sample_sequence_ids,
             std::vector<std::string>{"req-packed#0"});
   EXPECT_EQ(round_trip.sample_prior_output_rows, std::vector<int32_t>{3});
-  ASSERT_TRUE(round_trip.sampling_params.constraints.filter_bitmask.defined());
-  EXPECT_TRUE(torch::equal(
-      round_trip.sampling_params.constraints.filter_bitmask.to(torch::kCPU),
-      input.sampling_params.constraints.filter_bitmask));
+  ASSERT_TRUE(round_trip.sampling_params.filter_bitmask().defined());
+  EXPECT_TRUE(
+      torch::equal(round_trip.sampling_params.filter_bitmask().to(torch::kCPU),
+                   input.sampling_params.filter_bitmask()));
   ASSERT_TRUE(
       round_trip.input_params.embedding.mtp_bootstrap_embeddings.defined());
   EXPECT_TRUE(torch::equal(
@@ -2756,9 +2752,8 @@ TEST(BatchTest, SampleRequestKeepsThreadedForwardBuilderOffsetsStable) {
                                   /*min_decoding_batch_size=*/0);
 
   const std::vector<int32_t> expected_selected_token_idxes = {1, 3, 4, 6};
-  EXPECT_TRUE(
-      equal(forward_input.sampling_params.selection.selected_token_idxes,
-            expected_selected_token_idxes));
+  EXPECT_TRUE(equal(forward_input.sampling_params.selected_token_idxes(),
+                    expected_selected_token_idxes));
   ASSERT_EQ(forward_input.input_params.embedding.embedding_ids.size(),
             sequences.size());
   ASSERT_EQ(forward_input.input_params.embedding.linear_state_ids.size(),
@@ -3225,9 +3220,9 @@ TEST(BatchTest, ThreadedPrefillPreservesChunkSlicesAndFinalSamplingOffset) {
               std::vector<int32_t>({-1, -1}));
     EXPECT_EQ(input_params.embedding.extra_token_ids,
               std::vector<int32_t>({32871, -1}));
-    EXPECT_TRUE(torch::equal(
-        forward_input.sampling_params.selection.selected_token_idxes,
-        make_cpu_tensor(std::vector<int32_t>({65535}))));
+    EXPECT_TRUE(
+        torch::equal(forward_input.sampling_params.selected_token_idxes(),
+                     make_cpu_tensor(std::vector<int32_t>({65535}))));
   };
 
   verify(/*thread_pool=*/nullptr);
@@ -4121,8 +4116,7 @@ TEST_P(BatchOutputActionTest, ChunkedPrefillKeepsFinalAndDecodeOutputTargets) {
   first_chunk.add(&sequence, /*allowed_max_token=*/2);
   const auto first_input = first_chunk.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
-  EXPECT_FALSE(
-      first_input.sampling_params.selection.selected_token_idxes.defined());
+  EXPECT_FALSE(first_input.sampling_params.selected_token_idxes().defined());
   apply_outputs(first_chunk,
                 BatchOutputAction::RESERVE_PENDING,
                 /*token_ids=*/{});
@@ -4131,8 +4125,7 @@ TEST_P(BatchOutputActionTest, ChunkedPrefillKeepsFinalAndDecodeOutputTargets) {
   second_chunk.add(&sequence, /*allowed_max_token=*/2);
   const auto second_input = second_chunk.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
-  EXPECT_FALSE(
-      second_input.sampling_params.selection.selected_token_idxes.defined());
+  EXPECT_FALSE(second_input.sampling_params.selected_token_idxes().defined());
   apply_outputs(second_chunk,
                 BatchOutputAction::RESERVE_PENDING,
                 /*token_ids=*/{});
@@ -4145,8 +4138,7 @@ TEST_P(BatchOutputActionTest, ChunkedPrefillKeepsFinalAndDecodeOutputTargets) {
   final_chunk.add(&sequence, /*allowed_max_token=*/1);
   const auto final_input = final_chunk.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
-  EXPECT_EQ(final_input.sampling_params.selection.selected_token_idxes.numel(),
-            1);
+  EXPECT_EQ(final_input.sampling_params.selected_token_idxes().numel(), 1);
   apply_outputs(final_chunk,
                 BatchOutputAction::RESERVE_PENDING,
                 /*token_ids=*/{-1});
@@ -4203,8 +4195,7 @@ TEST_P(BatchOutputActionTest, MixedChunkedPrefillKeepsEachStepsOutputRowOrder) {
   prior.add(&second, /*allowed_max_token=*/3);
   const auto prior_input = prior.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
-  EXPECT_EQ(prior_input.sampling_params.selection.selected_token_idxes.numel(),
-            1);
+  EXPECT_EQ(prior_input.sampling_params.selected_token_idxes().numel(), 1);
   apply_outputs(prior,
                 BatchOutputAction::RESERVE_PENDING,
                 /*token_ids=*/{-1});
@@ -4216,8 +4207,7 @@ TEST_P(BatchOutputActionTest, MixedChunkedPrefillKeepsEachStepsOutputRowOrder) {
   current.add(&second, /*allowed_max_token=*/1);
   const auto current_input = current.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
-  EXPECT_EQ(
-      current_input.sampling_params.selection.selected_token_idxes.numel(), 2);
+  EXPECT_EQ(current_input.sampling_params.selected_token_idxes().numel(), 2);
   apply_outputs(current,
                 BatchOutputAction::RESERVE_PENDING,
                 /*token_ids=*/{-1, -1});

@@ -117,26 +117,25 @@ TEST(MtpWorkerSelectionTest, RejectsDsparkDpUnifiedGraphsBeforeModelSetup) {
 
 TEST(MtpWorkerSelectionTest, RequestRoutingDoesNotRejectUnsupportedSampling) {
   LlmForwardInput input;
-  input.sampling_params.selection.sampling_mode = SamplingMode::GREEDY;
+  input.sampling_params.sampling_mode() = SamplingMode::GREEDY;
   EXPECT_TRUE(supports_unified_mtp_request(input));
-  input.sampling_params.output.logprobs = true;
-  input.sampling_params.output.max_top_logprobs = 5;
+  input.sampling_params.logprobs() = true;
+  input.sampling_params.max_top_logprobs() = 5;
   EXPECT_TRUE(supports_unified_mtp_request(input));
-  input.sampling_params.selection.sampling_mode = SamplingMode::MIXED;
+  input.sampling_params.sampling_mode() = SamplingMode::MIXED;
   EXPECT_FALSE(supports_unified_mtp_request(input));
-  input.sampling_params.selection.sampling_mode = SamplingMode::GREEDY;
-  input.sampling_params.beam_search.use_beam_search = true;
+  input.sampling_params.sampling_mode() = SamplingMode::GREEDY;
+  input.sampling_params.use_beam_search() = true;
   EXPECT_FALSE(supports_unified_mtp_request(input));
-  input.sampling_params.beam_search.use_beam_search = false;
-  for (torch::Tensor* control :
-       {&input.sampling_params.distribution.temperatures,
-        &input.sampling_params.distribution.top_k,
-        &input.sampling_params.distribution.top_p,
-        &input.sampling_params.penalties.frequency_penalties,
-        &input.sampling_params.penalties.presence_penalties,
-        &input.sampling_params.penalties.repetition_penalties,
-        &input.sampling_params.constraints.filter_mask,
-        &input.sampling_params.constraints.filter_bitmask}) {
+  input.sampling_params.use_beam_search() = false;
+  for (torch::Tensor* control : {&input.sampling_params.temperatures(),
+                                 &input.sampling_params.top_k(),
+                                 &input.sampling_params.top_p(),
+                                 &input.sampling_params.frequency_penalties(),
+                                 &input.sampling_params.presence_penalties(),
+                                 &input.sampling_params.repetition_penalties(),
+                                 &input.sampling_params.filter_mask(),
+                                 &input.sampling_params.filter_bitmask()}) {
     *control = torch::ones({1});
     EXPECT_FALSE(supports_unified_mtp_request(input));
     *control = torch::Tensor();

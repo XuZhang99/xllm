@@ -1070,7 +1070,7 @@ void DFlashWorkerImpl::prepare_query_inputs(const LlmForwardInput& input,
   }
   input_params.attention.rebuild_device_buffer(device_);
 
-  query_input.sampling_params.selection.selected_token_idxes =
+  query_input.sampling_params.selected_token_idxes() =
       async_h2d_tensor(selected_idxes, device_.unwrap());
   prepare_draft_sampling(/*probabilistic=*/false, query_input.sampling_params);
   for (const auto& field : kSamplingFields) {

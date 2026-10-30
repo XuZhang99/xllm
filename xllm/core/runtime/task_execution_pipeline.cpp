@@ -711,7 +711,7 @@ Status TaskExecutionPipeline::validate(const Slot& slot,
     return status;
   }
   const auto& sampling = input.sampling_params;
-  if (!sampling.output.logprobs && sampling.output.max_top_logprobs != 0) {
+  if (!sampling.logprobs() && sampling.max_top_logprobs() != 0) {
     return invalid("Ordinary LLM requires consistent token result options.");
   }
   if (input.input_params.meta.batch_forward_type.is_empty()) {
@@ -967,7 +967,7 @@ void TaskExecutionPipeline::launch(uint32_t slot_id) {
   auto& params = slot.sampling;
   if (params.num_sample_seqs() > 0) {
     slot.logits = model_.logits(slot.model_output.hidden_states,
-                                params.selection.selected_token_idxes);
+                                params.selected_token_idxes());
     slot.buffer->refresh_min_tokens();
     slot.sample_output = ::xllm::sample(slot.logits, params);
     const auto& result = slot.buffer->device_result();
@@ -980,7 +980,7 @@ void TaskExecutionPipeline::launch(uint32_t slot_id) {
       result.top_logprobs.copy_(slot.sample_output.top_logprobs);
     }
     if (capacity_.cp_sampling_group != nullptr) {
-      synchronize_samples(result, params.selection.sampling_mode);
+      synchronize_samples(result, params.sampling_mode());
     }
   }
   // The independent buffer survives Consume and immediate Slot reuse. Copy

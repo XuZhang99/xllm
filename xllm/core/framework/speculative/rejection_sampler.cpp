@@ -70,7 +70,7 @@ torch::Tensor all_accepted_before(const torch::Tensor& accepted) {
 void compute_logprobs(SampleOutput& output,
                       const torch::Tensor& grouped_logits,
                       const SamplingParameters& params) {
-  if (!params.output.logprobs) {
+  if (!params.logprobs()) {
     return;
   }
   auto target_logprobs =
@@ -81,9 +81,9 @@ void compute_logprobs(SampleOutput& output,
                       output.next_tokens.clamp_min(0).to(torch::kLong));
   selected_logprobs.masked_fill_(output.next_tokens.lt(0), 0);
   output.logprobs = std::move(selected_logprobs);
-  if (params.output.max_top_logprobs > 0) {
+  if (params.max_top_logprobs() > 0) {
     auto [values, indices] =
-        target_logprobs.topk(params.output.max_top_logprobs, /*dim=*/-1);
+        target_logprobs.topk(params.max_top_logprobs(), /*dim=*/-1);
     output.top_logprobs = values;
     output.top_tokens = indices;
   }
@@ -108,22 +108,22 @@ SampleOutput rejection_sample(const SamplingParameters& params,
   torch::Tensor grouped_logits =
       target_logits.view({batch_size, num_val_tokens, vocab_size});
   const torch::Tensor raw_logits =
-      params.output.logprobs ? grouped_logits.clone() : torch::Tensor();
+      params.logprobs() ? grouped_logits.clone() : torch::Tensor();
   if (params.has_sampling_fields()) {
     for (int64_t column = 0; column < num_val_tokens; ++column) {
       SamplingParameters step_params = params;
-      if (params.constraints.min_tokens_remaining.defined()) {
-        step_params.constraints.min_tokens_remaining =
-            params.constraints.min_tokens_remaining - column;
+      if (params.min_tokens_remaining().defined()) {
+        step_params.min_tokens_remaining() =
+            params.min_tokens_remaining() - column;
       }
       const torch::Tensor prefix = draft_token_ids.narrow(1, 0, column);
-      step_params.prefix_tokens =
-          params.prefix_tokens.defined()
-              ? torch::cat({params.prefix_tokens, prefix}, 1)
+      step_params.prefix_tokens() =
+          params.prefix_tokens().defined()
+              ? torch::cat({params.prefix_tokens(), prefix}, 1)
               : prefix;
-      if (params.constraints.bad_word_suffix.defined()) {
-        step_params.constraints.bad_word_suffix =
-            append_token_suffix(params.constraints.bad_word_suffix, prefix);
+      if (params.bad_word_suffix().defined()) {
+        step_params.bad_word_suffix() =
+            append_token_suffix(params.bad_word_suffix(), prefix);
       }
       torch::Tensor row_logits = grouped_logits.select(1, column);
       apply_sampling_penalties(row_logits, step_params);
@@ -131,42 +131,39 @@ SampleOutput rejection_sample(const SamplingParameters& params,
   }
   // MTP installs the bitmask at full validate width; other workers pass a
   // per-sequence [batch, words] mask, repeated here per verify row.
-  if (params.constraints.filter_bitmask.defined()) {
+  if (params.filter_bitmask().defined()) {
     const torch::Tensor bitmask =
-        params.constraints.filter_bitmask.size(0) == batch_size
-            ? params.constraints.filter_bitmask.repeat_interleave(
-                  num_val_tokens,
-                  /*dim=*/0)
-            : params.constraints.filter_bitmask;
+        params.filter_bitmask().size(0) == batch_size
+            ? params.filter_bitmask().repeat_interleave(num_val_tokens,
+                                                        /*dim=*/0)
+            : params.filter_bitmask();
     apply_token_bitmask_inplace(target_logits, bitmask);
-  } else if (params.constraints.filter_mask.defined()) {
-    CHECK_EQ(params.constraints.filter_mask.sizes(),
+  } else if (params.filter_mask().defined()) {
+    CHECK_EQ(params.filter_mask().sizes(),
              torch::IntArrayRef({batch_size, vocab_size}))
         << "verify filter_mask must be per-sequence [batch, vocab]";
     grouped_logits.add_(
-        expand_batch_to_tokens(params.constraints.filter_mask, num_val_tokens));
+        expand_batch_to_tokens(params.filter_mask(), num_val_tokens));
   }
   if (!params.is_all_greedy()) {
-    if (params.distribution.temperatures.defined()) {
-      apply_temperatures(grouped_logits, params.distribution.temperatures);
+    if (params.temperatures().defined()) {
+      apply_temperatures(grouped_logits, params.temperatures());
     }
-    if (params.distribution.min_p.defined()) {
-      apply_min_p(grouped_logits, params.distribution.min_p);
+    if (params.min_p().defined()) {
+      apply_min_p(grouped_logits, params.min_p());
     }
-    if (params.distribution.top_k.defined() ||
-        params.distribution.top_p.defined()) {
-      apply_top_k_top_p(target_logits,
-                        params.distribution.top_k.defined()
-                            ? params.distribution.top_k.repeat_interleave(
-                                  num_val_tokens, /*dim=*/0)
-                            : params.distribution.top_k,
-                        params.distribution.top_p.defined()
-                            ? params.distribution.top_p.repeat_interleave(
-                                  num_val_tokens, /*dim=*/0)
-                            : params.distribution.top_p);
+    if (params.top_k().defined() || params.top_p().defined()) {
+      apply_top_k_top_p(
+          target_logits,
+          params.top_k().defined()
+              ? params.top_k().repeat_interleave(num_val_tokens, /*dim=*/0)
+              : params.top_k(),
+          params.top_p().defined()
+              ? params.top_p().repeat_interleave(num_val_tokens, /*dim=*/0)
+              : params.top_p());
     }
   }
-  if (params.random.seeds.defined() && !params.is_all_greedy()) {
+  if (params.seeds().defined() && !params.is_all_greedy()) {
     // Sampling the target at each logical token offset makes seeded requests
     // independent of batch position and the number of accepted MTP drafts.
     const torch::Tensor sampled = gumbel_argmax(
@@ -196,18 +193,18 @@ SampleOutput rejection_sample(const SamplingParameters& params,
   torch::Tensor bonus_token_ids;
   torch::Tensor full_greedy_token_ids;
   const torch::Tensor greedy_rows =
-      params.selection.sampling_mode == SamplingMode::MIXED
+      params.sampling_mode() == SamplingMode::MIXED
           ? ::xllm::greedy_mask(params, grouped_logits.device())
           : torch::Tensor();
   SampleOutput output;
-  if (params.selection.sampling_mode == SamplingMode::GREEDY) {
+  if (params.sampling_mode() == SamplingMode::GREEDY) {
     full_greedy_token_ids = greedy_sample(grouped_logits);
     bonus_token_ids =
         full_greedy_token_ids.select(/*dim=*/1, -1).unsqueeze(/*dim=*/-1);
   } else {
     bonus_token_ids = gumbel_sample(grouped_logits.select(/*dim=*/1, -1))
                           .view({grouped_logits.size(0), 1});
-    if (params.selection.sampling_mode != SamplingMode::RANDOM) {
+    if (params.sampling_mode() != SamplingMode::RANDOM) {
       full_greedy_token_ids = greedy_sample(grouped_logits);
       const torch::Tensor greedy_bonus =
           full_greedy_token_ids.select(/*dim=*/1, -1).unsqueeze(/*dim=*/-1);
@@ -227,7 +224,7 @@ SampleOutput rejection_sample(const SamplingParameters& params,
   // Only the random/mixed verification legs read the lse; greedy batches
   // (the default draft mode) skip the [B, K, V] fp32 reduction entirely.
   const torch::Tensor target_lse =
-      params.selection.sampling_mode == SamplingMode::GREEDY
+      params.sampling_mode() == SamplingMode::GREEDY
           ? torch::Tensor()
           : torch::logsumexp(
                 grouped_logits
@@ -371,13 +368,13 @@ SampleOutput rejection_sample(const SamplingParameters& params,
     return {commit_prefix(accepted, correction), first_reject};
   };
 
-  if (params.selection.sampling_mode == SamplingMode::GREEDY) {
+  if (params.sampling_mode() == SamplingMode::GREEDY) {
     std::tie(output.next_tokens, output.num_accepted_tokens) =
         greedy_sample_dispatch();
   } else {
     std::tie(output.next_tokens, output.num_accepted_tokens) =
         random_sample_dispatch();
-    if (params.selection.sampling_mode == SamplingMode::MIXED) {
+    if (params.sampling_mode() == SamplingMode::MIXED) {
       const auto [greedy_tokens, greedy_counts] = greedy_sample_dispatch();
       output.next_tokens =
           torch::where(greedy_rows, greedy_tokens, output.next_tokens);

@@ -1300,8 +1300,7 @@ std::optional<ForwardOutput> MTPWorkerImpl<TargetInput>::step_prefill(
     if (should_broadcast_spec_tokens(
             parallel_args_,
             get_optimization_config().enable_spec_token_broadcast,
-            input.sampling_params.selection.sampling_mode ==
-                SamplingMode::GREEDY)) {
+            input.sampling_params.sampling_mode() == SamplingMode::GREEDY)) {
       broadcast_spec_tokens(output.sample_output.next_tokens, parallel_args_);
     }
     if (embeddings.defined()) {
@@ -1696,8 +1695,7 @@ std::optional<ForwardOutput> MTPWorkerImpl<TargetInput>::step_decode(
       if (should_broadcast_spec_tokens(
               parallel_args_,
               get_optimization_config().enable_spec_token_broadcast,
-              draft_sampling_params.selection.sampling_mode ==
-                  SamplingMode::GREEDY)) {
+              draft_sampling_params.sampling_mode() == SamplingMode::GREEDY)) {
         broadcast_spec_tokens(draft_outputs.back().sample_output.next_tokens,
                               parallel_args_);
       }
@@ -1779,13 +1777,12 @@ std::optional<ForwardOutput> MTPWorkerImpl<TargetInput>::step_decode(
         }
         break;
       }
-      current_draft_input.sampling_params.constraints.filter_bitmask =
+      current_draft_input.sampling_params.filter_bitmask() =
           build_json_object_filter_bitmask(
               current_draft_input.json_object_states,
               device_,
               JsonObjectMaskBuildPhase::DRAFT);
-      current_draft_input.sampling_params.constraints.filter_mask =
-          torch::Tensor();
+      current_draft_input.sampling_params.filter_mask() = torch::Tensor();
     }
     record_current_metadata_ready_event(current_draft_input, *compute_stream_);
   }
@@ -1831,11 +1828,11 @@ void MTPWorkerImpl<TargetInput>::fill_validate_input_from_draft_outputs(
         input.json_object_states,
         *json_scratch,
         validate_input.json_object_invalid_draft);
-    validate_input.sampling_params.constraints.filter_bitmask =
+    validate_input.sampling_params.filter_bitmask() =
         build_json_object_filter_bitmask(validate_input.json_object_states,
                                          device_,
                                          JsonObjectMaskBuildPhase::TARGET);
-    validate_input.sampling_params.constraints.filter_mask = torch::Tensor();
+    validate_input.sampling_params.filter_mask() = torch::Tensor();
   }
 
   validate_input.runtime.device_tensors_ready = false;
@@ -1959,7 +1956,7 @@ std::optional<ForwardOutput> MTPWorkerImpl<TargetInput>::run_validate(
     // the verify transforms in rejection_sample), because its
     // per-sequence grammar state advances with each speculative token.
     SamplingParameters verify_params = input.sampling_params;
-    if (verify_params.constraints.min_token_positions.defined()) {
+    if (verify_params.min_token_positions().defined()) {
       // Overlap can leave the scheduler's generated count behind accepted
       // tokens. Use the corrected target positions; rejection sampling applies
       // the candidate and bonus offsets within each verify row.
@@ -1967,13 +1964,13 @@ std::optional<ForwardOutput> MTPWorkerImpl<TargetInput>::run_validate(
           validate_input.positions
               .view({batch_size, num_speculative_tokens + 1})
               .select(/*dim=*/1, /*index=*/0);
-      verify_params.constraints.min_tokens_remaining =
-          verify_params.constraints.min_token_positions - first_positions;
+      verify_params.min_tokens_remaining() =
+          verify_params.min_token_positions() - first_positions;
     }
-    if (validate_input.sampling_params.constraints.filter_bitmask.defined()) {
-      verify_params.constraints.filter_bitmask =
-          validate_input.sampling_params.constraints.filter_bitmask;
-      verify_params.constraints.filter_mask = torch::Tensor();
+    if (validate_input.sampling_params.filter_bitmask().defined()) {
+      verify_params.filter_bitmask() =
+          validate_input.sampling_params.filter_bitmask();
+      verify_params.filter_mask() = torch::Tensor();
     }
     val_output = validate(std::move(verify_params),
                           draft_outputs,
@@ -1987,8 +1984,7 @@ std::optional<ForwardOutput> MTPWorkerImpl<TargetInput>::run_validate(
     if (should_broadcast_spec_tokens(
             parallel_args_,
             get_optimization_config().enable_spec_token_broadcast,
-            input.sampling_params.selection.sampling_mode ==
-                SamplingMode::GREEDY)) {
+            input.sampling_params.sampling_mode() == SamplingMode::GREEDY)) {
       c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
       broadcast_spec_tokens(val_output.next_tokens, parallel_args_);
     }
@@ -2030,8 +2026,7 @@ std::optional<ForwardOutput> MTPWorkerImpl<TargetInput>::run_validate(
     if (should_broadcast_spec_tokens(
             parallel_args_,
             get_optimization_config().enable_spec_token_broadcast,
-            input.sampling_params.selection.sampling_mode ==
-                SamplingMode::GREEDY)) {
+            input.sampling_params.sampling_mode() == SamplingMode::GREEDY)) {
       broadcast_spec_tokens(val_output.next_tokens, parallel_args_);
     }
 
@@ -3093,8 +3088,8 @@ void MTPWorkerImpl<TargetInput>::prepare_validate_inputs(
   if (!input.json_object_states.empty()) {
     // Validation installs exact per-position JSON masks after the draft
     // tokens are known. Do not repeat the inherited one-row mask here.
-    validate_input.sampling_params.constraints.filter_mask = torch::Tensor();
-    validate_input.sampling_params.constraints.filter_bitmask = torch::Tensor();
+    validate_input.sampling_params.filter_mask() = torch::Tensor();
+    validate_input.sampling_params.filter_bitmask() = torch::Tensor();
   }
   // The validate forward is logits-only (see
   // expand_sampling_params_for_verify); the JSON bitmask installs later, from
@@ -3106,8 +3101,7 @@ void MTPWorkerImpl<TargetInput>::prepare_validate_inputs(
   // overhead on the final-draft -> target dependency chain.
   const bool use_stable_greedy_validate_sampling =
       use_explicit_spec_verify_replay_update &&
-      validate_sampling_params.selection.sampling_mode ==
-          SamplingMode::GREEDY &&
+      validate_sampling_params.sampling_mode() == SamplingMode::GREEDY &&
       validate_sampling_params.num_sample_seqs() == 1;
   if (use_stable_greedy_validate_sampling &&
       (!mtp_validate_greedy_indices_.defined() ||
@@ -3598,21 +3592,21 @@ void MTPWorkerImpl<TargetInput>::prepare_draft_extend_inputs(
 
   auto& params = extend_input.sampling_params;
   torch::TensorOptions idx_options =
-      params.selection.selected_token_idxes.defined()
-          ? params.selection.selected_token_idxes.options()
+      params.selected_token_idxes().defined()
+          ? params.selected_token_idxes().options()
           : torch::dtype(torch::kInt).device(device_);
   if (use_chunked_prefill || use_uniform_two_rows) {
     // These layouts always append two rows per sequence and select the second
     // row.  Build the tiny control tensor directly on device; copying a
     // temporary pinned CPU tensor forces its allocator to synchronize before
     // the asynchronous H2D has completed.
-    params.selection.selected_token_idxes = torch::arange(
+    params.selected_token_idxes() = torch::arange(
         /*start=*/1,
         /*end=*/2 * num_sequences,
         /*step=*/2,
         idx_options);
   } else {
-    params.selection.selected_token_idxes =
+    params.selected_token_idxes() =
         async_h2d_tensor(selected_row_idx, idx_options);
   }
   extend_input.runtime.device_tensors_ready = true;
