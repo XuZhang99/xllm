@@ -55,7 +55,8 @@ class DistributedVirtualMemoryCoordinator final : public KVCachePageBackend {
       double max_memory_utilization = 0.9,
       int64_t max_cache_size = 0,
       bool max_memory_utilization_configured = true,
-      int64_t reserved_memory_bytes = 0);
+      int64_t reserved_memory_bytes = 0,
+      int64_t resident_memory_bytes = 0);
 
   void init_page_budget(size_t total_pages,
                         int32_t dp_size,

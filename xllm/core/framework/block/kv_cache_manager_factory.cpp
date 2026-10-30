@@ -127,7 +127,8 @@ void KVCacheManagerFactory::initialize_vmm_pool(const runtime::Options& options,
                  config.max_memory_utilization(),
                  config.max_cache_size(),
                  config.max_memory_utilization_configured(),
-                 reserved_state_bytes + encoder_cache_reserved_bytes),
+                 encoder_cache_reserved_bytes,
+                 reserved_state_bytes),
              0)
         << "Failed to initialize KV cache physical page pools";
   }
