@@ -295,9 +295,9 @@ class RecordingProfileEngine final : public Engine {
         // the presence of a per-row sampling tensor implies greedy admission.
         SamplingParameters sampling;
         sampling.init({sequence->sampling_param()}, {0}, {}, {}, {}, {});
-        observed_greedy_samples_.emplace_back(sampling.sampling_mode ==
-                                                  SamplingMode::GREEDY &&
-                                              !sampling.do_sample.defined());
+        observed_greedy_samples_.emplace_back(
+            sampling.selection.sampling_mode == SamplingMode::GREEDY &&
+            !sampling.selection.do_sample.defined());
         if (linear_attention_) {
           EXPECT_GE(sequence->get_linear_state_slot_id(), 0);
         }

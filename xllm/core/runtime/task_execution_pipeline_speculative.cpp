@@ -213,28 +213,34 @@ bool neutral_host_values(const torch::Tensor& tensor, float neutral) {
 }
 
 bool adaptive_target_sampling(const SamplingParameters& sampling) {
-  if (sampling.logprobs || sampling.max_top_logprobs != 0 ||
-      sampling.use_beam_search || sampling.is_embeddings ||
-      sampling.num_return_sequences != 0 || sampling.acc_logprob.defined() ||
-      (sampling.filter_mask.defined() && sampling.filter_mask.numel() != 0) ||
-      (sampling.filter_bitmask.defined() &&
-       sampling.filter_bitmask.numel() != 0) ||
-      !neutral_host_values(sampling.frequency_penalties, /*neutral=*/0.0F) ||
-      !neutral_host_values(sampling.presence_penalties, /*neutral=*/0.0F) ||
-      !neutral_host_values(sampling.repetition_penalties, /*neutral=*/1.0F)) {
+  if (sampling.output.logprobs || sampling.output.max_top_logprobs != 0 ||
+      sampling.beam_search.use_beam_search || sampling.output.is_embeddings ||
+      sampling.beam_search.num_return_sequences != 0 ||
+      sampling.beam_search.acc_logprob.defined() ||
+      (sampling.constraints.filter_mask.defined() &&
+       sampling.constraints.filter_mask.numel() != 0) ||
+      (sampling.constraints.filter_bitmask.defined() &&
+       sampling.constraints.filter_bitmask.numel() != 0) ||
+      !neutral_host_values(sampling.penalties.frequency_penalties,
+                           /*neutral=*/0.0F) ||
+      !neutral_host_values(sampling.penalties.presence_penalties,
+                           /*neutral=*/0.0F) ||
+      !neutral_host_values(sampling.penalties.repetition_penalties,
+                           /*neutral=*/1.0F)) {
     return false;
   }
-  if (sampling.sampling_mode == SamplingMode::GREEDY ||
-      sampling.sampling_mode == SamplingMode::RANDOM) {
-    return !sampling.do_sample.defined();
+  if (sampling.selection.sampling_mode == SamplingMode::GREEDY ||
+      sampling.selection.sampling_mode == SamplingMode::RANDOM) {
+    return !sampling.selection.do_sample.defined();
   }
-  if (sampling.sampling_mode != SamplingMode::MIXED ||
-      !sampling.do_sample.defined() || sampling.do_sample.numel() == 0 ||
-      !sampling.do_sample.device().is_cpu() ||
-      sampling.do_sample.scalar_type() != torch::kBool) {
+  if (sampling.selection.sampling_mode != SamplingMode::MIXED ||
+      !sampling.selection.do_sample.defined() ||
+      sampling.selection.do_sample.numel() == 0 ||
+      !sampling.selection.do_sample.device().is_cpu() ||
+      sampling.selection.do_sample.scalar_type() != torch::kBool) {
     return false;
   }
-  const torch::Tensor values = sampling.do_sample.contiguous();
+  const torch::Tensor values = sampling.selection.do_sample.contiguous();
   const bool* begin = values.const_data_ptr<bool>();
   const bool any_random = std::any_of(
       begin, begin + values.numel(), [](bool value) { return value; });
@@ -309,8 +315,8 @@ bool supports_unified_block_graph(const SpeculativeTaskCapacity& capacity,
          !input.input_params.meta.is_graph_warmup &&
          input.json_object_states.empty() &&
          input.input_params.multi_block_tables.empty() &&
-         sampling.sampling_mode == SamplingMode::GREEDY &&
-         !sampling.use_beam_search && !sampling.logprobs &&
+         sampling.selection.sampling_mode == SamplingMode::GREEDY &&
+         !sampling.beam_search.use_beam_search && !sampling.output.logprobs &&
          !sampling.has_sampling_fields();
 }
 
@@ -932,13 +938,13 @@ Status TaskExecutionPipeline::validate_input(SpeculativeSlot& slot,
         "penalties.");
   }
   if (adaptive_verify_ && speculative_capacity_->unified_graph &&
-      input.sampling_params.sampling_mode != SamplingMode::GREEDY) {
+      input.sampling_params.selection.sampling_mode != SamplingMode::GREEDY) {
     return invalid(
         "Adaptive DSpark unified graphs require greedy target sampling; "
         "disable unified graphs for positive or mixed temperatures.");
   }
   if (adaptive_verify_ && speculative_capacity_->unified_graph &&
-      input.sampling_params.min_token_ids.defined()) {
+      input.sampling_params.constraints.min_token_ids.defined()) {
     return invalid(
         "Adaptive minimum-length sampling requires split target/draft graphs.");
   }
@@ -950,8 +956,8 @@ Status TaskExecutionPipeline::validate_input(SpeculativeSlot& slot,
       input.input_params.embedding.request_ids.size() !=
           input.input_params.embedding.embedding_ids.size() ||
       batch.is_graph_warmup ||
-      (!input.sampling_params.logprobs &&
-       input.sampling_params.max_top_logprobs != 0) ||
+      (!input.sampling_params.output.logprobs &&
+       input.sampling_params.output.max_top_logprobs != 0) ||
       (!batch.forward_type.is_decode() && !batch.forward_type.is_prefill() &&
        !batch.forward_type.is_chunked_prefill() &&
        !batch.forward_type.is_mixed() &&
@@ -1549,7 +1555,8 @@ Status TaskExecutionPipeline::plan_sampling(SpeculativeSlot& slot,
   // rejection sampling; JSON-constrained decode runs through the MTP worker
   // path, which installs full-width masks. Reject here instead of silently
   // verifying unconstrained.
-  if (base.filter_bitmask.defined() || base.filter_mask.defined()) {
+  if (base.constraints.filter_bitmask.defined() ||
+      base.constraints.filter_mask.defined()) {
     return invalid(
         "Task pipeline speculative decode does not support JSON grammar "
         "constraints.");
@@ -1557,7 +1564,8 @@ Status TaskExecutionPipeline::plan_sampling(SpeculativeSlot& slot,
   if (slot.samples != slot.rows) {
     return invalid("MTP Decode must sample every base row.");
   }
-  const auto* selected = base.selected_token_idxes.const_data_ptr<int32_t>();
+  const auto* selected =
+      base.selection.selected_token_idxes.const_data_ptr<int32_t>();
   for (uint32_t row = 0; row < slot.rows; ++row) {
     if (selected[row] != static_cast<int32_t>(row)) {
       return invalid("MTP Decode sampling rows must be in sequence order.");
@@ -1568,7 +1576,7 @@ Status TaskExecutionPipeline::plan_sampling(SpeculativeSlot& slot,
         torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
     const uint32_t graph_rows = slot.verify->plan.graph_rows;
     slot.host_validate_sampling = SamplingParameters();
-    slot.host_validate_sampling.selected_token_idxes =
+    slot.host_validate_sampling.selection.selected_token_idxes =
         torch::arange(graph_rows, indices);
     return slot.validate_input->validate_sampling(slot.host_validate_sampling,
                                                   graph_rows);
@@ -1580,8 +1588,8 @@ Status TaskExecutionPipeline::plan_sampling(SpeculativeSlot& slot,
                                     slot.rows * width,
                                     torch::Device(torch::kCPU));
   // Rejection sampling produces the final log probabilities once.
-  slot.host_validate_sampling.logprobs = false;
-  slot.host_validate_sampling.max_top_logprobs = 0;
+  slot.host_validate_sampling.output.logprobs = false;
+  slot.host_validate_sampling.output.max_top_logprobs = 0;
   return slot.validate_input->validate_sampling(slot.host_validate_sampling,
                                                 slot.rows * width);
 }
@@ -2486,14 +2494,15 @@ Status TaskExecutionPipeline::prepare_speculative(
       input.sampling_params, slot.model_tokens, prepare_stream_);
   CHECK(status.ok()) << status.message();
   const uint32_t width = slot.decode ? slot.draft_steps + 1 : 1;
-  status = slot.samples == 0 ? slot.target_prefill->bind_result(0, 0, 0, false)
-                             : slot.target_prefill->bind_result(
-                                   slot.samples,
-                                   width,
-                                   input.sampling_params.logprobs
-                                       ? input.sampling_params.max_top_logprobs
-                                       : 0,
-                                   input.sampling_params.logprobs);
+  status = slot.samples == 0
+               ? slot.target_prefill->bind_result(0, 0, 0, false)
+               : slot.target_prefill->bind_result(
+                     slot.samples,
+                     width,
+                     input.sampling_params.output.logprobs
+                         ? input.sampling_params.output.max_top_logprobs
+                         : 0,
+                     input.sampling_params.output.logprobs);
   CHECK(status.ok()) << status.message();
   slot.is_warmup = input.input_params.meta.is_graph_warmup;
   slot.state->reuse_draft_prefix_ =
@@ -2618,14 +2627,14 @@ Status TaskExecutionPipeline::prepare_speculative(
         if (speculative_capacity_->kind == SpeculativeTaskKind::DFLASH) {
           for (const auto& field : kSamplingFields) {
             if (!field.per_request) {
-              repeat_interleave_if_defined(params.*field.member, width - 1);
+              repeat_interleave_if_defined(field.member(params), width - 1);
             }
           }
         }
-        params.selected_token_idxes =
+        params.selection.selected_token_idxes =
             prefix(slot.draft_block_indices, draft_rows);
       } else if (step == 0) {
-        params.selected_token_idxes =
+        params.selection.selected_token_idxes =
             prefix(slot.state->reuse_draft_prefix_ ? slot.draft_prefix_indices
                                                    : slot.draft_first_indices,
                    slot.rows);
@@ -3046,17 +3055,19 @@ void TaskExecutionPipeline::launch_prefill(SpeculativeSlot& slot) {
     slot.target_prefill->refresh_min_tokens();
     slot.target_logits = model_.logits(
         slot.target_output.hidden_states,
-        slot.target_prefill->sampling_params().selected_token_idxes);
+        slot.target_prefill->sampling_params().selection.selected_token_idxes);
     sample(*slot.target_sampling, slot.target_logits);
     slot.target_prefill->device_result().lengths.fill_(1);
     if (block_draft() || capacity_.cp_sampling_group != nullptr) {
-      synchronize_samples(slot.target_prefill->device_result(),
-                          slot.target_prefill->sampling_params().sampling_mode);
+      synchronize_samples(
+          slot.target_prefill->device_result(),
+          slot.target_prefill->sampling_params().selection.sampling_mode);
     } else {
       auto tokens = slot.target_prefill->device_result().tokens;
-      synchronize_tokens(tokens,
-                         slot.target_prefill->sampling_params().sampling_mode ==
-                             SamplingMode::GREEDY);
+      synchronize_tokens(
+          tokens,
+          slot.target_prefill->sampling_params().selection.sampling_mode ==
+              SamplingMode::GREEDY);
     }
   }
   if (block_draft()) {
@@ -3168,12 +3179,12 @@ void TaskExecutionPipeline::launch_decode(SpeculativeSlot& slot) {
       }
       invocation.logits = draft_->model.logits(
           invocation.output.hidden_states,
-          invocation.sampling->params.selected_token_idxes);
+          invocation.sampling->params.selection.selected_token_idxes);
       invocation.sampled = sample(*invocation.sampling, invocation.logits);
-      synchronize_tokens(
-          invocation.sampled.next_tokens,
-          invocation.sampling->params.sampling_mode == SamplingMode::GREEDY &&
-              capacity_.cp_sampling_group == nullptr);
+      synchronize_tokens(invocation.sampled.next_tokens,
+                         invocation.sampling->params.selection.sampling_mode ==
+                                 SamplingMode::GREEDY &&
+                             capacity_.cp_sampling_group == nullptr);
       slot.proposal.select(/*dim=*/1, step)
           .copy_(invocation.sampled.next_tokens);
       if (adaptive_verify_) {
@@ -3227,7 +3238,7 @@ void TaskExecutionPipeline::launch_decode(SpeculativeSlot& slot) {
   }
   slot.target_logits = model_.logits(
       slot.target_output.hidden_states,
-      slot.validate_input->sampling_params().selected_token_idxes);
+      slot.validate_input->sampling_params().selection.selected_token_idxes);
   finish_fixed_verify(slot);
 }
 
@@ -3244,7 +3255,7 @@ void TaskExecutionPipeline::finish_fixed_verify(SpeculativeSlot& slot) {
     proposal =
         DraftProposal(slot.proposal, slot.drafts.front()->sampled.draft_logits);
   } else if (speculative_capacity_->is_probabilistic_draft &&
-             base.sampling_mode != SamplingMode::GREEDY) {
+             base.selection.sampling_mode != SamplingMode::GREEDY) {
     const torch::Tensor& first_step_logits =
         slot.drafts.front()->sampled.draft_logits;
     proposal = DraftProposal::from_token_buffer(slot.proposal,
@@ -3269,10 +3280,11 @@ void TaskExecutionPipeline::finish_fixed_verify(SpeculativeSlot& slot) {
     result.top_logprobs.copy_(accepted.top_logprobs);
   }
   if (block_draft() || capacity_.cp_sampling_group != nullptr) {
-    synchronize_samples(result, base.sampling_mode);
+    synchronize_samples(result, base.selection.sampling_mode);
   } else {
     auto tokens = result.tokens;
-    synchronize_tokens(tokens, base.sampling_mode == SamplingMode::GREEDY);
+    synchronize_tokens(tokens,
+                       base.selection.sampling_mode == SamplingMode::GREEDY);
   }
   torch::ge_out(slot.accepted_mask, result.tokens, /*other=*/0);
   auto lengths = result.lengths;
@@ -3359,7 +3371,8 @@ void TaskExecutionPipeline::launch_block_draft(SpeculativeSlot& slot) {
   SlotBuffer::patch_mtp_decode(*invocation.input, *slot.state);
   auto& input = *invocation.input;
   const int64_t steps = speculative_capacity_->num_speculative_tokens;
-  const auto& selected = invocation.sampling->params.selected_token_idxes;
+  const auto& selected =
+      invocation.sampling->params.selection.selected_token_idxes;
   SamplingParameters selector_sampling = slot.target_prefill->sampling_params();
   prepare_draft_sampling(speculative_capacity_->is_probabilistic_draft,
                          selector_sampling);
@@ -3515,7 +3528,7 @@ void TaskExecutionPipeline::launch_packed_verify(SpeculativeSlot& slot) {
                                          validate.model_params());
   slot.target_logits =
       model_.logits(slot.target_output.hidden_states,
-                    validate.sampling_params().selected_token_idxes);
+                    validate.sampling_params().selection.selected_token_idxes);
   if (!adaptive_verify_) {
     // Full-width packed rows are request-major, exactly the fixed verifier's
     // sampling order. Keep its penalties, random sampling and logprobs intact.
@@ -3523,8 +3536,8 @@ void TaskExecutionPipeline::launch_packed_verify(SpeculativeSlot& slot) {
     return;
   }
   const auto& sampling = slot.target_prefill->sampling_params();
-  if (sampling.sampling_mode == SamplingMode::GREEDY &&
-      !sampling.min_token_ids.defined()) {
+  if (sampling.selection.sampling_mode == SamplingMode::GREEDY &&
+      !sampling.constraints.min_token_ids.defined()) {
     torch::argmax_out(slot.target_tokens,
                       slot.target_logits,
                       /*dim=*/-1,
@@ -3537,7 +3550,7 @@ void TaskExecutionPipeline::launch_packed_verify(SpeculativeSlot& slot) {
   // context-KV writes, not merely synchronize the final returned tokens.
   synchronize_tokens(
       slot.target_tokens,
-      sampling.sampling_mode == SamplingMode::GREEDY &&
+      sampling.selection.sampling_mode == SamplingMode::GREEDY &&
           (speculative_capacity_->kind == SpeculativeTaskKind::DSPARK ||
            capacity_.cp_sampling_group == nullptr));
   const auto& result = slot.target_prefill->device_result();

@@ -117,7 +117,7 @@ TokenResultTensors bind_result_views(const TokenResultTensors& storage,
 }
 
 struct InputField {
-  torch::Tensor SamplingParameters::* member;
+  SamplingTensorAccessor member;
   torch::ScalarType dtype;
   // History fields are 2-D [rows, unique_tokens]. Stop IDs use a separate
   // growable 2-D buffer; other fields are 1-D per-row tensors.
@@ -130,21 +130,66 @@ struct InputField {
 // per-sequence tensors; carries no seeds/seed_offsets/logits_bias — see
 // kSamplingFields in sampling_params.h for the roles each member plays).
 constexpr std::array<InputField, 15> kFields = {{
-    {&SamplingParameters::selected_token_idxes, torch::kInt32, false},
-    {&SamplingParameters::frequency_penalties, torch::kFloat32, false},
-    {&SamplingParameters::presence_penalties, torch::kFloat32, false},
-    {&SamplingParameters::repetition_penalties, torch::kFloat32, false},
-    {&SamplingParameters::temperatures, torch::kFloat32, false},
-    {&SamplingParameters::top_p, torch::kFloat32, false},
-    {&SamplingParameters::min_p, torch::kFloat32, false},
-    {&SamplingParameters::min_token_positions, torch::kInt64, false},
-    {&SamplingParameters::min_tokens_remaining, torch::kInt64, false},
-    {&SamplingParameters::min_token_ids, torch::kInt64, false},
-    {&SamplingParameters::top_k, torch::kInt64, false},
-    {&SamplingParameters::unique_token_ids, torch::kInt64, true},
-    {&SamplingParameters::unique_token_counts, torch::kInt32, true},
-    {&SamplingParameters::unique_token_ids_lens, torch::kInt32, false},
-    {&SamplingParameters::do_sample, torch::kBool, false},
+    {kSamplingTensor<&SamplingParameters::selection,
+                     &SamplingSelection::selected_token_idxes>,
+     torch::kInt32,
+     false},
+    {kSamplingTensor<&SamplingParameters::penalties,
+                     &SamplingPenalties::frequency_penalties>,
+     torch::kFloat32,
+     false},
+    {kSamplingTensor<&SamplingParameters::penalties,
+                     &SamplingPenalties::presence_penalties>,
+     torch::kFloat32,
+     false},
+    {kSamplingTensor<&SamplingParameters::penalties,
+                     &SamplingPenalties::repetition_penalties>,
+     torch::kFloat32,
+     false},
+    {kSamplingTensor<&SamplingParameters::distribution,
+                     &SamplingDistribution::temperatures>,
+     torch::kFloat32,
+     false},
+    {kSamplingTensor<&SamplingParameters::distribution,
+                     &SamplingDistribution::top_p>,
+     torch::kFloat32,
+     false},
+    {kSamplingTensor<&SamplingParameters::distribution,
+                     &SamplingDistribution::min_p>,
+     torch::kFloat32,
+     false},
+    {kSamplingTensor<&SamplingParameters::constraints,
+                     &SamplingConstraints::min_token_positions>,
+     torch::kInt64,
+     false},
+    {kSamplingTensor<&SamplingParameters::constraints,
+                     &SamplingConstraints::min_tokens_remaining>,
+     torch::kInt64,
+     false},
+    {kSamplingTensor<&SamplingParameters::constraints,
+                     &SamplingConstraints::min_token_ids>,
+     torch::kInt64,
+     false},
+    {kSamplingTensor<&SamplingParameters::distribution,
+                     &SamplingDistribution::top_k>,
+     torch::kInt64,
+     false},
+    {kSamplingTensor<&SamplingParameters::penalties,
+                     &SamplingPenalties::unique_token_ids>,
+     torch::kInt64,
+     true},
+    {kSamplingTensor<&SamplingParameters::penalties,
+                     &SamplingPenalties::unique_token_counts>,
+     torch::kInt32,
+     true},
+    {kSamplingTensor<&SamplingParameters::penalties,
+                     &SamplingPenalties::unique_token_ids_lens>,
+     torch::kInt32,
+     false},
+    {kSamplingTensor<&SamplingParameters::selection,
+                     &SamplingSelection::do_sample>,
+     torch::kBool,
+     false},
 }};
 
 namespace {
@@ -156,7 +201,8 @@ bool parameter_type(torch::ScalarType dtype) {
 
 uint64_t capacity_elements(const InputField& field,
                            const SlotBufferCapacity& capacity) {
-  if (field.member == &SamplingParameters::min_token_ids) {
+  if (field.member == kSamplingTensor<&SamplingParameters::constraints,
+                                      &SamplingConstraints::min_token_ids>) {
     return 0;  // Grow stop-ID storage outside the model graph.
   }
   return field.history ? static_cast<uint64_t>(capacity.max_sample_rows) *
@@ -531,7 +577,8 @@ Status SlotBuffer::create(const SlotBufferCapacity& capacity,
 }
 
 Status SlotBuffer::configure_sampling(const SlotBufferCapacity& requested) {
-  if (sampling_host_.selected_token_idxes.defined() || copy_submitted_) {
+  if (sampling_host_.selection.selected_token_idxes.defined() ||
+      copy_submitted_) {
     return Status(StatusCode::INVALID_ARGUMENT,
                   "Sampling storage is already configured.");
   }
@@ -551,9 +598,9 @@ Status SlotBuffer::configure_sampling(const SlotBufferCapacity& requested) {
         static_cast<int64_t>(capacity_elements(field, capacity_));
     const auto options = torch::TensorOptions().dtype(
         storage_dtype(field, capacity_.parameter_dtype));
-    sampling_host_.*field.member = torch::empty(
+    field.member(sampling_host_) = torch::empty(
         {elements}, options.device(torch::kCPU).pinned_memory(true));
-    sampling_device_.*field.member =
+    field.member(sampling_device_) =
         torch::empty({elements}, options.device(device_));
   }
   for (const auto& field : kResultFields) {
@@ -688,25 +735,28 @@ Status SlotBuffer::validate_model(const ModelInputHostView& input) const {
 
 Status SlotBuffer::validate_sampling(const SamplingParameters& input,
                                      uint32_t model_tokens) const {
-  if (input.logits_bias.defined() || input.seeds.defined() ||
-      input.seed_offsets.defined() || input.filter_mask.defined() ||
-      input.filter_bitmask.defined() || input.acc_logprob.defined() ||
-      input.is_embeddings || input.use_beam_search ||
-      input.num_return_sequences != 0 || input.max_top_logprobs < 0 ||
+  if (input.constraints.logits_bias.defined() || input.random.seeds.defined() ||
+      input.random.seed_offsets.defined() ||
+      input.constraints.filter_mask.defined() ||
+      input.constraints.filter_bitmask.defined() ||
+      input.beam_search.acc_logprob.defined() || input.output.is_embeddings ||
+      input.beam_search.use_beam_search ||
+      input.beam_search.num_return_sequences != 0 ||
+      input.output.max_top_logprobs < 0 ||
       model_tokens >
           static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) ||
-      static_cast<uint64_t>(input.max_top_logprobs) >
+      static_cast<uint64_t>(input.output.max_top_logprobs) >
           capacity_.max_top_logprobs) {
     return invalid_input();
   }
   const int64_t rows = input.num_sample_seqs();
-  if (!sampling_host_.selected_token_idxes.defined() ||
+  if (!sampling_host_.selection.selected_token_idxes.defined() ||
       rows > capacity_.max_sample_rows || (rows > 0 && model_tokens == 0)) {
     return invalid_input();
   }
   int64_t width = 0;
   for (const auto& field : kFields) {
-    const torch::Tensor& tensor = input.*field.member;
+    const torch::Tensor& tensor = field.member(input);
     if (!tensor.defined()) {
       continue;
     }
@@ -714,7 +764,9 @@ Status SlotBuffer::validate_sampling(const SamplingParameters& input,
                                    ? parameter_type(tensor.scalar_type())
                                    : tensor.scalar_type() == field.dtype;
     const bool history = field.history;
-    const bool stop = field.member == &SamplingParameters::min_token_ids;
+    const bool stop =
+        field.member == kSamplingTensor<&SamplingParameters::constraints,
+                                        &SamplingConstraints::min_token_ids>;
     if (!tensor.device().is_cpu() || !tensor.is_contiguous() ||
         !dtype_matches || tensor.dim() != ((history || stop) ? 2 : 1) ||
         tensor.size(0) != rows) {
@@ -733,79 +785,82 @@ Status SlotBuffer::validate_sampling(const SamplingParameters& input,
       width = tensor.size(1);
     }
   }
-  const bool minimum = input.min_token_ids.defined();
-  if (minimum != input.min_token_positions.defined() ||
-      minimum != input.min_tokens_remaining.defined()) {
+  const bool minimum = input.constraints.min_token_ids.defined();
+  if (minimum != input.constraints.min_token_positions.defined() ||
+      minimum != input.constraints.min_tokens_remaining.defined()) {
     return invalid_input();
   }
   if (minimum &&
-      (!all_values<int64_t>(input.min_token_ids,
+      (!all_values<int64_t>(input.constraints.min_token_ids,
                             [this](int64_t token) {
                               return token >= -1 &&
                                      token < capacity_.vocab_size;
                             }) ||
-       !all_values<int64_t>(input.min_token_positions,
+       !all_values<int64_t>(input.constraints.min_token_positions,
                             [](int64_t value) { return value >= 0; }) ||
-       !all_values<int64_t>(input.min_tokens_remaining,
+       !all_values<int64_t>(input.constraints.min_tokens_remaining,
                             [](int64_t value) { return value >= 0; }))) {
     return invalid_input();
   }
-  const bool history = input.unique_token_ids.defined();
-  if (history != input.unique_token_counts.defined() ||
-      history != input.unique_token_ids_lens.defined() ||
-      input.frequency_penalties.defined() !=
-          input.presence_penalties.defined() ||
-      ((input.frequency_penalties.defined() ||
-        input.repetition_penalties.defined()) &&
+  const bool history = input.penalties.unique_token_ids.defined();
+  if (history != input.penalties.unique_token_counts.defined() ||
+      history != input.penalties.unique_token_ids_lens.defined() ||
+      input.penalties.frequency_penalties.defined() !=
+          input.penalties.presence_penalties.defined() ||
+      ((input.penalties.frequency_penalties.defined() ||
+        input.penalties.repetition_penalties.defined()) &&
        !history) ||
-      (rows > 0 && input.sampling_mode == SamplingMode::MIXED &&
-       !input.do_sample.defined())) {
+      (rows > 0 && input.selection.sampling_mode == SamplingMode::MIXED &&
+       !input.selection.do_sample.defined())) {
     return invalid_input();
   }
   if (rows > 0) {
-    if (!all_values<int32_t>(
-            input.selected_token_idxes, [model_tokens](int32_t value) {
-              return value >= 0 && static_cast<uint32_t>(value) < model_tokens;
-            })) {
+    if (!all_values<int32_t>(input.selection.selected_token_idxes,
+                             [model_tokens](int32_t value) {
+                               return value >= 0 && static_cast<uint32_t>(
+                                                        value) < model_tokens;
+                             })) {
       return invalid_input();
     }
   }
   const auto finite = [](float /*value*/) { return true; };
-  if (!valid_parameters(
-          input.frequency_penalties, capacity_.parameter_dtype, finite) ||
-      !valid_parameters(
-          input.presence_penalties, capacity_.parameter_dtype, finite) ||
-      !valid_parameters(input.repetition_penalties,
+  if (!valid_parameters(input.penalties.frequency_penalties,
+                        capacity_.parameter_dtype,
+                        finite) ||
+      !valid_parameters(input.penalties.presence_penalties,
+                        capacity_.parameter_dtype,
+                        finite) ||
+      !valid_parameters(input.penalties.repetition_penalties,
                         capacity_.parameter_dtype,
                         [](float value) { return value > 0; }) ||
-      !valid_parameters(input.temperatures,
+      !valid_parameters(input.distribution.temperatures,
                         capacity_.parameter_dtype,
                         [](float value) { return value >= 0; }) ||
-      !valid_parameters(input.min_p,
+      !valid_parameters(input.distribution.min_p,
                         capacity_.parameter_dtype,
                         [](float value) { return value >= 0 && value <= 1; }) ||
-      !valid_parameters(input.top_p,
+      !valid_parameters(input.distribution.top_p,
                         capacity_.parameter_dtype,
                         [](float value) { return value >= 0 && value <= 1; })) {
     return invalid_input();
   }
-  if (input.top_k.defined() &&
-      !all_values<int64_t>(input.top_k, [](int64_t value) {
+  if (input.distribution.top_k.defined() &&
+      !all_values<int64_t>(input.distribution.top_k, [](int64_t value) {
         return value <= std::numeric_limits<int32_t>::max();
       })) {
     return invalid_input();
   }
   if (history &&
-      (!all_values<int64_t>(input.unique_token_ids,
+      (!all_values<int64_t>(input.penalties.unique_token_ids,
                             [this](int64_t value) {
                               return value >= 0 &&
                                      static_cast<uint64_t>(value) <
                                          capacity_.vocab_size;
                             }) ||
-       !all_values<int32_t>(input.unique_token_counts,
+       !all_values<int32_t>(input.penalties.unique_token_counts,
                             [](int32_t value) { return value >= 0; }) ||
        !all_values<int32_t>(
-           input.unique_token_ids_lens,
+           input.penalties.unique_token_ids_lens,
            [width](int32_t value) { return value >= 0 && value <= width; }))) {
     return invalid_input();
   }
@@ -1270,52 +1325,54 @@ void SlotBuffer::prepare_sampling(const SamplingParameters& input) {
   const bool empty = input.num_sample_seqs() == 0;
   if (!empty) {
     for (const auto& field : kFields) {
-      const torch::Tensor& source = input.*field.member;
+      const torch::Tensor& source = field.member(input);
       if (!source.defined()) {
         continue;
       }
-      if (field.member == &SamplingParameters::min_token_ids &&
-          (sampling_host_.*field.member).numel() < source.numel()) {
+      if (field.member ==
+              kSamplingTensor<&SamplingParameters::constraints,
+                              &SamplingConstraints::min_token_ids> &&
+          (field.member(sampling_host_)).numel() < source.numel()) {
         const auto options = torch::TensorOptions().dtype(field.dtype);
-        sampling_host_.*field.member = torch::empty(
+        field.member(sampling_host_) = torch::empty(
             {source.numel()}, options.device(torch::kCPU).pinned_memory(true));
-        sampling_device_.*field.member =
+        field.member(sampling_device_) =
             torch::empty({source.numel()}, options.device(device_));
       }
-      torch::Tensor host = (sampling_host_.*field.member)
+      torch::Tensor host = (field.member(sampling_host_))
                                .narrow(/*dim=*/0, /*start=*/0, source.numel());
       torch::Tensor device =
-          (sampling_device_.*field.member)
+          (field.member(sampling_device_))
               .narrow(/*dim=*/0, /*start=*/0, source.numel());
       host.copy_(source.view({-1}));
       device.copy_(host, /*non_blocking=*/true);
-      prepared.*field.member = device.view(source.sizes());
+      field.member(prepared) = device.view(source.sizes());
     }
-    prepared.sampling_mode = input.sampling_mode;
-    prepared.logprobs = input.logprobs;
-    prepared.return_logits = input.return_logits;
-    prepared.max_top_logprobs = input.max_top_logprobs;
+    prepared.selection.sampling_mode = input.selection.sampling_mode;
+    prepared.output.logprobs = input.output.logprobs;
+    prepared.output.return_logits = input.output.return_logits;
+    prepared.output.max_top_logprobs = input.output.max_top_logprobs;
   }
   sampling_params_ = std::move(prepared);
 }
 
 void SlotBuffer::refresh_min_tokens() {
   auto& params = sampling_params_;
-  if (!params.min_token_positions.defined()) {
+  if (!params.constraints.min_token_positions.defined()) {
     return;
   }
   const auto selected_positions = positions().index_select(
-      /*dim=*/0, params.selected_token_idxes.to(torch::kInt64));
+      /*dim=*/0, params.selection.selected_token_idxes.to(torch::kInt64));
   refresh_min_tokens(selected_positions);
 }
 
 void SlotBuffer::refresh_min_tokens(const torch::Tensor& selected_positions) {
   auto& params = sampling_params_;
-  if (!params.min_token_positions.defined()) {
+  if (!params.constraints.min_token_positions.defined()) {
     return;
   }
-  torch::sub_out(params.min_tokens_remaining,
-                 params.min_token_positions,
+  torch::sub_out(params.constraints.min_tokens_remaining,
+                 params.constraints.min_token_positions,
                  selected_positions);
 }
 
@@ -1380,19 +1437,20 @@ SlotBuffer::~SlotBuffer() {
 void SlotBuffer::prepare_result() {
   const uint32_t rows =
       static_cast<uint32_t>(sampling_params_.num_sample_seqs());
-  const uint32_t top_logprobs =
-      sampling_params_.logprobs ? sampling_params_.max_top_logprobs : 0;
+  const uint32_t top_logprobs = sampling_params_.output.logprobs
+                                    ? sampling_params_.output.max_top_logprobs
+                                    : 0;
   result_host_ = bind_result_views(result_host_storage_,
                                    rows,
                                    1,
                                    top_logprobs,
-                                   sampling_params_.logprobs,
+                                   sampling_params_.output.logprobs,
                                    false);
   result_device_ = bind_result_views(result_device_storage_,
                                      rows,
                                      1,
                                      top_logprobs,
-                                     sampling_params_.logprobs,
+                                     sampling_params_.output.logprobs,
                                      false);
   result_sequences_ = rows;
   result_width_ = 1;
@@ -1521,8 +1579,8 @@ uint64_t SlotBuffer::pinned_bytes() const {
       (host_buffer_.defined() ? host_buffer_.nbytes() : 0) +
       (initial_states_host_.defined() ? initial_states_host_.nbytes() : 0) +
       auxiliary_bytes_ + (host_indices_.defined() ? host_indices_.nbytes() : 0);
-  bytes += sampling_host_.min_token_ids.defined()
-               ? sampling_host_.min_token_ids.nbytes()
+  bytes += sampling_host_.constraints.min_token_ids.defined()
+               ? sampling_host_.constraints.min_token_ids.nbytes()
                : 0;
   bytes += input_scratch_ ? input_scratch_->pinned_bytes_ : 0;
   return bytes;
@@ -1536,8 +1594,8 @@ uint64_t SlotBuffer::device_bytes() const {
        {&device_indices_, &gathered_int64_, &gathered_int32_}) {
     bytes += tensor->defined() ? tensor->nbytes() : 0;
   }
-  bytes += sampling_device_.min_token_ids.defined()
-               ? sampling_device_.min_token_ids.nbytes()
+  bytes += sampling_device_.constraints.min_token_ids.defined()
+               ? sampling_device_.constraints.min_token_ids.nbytes()
                : 0;
   bytes += input_scratch_ ? input_scratch_->device_bytes_ : 0;
   return bytes;
@@ -2224,7 +2282,8 @@ Status SlotBuffer::plan_mtp_prefill(SlotBuffer& input,
   }
   const int64_t sample_count = sampling.num_sample_seqs();
   if (sample_count > 0 &&
-      !is_cpu_int_tensor(sampling.selected_token_idxes, /*dimensions=*/1)) {
+      !is_cpu_int_tensor(sampling.selection.selected_token_idxes,
+                         /*dimensions=*/1)) {
     return invalid(
         "MTP Prefill sampling indices must be contiguous CPU int32.");
   }
@@ -2248,8 +2307,9 @@ Status SlotBuffer::plan_mtp_prefill(SlotBuffer& input,
   view.planned_rows_.clear();
   view.sampled_token_rows_.clear();
   const int32_t* selected_data =
-      sample_count > 0 ? sampling.selected_token_idxes.const_data_ptr<int32_t>()
-                       : nullptr;
+      sample_count > 0
+          ? sampling.selection.selected_token_idxes.const_data_ptr<int32_t>()
+          : nullptr;
   // One sample per completed chunk: a row is completed iff its extra token is
   // -1, and its selected tail token is the last query position of that row.
   for (int64_t index = 0; index < sample_count; ++index) {

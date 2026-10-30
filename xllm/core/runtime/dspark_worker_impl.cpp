@@ -132,7 +132,8 @@ DraftProposal sample_dspark_markov_block(const DSparkMarkovBias& markov_bias,
                 base_logits.options().dtype(torch::kFloat32));
   auto previous = anchors;
   torch::Tensor scratch;
-  const bool needs_sync = sampling.sampling_mode != SamplingMode::GREEDY;
+  const bool needs_sync =
+      sampling.selection.sampling_mode != SamplingMode::GREEDY;
   for (int64_t step = 0; step < steps; ++step) {
     auto bias = markov_bias(previous);
     CHECK_EQ(bias.sizes(), torch::IntArrayRef({rows, vocab}))

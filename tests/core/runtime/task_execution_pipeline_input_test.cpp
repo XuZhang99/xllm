@@ -65,7 +65,7 @@ LlmForwardInput ordinary_input(
   input.input_params.attention.device.new_cache_slots =
       decode ? torch::arange(rows, torch::kInt32) * 8
              : torch::arange(num_tokens, torch::kInt32);
-  input.sampling_params.selected_token_idxes =
+  input.sampling_params.selection.selected_token_idxes =
       torch::tensor({num_tokens - 1}, torch::kInt32);
   return input;
 }

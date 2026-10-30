@@ -119,7 +119,7 @@ TEST(SamplingInputBuilderTest, MergeOffsetsSelectedRows) {
   first.merge(std::move(second), /*token_offset=*/4);
   EXPECT_EQ(first.selected_token_indices(), (std::vector<int32_t>{1, 3, 4}));
   const auto sampling = first.build();
-  EXPECT_TRUE(torch::equal(sampling.selected_token_idxes,
+  EXPECT_TRUE(torch::equal(sampling.selection.selected_token_idxes,
                            torch::tensor({1, 3, 4}, torch::kInt)));
 }
 
@@ -135,11 +135,11 @@ TEST(SamplingInputBuilderTest, PadsAndMergesAdjustedTokenCounts) {
   second.append(&params, 0, &counts, &fully_excluded);
   first.merge(std::move(second), /*token_offset=*/1);
   const auto sampling = first.build();
-  EXPECT_TRUE(torch::equal(sampling.unique_token_ids,
+  EXPECT_TRUE(torch::equal(sampling.penalties.unique_token_ids,
                            torch::tensor({{42}, {0}}, torch::kInt64)));
-  EXPECT_TRUE(torch::equal(sampling.unique_token_counts,
+  EXPECT_TRUE(torch::equal(sampling.penalties.unique_token_counts,
                            torch::tensor({{2}, {0}}, torch::kInt)));
-  EXPECT_TRUE(torch::equal(sampling.unique_token_ids_lens,
+  EXPECT_TRUE(torch::equal(sampling.penalties.unique_token_ids_lens,
                            torch::tensor({1, 0}, torch::kInt)));
 }
 
@@ -184,11 +184,12 @@ TEST(RecForwardInputTest, DeviceConversionPreservesRecPayloadAndSampling) {
   xattention.encoder_token_ids = torch::tensor({1, 2, 3}, torch::kInt32);
   xattention.decoder_context_embedding = values;
   xattention.beam_width_tensor = torch::tensor({2}, torch::kInt32);
-  source.sampling_params.selected_token_idxes =
+  source.sampling_params.selection.selected_token_idxes =
       torch::tensor({1}, torch::kInt32);
-  source.decoder_sampling_params.selected_token_idxes =
+  source.decoder_sampling_params.selection.selected_token_idxes =
       torch::tensor({0, 1}, torch::kInt32);
-  source.decoder_sampling_params.temperatures = torch::tensor({0.5F, 0.75F});
+  source.decoder_sampling_params.distribution.temperatures =
+      torch::tensor({0.5F, 0.75F});
   source.step_decode = StepDecodeMeta{.batch_size = 1,
                                       .beam_width = 2,
                                       .current_round = 1,
@@ -223,13 +224,15 @@ TEST(RecForwardInputTest, DeviceConversionPreservesRecPayloadAndSampling) {
                            xattention.encoder_token_ids));
   EXPECT_TRUE(
       torch::equal(converted_xattention->decoder_context_embedding, values));
-  EXPECT_TRUE(torch::equal(input.sampling_params.selected_token_idxes,
-                           source.sampling_params.selected_token_idxes));
   EXPECT_TRUE(
-      torch::equal(input.decoder_sampling_params.selected_token_idxes,
-                   source.decoder_sampling_params.selected_token_idxes));
-  EXPECT_TRUE(torch::equal(input.decoder_sampling_params.temperatures,
-                           source.decoder_sampling_params.temperatures));
+      torch::equal(input.sampling_params.selection.selected_token_idxes,
+                   source.sampling_params.selection.selected_token_idxes));
+  EXPECT_TRUE(torch::equal(
+      input.decoder_sampling_params.selection.selected_token_idxes,
+      source.decoder_sampling_params.selection.selected_token_idxes));
+  EXPECT_TRUE(
+      torch::equal(input.decoder_sampling_params.distribution.temperatures,
+                   source.decoder_sampling_params.distribution.temperatures));
   ASSERT_TRUE(input.has_step_meta());
   EXPECT_EQ(input.step_meta()->batch_size, 1);
   EXPECT_EQ(input.step_meta()->beam_width, 2);
@@ -346,8 +349,9 @@ TEST(BatchFactoryTest, RecOutputsRefreshSamplingTargetsAcrossForwards) {
       std::is_same_v<std::decay_t<decltype(prefill_input)>, RecForwardInput>);
   EXPECT_TRUE(torch::equal(prefill_input.token_ids,
                            torch::tensor({1, 2, 1, 2, 3}, torch::kInt32)));
-  EXPECT_TRUE(torch::equal(prefill_input.sampling_params.selected_token_idxes,
-                           torch::tensor({4}, torch::kInt32)));
+  EXPECT_TRUE(
+      torch::equal(prefill_input.sampling_params.selection.selected_token_idxes,
+                   torch::tensor({4}, torch::kInt32)));
   EXPECT_EQ(prefill_input.input_params.meta.batch_id, batch_id);
   EXPECT_FALSE(prefill_input.has_step_meta());
   SampleOutput sample_output;
@@ -868,8 +872,9 @@ TEST(BatchFactoryTest, RecMultiRoundBuilderUsesScheduledSequencesAndBudgets) {
   EXPECT_EQ(input.step_decode->total_round, 3);
   EXPECT_EQ(input.step_decode->decode_positions_vec,
             (std::vector<int32_t>{3, 3}));
-  EXPECT_TRUE(torch::equal(input.decoder_sampling_params.selected_token_idxes,
-                           torch::tensor({0, 1, 2, 3}, torch::kInt32)));
+  EXPECT_TRUE(
+      torch::equal(input.decoder_sampling_params.selection.selected_token_idxes,
+                   torch::tensor({0, 1, 2, 3}, torch::kInt32)));
   EXPECT_EQ(batches[0].get_allowed_max_tokens(), (std::vector<uint32_t>{1, 2}));
 }
 
@@ -902,8 +907,9 @@ TEST(BatchFactoryTest, OneRecBuildersPreserveEncoderAndDecoderContracts) {
     EXPECT_TRUE(onerec->is_first_prefill);
     EXPECT_EQ(input.input_params.meta.batch_id, batches[0].batch_id());
     EXPECT_EQ(input.token_ids.numel(), 1);
-    EXPECT_TRUE(torch::equal(input.sampling_params.selected_token_idxes,
-                             torch::tensor({0}, torch::kInt32)));
+    EXPECT_TRUE(
+        torch::equal(input.sampling_params.selection.selected_token_idxes,
+                     torch::tensor({0}, torch::kInt32)));
     if (type == BatchInputType::ONEREC) {
       EXPECT_FALSE(input.has_step_meta());
       EXPECT_FALSE(input.input_params.has_onerec_xattention_params());
@@ -916,8 +922,9 @@ TEST(BatchFactoryTest, OneRecBuildersPreserveEncoderAndDecoderContracts) {
     EXPECT_EQ(input.step_meta()->total_round, 3);
     EXPECT_EQ(input.step_meta()->decode_positions_vec,
               (std::vector<int32_t>{1}));
-    EXPECT_TRUE(torch::equal(input.decoder_sampling_params.selected_token_idxes,
-                             torch::tensor({0, 1}, torch::kInt32)));
+    EXPECT_TRUE(torch::equal(
+        input.decoder_sampling_params.selection.selected_token_idxes,
+        torch::tensor({0, 1}, torch::kInt32)));
   }
 }
 #endif

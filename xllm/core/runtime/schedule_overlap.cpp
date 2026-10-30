@@ -80,10 +80,11 @@ void ScheduleOverlap::prepare_continuation_impl(WorkerImpl& worker,
                                         worker.device_,
                                         compute_stream);
   const auto& sampling = input.sampling_params;
-  const bool needs_sampling_history = sampling.bad_words.defined() ||
-                                      sampling.seeds.defined() ||
-                                      sampling.repetition_penalties.defined() ||
-                                      sampling.frequency_penalties.defined();
+  const bool needs_sampling_history =
+      sampling.constraints.bad_words.defined() ||
+      sampling.random.seeds.defined() ||
+      sampling.penalties.repetition_penalties.defined() ||
+      sampling.penalties.frequency_penalties.defined();
   if (needs_sampling_history &&
       prior_output.sample_output.next_tokens.defined()) {
     for (size_t row = 0; row < input.sample_prior_output_rows.size(); ++row) {

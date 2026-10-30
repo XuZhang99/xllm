@@ -1049,16 +1049,18 @@ TEST(DisaggPDSchedulerTest, DecodeBuildsMinTokenInputsFromLocalExecutionMode) {
       builder.append(&request->state().sampling_param, /*token_index=*/0);
       const SamplingParameters input = builder.build();
       const bool device_min_tokens = enable_task_pipeline && minimum > 0;
-      EXPECT_EQ(input.min_token_ids.defined(), device_min_tokens);
-      EXPECT_EQ(input.min_tokens_remaining.defined(), device_min_tokens);
-      EXPECT_EQ(input.logits_bias.defined(),
+      EXPECT_EQ(input.constraints.min_token_ids.defined(), device_min_tokens);
+      EXPECT_EQ(input.constraints.min_tokens_remaining.defined(),
+                device_min_tokens);
+      EXPECT_EQ(input.constraints.logits_bias.defined(),
                 !enable_task_pipeline && minimum > 0);
-      if (input.min_tokens_remaining.defined()) {
-        EXPECT_EQ(input.min_tokens_remaining.item<int64_t>(), minimum);
-        EXPECT_EQ(input.min_token_ids[0][0].item<int64_t>(), 7);
+      if (input.constraints.min_tokens_remaining.defined()) {
+        EXPECT_EQ(input.constraints.min_tokens_remaining.item<int64_t>(),
+                  minimum);
+        EXPECT_EQ(input.constraints.min_token_ids[0][0].item<int64_t>(), 7);
       }
-      if (input.logits_bias.defined()) {
-        EXPECT_EQ(input.logits_bias[0][7].item<float>(),
+      if (input.constraints.logits_bias.defined()) {
+        EXPECT_EQ(input.constraints.logits_bias[0][7].item<float>(),
                   -std::numeric_limits<float>::infinity());
       }
     }
