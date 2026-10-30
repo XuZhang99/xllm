@@ -287,7 +287,7 @@ SampleOutput rejection_sample(const SamplingParameters& params,
 
     const torch::Tensor first_reject = first_rejected_indices(accepted);
     const torch::Tensor gather_reject =
-        first_reject.clamp_max(num_draft_tokens - 1);
+        first_reject.clamp_max(num_draft_tokens - 1).to(torch::kLong);
     const torch::Tensor rejected_tokens =
         draft_token_ids.gather(/*dim=*/1, gather_reject);
     // Row first_reject[i] of each [B, K, V] tensor as [B, V], kept as
@@ -362,7 +362,7 @@ SampleOutput rejection_sample(const SamplingParameters& params,
     const torch::Tensor accepted = greedy_target_token_ids == draft_token_ids;
     const torch::Tensor first_reject = first_rejected_indices(accepted);
     const torch::Tensor gather_reject =
-        first_reject.clamp_max(num_draft_tokens - 1);
+        first_reject.clamp_max(num_draft_tokens - 1).to(torch::kLong);
     const torch::Tensor correction = greedy_target_token_ids.gather(
         /*dim=*/1, gather_reject);
     return {commit_prefix(accepted, correction), first_reject};
