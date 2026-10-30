@@ -45,6 +45,7 @@ def _runner(
     spec_verify_width: int = 1,
     enable_graph_mode_decode_no_padding: bool = False,
     enable_mega_moe_token_mask: bool = False,
+    device_kv_lengths: bool = False,
 ) -> DecodeAclGraphRunner:
     attention_backend = SimpleNamespace(page_size=4, is_mla=False, create_graph_block_tables=lambda *_: ())
     return DecodeAclGraphRunner(
@@ -58,6 +59,7 @@ def _runner(
         spec_verify_width=spec_verify_width,
         enable_graph_mode_decode_no_padding=enable_graph_mode_decode_no_padding,
         enable_mega_moe_token_mask=enable_mega_moe_token_mask,
+        device_kv_lengths=device_kv_lengths,
     )
 
 
@@ -897,6 +899,48 @@ def test_linear_state_indices_use_stable_graph_buffer() -> None:
 
     assert static_indices.data_ptr() == data_ptr
     assert static_indices.tolist() == [4, 8, 12, 16, 0, 0, 0, 0]
+
+
+def test_decode_graph_replay_clears_stale_page_table_tail() -> None:
+    runner = _runner(max_batch=4, max_model_len=32, device_kv_lengths=True)
+    runner.attention_backend.prepare_metadata = Mock()
+    input_ids = torch.arange(4, dtype=torch.int32)
+
+    def _metadata_for(block_table: torch.Tensor) -> SimpleNamespace:
+        rows, columns = block_table.shape
+        metadata = _metadata(torch.arange(rows, dtype=torch.int32))
+        metadata.block_table = block_table
+        metadata.kv_seq_lens.fill_(columns * runner.attention_backend.page_size)
+        metadata.kv_seq_lens_host_values = metadata.kv_seq_lens.tolist()
+        metadata.kv_cu_seq_lens = None
+        metadata.paged_kv_indptr, metadata.paged_kv_indices, metadata.paged_kv_last_page_len = (
+            build_row_aligned_paged_kv_metadata(
+                block_table, metadata.kv_seq_lens_host_values, runner.attention_backend.page_size
+            )
+        )
+        return metadata
+
+    first_metadata = _metadata_for(torch.arange(10, 22, dtype=torch.int32).reshape(4, 3))
+    second_metadata = _metadata_for(torch.tensor([[30], [40], [50]], dtype=torch.int32))
+    graph_key, _, _ = runner._resolve_graph_key(input_ids, first_metadata, 4, None, None, None)
+    second_graph_key, _, _ = runner._resolve_graph_key(input_ids[:3], second_metadata, 4, None, None, None)
+    assert graph_key == second_graph_key
+    assert graph_key[-1] == 4
+
+    entry = runner._allocate_entry(4, input_ids, first_metadata, kv_capacity_pages=graph_key[-1])
+    static_table = entry.static_metadata.block_table
+    table_ptr = static_table.data_ptr()
+    with patch(
+        "xllm.python.model_executor.runners.decode_acl_graph.kernels.update_decode_graph_metadata",
+        create=True,
+    ):
+        runner._fill_entry(entry, input_ids, input_ids, first_metadata, 4, None)
+        assert static_table.tolist() == [[10, 11, 12, 0], [13, 14, 15, 0], [16, 17, 18, 0], [19, 20, 21, 0]]
+
+        runner._fill_entry(entry, input_ids[:3], input_ids[:3], second_metadata, 3, None)
+
+    assert entry.static_metadata.block_table.data_ptr() == table_ptr
+    assert static_table.tolist() == [[30, 0, 0, 0], [40, 0, 0, 0], [50, 0, 0, 0], [0, 0, 0, 0]]
 
 
 def test_accepted_counts_refresh_in_stable_graph_buffer() -> None:

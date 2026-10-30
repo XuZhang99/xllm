@@ -105,7 +105,7 @@ void PrefillFirstPolicy::schedule(
   // released blocks before that request can retry.
   const bool retry_decode_before_restore =
       !state.decode_restore_waiting.empty() &&
-      !state.kv_cache_manager->has_pending_async_block_release();
+      !has_pending_block_release(state);
   if (retry_decode_before_restore) {
     budget.latency_budget = options_.max_global_tpot_ms();
     adjust_latency_budget_and_reorder(&state.decode_queue,
@@ -114,8 +114,7 @@ void PrefillFirstPolicy::schedule(
                                       /*for_prefill=*/false,
                                       state);
     schedule_decode_from_queue(&state.decode_queue, state, budget);
-    if (!state.running_sequences.empty() ||
-        state.kv_cache_manager->has_pending_async_block_release()) {
+    if (!state.running_sequences.empty() || has_pending_block_release(state)) {
       return;
     }
   }

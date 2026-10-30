@@ -37,6 +37,7 @@ limitations under the License.
 #include "core/distributed_runtime/worker_model_codec.h"
 #include "core/framework/batch/batch_group.h"
 #include "core/framework/batch/forward_input_builder.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/kv_cache/block/block.h"
@@ -538,6 +539,50 @@ TEST(KVCacheBlockLeaseTest, BatchRetirementDuringOwnerReleaseClearsUsage) {
   release_locks.clear();
   retired.get();
   EXPECT_EQ(manager.num_used_blocks(), initial_used);
+}
+
+TEST(BatchStateTest, PendingVmmInputKeepsKvBlocksUntilBatchRetires) {
+  KVCacheConfig& config = KVCacheConfig::get_instance();
+  const bool original_vmm = config.enable_vmm_kvcache();
+  ScopeGuard restore_config([&] { config.enable_vmm_kvcache(original_vmm); });
+  for (const bool enable_vmm : {false, true}) {
+    SCOPED_TRACE(enable_vmm);
+    config.enable_vmm_kvcache(enable_vmm);
+    BlockManager::Options options;
+    options.num_blocks(8).block_size(4).enable_prefix_cache(false);
+    BlockManagerImpl kv_manager(options);
+    BlockManagerImpl linear_manager(options);
+    const size_t initial_kv_free = kv_manager.num_free_blocks();
+    const size_t initial_linear_free = linear_manager.num_free_blocks();
+    Sequence first = make_basic_sequence({1, 2, 3, 4});
+    Sequence second = make_basic_sequence({5, 6, 7, 8});
+    {
+      BatchState state;
+      state.add(&first, 4);
+      state.add(&second, 4);
+      // Cache allocation may happen after the execution rows are assembled.
+      for (auto* sequence : {&first, &second}) {
+        sequence->add_blocks(BlockType::KV, kv_manager.allocate(1));
+        sequence->add_blocks(BlockType::LINEAR, linear_manager.allocate(1));
+      }
+      state.prepare_sequence_input_data();
+      state.prepare_sequence_input_data();
+      for (auto* sequence : {&first, &second}) {
+        const auto kv_blocks = sequence->kv_state().blocks(BlockType::KV);
+        const auto linear_blocks =
+            sequence->kv_state().blocks(BlockType::LINEAR);
+        EXPECT_EQ(kv_blocks[0].ref_count(), enable_vmm ? 2U : 1U);
+        EXPECT_EQ(linear_blocks[0].ref_count(), 1U);
+        kv_manager.deallocate(kv_blocks);
+        linear_manager.deallocate(linear_blocks);
+        sequence->reset();
+      }
+      EXPECT_EQ(kv_manager.num_free_blocks(),
+                initial_kv_free - (enable_vmm ? 2 : 0));
+      EXPECT_EQ(linear_manager.num_free_blocks(), initial_linear_free);
+    }
+    EXPECT_EQ(kv_manager.num_free_blocks(), initial_kv_free);
+  }
 }
 
 TEST(ForwardInputBuilderTest, LaterChunkUsesLogicalOffset) {

@@ -1312,6 +1312,121 @@ INSTANTIATE_TEST_SUITE_P(AllPolicies,
                                             ::testing::Bool(),
                                             ::testing::Values(1, 2)));
 
+class PendingVmmBatchPolicyTest
+    : public ::testing::TestWithParam<std::tuple<int32_t, bool, int32_t>> {};
+
+TEST_P(PendingVmmBatchPolicyTest, RetainsRequestsUntilBatchReleasesBlocks) {
+  const auto [policy_kind, prefill, request_count] = GetParam();
+  const std::string strategy = policy_kind == 2 ? "multi_slo_and_prio" : "fcfs";
+  auto options = create_scheduler_options(1024, 16, 0, 512, 1, strategy);
+  options.enable_schedule_overlap(true).enable_chunked_prefill(true);
+  BatchMode mode{
+      .enable_mix_batch = policy_kind != 0,
+      .enable_chunked_prefill = true,
+      .priority_strategy = strategy,
+  };
+  auto policy = create_scheduler_policy(mode, options);
+  BlockManagerPool::Options block_options;
+  block_options.num_blocks_ = 8;
+  block_options.block_size_ = 128;
+  block_options.max_seqs_per_batch_ = 16;
+  block_options.enable_prefix_cache_ = false;
+  BlockManagerPool block_manager_pool(block_options, /*dp_size=*/1);
+  const size_t free_blocks = block_manager_pool.num_free_blocks().front();
+  int32_t dp_rank = 0;
+  std::vector<Block> pending_blocks =
+      block_manager_pool.allocate(free_blocks * 128, dp_rank);
+  ASSERT_EQ(pending_blocks.size(), free_blocks);
+  ASSERT_EQ(block_manager_pool.num_free_blocks().front(), 0u);
+
+  FakeEngine profile_engine(256, 128);
+  ProfileManager::Options profile_options;
+  profile_options.max_tokens_per_batch(1024).max_seqs_per_batch(16);
+  ProfileManager profile_manager(&profile_engine, profile_options);
+  auto requests = generate_request(std::vector<int32_t>(request_count, 128),
+                                   std::vector<int32_t>(request_count, 16),
+                                   std::nullopt,
+                                   std::nullopt,
+                                   1024);
+  if (!prefill) {
+    for (const auto& request : requests) {
+      Sequence* sequence = request->sequences().front().get();
+      sequence->kv_state().set_kv_cache_tokens_num(
+          sequence->num_prompt_tokens());
+      sequence->append_token(1);
+    }
+  }
+  DequeQueue prefill_queue;
+  DequeQueue chunk_queue;
+  DequeQueue decode_queue;
+  std::list<std::shared_ptr<Request>> unified_queue;
+  for (const auto& request : requests) {
+    if (policy_kind == 2) {
+      unified_queue.emplace_back(request);
+    } else {
+      (prefill ? prefill_queue : decode_queue).push(request);
+    }
+  }
+  std::deque<DecodeRestoreEntry> decode_restore_waiting;
+  std::vector<std::shared_ptr<Request>> running_requests;
+  std::vector<Sequence*> running_sequences;
+  std::vector<size_t> running_sequence_budgets;
+  bool last_step_prefill = false;
+  ModelArgs model_args;
+  SchedulerState state{
+      .prefill_queue = prefill_queue,
+      .chunk_queue = chunk_queue,
+      .decode_queue = decode_queue,
+      .unified_queue = unified_queue,
+      .decode_restore_waiting = decode_restore_waiting,
+      .running_requests = running_requests,
+      .running_sequences = running_sequences,
+      .running_sequences_budgets = running_sequence_budgets,
+      .kv_cache_manager = &block_manager_pool,
+      .profile_manager = &profile_manager,
+      .output_dispatcher = nullptr,
+      .model_args = model_args,
+      .last_step_prefill = last_step_prefill,
+      .options = options,
+      .min_speculative_tokens_required = 0,
+      .enable_prefix_cache = false,
+      .has_pending_vmm_batch = true,
+  };
+  ScheduleBudget budget{
+      .remaining_token_budget = 1024,
+      .remaining_seq_budget = 16,
+      .latency_budget = std::numeric_limits<double>::max(),
+      .estimate_latency = 0,
+      .num_preempted_requests = 0,
+  };
+  std::vector<std::shared_ptr<Request>> finished;
+
+  policy->schedule(state, budget, finished);
+
+  EXPECT_TRUE(running_sequences.empty());
+  EXPECT_TRUE(finished.empty());
+  EXPECT_EQ(budget.num_preempted_requests, 0u);
+  EXPECT_EQ(prefill_queue.size() + decode_queue.size() + unified_queue.size(),
+            static_cast<size_t>(request_count));
+  for (const auto& request : requests) {
+    EXPECT_FALSE(request->preempted());
+  }
+
+  pending_blocks.clear();
+  state.has_pending_vmm_batch = false;
+  policy->schedule(state, budget, finished);
+
+  EXPECT_EQ(running_sequences.size(), static_cast<size_t>(request_count));
+  EXPECT_EQ(budget.num_preempted_requests, 0u);
+  EXPECT_TRUE(finished.empty());
+}
+
+INSTANTIATE_TEST_SUITE_P(AllPolicies,
+                         PendingVmmBatchPolicyTest,
+                         ::testing::Combine(::testing::Values(0, 1, 2),
+                                            ::testing::Bool(),
+                                            ::testing::Values(1, 2)));
+
 TEST(SchedulerPolicyTest, DefersWhileAsyncBlockReleaseIsPending) {
   SchedulerOptions options = create_scheduler_options(
       /*max_tokens_per_batch=*/16384,

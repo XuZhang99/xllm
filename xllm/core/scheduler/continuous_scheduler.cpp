@@ -506,6 +506,9 @@ SchedulerState ContinuousSchedulerBase::make_state() {
           [this](const std::shared_ptr<Request>& request) {
             release_failed_request(request);
           },
+      .has_pending_vmm_batch =
+          KVCacheConfig::get_instance().enable_vmm_kvcache() &&
+          pending_step_.has_value(),
   };
 }
 

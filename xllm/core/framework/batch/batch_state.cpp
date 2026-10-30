@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "core/framework/batch/forward_input_builder.h"
 #include "core/framework/config/kernel_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/model/model_args.h"
 
@@ -280,6 +281,20 @@ Sequence* BatchState::group_sequence(size_t index) const {
 }
 
 BatchInputData BatchState::input_data(const BatchSequencePlan& plan) {
+  if (KVCacheConfig::get_instance().enable_vmm_kvcache()) {
+    std::vector<Block> retained_blocks;
+    size_t block_count = 0;
+    for (auto* sequence : plan.sequences()) {
+      block_count += sequence->kv_state().num_blocks(BlockType::KV);
+    }
+    retained_blocks.reserve(block_count);
+    for (auto* sequence : plan.sequences()) {
+      const auto blocks = sequence->kv_state().blocks(BlockType::KV);
+      retained_blocks.insert(
+          retained_blocks.end(), blocks.begin(), blocks.end());
+    }
+    vmm_kv_blocks_ = std::move(retained_blocks);
+  }
   return {plan.sequences(),
           sequence_groups_,
           plan.budgets(),

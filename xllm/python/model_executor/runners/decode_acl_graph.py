@@ -1452,6 +1452,8 @@ class DecodeAclGraphRunner(AclGraphRunner):
                 static_metadata.block_table.shape[1],
             )
             static_metadata.block_table[:batch_size, :copy_cols].copy_(src_bt[:batch_size, :copy_cols])
+            # Drop old page IDs that VMM may have unmapped since the last replay.
+            static_metadata.block_table[:batch_size, copy_cols:].zero_()
             if padded_batch_size > batch_size:
                 static_metadata.block_table[batch_size:].zero_()
 

@@ -631,11 +631,16 @@ void SchedulerPolicy::allocate_shared_blocks_for(Sequence* seq,
   }
 }
 
+bool SchedulerPolicy::has_pending_block_release(
+    const SchedulerState& state) const {
+  return state.has_pending_vmm_batch ||
+         state.kv_cache_manager->has_pending_async_block_release();
+}
+
 void SchedulerPolicy::schedule_decode_restore(SchedulerState& state,
                                               ScheduleBudget& budget) {
   if (state.decode_restore_waiting.empty() ||
-      state.kv_cache_manager->has_pending_async_block_release() ||
-      budget_exhausted(budget)) {
+      has_pending_block_release(state) || budget_exhausted(budget)) {
     return;
   }
 
@@ -891,10 +896,10 @@ void SchedulerPolicy::schedule_decode_from_queue(RequestPriorityQueue* queue,
       break;
     }
 
-    // Blocks exhausted: wait for an in-flight async release before selecting
-    // another victim. The released blocks remain unavailable until the
-    // transfer completes.
-    if (state.kv_cache_manager->has_pending_async_block_release()) {
+    // The previous batch or an asynchronous transfer can still retain the
+    // pages released by a sequence. Let that owner finish before preempting
+    // another request.
+    if (has_pending_block_release(state)) {
       return;
     }
 
@@ -907,7 +912,7 @@ void SchedulerPolicy::schedule_decode_from_queue(RequestPriorityQueue* queue,
       state.chunk_queue.pop_back();
       request_to_preempt->set_preempted();
       state.prefill_queue.push(request_to_preempt);
-      if (state.kv_cache_manager->has_pending_async_block_release()) {
+      if (has_pending_block_release(state)) {
         return;
       }
       continue;
@@ -918,7 +923,7 @@ void SchedulerPolicy::schedule_decode_from_queue(RequestPriorityQueue* queue,
         ++budget.num_preempted_requests;
         enqueue_decode_restore(request_to_preempt, state);
         queue->pop_back();
-        if (state.kv_cache_manager->has_pending_async_block_release()) {
+        if (has_pending_block_release(state)) {
           return;
         }
         continue;
@@ -1030,8 +1035,7 @@ void SchedulerPolicy::handle_unschedulable_head(
     std::vector<std::shared_ptr<Request>>& finished,
     bool budget_exhausted,
     bool blocks_exhausted) {
-  if (blocks_exhausted &&
-      state.kv_cache_manager->has_pending_async_block_release()) {
+  if (blocks_exhausted && has_pending_block_release(state)) {
     return;
   }
   if (state.running_sequences.empty() && !queue->empty() &&
