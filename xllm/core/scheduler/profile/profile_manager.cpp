@@ -745,6 +745,20 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
     int32_t prefix_length,
     bool is_graph_warmup,
     std::optional<int32_t> dp_rank) {
+  auto request = try_generate_single_request(
+      token_length, prefix_length, is_graph_warmup, dp_rank);
+  if (request == nullptr) {
+    LOG(FATAL) << "Profiling time failed! Not enough blocks, token length: "
+               << token_length << ", prefix length: " << prefix_length;
+  }
+  return request;
+}
+
+std::shared_ptr<Request> ProfileManager::try_generate_single_request(
+    int32_t token_length,
+    int32_t prefix_length,
+    bool is_graph_warmup,
+    std::optional<int32_t> dp_rank) {
   auto& model_args = engine_->model_args();
   int32_t vocab_size = model_args.vocab_size();
   int32_t eos_token_id = model_args.eos_token_id();
@@ -783,16 +797,16 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
   if (prefix_length > 0) {
     if (!block_manager_pool_->BlockManagerPool::allocate(
             request->sequences()[0].get(), prefix_length)) {
-      LOG(FATAL) << "Profiling time failed! Not enough blocks, prefix length : "
-                 << prefix_length;
+      return nullptr;
     }
     request->sequences()[0]->kv_state().incr_kv_cache_tokens_num(prefix_length);
   }
 
   if (!block_manager_pool_->BlockManagerPool::allocate(
           request->sequences()[0].get(), token_length)) {
-    LOG(FATAL) << "Profiling time failed! Not enough blocks, token length : "
-               << token_length;
+    block_manager_pool_->deallocate_without_cache(
+        request->sequences()[0].get());
+    return nullptr;
   }
 
   return request;
@@ -1171,17 +1185,37 @@ void ProfileManager::run_vmm_warmup_batch(
   sequences.reserve(token_lengths.size());
   budgets.reserve(token_lengths.size());
   // Capacity snapshots can lag KV released by the previous warmup batch.
-  // Allocate against the live budget instead of rejecting an advisory sample.
+  // Allocate against the live budget and execute only the requests that fit.
+  int64_t allocated_tokens = 0;
   for (int32_t length : token_lengths) {
-    std::shared_ptr<Request> request =
-        decode ? generate_single_decode_request(
-                     length, dp_rank, /*is_graph_warmup=*/true)
-               : generate_single_request(length,
-                                         /*prefix_length=*/0,
-                                         /*is_graph_warmup=*/true,
-                                         dp_rank);
+    std::shared_ptr<Request> request;
+    const int32_t min_length = decode ? 2 : 1;
+    while (true) {
+      request = decode ? try_generate_single_decode_request(
+                             length, dp_rank, /*is_graph_warmup=*/true)
+                       : try_generate_single_request(length,
+                                                     /*prefix_length=*/0,
+                                                     /*is_graph_warmup=*/true,
+                                                     dp_rank);
+      if (request != nullptr || !requests.empty()) {
+        break;
+      }
+      if (length <= min_length) {
+        LOG(FATAL) << "VMM execution warmup cannot allocate one "
+                   << (decode ? "decode" : "prefill")
+                   << " request on dp_rank=" << dp_rank
+                   << ", token_length=" << length;
+      }
+      // Even a configured long context can exceed the current live KV budget.
+      // Find a usable first request before attempting the rest of the batch.
+      length = std::max(min_length, length / 2);
+    }
+    if (request == nullptr) {
+      break;
+    }
     sequences.emplace_back(request->sequences()[0].get());
     budgets.emplace_back(decode ? 1 : length);
+    allocated_tokens += length;
     requests.emplace_back(std::move(request));
   }
   auto batches = batch_factory_.create_batches(
@@ -1195,6 +1229,11 @@ void ProfileManager::run_vmm_warmup_batch(
     block_manager_pool_->deallocate_without_cache(
         request->sequences()[0].get());
   }
+  LOG(INFO) << "VMM execution warmup batch completed: phase="
+            << (decode ? "decode" : "prefill") << ", dp_rank=" << dp_rank
+            << ", sequences=" << requests.size()
+            << ", requested_sequences=" << token_lengths.size()
+            << ", context_tokens=" << allocated_tokens;
 }
 
 void ProfileManager::warmup_for_vmm() {
@@ -1243,9 +1282,8 @@ void ProfileManager::warmup_for_vmm() {
       run_vmm_warmup_batch(decode_lengths, dp_rank, /*decode=*/true);
     }
   }
-  LOG(INFO) << "Elastic VMM execution warmup completed: prefill_tokens="
-            << prefill_tokens << ", decode_sequences=" << max_sequences
-            << ", dp_size=" << options_.dp_size();
+  LOG(INFO) << "Elastic VMM execution warmup completed: dp_size="
+            << options_.dp_size();
 }
 
 void ProfileManager::warmup_for_graph() {
