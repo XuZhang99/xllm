@@ -17,6 +17,8 @@ Enable either option on its own, or enable both to share the VMM pool between th
 
 Co-located MTP target and draft models can use `enable_vmm_kvcache=true`. The scheduler maps and releases both caches together, including models whose target and draft KV tensors have different widths. For hybrid attention models, only full-attention KV tensors use VMM; convolution and recurrent states remain resident and are reserved separately from the physical KV page pool.
 
+Use `enable_task_pipeline=false`; the task execution pipeline currently excludes virtual KV Cache.
+
 Append these flags to an existing MTP launch command:
 
 ```bash
@@ -24,7 +26,8 @@ Append these flags to an existing MTP launch command:
 --speculative_algorithm=MTP \
 --num_speculative_tokens=3 \
 --enable_vmm_kvcache=true \
---enable_vmm_weights=false
+--enable_vmm_weights=false \
+--enable_task_pipeline=false
 ```
 
 Hybrid linear-state caches and external draft models do not support weight VMM. Embedded Eagle3 drafts and speculative decoding with PD disaggregation are unsupported with virtual KV Cache. Existing KV VMM restrictions, including quantized KV Cache and host offload, still apply.

@@ -17,6 +17,8 @@ xLLM 可以分别为 KV Cache 和模型权重启用虚拟内存管理（VMM）�
 
 部署在相同设备上的 MTP target 和 draft 模型可以同时开启 `enable_vmm_kvcache=true`。调度器会一起映射和释放两者的缓存，也支持 target 与 draft 的 KV 张量宽度不同。对于混合注意力模型，只有全注意力层的 KV 张量使用 VMM；卷积与循环状态保持常驻，提前从物理 KV 页池的预算中预留。
 
+请设置 `enable_task_pipeline=false`；当前任务执行流水线尚不支持虚拟 KV Cache。
+
 在已有 MTP 启动命令中加入以下参数：
 
 ```bash
@@ -24,7 +26,8 @@ xLLM 可以分别为 KV Cache 和模型权重启用虚拟内存管理（VMM）�
 --speculative_algorithm=MTP \
 --num_speculative_tokens=3 \
 --enable_vmm_kvcache=true \
---enable_vmm_weights=false
+--enable_vmm_weights=false \
+--enable_task_pipeline=false
 ```
 
 混合线性状态缓存和外部 draft 暂不支持同时使用权重 VMM。虚拟 KV Cache 暂不支持内嵌 Eagle3 draft，以及投机解码结合 PD 分离。KV VMM 原有的限制仍适用，包括不支持量化 KV Cache 和 host offload。

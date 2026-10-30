@@ -1089,7 +1089,8 @@ TEST_F(VirtualIndexedKVCacheMemoryRegistryTest,
                                                   /*num_layers=*/4,
                                                   /*index_layer_owned=*/{},
                                                   kv_layer_owned);
-  const std::vector<int64_t> shape{static_cast<int64_t>(page_size_), 1};
+  const std::vector<int64_t> shape{
+      static_cast<int64_t>(page_size_ / sizeof(uint16_t)), 1};
   std::vector<torch::Tensor> keys;
   std::vector<torch::Tensor> values;
   std::vector<torch::Tensor> indices;
@@ -1098,11 +1099,11 @@ TEST_F(VirtualIndexedKVCacheMemoryRegistryTest,
   indices.reserve(2);
   for (size_t index = 0; index < 2; ++index) {
     keys.emplace_back(allocator->allocate(
-        KVCacheTensorRole::KEY, shape, torch::kUInt8, device_));
+        KVCacheTensorRole::KEY, shape, torch::kBFloat16, device_));
     values.emplace_back(allocator->allocate(
-        KVCacheTensorRole::VALUE, shape, torch::kUInt8, device_));
+        KVCacheTensorRole::VALUE, shape, torch::kBFloat16, device_));
     indices.emplace_back(allocator->allocate(
-        KVCacheTensorRole::INDEX, shape, torch::kUInt8, device_));
+        KVCacheTensorRole::INDEX, shape, torch::kBFloat16, device_));
   }
   EXPECT_NE(keys[0].data_ptr(), keys[1].data_ptr());
   EXPECT_NE(values[0].data_ptr(), values[1].data_ptr());
@@ -1133,14 +1134,16 @@ TEST_F(VirtualIndexedKVCacheMemoryRegistryTest,
   const std::vector<bool> index_layer_owned{true, true, true, false};
   auto allocator = create_vmm_kv_tensor_allocator(
       registry_, "hybrid", /*num_layers=*/4, index_layer_owned, kv_layer_owned);
-  const std::vector<int64_t> shape{static_cast<int64_t>(page_size_), 1};
+  const std::vector<int64_t> shape{
+      static_cast<int64_t>(page_size_ / sizeof(uint16_t)), 1};
   for (size_t index = 0; index < 2; ++index) {
-    allocator->allocate(KVCacheTensorRole::KEY, shape, torch::kUInt8, device_);
     allocator->allocate(
-        KVCacheTensorRole::VALUE, shape, torch::kUInt8, device_);
+        KVCacheTensorRole::KEY, shape, torch::kBFloat16, device_);
+    allocator->allocate(
+        KVCacheTensorRole::VALUE, shape, torch::kBFloat16, device_);
   }
   auto indices = allocator->allocate(
-      KVCacheTensorRole::INDEX, shape, torch::kUInt8, device_);
+      KVCacheTensorRole::INDEX, shape, torch::kBFloat16, device_);
   ASSERT_TRUE(registry_.map("hybrid", {0}));
   EXPECT_EQ(PhysicalPagePool::get_instance().num_available(), pool_pages() - 5);
   fill_block_pattern(indices, /*block_id=*/0, /*pattern=*/111);
