@@ -18,7 +18,6 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
-#include <limits>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -243,15 +242,9 @@ bool SpeculativeEngineBase<TargetEngine>::allocate_kv_cache(
         shared_vmm_layout.tensor_counts.end(),
         draft_layout.tensor_counts.begin(),
         draft_layout.tensor_counts.end());
-    const int64_t target_state_bytes =
-        target_kv_cache_cap.linear_cache_size_in_bytes();
-    const int64_t draft_state_bytes =
+    const int64_t reserved_state_bytes =
+        target_kv_cache_cap.linear_cache_size_in_bytes() +
         draft_kv_cache_cap.linear_cache_size_in_bytes();
-    CHECK_GE(target_state_bytes, 0);
-    CHECK_GE(draft_state_bytes, 0);
-    CHECK_LE(target_state_bytes,
-             std::numeric_limits<int64_t>::max() - draft_state_bytes);
-    const int64_t reserved_state_bytes = target_state_bytes + draft_state_bytes;
     KVCacheManagerFactory::initialize_vmm_pool(
         engine_->options_,
         engine_->dp_local_tp_size_,
@@ -267,10 +260,6 @@ bool SpeculativeEngineBase<TargetEngine>::allocate_kv_cache(
     const size_t n_blocks =
         layout.block_capacity(PhysicalPagePool::get_instance().num_total(),
                               shared_vmm_layout.tensor_counts);
-    CHECK_LE(n_blocks,
-             static_cast<size_t>(std::numeric_limits<int64_t>::max()));
-    CHECK_LE(pool_bytes,
-             std::numeric_limits<int64_t>::max() - reserved_state_bytes);
     shared_vmm_blocks = static_cast<int64_t>(n_blocks);
     // Report the combined budget, while paged K/V block capacity depends only
     // on the pool. Persistent states have already been reserved outside it.

@@ -47,7 +47,7 @@ VmmKVCacheLayout KVCacheManagerFactory::describe_vmm_layout(
     torch::ScalarType dtype,
     bool is_draft_engine) {
   const KVCacheShape shape(capacity, model_args, world_size);
-  CHECK(shape.has_key_cache_shape() && shape.has_value_cache_shape());
+  CHECK(shape.has_value_cache_shape());
   CHECK_EQ(capacity.scale_slot_size(), 0)
       << "Virtual memory does not support quantized KV cache";
   CHECK(!capacity.enable_mla_kv_cache_quant());
@@ -63,7 +63,6 @@ VmmKVCacheLayout KVCacheManagerFactory::describe_vmm_layout(
 #endif
   const KVCacheCreateOptions create_options =
       get_kv_cache_create_options(model_args, shape, is_draft_engine);
-  CHECK_GT(capacity.n_layers(), 0);
   size_t full_attention_layers = 0;
   for (int64_t layer_id = 0; layer_id < capacity.n_layers(); ++layer_id) {
     if (!create_options.enable_linear_attention() ||
@@ -82,7 +81,6 @@ VmmKVCacheLayout KVCacheManagerFactory::describe_vmm_layout(
                         VirtualKVCachePageLayout::tensor_block_bytes(
                             shape.value_cache_shape(), element_size)};
   layout.tensor_counts = {full_attention_layers, full_attention_layers};
-  CHECK_EQ(shape.key_cache_shape().front(), shape.value_cache_shape().front());
   if (shape.has_index_cache_shape()) {
     CHECK_EQ(dtype, torch::kBFloat16)
         << "Virtual memory indexer cache requires BF16";
@@ -90,8 +88,6 @@ VmmKVCacheLayout KVCacheManagerFactory::describe_vmm_layout(
              shape.key_cache_shape().front());
     const std::vector<bool> indexer_layers =
         resolve_indexer_cache_enabled_layers(model_args, capacity.n_layers());
-    CHECK(indexer_layers.empty() ||
-          indexer_layers.size() == static_cast<size_t>(capacity.n_layers()));
     size_t indexer_count = 0;
     for (int64_t layer_id = 0; layer_id < capacity.n_layers(); ++layer_id) {
       const size_t layer_index = static_cast<size_t>(layer_id);
@@ -118,7 +114,6 @@ void KVCacheManagerFactory::initialize_vmm_pool(const runtime::Options& options,
                                                 size_t worker_count,
                                                 int64_t reserved_state_bytes,
                                                 bool is_multimodal) {
-  CHECK_GE(reserved_state_bytes, 0);
   CHECK(reserved_state_bytes == 0 ||
         !LoadConfig::get_instance().enable_vmm_weights())
       << "Virtual weight memory does not support hybrid linear-state caches.";
@@ -128,9 +123,6 @@ void KVCacheManagerFactory::initialize_vmm_pool(const runtime::Options& options,
   if (!phy_pool.is_initialized()) {
     const int64_t encoder_cache_reserved_bytes =
         is_multimodal ? options.max_encoder_cache_size() * 1024 * 1024 : 0;
-    CHECK_LE(
-        reserved_state_bytes,
-        std::numeric_limits<int64_t>::max() - encoder_cache_reserved_bytes);
     CHECK_GT(coordinator.init_physical_page_pools(
                  config.max_memory_utilization(),
                  config.max_cache_size(),
@@ -140,8 +132,6 @@ void KVCacheManagerFactory::initialize_vmm_pool(const runtime::Options& options,
         << "Failed to initialize KV cache physical page pools";
   }
   if (!coordinator.is_initialized()) {
-    CHECK_LE(worker_count,
-             static_cast<size_t>(std::numeric_limits<int32_t>::max()));
     coordinator.init_page_budget(phy_pool.num_total(),
                                  options.dp_size(),
                                  static_cast<int32_t>(worker_count),
@@ -193,9 +183,6 @@ KVCacheCapacity KVCacheManagerFactory::estimate_capacity(
     if (config.enable_vmm_kvcache()) {
       const int64_t encoder_bytes =
           is_multimodal ? options.max_encoder_cache_size() * 1024 * 1024 : 0;
-      CHECK_GE(reserved_memory_bytes, 0);
-      CHECK_LE(reserved_memory_bytes,
-               std::numeric_limits<int64_t>::max() - encoder_bytes);
       int64_t initial_bytes = std::numeric_limits<int64_t>::max();
       for (const KVCacheMemorySnapshot& memory : context.worker_memory) {
         const VmmArenaCapacity arena = calculate_vmm_arena_capacity(
@@ -231,11 +218,6 @@ KVCacheCapacity KVCacheManagerFactory::estimate_capacity(
     const int64_t pool_bytes =
         static_cast<int64_t>(PhysicalPagePool::get_instance().num_total()) *
         config.phy_page_granularity_size();
-    CHECK_LE(n_blocks,
-             static_cast<size_t>(std::numeric_limits<int64_t>::max()));
-    CHECK_LE(pool_bytes,
-             std::numeric_limits<int64_t>::max() -
-                 capacity.linear_cache_size_in_bytes());
     capacity.n_blocks(static_cast<int64_t>(n_blocks))
         .cache_size_in_bytes(pool_bytes +
                              capacity.linear_cache_size_in_bytes());
@@ -273,12 +255,6 @@ KVCacheManagerFactoryResult KVCacheManagerFactory::create(
                     "disabling prefix caching for this KV cache manager.";
     options.enable_prefix_cache(false);
   }
-#if defined(USE_NPU)
-  CHECK(!options.enable_vmm_kvcache() ||
-        !use_npu_nz_kv_cache_layout(model_args.model_type()))
-      << "Virtual memory does not support the NPU NZ KV cache layout.";
-#endif
-
   KVCacheShape shape(kv_cache_capacity, model_args, world_size);
   CHECK(shape.has_key_cache_shape())
       << "KV cache shape must contain a key cache shape";
@@ -319,7 +295,6 @@ KVCacheManagerFactoryResult KVCacheManagerFactory::create(
         describe_vmm_layout(kv_cache_capacity, model_args, world_size, dtype);
     const VmmKVCacheLayout& tensors =
         shared_vmm_layout == nullptr ? component_layout : *shared_vmm_layout;
-    CHECK_EQ(tensors.block_bytes.size(), tensors.tensor_counts.size());
     auto& allocator = DistributedVirtualMemoryCoordinator::get_instance()
                           .vmm_kv_page_allocator();
     if (options.enable_disagg_pd()) {

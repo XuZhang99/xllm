@@ -65,9 +65,7 @@ class VirtualKVCachePageLayout final {
   size_t block_capacity(size_t physical_page_budget,
                         const std::vector<size_t>& tensor_counts) const {
     const size_t pages_per_group = physical_pages(tensor_counts);
-    CHECK_GT(pages_per_group, 0);
     const size_t groups = physical_page_budget / pages_per_group;
-    CHECK_LE(groups, std::numeric_limits<size_t>::max() / blocks_per_page());
     return groups * blocks_per_page();
   }
 

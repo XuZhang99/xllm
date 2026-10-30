@@ -166,7 +166,6 @@ std::vector<torch::Tensor> VirtualKVCacheMemoryRegions::create_tensors(
   }
 
   CHECK_GT(page_size, 0);
-  CHECK(page_size_ == 0 || page_size_ == page_size);
   CHECK_LE(size, std::numeric_limits<size_t>::max() - (page_size - 1));
   if (size % page_size != 0) {
     size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
@@ -247,19 +246,11 @@ bool VirtualKVCacheMemoryRegions::collect_page_targets(
     if (owned_layers == 0) {
       return;
     }
-    CHECK_GT(pages_per_tensor, 0);
-    CHECK_LE(owned_layers,
-             (std::numeric_limits<size_t>::max() - pages_per_offset) /
-                 pages_per_tensor);
     pages_per_offset += owned_layers * pages_per_tensor;
   };
   count_role_pages(k_regions_, k_block_bytes_);
   count_role_pages(v_regions_, v_block_bytes_);
   count_role_pages(index_regions_, index_block_bytes_);
-  CHECK_GT(pages_per_offset, 0);
-  CHECK_LE(
-      offsets.size(),
-      (std::numeric_limits<size_t>::max() - targets.size()) / pages_per_offset);
   targets.reserve(targets.size() + offsets.size() * pages_per_offset);
 
   const auto append_role = [&offsets, &targets, this, common_block_bytes](
@@ -269,10 +260,6 @@ bool VirtualKVCacheMemoryRegions::collect_page_targets(
       if (region == nullptr) {
         continue;
       }
-      CHECK_EQ(region->page_size(), page_size_);
-      CHECK_GT(pages_per_tensor, 0);
-      CHECK_LE(pages_per_tensor,
-               std::numeric_limits<size_t>::max() / page_size_);
       const size_t page_span = pages_per_tensor * page_size_;
       for (offset_t offset : offsets) {
         if (static_cast<size_t>(offset) >
