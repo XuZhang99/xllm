@@ -56,6 +56,12 @@ if(USE_NPU)
     VirtualIndexedKVCacheMemoryRegistryTest.DefaultIndexOwnershipMapsAllLayersAndRejectsTransfer
     VirtualIndexedKVCacheMemoryRegistryTest.UnownedIndexWidthDoesNotChangeKVPageGeometry
     VirtualIndexedKVCacheMemoryRegistryTest.AllocateKVCacheUsesSparseVirtualIndexRegions
+    VirtualMLAKVCacheMemoryRegistryTest.MappingGroupUsesCommonGeometryForEveryMember
+    VirtualMLAKVCacheMemoryRegistryTest.MappingGroupShortageRollsBackEveryMember
+    VirtualKVCacheMemoryRegistryTest.MappingGroupsRejectMissingDuplicateAndAlreadyMappedMembers
+    VirtualIndexedKVCacheMemoryRegistryTest.SparseKeyValueRegionsPreserveFullAttentionLayerIds
+    VirtualIndexedKVCacheMemoryRegistryTest.TensorAllocatorSkipsLinearAttentionLayers
+    VirtualIndexedKVCacheMemoryRegistryTest.TensorAllocatorRestrictsIndexToFullAttentionLayers
     PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE
   )
 endif()

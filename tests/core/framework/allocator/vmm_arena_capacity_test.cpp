@@ -87,6 +87,21 @@ TEST(VmmArenaCapacityTest, ZeroRatioDisablesElasticUtilizationCeiling) {
   EXPECT_EQ(capacity.growth_memory_reserve_bytes, 0);
 }
 
+TEST(VmmArenaCapacityTest, ZeroRatioKeepsPersistentStatesWithinStartupBudget) {
+  const VmmArenaCapacity capacity = calculate_vmm_arena_capacity(
+      /*available_memory=*/20,
+      /*total_memory=*/80,
+      /*max_memory_utilization=*/0.0,
+      /*max_memory_utilization_configured=*/true,
+      /*lazy=*/true,
+      /*max_cache_size=*/0,
+      /*reserved_memory_bytes=*/8);
+
+  EXPECT_EQ(capacity.maximum_bytes, 72);
+  EXPECT_EQ(capacity.initial_bytes, 12);
+  EXPECT_EQ(capacity.growth_memory_reserve_bytes, 8);
+}
+
 TEST(VmmArenaCapacityTest, FullUtilizationStillStartsWithinAvailableMemory) {
   const VmmArenaCapacity capacity = calculate_vmm_arena_capacity(
       /*available_memory=*/20,

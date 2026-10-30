@@ -90,7 +90,12 @@ torch::Tensor alloc_cache_tensor(KVCacheTensorRole role,
                                  const KVCacheCreateOptions& create_options) {
   std::shared_ptr<KVCacheTensorAllocator> allocator =
       create_options.tensor_allocator();
-  if (allocator == nullptr) {
+  // Linear state is indexed by request slots and remains resident independently
+  // of the scheduler's paged KV blocks.
+  const bool resident_state =
+      create_options.enable_vmm_kvcache() &&
+      (role == KVCacheTensorRole::CONV || role == KVCacheTensorRole::SSM);
+  if (allocator == nullptr || resident_state) {
     allocator = default_kv_tensor_allocator();
   }
   return allocator->allocate(role, shape, dtype, create_options.device());

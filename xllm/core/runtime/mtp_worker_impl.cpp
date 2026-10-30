@@ -446,6 +446,9 @@ runtime::Options mtp_target_options(const runtime::Options& options) {
 
 runtime::Options mtp_draft_options(const runtime::Options& options) {
   runtime::Options draft_options = options;
+  if (KVCacheConfig::get_instance().enable_vmm_kvcache()) {
+    draft_options.model_id(options.model_id() + "::mtp_draft");
+  }
   draft_options.enable_schedule_overlap(false)
       .is_draft_engine(true)
       .mtp_draft_prefix_width(options.num_speculative_tokens() + 1)
@@ -1013,6 +1016,9 @@ KVCacheShape MTPWorkerImpl<TargetInput>::draft_kv_cache_shape(
   if (options_.enable_mtp_draft_body_tp1()) {
     return build_draft_kv_cache_shape(target_kv_cache_shape,
                                       /*draft_world_size=*/1);
+  }
+  if (KVCacheConfig::get_instance().enable_vmm_kvcache()) {
+    return build_draft_kv_cache_shape(target_kv_cache_shape);
   }
   return target_kv_cache_shape;
 }

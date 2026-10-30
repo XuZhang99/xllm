@@ -146,6 +146,67 @@ class RecordingKVCacheTensorAllocator final : public KVCacheTensorAllocator {
   bool fill_index_cache_with_nonzero_;
 };
 
+void expect_virtual_hybrid_cache(const torch::Device& device) {
+  KVCacheCapacity capacity;
+  capacity.n_blocks(4).block_size(4).num_linear_state_blocks(3);
+  ModelArgs args;
+  args.model_type("qwen3_5")
+      .n_layers(4)
+      .n_heads(2)
+      .n_kv_heads(2)
+      .head_dim(4)
+      .full_attention_interval(2)
+      .linear_num_key_heads(2)
+      .linear_num_value_heads(2)
+      .linear_key_head_dim(4)
+      .linear_value_head_dim(8)
+      .linear_conv_kernel_dim(3);
+  const KVCacheShape shape(capacity, args, /*world_size=*/1);
+  auto allocator = std::make_shared<RecordingKVCacheTensorAllocator>();
+  KVCacheCreateOptions options;
+  options.device(device)
+      .dtype(torch::kBFloat16)
+      .ssm_dtype(torch::kFloat32)
+      .num_layers(4)
+      .model_id("virtual-hybrid")
+      .model_type(args.model_type())
+      .enable_vmm_kvcache(true)
+      .enable_linear_attention(true)
+      .full_attention_interval(2)
+      .layer_types({"full_attention",
+                    "linear_attention",
+                    "linear_attention",
+                    "full_attention"})
+      .tensor_allocator(allocator);
+
+  std::vector<KVCache> caches;
+  allocate_kv_caches(caches, shape, options);
+
+  ASSERT_EQ(caches.size(), 4U);
+  // Only full-attention K/V tensors belong to the paged allocator.
+  ASSERT_EQ(allocator->requests.size(), 4U);
+  EXPECT_EQ(allocator->requests[0].role, KVCacheTensorRole::KEY);
+  EXPECT_EQ(allocator->requests[1].role, KVCacheTensorRole::VALUE);
+  EXPECT_EQ(allocator->requests[2].role, KVCacheTensorRole::KEY);
+  EXPECT_EQ(allocator->requests[3].role, KVCacheTensorRole::VALUE);
+  EXPECT_EQ(caches[0].get_k_cache().data_ptr(),
+            allocator->tensors[0].data_ptr());
+  EXPECT_EQ(caches[3].get_k_cache().data_ptr(),
+            allocator->tensors[2].data_ptr());
+  for (int64_t layer_id : {1, 2}) {
+    SCOPED_TRACE(layer_id);
+    const torch::Tensor conv = caches[layer_id].get_conv_cache();
+    const torch::Tensor ssm = caches[layer_id].get_ssm_cache();
+    EXPECT_EQ(conv.sizes().vec(), shape.conv_cache_shape());
+    EXPECT_EQ(ssm.sizes().vec(), shape.ssm_cache_shape());
+    EXPECT_EQ(ssm.scalar_type(), torch::kFloat32);
+    EXPECT_EQ(conv.count_nonzero().item<int64_t>(), 0);
+    EXPECT_EQ(ssm.count_nonzero().item<int64_t>(), 0);
+  }
+  caches[1].get_ssm_cache().fill_(3.0);
+  EXPECT_EQ(caches[2].get_ssm_cache().count_nonzero().item<int64_t>(), 0);
+}
+
 #if defined(USE_MLU)
 // MLU merges the per-block compressed split states into a single owning tensor
 // and exposes them through the COMPRESS_STATE / COMPRESS_INDEX_STATE transfer
@@ -310,6 +371,10 @@ TEST_F(GenericIndexerAllocationTest, VirtualIndexerUsesAllocatorWithoutWrites) {
       torch::equal(index_cache, torch::full_like(allocator_->tensors[2], 7.0)));
 }
 
+TEST(KVCacheTest, VirtualHybridKeepsLinearStateResident) {
+  expect_virtual_hybrid_cache(torch::Device(torch::kCPU));
+}
+
 TEST_F(GenericIndexerAllocationTest,
        InjectedNonVirtualIndexerIsZeroInitialized) {
   std::vector<KVCache> caches;
@@ -373,6 +438,10 @@ class NpuKVCacheTest : public ::testing::Test {
 
   const torch::Device device_{"npu:0"};
 };
+
+TEST_F(NpuKVCacheTest, VirtualHybridKeepsLinearStateResident) {
+  expect_virtual_hybrid_cache(device_);
+}
 
 TEST_F(NpuKVCacheTest, VirtualMemoryPreservesSharedIndexerOwnership) {
   KVCacheCapacity capacity;

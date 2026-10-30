@@ -318,7 +318,8 @@ bool LLMEngine::init_model(MasterStatus master_status,
   return true;
 }
 
-KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
+KVCacheCapacity LLMEngine::estimate_kv_cache_capacity(
+    bool initialize_virtual_memory) {
   return KVCacheManagerFactory::estimate_capacity(
       args_,
       options_,
@@ -326,12 +327,14 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
       dp_local_tp_size_,
       worker_clients_,
       /*is_multimodal=*/false,
-      initial_weight_reservation_bytes_);
+      initial_weight_reservation_bytes_,
+      initialize_virtual_memory);
 }
 
 bool LLMEngine::allocate_kv_cache(
     const KVCacheCapacity& kv_cache_cap,
-    std::shared_ptr<KVCacheTransferCoordinatorBase> transfer_coordinator) {
+    std::shared_ptr<KVCacheTransferCoordinatorBase> transfer_coordinator,
+    const VmmKVCacheLayout* shared_vmm_layout) {
   const KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
 
   const bool enable_state_cache = has_linear_attention_layers(args_) ||
@@ -492,7 +495,7 @@ bool LLMEngine::allocate_kv_cache(
     // The speculative scheduler owns only the target engine BlockManager.
     // Keep the draft engine's placeholder manager non-caching so a Draft
     // model with only SWA tensors does not pretend to own logical prefixes.
-    options.enable_prefix_cache(false);
+    options.enable_prefix_cache(false).enable_vmm_kvcache(false);
   }
 
   if (options_.host_blocks_factor() > 1.0 && !is_mtp_draft_engine) {
@@ -532,7 +535,8 @@ bool LLMEngine::allocate_kv_cache(
                                     std::move(options),
                                     std::move(transfer_coordinator),
                                     dp_size_,
-                                    std::move(host_cache_validation_options));
+                                    std::move(host_cache_validation_options),
+                                    shared_vmm_layout);
   factory_result.shape.print_shapes();
   KVCacheShape kv_cache_shape = std::move(factory_result.shape);
   kv_cache_manager_ = std::move(factory_result.manager);

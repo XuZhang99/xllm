@@ -39,6 +39,7 @@ limitations under the License.
 #include "core/kv_cache/transfer/mooncake_kv_cache_transfer.h"
 #include "models/model_registry.h"
 #include "runtime/llm_worker_impl.h"
+#include "runtime/worker_memory_resources.h"
 #include "util/hash_util.h"
 #include "util/tensor_helper.h"
 #include "util/utils.h"
@@ -360,6 +361,11 @@ template <typename TargetInput>
 bool DraftModelSpecWorkerImpl<TargetInput>::allocate_pools(
     const KVCacheShape& kv_cache_shape,
     const AllocateFn& allocate) {
+  const bool bind_vmm_group =
+      KVCacheConfig::get_instance().enable_vmm_kvcache() &&
+      impl_->get_status() == WorkerImpl::Status::LOADED &&
+      draft_impl_->get_status() == WorkerImpl::Status::LOADED &&
+      impl_->context_.get_model_id() != draft_impl_->context_.get_model_id();
   const bool target_allocated = allocate_pool_if_loaded(
       *impl_,
       [&]() -> const KVCacheShape& { return kv_cache_shape; },
@@ -372,6 +378,15 @@ bool DraftModelSpecWorkerImpl<TargetInput>::allocate_pools(
   init_embedding_cache(kv_cache_shape.key_cache_shape()[0]);
   const bool allocated = target_allocated && draft_allocated;
   if (allocated) {
+    if (bind_vmm_group) {
+      // The scheduler's block IDs address both caches. Bind their mappings
+      // before the master reserves its first (padding) page group.
+      CHECK(WorkerMemoryResources::get_instance()
+                .kv_cache_memory()
+                .bind_mapping_group(impl_->context_.get_model_id(),
+                                    {impl_->context_.get_model_id(),
+                                     draft_impl_->context_.get_model_id()}));
+    }
     finalize_hierarchy_kv_cache_transfers();
   }
   return allocated;

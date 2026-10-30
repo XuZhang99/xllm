@@ -602,11 +602,22 @@ bool WorkerImpl::allocate_kv_cache_storage(
   if (::xllm::KVCacheConfig::get_instance().enable_vmm_kvcache()) {
     CHECK(tensor_allocator == nullptr)
         << "Virtual memory KV cache cannot use another tensor allocator.";
+    std::vector<bool> kv_layer_owned;
+    if (enable_linear_attention) {
+      kv_layer_owned.reserve(static_cast<size_t>(num_layers));
+      for (int64_t layer_id = 0; layer_id < num_layers; ++layer_id) {
+        kv_layer_owned.emplace_back(
+            !is_linear_attention_layer(layer_id,
+                                       layout_options.full_attention_interval(),
+                                       layout_options.layer_types()));
+      }
+    }
     tensor_allocator = create_vmm_kv_tensor_allocator(
         WorkerMemoryResources::get_instance().kv_cache_memory(),
         options_.model_id(),
         num_layers,
-        indexer_cache_enabled_layers);
+        indexer_cache_enabled_layers,
+        std::move(kv_layer_owned));
   }
 
   KVCacheCreateOptions create_options;

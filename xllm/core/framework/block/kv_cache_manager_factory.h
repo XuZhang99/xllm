@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/types.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -40,8 +41,29 @@ struct KVCacheManagerFactoryResult final {
   KVCacheShape shape;
 };
 
+// Tensor widths and multiplicities belonging to one scheduler mapping group.
+// Target and draft tensors share block IDs, but may have different widths.
+struct VmmKVCacheLayout final {
+  std::vector<size_t> block_bytes;
+  std::vector<size_t> tensor_counts;
+};
+
 class KVCacheManagerFactory final {
  public:
+  static VmmKVCacheLayout describe_vmm_layout(const KVCacheCapacity& capacity,
+                                              const ModelArgs& model_args,
+                                              int64_t world_size,
+                                              torch::ScalarType dtype,
+                                              bool is_draft_engine = false);
+
+  // Reserve persistent state tensors before the fixed physical pool consumes
+  // free device memory. A speculative pair passes its combined state budget.
+  static void initialize_vmm_pool(const runtime::Options& options,
+                                  int64_t world_size,
+                                  size_t worker_count,
+                                  int64_t reserved_state_bytes,
+                                  bool is_multimodal = false);
+
   static KVCacheCapacity estimate_capacity(
       const ModelArgs& model_args,
       const runtime::Options& options,
@@ -49,7 +71,8 @@ class KVCacheManagerFactory final {
       int64_t world_size,
       const std::vector<std::shared_ptr<WorkerClient>>& worker_clients,
       bool is_multimodal = false,
-      int64_t reserved_memory_bytes = 0);
+      int64_t reserved_memory_bytes = 0,
+      bool initialize_virtual_memory = true);
 
   static KVCacheManagerFactoryResult create(
       const KVCacheCapacity& kv_cache_capacity,
@@ -60,7 +83,8 @@ class KVCacheManagerFactory final {
       std::shared_ptr<KVCacheTransferCoordinatorBase> transfer_coordinator,
       int32_t dp_size = 1,
       std::optional<HostCacheValidationOptions> host_validation_options =
-          std::nullopt);
+          std::nullopt,
+      const VmmKVCacheLayout* shared_vmm_layout = nullptr);
 };
 
 }  // namespace xllm

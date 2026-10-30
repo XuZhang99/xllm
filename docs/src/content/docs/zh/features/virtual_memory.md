@@ -13,6 +13,22 @@ xLLM 可以分别为 KV Cache 和模型权重启用虚拟内存管理（VMM）�
 
 两个开关可以单独启用，也可以同时启用，使 KV Cache 和模型权重共享 VMM 池。仅启用 KV VMM 时继续使用配置的权重加载器，不会隐式启用 `enable_manual_loader`；仅启用权重 VMM 时继续使用物理 KV Cache。权重 VMM 目前仅支持 LLM 后端。模型休眠、唤醒和 fork 需要设置 `enable_vmm_weights=true`。仅启用权重 VMM 时要求 `vmm_elastic=true`，避免固定权重页池占用物理 KV Cache 所需的显存。所有开关和默认值见 [CLI 参数参考](/zh/cli_reference/)。
 
+## MTP 与虚拟 KV Cache
+
+部署在相同设备上的 MTP target 和 draft 模型可以同时开启 `enable_vmm_kvcache=true`。调度器会一起映射和释放两者的缓存，也支持 target 与 draft 的 KV 张量宽度不同。对于混合注意力模型，只有全注意力层的 KV 张量使用 VMM；卷积与循环状态保持常驻，提前从物理 KV 页池的预算中预留。
+
+在已有 MTP 启动命令中加入以下参数：
+
+```bash
+--draft_model=/models/mtp \
+--speculative_algorithm=MTP \
+--num_speculative_tokens=3 \
+--enable_vmm_kvcache=true \
+--enable_vmm_weights=false
+```
+
+混合线性状态缓存和外部 draft 暂不支持同时使用权重 VMM。虚拟 KV Cache 暂不支持内嵌 Eagle3 draft，以及投机解码结合 PD 分离。KV VMM 原有的限制仍适用，包括不支持量化 KV Cache 和 host offload。
+
 ## 弹性 KV Cache
 
 设置 `enable_vmm_kvcache=true` 和 `vmm_elastic=true` 后，KV 页映射时按需增长物理 backing。页面上的最后一个 block 归还后，空闲 backing 会被释放。VMM 池会预留稳定的虚拟地址，并随需求激活逻辑槽位。

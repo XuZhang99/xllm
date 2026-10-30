@@ -62,6 +62,15 @@ class VirtualKVCachePageLayout final {
     return pages;
   }
 
+  size_t block_capacity(size_t physical_page_budget,
+                        const std::vector<size_t>& tensor_counts) const {
+    const size_t pages_per_group = physical_pages(tensor_counts);
+    CHECK_GT(pages_per_group, 0);
+    const size_t groups = physical_page_budget / pages_per_group;
+    CHECK_LE(groups, std::numeric_limits<size_t>::max() / blocks_per_page());
+    return groups * blocks_per_page();
+  }
+
   // The first dimension is the block ID; ND and NPU NZ layouts both keep
   // all bytes belonging to one block contiguous in the remaining dimensions.
   static size_t tensor_block_bytes(const std::vector<int64_t>& dims,
