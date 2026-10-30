@@ -246,12 +246,6 @@ class ContinuousSchedulerBase : public Scheduler {
   // build a batch of requests from the priority queue
   virtual BatchGroup prepare_batch();
 
-  virtual bool if_queue_not_empty() {
-    return !prefill_queue_->empty() || !chunk_queue_->empty() ||
-           !decode_queue_->empty() || !decode_restore_waiting_.empty() ||
-           !unified_queue_.empty();
-  }
-
   // tokenizer
   std::unique_ptr<Tokenizer> tokenizer_;
 

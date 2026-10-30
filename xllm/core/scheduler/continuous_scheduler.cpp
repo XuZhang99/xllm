@@ -533,16 +533,12 @@ BatchGroup ContinuousSchedulerBase::schedule_request(
       return batch;
     }
 
-    if (if_queue_not_empty()) {
-      continue;
-    }
-
     const auto now = absl::Now();
-    if (now > deadline) {
+    if (now >= deadline) {
       break;
     }
-    // Wait for a request notification, while retaining a short timeout as a
-    // fallback for completion sources that do not have a direct notifier.
+    // Queued requests may still be waiting for resources. Bound every empty
+    // batch retry, including completion sources without a direct notifier.
     const auto wait_duration =
         std::min(kSchedulerWakeupInterval, deadline - now);
     if (notifier_->wait_for(wakeup.generation,
