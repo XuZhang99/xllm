@@ -19,19 +19,19 @@ limitations under the License.
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
 #include "common/metrics.h"
-#include "core/framework/allocator/virtual_memory/physical_page_pool.h"
-#include "core/framework/block/kv_cache_manager_factory.h"
+#include "core/distributed_runtime/distributed_virtual_memory_coordinator.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/eplb/eplb_controller.h"
 #include "core/kv_cache/layout/kv_cache_estimation.h"
-#include "core/kv_cache/layout/virtual_kv_cache_page_layout.h"
+#include "core/kv_cache/layout/vmm_kv_cache_layout.h"
 #include "framework/speculative/mtp_utils.h"
 #include "llm_engine.h"
 #include "util/utils.h"
@@ -191,13 +191,13 @@ bool SpeculativeEngineBase<TargetEngine>::allocate_kv_cache(
                           !should_skip_external_draft_kv_cache();
   KVCacheCapacity target_kv_cache_cap =
       engine_->estimate_kv_cache_capacity(!shared_vmm);
-  VmmKVCacheLayout shared_vmm_layout;
+  std::optional<VmmKVCacheLayout> shared_vmm_layout;
   const auto allocate_target_cache = [this,
                                       &transfer_coordinator,
                                       shared_vmm,
                                       &shared_vmm_layout](
                                          const KVCacheCapacity& capacity) {
-    const VmmKVCacheLayout* layout = shared_vmm ? &shared_vmm_layout : nullptr;
+    const VmmKVCacheLayout* layout = shared_vmm ? &*shared_vmm_layout : nullptr;
     if constexpr (std::is_same_v<TargetEngine, LLMEngine>) {
       return engine_->allocate_kv_cache(capacity, transfer_coordinator, layout);
     } else {
@@ -221,45 +221,35 @@ bool SpeculativeEngineBase<TargetEngine>::allocate_kv_cache(
 
   int64_t shared_vmm_blocks = 0;
   if (shared_vmm) {
-    shared_vmm_layout =
-        KVCacheManagerFactory::describe_vmm_layout(target_kv_cache_cap,
-                                                   engine_->model_args(),
-                                                   engine_->dp_local_tp_size_,
-                                                   dtype_);
+    shared_vmm_layout.emplace(target_kv_cache_cap,
+                              engine_->model_args(),
+                              engine_->dp_local_tp_size_,
+                              dtype_);
     const int64_t draft_world_size = options_.enable_mtp_draft_body_tp1()
                                          ? 1
                                          : draft_engine_->dp_local_tp_size_;
-    VmmKVCacheLayout draft_layout =
-        KVCacheManagerFactory::describe_vmm_layout(draft_kv_cache_cap,
-                                                   draft_engine_->model_args(),
-                                                   draft_world_size,
-                                                   draft_engine_->dtype_,
-                                                   /*is_draft_engine=*/true);
-    shared_vmm_layout.block_bytes.insert(shared_vmm_layout.block_bytes.end(),
-                                         draft_layout.block_bytes.begin(),
-                                         draft_layout.block_bytes.end());
-    shared_vmm_layout.tensor_counts.insert(
-        shared_vmm_layout.tensor_counts.end(),
-        draft_layout.tensor_counts.begin(),
-        draft_layout.tensor_counts.end());
+    VmmKVCacheLayout draft_layout(draft_kv_cache_cap,
+                                  draft_engine_->model_args(),
+                                  draft_world_size,
+                                  draft_engine_->dtype_,
+                                  /*is_draft_engine=*/true);
+    shared_vmm_layout->append(std::move(draft_layout));
     const int64_t reserved_state_bytes =
         target_kv_cache_cap.linear_cache_size_in_bytes() +
         draft_kv_cache_cap.linear_cache_size_in_bytes();
-    KVCacheManagerFactory::initialize_vmm_pool(
+    auto& coordinator = DistributedVirtualMemoryCoordinator::get_instance();
+    coordinator.prepare_kv_cache_pool(
         engine_->options_,
         engine_->dp_local_tp_size_,
         engine_->worker_clients_.size(),
         reserved_state_bytes,
         /*is_multimodal=*/std::is_same_v<TargetEngine, VLMEngine>);
     const KVCacheConfig& config = KVCacheConfig::get_instance();
+    const size_t total_pages = coordinator.get_num_total_phy_pages();
     const int64_t pool_bytes =
-        static_cast<int64_t>(PhysicalPagePool::get_instance().num_total()) *
-        config.phy_page_granularity_size();
-    const VirtualKVCachePageLayout layout(shared_vmm_layout.block_bytes,
-                                          config.phy_page_granularity_size());
-    const size_t n_blocks =
-        layout.block_capacity(PhysicalPagePool::get_instance().num_total(),
-                              shared_vmm_layout.tensor_counts);
+        static_cast<int64_t>(total_pages) * config.phy_page_granularity_size();
+    const size_t n_blocks = shared_vmm_layout->block_capacity(
+        total_pages, config.phy_page_granularity_size());
     shared_vmm_blocks = static_cast<int64_t>(n_blocks);
     // Report the combined budget, while paged K/V block capacity depends only
     // on the pool. Persistent states have already been reserved outside it.

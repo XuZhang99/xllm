@@ -33,7 +33,7 @@ limitations under the License.
 
 namespace xllm {
 
-struct VmmKVCacheLayout;
+class VmmKVCacheLayout;
 
 class VLMEngine : public Engine {
  public:

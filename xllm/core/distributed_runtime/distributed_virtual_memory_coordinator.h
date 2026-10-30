@@ -37,6 +37,9 @@ class WorkerMemoryRpcClient;
 class WorkerMemoryRpcServer;
 class VmmKVPageAllocatorImpl;
 struct KVCacheMappingPlan;
+namespace runtime {
+struct Options;
+}
 
 // Coordinates the virtual-memory subsystem across workers, including shared
 // physical-page capacity for KV caches and weights and their mapping commands.
@@ -57,6 +60,14 @@ class DistributedVirtualMemoryCoordinator final : public KVCachePageBackend {
       bool max_memory_utilization_configured = true,
       int64_t reserved_memory_bytes = 0,
       int64_t resident_memory_bytes = 0);
+
+  // Prepare the shared KV page pool after persistent target/draft state
+  // budgets are known, then register the model's parallel strategy.
+  void prepare_kv_cache_pool(const runtime::Options& options,
+                             int64_t world_size,
+                             size_t worker_count,
+                             int64_t reserved_state_bytes,
+                             bool is_multimodal = false);
 
   void init_page_budget(size_t total_pages,
                         int32_t dp_size,

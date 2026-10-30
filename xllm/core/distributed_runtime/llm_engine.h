@@ -45,7 +45,7 @@ class EplbController;
 class KVCacheTransferCoordinatorBase;
 class ModelLoader;
 class DraftStepController;
-struct VmmKVCacheLayout;
+class VmmKVCacheLayout;
 
 class LLMEngine : public Engine {
  public:
