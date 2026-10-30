@@ -509,7 +509,7 @@ TEST(HFModelLoaderTest, Glm5NextMtpNormalizationIgnoresOtherAlgorithms) {
 }
 
 TEST(HFModelLoaderTest, Glm5NextMtpNormalizationIgnoresOtherModels) {
-  for (const std::string model_type : {"deepseek_v3", "qwen3_5_text"}) {
+  for (const std::string model_type : {"deepseek_v3", "llama"}) {
     SCOPED_TRACE(model_type);
     ModelArgs args;
     args.model_type(model_type).n_layers(45).num_nextn_predict_layers(1);
@@ -901,9 +901,15 @@ TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromDenseConfig) {
 
   ModelArgs args;
   ASSERT_TRUE(loader(reader, &args));
+  const int32_t full_attention_interval = args.full_attention_interval();
+  ModelRegistry::configure_mtp_args(args,
+                                    /*speculative_algorithm=*/"MTP",
+                                    /*is_draft_engine=*/true,
+                                    /*is_python_model=*/false);
   EXPECT_EQ(args.model_type(), "qwen3_5_mtp");
   EXPECT_EQ(args.num_nextn_predict_layers(), 1);
   EXPECT_EQ(args.n_layers(), 1);
+  EXPECT_EQ(args.full_attention_interval(), full_attention_interval);
   ASSERT_EQ(args.layer_types().size(), 1);
   EXPECT_EQ(args.layer_types()[0], "full_attention");
 }
@@ -925,12 +931,125 @@ TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromMoeConfig) {
 
   ModelArgs args;
   ASSERT_TRUE(loader(reader, &args));
+  const int32_t full_attention_interval = args.full_attention_interval();
+  ModelRegistry::configure_mtp_args(args,
+                                    /*speculative_algorithm=*/"MTP",
+                                    /*is_draft_engine=*/true,
+                                    /*is_python_model=*/false);
   EXPECT_EQ(args.model_type(), "qwen3_5_moe_mtp");
   EXPECT_EQ(args.num_nextn_predict_layers(), 2);
   EXPECT_EQ(args.n_layers(), 2);
+  EXPECT_EQ(args.full_attention_interval(), full_attention_interval);
   ASSERT_EQ(args.layer_types().size(), 2);
   EXPECT_EQ(args.layer_types()[0], "full_attention");
   EXPECT_EQ(args.layer_types()[1], "full_attention");
+}
+
+TEST(HFModelLoaderTest,
+     Qwen35MtpNormalizationUsesFullAttentionPredictionLayers) {
+  for (const std::string model_type : {"qwen3_5_text", "qwen3_5_moe_text"}) {
+    SCOPED_TRACE(model_type);
+    auto loader = ModelRegistry::get_model_args_loader(model_type);
+    ASSERT_NE(loader, nullptr);
+    for (const int32_t mtp_layers : {1, 2}) {
+      SCOPED_TRACE(mtp_layers);
+      JsonReader reader;
+      ASSERT_TRUE(reader.parse_text(
+          R"json({"text_config": {
+            "num_hidden_layers": 4,
+            "full_attention_interval": 4,
+            "layer_types": ["linear_attention", "linear_attention",
+                            "linear_attention", "full_attention"],
+            "mtp_num_hidden_layers": )json" +
+          std::to_string(mtp_layers) + "}}"));
+      ModelArgs args;
+      ASSERT_TRUE(loader(reader, &args));
+      ASSERT_TRUE(has_linear_attention_layers(args));
+      ModelRegistry::configure_mtp_args(args,
+                                        /*speculative_algorithm=*/"mTp",
+                                        /*is_draft_engine=*/true,
+                                        /*is_python_model=*/false);
+      EXPECT_EQ(
+          args.model_type(),
+          model_type == "qwen3_5_text" ? "qwen3_5_mtp" : "qwen3_5_moe_mtp");
+      EXPECT_EQ(args.num_nextn_predict_layers(), mtp_layers);
+      EXPECT_EQ(args.n_layers(), mtp_layers);
+      EXPECT_EQ(args.full_attention_interval(), 1);
+      EXPECT_EQ(args.layer_types(),
+                std::vector<std::string>(static_cast<size_t>(mtp_layers),
+                                         "full_attention"));
+      EXPECT_FALSE(has_linear_attention_layers(args));
+      ModelRegistry::configure_mtp_args(args,
+                                        /*speculative_algorithm=*/"MTP",
+                                        /*is_draft_engine=*/true,
+                                        /*is_python_model=*/false);
+      EXPECT_EQ(args.n_layers(), mtp_layers);
+      EXPECT_FALSE(has_linear_attention_layers(args));
+    }
+  }
+}
+
+TEST(HFModelLoaderTest, Qwen35MtpNormalizationPreservesTargetModels) {
+  for (const std::string model_type :
+       {"qwen3_5", "qwen3_5_moe", "qwen3_5_text", "qwen3_5_moe_text"}) {
+    SCOPED_TRACE(model_type);
+    ModelArgs args;
+    args.model_type(model_type)
+        .n_layers(4)
+        .num_nextn_predict_layers(1)
+        .full_attention_interval(4)
+        .layer_types({"linear_attention",
+                      "linear_attention",
+                      "linear_attention",
+                      "full_attention"});
+    ModelRegistry::configure_mtp_args(args,
+                                      /*speculative_algorithm=*/"MTP",
+                                      /*is_draft_engine=*/false,
+                                      /*is_python_model=*/false);
+    EXPECT_EQ(args.model_type(), model_type);
+    EXPECT_EQ(args.n_layers(), 4);
+    EXPECT_EQ(args.full_attention_interval(), 4);
+    EXPECT_TRUE(has_linear_attention_layers(args));
+  }
+}
+
+TEST(HFModelLoaderTest, Qwen35MtpNormalizationIgnoresOtherAlgorithms) {
+  for (const std::string_view algorithm : {"", "Eagle3", "DFlash", "DSpark"}) {
+    SCOPED_TRACE(algorithm);
+    ModelArgs args;
+    args.model_type("qwen3_5_text")
+        .n_layers(4)
+        .num_nextn_predict_layers(1)
+        .full_attention_interval(4);
+    ModelRegistry::configure_mtp_args(args,
+                                      algorithm,
+                                      /*is_draft_engine=*/true,
+                                      /*is_python_model=*/false);
+    EXPECT_EQ(args.model_type(), "qwen3_5_text");
+    EXPECT_EQ(args.n_layers(), 4);
+    EXPECT_EQ(args.full_attention_interval(), 4);
+    EXPECT_TRUE(has_linear_attention_layers(args));
+  }
+}
+
+TEST(HFModelLoaderTest, Qwen35MtpNormalizationRequiresPredictionLayers) {
+  for (const std::string model_type : {"qwen3_5_text", "qwen3_5_moe_text"}) {
+    SCOPED_TRACE(model_type);
+    ModelArgs args;
+    args.model_type(model_type)
+        .n_layers(4)
+        .num_nextn_predict_layers(0)
+        .full_attention_interval(4);
+    ModelRegistry::configure_mtp_args(args,
+                                      /*speculative_algorithm=*/"MTP",
+                                      /*is_draft_engine=*/true,
+                                      /*is_python_model=*/false);
+    EXPECT_EQ(args.model_type(), model_type);
+    EXPECT_EQ(args.num_nextn_predict_layers(), 0);
+    EXPECT_EQ(args.n_layers(), 4);
+    EXPECT_EQ(args.full_attention_interval(), 4);
+    EXPECT_TRUE(has_linear_attention_layers(args));
+  }
 }
 #endif
 
