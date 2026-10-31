@@ -449,7 +449,8 @@ runtime::Options mtp_draft_options(const runtime::Options& options) {
   if (KVCacheConfig::get_instance().enable_vmm_kvcache()) {
     draft_options.model_id(options.model_id() + "::mtp_draft");
   }
-  draft_options.enable_schedule_overlap(false)
+  draft_options.backend("llm")
+      .enable_schedule_overlap(false)
       .is_draft_engine(true)
       .mtp_draft_prefix_width(options.num_speculative_tokens() + 1)
       // The task path also restores the verifier prefix (K+1 rows).
