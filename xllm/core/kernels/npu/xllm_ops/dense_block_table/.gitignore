@@ -1,0 +1,5 @@
+# Copyright 2026 The xLLM Authors.
+# SPDX-License-Identifier: Apache-2.0
+/_dense_block_table_native*.so
+/task_submission/
+/task_submission.zip
