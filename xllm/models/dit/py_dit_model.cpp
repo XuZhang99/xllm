@@ -27,6 +27,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/config/dit_config.h"
+#include "core/framework/config/execution_config.h"
 #include "core/framework/model_context/dit_model_context.h"
 #include "core/framework/parallel_state/parallel_state.h"
 #include "core/framework/parallel_state/process_group.h"
@@ -93,6 +94,11 @@ PyDiTModel::PyDiTModel(const DiTModelContext& context)
   py::object pipeline_class =
       py::module_::import("xllm.python.dit.registry")
           .attr("get_pipeline_class")(context.model_type());
+  py::dict pipeline_options;
+  if (context.model_type() == "MiniMaxH3ModularPipeline") {
+    pipeline_options["enable_graph"] =
+        ExecutionConfig::get_instance().enable_graph();
+  }
   pipeline_ = pipeline_class(
       c10::str(device()),
       parallel.rank() == 0,
@@ -129,7 +135,8 @@ PyDiTModel::PyDiTModel(const DiTModelContext& context)
         return vae->allgather_base_sync(input);
       }),
       py::arg("laser_attention_enabled") =
-          DiTConfig::get_instance().dit_laser_attention_enabled());
+          DiTConfig::get_instance().dit_laser_attention_enabled(),
+      **pipeline_options);
 }
 
 PyDiTModel::~PyDiTModel() { clear_python_object(pipeline_); }

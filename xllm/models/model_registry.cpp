@@ -876,16 +876,18 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context) {
       CHECK(context.get_dit_config().selected_policy == PolicyType::None)
           << "Python MiniMax-H3 requires dit_cache_policy=None";
       CHECK(!config.dit_sparse_attention_enabled() &&
-            !ExecutionConfig::get_instance().enable_graph() &&
             !LoadConfig::get_instance().enable_rolling_load())
-          << "Python MiniMax-H3 requires dense eager execution";
-      CHECK(parallel.world_size() == 4 && parallel.tp_size() == 2 &&
-            parallel.sp_size() == 2 && parallel.vae_size() == 4 &&
+          << "Python MiniMax-H3 requires dense execution with resident weights";
+      CHECK((parallel.world_size() == 4 || parallel.world_size() == 8) &&
+            parallel.tp_size() >= 2 &&
+            parallel.tp_size() * parallel.sp_size() == parallel.world_size() &&
+            parallel.vae_size() == parallel.world_size() &&
             parallel.cfg_size() == 1 && parallel.dp_size() == 1 &&
             parallel.dit_tp_group_ != nullptr &&
             parallel.dit_sp_group_ != nullptr &&
             parallel.dit_vae_group_ != nullptr)
-          << "Python MiniMax-H3 requires TP2, SP2, VAE4, CFG1 and DP1";
+          << "Python MiniMax-H3 requires 4 or 8 ranks, TP>=2, TP*SP=world, "
+             "VAE=world, CFG1 and DP1";
       CHECK_EQ(config.max_requests_per_batch(), 1);
       CHECK(context.get_quant_args("transformer").quant_method().empty())
           << "Python MiniMax-H3 requires dense floating point weights";
