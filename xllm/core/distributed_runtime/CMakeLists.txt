@@ -2,8 +2,6 @@ if(USE_NPU OR USE_CUDA OR USE_MUSA OR USE_MLU OR USE_DCU)
   include_directories(
     ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
   )
-
-  add_subdirectory(spawn_worker_server)
 endif()
 
 cc_library(
@@ -36,6 +34,7 @@ cc_library(
     distributed_worker_manager.h
     remote_worker.h
     worker_server.h
+    spawn_worker_protocol.h
     heartbeat_callback_registry.h
     http_callback_channel_cache.h
     kv_transfer_topology.h

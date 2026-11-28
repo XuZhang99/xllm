@@ -29,10 +29,10 @@ limitations under the License.
 #endif
 
 #include "core/common/native_library.h"
-#include "core/distributed_runtime/spawn_worker_server/spawn_worker_protocol.h"
-#include "core/distributed_runtime/spawn_worker_server/spawn_worker_server.h"
+#include "core/distributed_runtime/spawn_worker_protocol.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/transfer/mooncake_transfer_engine.h"
+#include "entrypoints/spawn_worker/spawn_worker_server.h"
 
 // Worker argv from engine process:
 // @master_node_addr

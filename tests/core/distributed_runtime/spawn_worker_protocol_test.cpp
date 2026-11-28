@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/distributed_runtime/spawn_worker_server/spawn_worker_protocol.h"
+#include "core/distributed_runtime/spawn_worker_protocol.h"
 
 #include <gtest/gtest.h>
 

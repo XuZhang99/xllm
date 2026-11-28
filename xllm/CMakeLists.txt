@@ -70,6 +70,10 @@ add_subdirectory(proto)
 add_subdirectory(pybind)
 add_subdirectory(server)
 
+if(USE_NPU OR USE_CUDA OR USE_MUSA OR USE_MLU OR USE_DCU)
+  add_subdirectory(entrypoints/spawn_worker)
+endif()
+
 message(STATUS "build xllm binary and install")
 cc_binary(
   NAME

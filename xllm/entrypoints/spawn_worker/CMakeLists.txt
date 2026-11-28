@@ -1,10 +1,9 @@
 include(cc_binary)
 
 cc_binary(
-  NAME 
+  NAME
     spawn_worker
   HDRS
-    spawn_worker_protocol.h
     spawn_worker_server.h
   SRCS
     spawn_worker_server.cpp
@@ -13,6 +12,10 @@ cc_binary(
     :distributed_runtime
     $<$<BOOL:${USE_NPU}>:npu_startup>
     pybind11::embed
+)
+
+target_include_directories(spawn_worker PRIVATE
+  ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
 )
 
 xllm_export_native_host(spawn_worker)

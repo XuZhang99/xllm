@@ -21,7 +21,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/types.h"
-#include "core/distributed_runtime/spawn_worker_server/spawn_worker_protocol.h"
+#include "core/distributed_runtime/spawn_worker_protocol.h"
 #include "core/framework/eplb/eplb_options.h"
 
 namespace xllm {

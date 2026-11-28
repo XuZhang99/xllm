@@ -35,7 +35,7 @@ limitations under the License.
 #include <utility>
 
 #include "common/metrics.h"
-#include "core/distributed_runtime/spawn_worker_server/spawn_worker_protocol.h"
+#include "core/distributed_runtime/spawn_worker_protocol.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kernel_config.h"
