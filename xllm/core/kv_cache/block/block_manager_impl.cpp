@@ -307,11 +307,6 @@ void BlockManagerImpl::free(int32_t block_id) {
   }
 }
 
-// Flat incremental growth (the default sequence-level policy). Reads how many
-// blocks the sequence already holds for this manager's block_type(), allocates
-// the delta to cover num_tokens, and returns it (does not insert into the
-// sequence -- the CompositeBlockManager commits the returned blocks). Returns
-// std::nullopt on post-eviction shortage. SlidingWindow / Single override.
 std::optional<std::vector<Block>> BlockManagerImpl::allocate_for_sequence(
     Sequence* seq,
     KVCacheState& kv_state,
@@ -319,12 +314,11 @@ std::optional<std::vector<Block>> BlockManagerImpl::allocate_for_sequence(
   if (seq == nullptr) {
     return std::nullopt;
   }
-  const size_t held = kv_state.num_blocks(partition_id());
-  const size_t num_blocks_needed = (num_tokens + block_size_ - 1) / block_size_;
-  if (num_blocks_needed <= held) {
+  const HistoryGrowthPlan plan = plan_history_growth(kv_state, num_tokens);
+  const size_t num_additional = plan.additional_blocks();
+  if (num_additional == 0) {
     return std::vector<Block>{};
   }
-  const size_t num_additional = num_blocks_needed - held;
   const auto& pool = options_.shared_block_pool();
   std::vector<Block> blocks = pool && pool->uses_slabs()
                                   ? allocate_with_placement(num_additional, seq)

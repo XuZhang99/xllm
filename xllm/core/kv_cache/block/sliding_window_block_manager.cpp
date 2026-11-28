@@ -95,11 +95,9 @@ SlidingWindowBlockManager::allocate_for_sequence(Sequence* seq,
     // can be evicted and reused. Only mutate the sequence when those
     // reclaimable blocks make the retry large enough to succeed; otherwise a
     // failed composite round must preserve the existing SWA state.
-    const size_t block_size = options_.block_size();
-    const size_t held = kv_state.num_blocks(partition_id());
-    const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
-    CHECK_GT(num_blocks_needed, held);
-    const size_t num_additional = num_blocks_needed - held;
+    const HistoryGrowthPlan plan = plan_history_growth(kv_state, num_tokens);
+    const size_t num_additional = plan.additional_blocks();
+    CHECK_GT(num_additional, 0u);
     const size_t reclaimable =
         num_reclaimable_out_of_window_blocks(kv_state, restore_tokens);
     if (num_free_blocks() + reclaimable < num_additional) {

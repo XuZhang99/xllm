@@ -36,6 +36,7 @@ limitations under the License.
 #include "core/kv_cache/block/block.h"
 #include "core/kv_cache/block/cache_partition_binding.h"
 #include "core/kv_cache/events/kv_cache_event_journal.h"
+#include "core/kv_cache/layout/history_growth_plan.h"
 #include "core/kv_cache/layout/paged_cache_partition.h"
 #include "core/kv_cache/prefix/block_hasher.h"
 #include "core/kv_cache/prefix/prefix_cache_entry.h"
@@ -201,6 +202,12 @@ class BlockManager {
   virtual size_t num_total_blocks() const = 0;
   // Physical KV keeps its static capacity; VmmKV supplies a live budget.
   virtual size_t admission_capacity() const { return num_total_blocks(); }
+
+  // Read logical demand without reserving, evicting or changing sequence state.
+  // Window leaves use this only for their flat append and logical coverage;
+  // their sparse restoration and reclamation remain window-specific.
+  HistoryGrowthPlan plan_history_growth(const KVCacheState& kv_state,
+                                        size_t num_tokens) const;
 
   // —— Sequence-level growth interface (pure: every concrete manager defines
   // its own policy) ——

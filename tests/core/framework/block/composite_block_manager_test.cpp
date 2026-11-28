@@ -1505,6 +1505,88 @@ TEST(CompositeBlockManagerTest,
   EXPECT_EQ(released_pages, expected_released_pages);
 }
 
+TEST(CompositeBlockManagerTest, HistoryPlanningDoesNotEvictCachedBlocks) {
+  BlockManager::Options options;
+  options.num_blocks(5).block_size(4).enable_prefix_cache(true);
+  BlockManagerImpl leaf(options);
+  const std::vector<int32_t> tokens = {
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+  std::vector<Block> cached = leaf.allocate(/*num_blocks=*/4);
+  ASSERT_EQ(cached.size(), 4u);
+  leaf.cache(tokens, cached);
+  leaf.release(cached);
+  ASSERT_EQ(leaf.num_blocks_in_prefix_cache(), 4u);
+  ASSERT_EQ(leaf.num_free_blocks(), 0u);
+  Sequence sequence = MakeTestSequence(/*index=*/0, {21, 22, 23, 24, 25});
+  const BlockManager& planner = leaf;
+
+  const HistoryGrowthPlan plan =
+      planner.plan_history_growth(sequence.kv_state(), /*num_tokens=*/8);
+  EXPECT_EQ(plan.additional_blocks(), 2u);
+  EXPECT_EQ(leaf.num_blocks_in_prefix_cache(), 4u);
+  EXPECT_EQ(leaf.num_free_blocks(), 0u);
+  EXPECT_EQ(leaf.num_used_blocks(), 0u);
+  EXPECT_FALSE(sequence.kv_state().has_any_blocks());
+
+  auto allocated = leaf.allocate_for_sequence(
+      &sequence, sequence.kv_state(), /*num_tokens=*/8);
+  ASSERT_TRUE(allocated.has_value());
+  EXPECT_EQ(allocated->size(), plan.additional_blocks());
+  EXPECT_LT(leaf.num_blocks_in_prefix_cache(), 4u);
+  // Allocation is staged until Composite commits it to the sequence.
+  EXPECT_FALSE(sequence.kv_state().has_any_blocks());
+  sequence.add_blocks(BlockType::KV, std::move(*allocated));
+  EXPECT_EQ(
+      planner.plan_history_growth(sequence.kv_state(), 8).additional_blocks(),
+      0u);
+  sequence.reset();
+}
+
+TEST(CompositeBlockManagerTest, VirtualHistoryPlanningDoesNotMapPages) {
+  TestVmmKVPageAllocator allocator(/*dp_size=*/1);
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4).enable_prefix_cache(false);
+  VmmKVBlockManager leaf(options,
+                         allocator,
+                         /*num_layers=*/2,
+                         /*block_mem_size=*/16,
+                         /*page_size=*/64,
+                         /*dp_rank=*/0,
+                         "history-plan");
+  Sequence sequence = MakeTestSequence(/*index=*/0, {1});
+  const BlockManager& planner = leaf;
+  const HistoryGrowthPlan too_large =
+      planner.plan_history_growth(sequence.kv_state(), /*num_tokens=*/20);
+  EXPECT_EQ(too_large.additional_blocks(), 5u);
+  EXPECT_TRUE(allocator.allocation_requests.empty());
+  EXPECT_TRUE(allocator.released_pages.empty());
+  EXPECT_FALSE(leaf.allocate_for_sequence(
+                       &sequence, sequence.kv_state(), /*num_tokens=*/20)
+                   .has_value());
+  EXPECT_FALSE(sequence.kv_state().has_any_blocks());
+  EXPECT_EQ(allocator.get_num_inuse_virt_pages("history-plan", /*dp_rank=*/0),
+            0u);
+
+  const size_t allocation_attempts = allocator.allocation_requests.size();
+  const HistoryGrowthPlan fits =
+      planner.plan_history_growth(sequence.kv_state(), /*num_tokens=*/12);
+  EXPECT_EQ(fits.additional_blocks(), 3u);
+  EXPECT_EQ(allocator.allocation_requests.size(), allocation_attempts);
+  auto allocated = leaf.allocate_for_sequence(
+      &sequence, sequence.kv_state(), /*num_tokens=*/12);
+  ASSERT_TRUE(allocated.has_value());
+  ASSERT_EQ(allocated->size(), fits.additional_blocks());
+  sequence.add_blocks(BlockType::KV, std::move(*allocated));
+  const size_t mappings = allocator.allocation_requests.size();
+  auto unchanged = leaf.allocate_for_sequence(
+      &sequence, sequence.kv_state(), /*num_tokens=*/10);
+  ASSERT_TRUE(unchanged.has_value());
+  EXPECT_TRUE(unchanged->empty());
+  EXPECT_EQ(allocator.allocation_requests.size(), mappings);
+  EXPECT_EQ(sequence.kv_state().num_blocks(BlockType::KV), 3u);
+  sequence.reset();
+}
+
 TEST(CompositeBlockManagerTest, PagedShortageReturnsPagesToInjectedAllocator) {
   TestVmmKVPageAllocator allocator(/*dp_size=*/1);
   BlockManager::Options options;

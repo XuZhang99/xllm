@@ -195,12 +195,11 @@ std::optional<std::vector<Block>> VmmKVBlockManager::allocate_for_sequence(
   if (block_size == 0) {
     return std::vector<Block>{};
   }
-  const size_t held = kv_state.num_blocks(partition_id());
-  const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
-  if (num_blocks_needed <= held) {
+  const HistoryGrowthPlan plan = plan_history_growth(kv_state, num_tokens);
+  const size_t num_additional = plan.additional_blocks();
+  if (num_additional == 0) {
     return std::vector<Block>{};
   }
-  const size_t num_additional = num_blocks_needed - held;
   std::vector<Block> blocks = allocate(num_additional);  // VMM page alloc
   if (blocks.size() != num_additional) {
     return std::nullopt;

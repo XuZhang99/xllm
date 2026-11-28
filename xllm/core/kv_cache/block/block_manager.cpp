@@ -13,7 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-// Intentionally empty. BlockManager is now a pure interface; its former
-// default allocate_for_sequence (flat-KV growth) moved to BlockManagerImpl.
-// This file is no longer part of the build (removed from CMakeLists SRCS) and
-// can be deleted once tooling permits.
+#include "core/kv_cache/block/block_manager.h"
+
+#include "core/framework/request/sequence_kv_state.h"
+
+namespace xllm {
+
+HistoryGrowthPlan BlockManager::plan_history_growth(
+    const KVCacheState& kv_state,
+    size_t num_tokens) const {
+  return HistoryGrowthPlan(
+      block_size(), kv_state.num_blocks(partition_id()), num_tokens);
+}
+
+}  // namespace xllm

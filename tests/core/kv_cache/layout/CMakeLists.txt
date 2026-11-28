@@ -2,6 +2,17 @@ include(cc_test)
 
 cc_test(
   NAME
+    history_growth_plan_test
+  CPU_ONLY
+  SRCS
+    history_growth_plan_test.cpp
+  DEPS
+    :history_growth_plan
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
     recurrent_cache_partition_test
   CPU_ONLY
   SRCS

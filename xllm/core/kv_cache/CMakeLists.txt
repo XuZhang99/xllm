@@ -1,5 +1,14 @@
 include(cc_library)
 
+cc_library(
+  NAME
+    history_growth_plan
+  HDRS
+    layout/history_growth_plan.h
+  DEPS
+    glog::glog
+)
+
 # Semantic cache partitions have no Torch, Request or allocator dependency.
 cc_library(
   NAME

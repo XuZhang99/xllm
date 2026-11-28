@@ -778,12 +778,12 @@ bool CompositeBlockManager::allocate_sequence(Sequence* seq,
     if (leaf_block_size == 0) {
       continue;
     }
-    const size_t needed = (num_tokens + leaf_block_size - 1) / leaf_block_size;
+    const HistoryGrowthPlan plan =
+        entry.leaf->plan_history_growth(kv_state, num_tokens);
     const auto staged_it = staged.find(id);
     const size_t staged_for_type =
         staged_it == staged.end() ? 0 : staged_it->second.size();
-    const size_t total = kv_state.num_blocks(id) + staged_for_type;
-    if (total < needed) {
+    if (!plan.is_satisfied_by(staged_for_type)) {
       release_staged();
       return false;
     }

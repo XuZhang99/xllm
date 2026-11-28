@@ -49,6 +49,7 @@ cc_library(
     concurrent_block_manager_impl.h
     sliding_window_block_manager.h
   SRCS
+    block_manager.cpp
     static_kv_block_pool.cpp
     linear_state_block_manager.cpp
     concurrent_block_manager_impl.cpp
@@ -57,6 +58,7 @@ cc_library(
   DEPS
     :kv_cache_block_types
     :block_utils
+    :history_growth_plan
     :static_kv_layout
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:graph>
