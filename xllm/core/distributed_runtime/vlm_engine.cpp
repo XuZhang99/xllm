@@ -27,7 +27,6 @@ limitations under the License.
 #include <cstdlib>
 #include <map>
 #include <memory>
-#include <optional>
 #include <utility>
 
 #include "common/metrics.h"
@@ -37,6 +36,7 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/distributed_runtime/distributed_vmm_coordinator.h"
 #include "core/distributed_runtime/kv_capacity_planner.h"
+#include "core/distributed_runtime/worker_step_dispatch.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
@@ -48,7 +48,6 @@ limitations under the License.
 #include "core/kv_cache/manager/kv_cache_manager_factory.h"
 #include "core/kv_cache/prefix/block_hasher.h"
 #include "core/kv_cache/storage/host_cache_layout.h"
-#include "core/runtime/forward_input_encoding.h"
 #include "core/util/tensor_helper.h"
 #include "core/util/tensor_options.h"
 #include "framework/model/model_args.h"
@@ -450,31 +449,9 @@ ForwardOutput VLMEngine::step(BatchGroup& batch) {
       << "The processed forward inputs size " << forward_inputs.size()
       << " is not equal to dp size " << dp_size_ << ".";
 
-  std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
-  futures.reserve(worker_clients_num_);
-  std::vector<std::shared_ptr<ForwardInputEncoding>> encodings;
-  encodings.reserve(forward_inputs.size());
-  for (size_t dp_rank = 0; dp_rank < forward_inputs.size(); ++dp_rank) {
-    encodings.emplace_back(dp_local_tp_size_ > 1
-                               ? std::make_shared<ForwardInputEncoding>()
-                               : nullptr);
-  }
+  auto results =
+      dispatch_worker_step(worker_clients_, forward_inputs, dp_local_tp_size_);
 
-  // update dp related global parameters and then execute model
-  for (int32_t worker_rank = 0; worker_rank < worker_clients_num_;
-       ++worker_rank) {
-    int32_t dp_rank = worker_rank / dp_local_tp_size_;
-    futures.emplace_back(worker_clients_[worker_rank]->step_remote_async(
-        forward_inputs[dp_rank], encodings[dp_rank]));
-  }
-
-  // wait for the all future to complete
-  auto results = folly::collectAll(futures).get();
-
-  assert(dp_size_ == worker_clients_num_ / dp_local_tp_size_);
-  for (const auto& result : results) {
-    CHECK(result.hasValue()) << "Failed to execute model, worker RPC failed";
-  }
   std::vector<RawForwardOutput> outputs;
   outputs.reserve(dp_size_);
   size_t dp_rank = 0;
@@ -511,8 +488,6 @@ ForwardOutput VLMEngine::step(BatchGroup& batch) {
 std::vector<RawForwardOutput> VLMEngine::collect_step_outputs(
     const BatchGroup& batch) {
   CHECK_EQ(batch.size(), dp_size_);
-  std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
-  futures.reserve(worker_clients_num_);
   std::vector<RawForwardOutput> raw_forward_outputs;
   raw_forward_outputs.reserve(dp_size_);
 
@@ -520,19 +495,9 @@ std::vector<RawForwardOutput> VLMEngine::collect_step_outputs(
   // cause the output on other workers is the same as that on driver.
   // Under data parallelism (DP), we need to get dp_size outputs.
   // The `stride` means the workers num we can skip.
-  int32_t stride = dp_local_tp_size_;
-  for (int32_t worker_rank = 0; worker_rank < worker_clients_num_;
-       worker_rank += stride) {
-    futures.emplace_back(
-        worker_clients_[worker_rank]->get_last_vlm_step_result_async());
-  }
-  // wait for the all future to complete
-  auto last_step_results = folly::collectAll(futures).get();
-
-  for (const auto& result : last_step_results) {
-    CHECK(result.hasValue() && result.value().has_value())
-        << "Failed to get last step results, result has no value";
-  }
+  const uint32_t stride = dp_local_tp_size_;
+  auto last_step_results = collect_worker_step_results(
+      worker_clients_, stride, &WorkerClient::get_last_vlm_step_result_async);
 
   for (int32_t worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_tp_size_) {

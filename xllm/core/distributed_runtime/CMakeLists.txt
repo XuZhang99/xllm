@@ -42,6 +42,7 @@ cc_library(
     xservice_client.h
     model_residency_coordinator.h
     kv_capacity_planner.h
+    worker_step_dispatch.h
   SRCS
     dit_engine.cpp
     llm_engine.cpp

@@ -3,6 +3,17 @@ include(cc_test)
 cc_test(
   NO_NPU_RUNTIME
   NAME
+    worker_step_dispatch_test
+  SRCS
+    worker_step_dispatch_test.cpp
+  DEPS
+    :distributed_runtime
+    GTest::gtest_main
+)
+
+cc_test(
+  NO_NPU_RUNTIME
+  NAME
     worker_model_codec_test
   SRCS
     worker_model_codec_test.cpp
